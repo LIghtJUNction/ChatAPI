@@ -36,6 +36,7 @@ type Config struct {
 	AdminPassword  string
 	LogLevel       string
 	CORSOrigins    []string
+	MetricsEnabled bool
 
 	OIDCEnabled        bool
 	OIDCProviderName   string
@@ -93,6 +94,7 @@ func Default(mode Mode, backendRoot string) Config {
 		AdminPassword:  "",
 		LogLevel:       "info",
 		CORSOrigins:    []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		MetricsEnabled: false,
 
 		OIDCEnabled:        false,
 		OIDCProviderName:   "",
@@ -132,6 +134,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.LabToken = strings.TrimSpace(os.Getenv("CHATAPI_LAB_TOKEN"))
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))
 	cfg.AdminPassword = strings.TrimSpace(os.Getenv("CHATAPI_ADMIN_PASSWORD"))
+	cfg.MetricsEnabled = parseBool(os.Getenv("CHATAPI_METRICS_ENABLED"), cfg.MetricsEnabled)
 
 	cfg.OIDCEnabled = parseBool(os.Getenv("CHATAPI_OIDC_ENABLED"), cfg.OIDCEnabled)
 	cfg.OIDCProviderName = strings.TrimSpace(os.Getenv("CHATAPI_OIDC_PROVIDER_NAME"))

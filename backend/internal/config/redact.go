@@ -18,6 +18,7 @@ type RedactedConfig struct {
 	AdminPassword  string   `json:"admin_password"`
 	LogLevel       string   `json:"log_level"`
 	CORSOrigins    []string `json:"cors_origins"`
+	MetricsEnabled bool     `json:"metrics_enabled"`
 
 	OIDCEnabled        bool     `json:"oidc_enabled"`
 	OIDCProviderName   string   `json:"oidc_provider_name,omitempty"`
@@ -51,6 +52,7 @@ func (c Config) Redacted() RedactedConfig {
 		AdminPassword:      redactSecret(c.AdminPassword),
 		LogLevel:           c.LogLevel,
 		CORSOrigins:        append([]string(nil), c.CORSOrigins...),
+		MetricsEnabled:     c.MetricsEnabled,
 		OIDCEnabled:        c.OIDCEnabled,
 		OIDCProviderName:   c.OIDCProviderName,
 		OIDCIssuerURL:      c.OIDCIssuerURL,

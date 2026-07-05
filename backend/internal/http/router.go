@@ -46,6 +46,7 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, realtimeHub, pending)
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor}
+	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor)}
 	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)
 	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor}
 	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}
@@ -54,6 +55,9 @@ func NewRouter(
 
 	router.Get("/api/health", healthHandler.ServeHTTP)
 	router.Get("/api/ready", readinessHandler.ServeHTTP)
+	if cfg.MetricsEnabled {
+		router.Get("/metrics", metricsHandler.ServeHTTP)
+	}
 	router.Get("/api/auth/session", authHandler.Session)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)

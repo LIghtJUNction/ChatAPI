@@ -47,6 +47,7 @@
 - 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
 - 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
+- `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -425,7 +426,7 @@ PostgreSQL 连接建议：
 
 - `GET /api/health`：执行轻量数据库 ping，返回 `ok`、运行模式和数据库 driver。
 - `GET /api/ready`：执行数据库 ping 并读取 migration 状态，返回 `database` 与 `migration` 分项；数据库不可用、migration 状态不可读或 dirty 时返回 `503`。
-- `GET /metrics` 尚未开放；后续应默认关闭或只允许管理员/内网访问。
+- `GET /metrics`：当前已实现基础 Prometheus 文本输出，默认关闭；通过 `CHATAPI_METRICS_ENABLED=1` 开启。后续正式部署文档应要求只暴露给内网 Prometheus 或反向代理鉴权后的管理员。
 
 关键指标：
 

@@ -838,6 +838,36 @@ func TestReadyEndpointRejectsDirtyMigration(t *testing.T) {
 	}
 }
 
+func TestMetricsDisabledByDefault(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, _ := env.getText(t, "/metrics")
+	if status != http.StatusNotFound {
+		t.Fatalf("expected disabled metrics to be not found, got %d", status)
+	}
+}
+
+func TestMetricsEndpointWhenEnabled(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.MetricsEnabled = true
+	})
+
+	status, body := env.getText(t, "/metrics")
+	if status != http.StatusOK {
+		t.Fatalf("expected metrics ok: status=%d body=%q", status, body)
+	}
+	for _, expected := range []string{
+		"# HELP chatapi_go_goroutines",
+		"chatapi_pending_turns",
+		"chatapi_realtime_subscribers",
+		"chatapi_sqlite_database_bytes",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("metrics missing %q in body:\n%s", expected, body)
+		}
+	}
+}
+
 func TestAdminRuntimeEndpoints(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1619,6 +1649,11 @@ func newTestEnv(t *testing.T) *testEnv {
 
 func newTestEnvWithMode(t *testing.T, mode config.Mode) *testEnv {
 	t.Helper()
+	return newTestEnvWithConfig(t, mode, nil)
+}
+
+func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Config)) *testEnv {
+	t.Helper()
 
 	tempDir := t.TempDir()
 	cfg := config.Config{
@@ -1634,6 +1669,9 @@ func newTestEnvWithMode(t *testing.T, mode config.Mode) *testEnv {
 		MasterKey:      "test-master-key",
 		LogLevel:       "error",
 		CORSOrigins:    []string{"http://localhost"},
+	}
+	if mutate != nil {
+		mutate(&cfg)
 	}
 
 	store, err := sqlitestore.Open(cfg.DatabaseDSN)

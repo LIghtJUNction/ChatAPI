@@ -28,7 +28,7 @@
 - 已新增 Go `httptest` 集成测试，覆盖 `responses`、`chat/completions`、`messages` 三套协议的 pending/complete/abort 基础链路。
 - `backend/internal/protocol` 已开始承接三套协议的请求提取与完成响应构造，后续会继续从 service/handler 中抽离更多协议细节。
 - 当前最小实现已覆盖 `assistant_message`、`thinking`、`tool_call`、`tool_result` 四种人工完成模式，并用集成测试守护消息持久化顺序与三套协议返回外壳。
-- `stream=true` 已开始走真实 SSE 链路，不再只支持等待最终非流式结果；当前已覆盖 OpenAI Responses、Chat Completions、Anthropic Messages 三套协议的最小流式集成测试，并补上了 `tool_call` 的基础流式返回外壳。
+- 协议层已把非流式和流式都作为一等能力：`stream=false` 或缺省 `stream` 会等待人工/自动完成后返回一次性 JSON，`stream=true` 走真实 SSE 链路；当前已覆盖 OpenAI Responses、Chat Completions、Anthropic Messages 三套协议的非流闭环和最小流式集成测试，并补上了 `tool_call` 的基础流式返回外壳。
 - pending turn 已补上最小状态机约束：`delta` 会把会话推进到 `streaming`，终态后的 `delta` / `complete` / `abort` 会返回 `409`，并用集成测试守护这些行为。
 - `backend/internal/service` 已开始收敛统一的 `TurnControlCommand`，把 WebUI 手工回复、后续应用 API 和自动化规则共享的 turn control 输入模型从 handler 中抽离出来。
 - 已补上 `request_id -> conversation_id -> TurnControlCommand` 的最小解析链路，并先用于 `lab` 路由；后续应用 API 的 `/api/app/requests/{request_id}/*` 将直接复用这层能力。
@@ -41,7 +41,7 @@
 - 应用 API 当前已开始覆盖 `automation:read` / `automation:write`：`GET/PUT /api/app/automation-rules` 可读写当前用户自己的自动化规则，并支持 `allowed_automation_rule_ids` 限制外部程序只能管理指定规则。
 - 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、按模型和状态聚合、最老 pending 等待秒数。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标。
-- 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`，返回 SQLite 主库/WAL、uploads 目录大小，以及按 owner 估算的 conversations/messages 文本与 metadata 占用；当前只做估算与展示，不执行自动清理。
+- 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及 dry-run 清理候选预览；当前 cleanup 只允许 `dry_run: true`，不执行删除、文件清理或 SQLite vacuum。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
@@ -818,6 +818,13 @@ type TurnRequest struct {
 - 根据 TurnResult 构建 SSE chunk
 - 构建错误响应
 
+非流和流式协议要求：
+
+- `stream=false` 或缺省 `stream`：模型兼容入口应创建 pending turn，等待 WebUI / 应用 API / 自动化规则完成后，一次性返回目标协议的最终 JSON。当前前端没有流式输出功能时，可以先只使用非流式手工回复路径。
+- `stream=true`：模型兼容入口应返回目标协议要求的 SSE event/chunk，delta 只通过内存 realtime hub 广播，最终完成时再用短事务落库。
+- 非流和流式必须共享同一个内部 `TurnRequest` / `TurnResult` 状态机，不能维护两套转换逻辑。
+- 当前 Go 重构分支允许后端接口和旧 WebUI 临时不完全兼容；新的 path-based manual output API 和返回格式应以本文档为准，后续前端按新契约改造。
+
 协议包不能访问数据库。
 
 可抽取通用包：
@@ -924,7 +931,8 @@ type Hub struct {
 - `GET /api/admin/storage/summary`：返回 SQLite 主库/WAL、uploads 目录大小、估算用户数、估算总字节数、会话数和消息数。
 - `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数和消息数。当前估算范围为 conversation/message 文本与 metadata JSON；uploads 文件已计入 summary，但图片归属需要后续上传元数据表支持后才能精确拆分到用户。
 - `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
-- `POST /api/admin/storage/cleanup` 暂未落地；需要先完成配额、保留最近会话/天数、dry-run、审计日志和 SQLite vacuum 策略，避免误删用户数据。
+- `POST /api/admin/storage/cleanup`：当前只支持 dry-run 预览，必须传 `dry_run: true`；请求参数为 `owner_id`、`keep_recent_conversations`、`keep_recent_days`，返回候选会话数、候选消息数、估算可回收字节数和按 owner 聚合的计划。当前不会删除 conversations/messages、不会删除 uploads 文件、不会执行 SQLite vacuum。
+- 真正清理执行仍属于后续工作，必须补齐用户配额策略、保护最近会话、dry-run 审核、审计日志、上传文件归属、SQLite incremental vacuum / full vacuum 策略和失败恢复后再开放。
 
 GC 设置：
 

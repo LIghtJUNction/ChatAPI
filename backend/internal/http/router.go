@@ -136,6 +136,7 @@ func NewRouter(
 	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
 	adminRouter.Get("/storage/summary", adminStorageHandler.Summary)
 	adminRouter.Get("/storage/users", adminStorageHandler.Users)
+	adminRouter.Post("/storage/cleanup", adminStorageHandler.Cleanup)
 	adminRouter.Get("/requests/overview", adminRequestsHandler.Overview)
 	router.Mount("/api/admin", adminRouter)
 	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)

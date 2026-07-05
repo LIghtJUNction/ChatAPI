@@ -916,6 +916,65 @@ func TestAdminStorageEndpoints(t *testing.T) {
 	}
 }
 
+func TestAdminStorageCleanupPreview(t *testing.T) {
+	env := newTestEnv(t)
+
+	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-cleanup-a",
+		"input": "storage cleanup A",
+	})
+	firstConversation := env.waitForWaitingConversation(t, "storage cleanup A")
+	env.postJSON(t, "/api/conversations/"+firstConversation["id"].(string)+"/respond", map[string]any{
+		"text": "cleanup response A",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-firstCh
+
+	secondCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-cleanup-b",
+		"input": "storage cleanup B",
+	})
+	secondConversation := env.waitForWaitingConversation(t, "storage cleanup B")
+	env.postJSON(t, "/api/conversations/"+secondConversation["id"].(string)+"/respond", map[string]any{
+		"text": "cleanup response B",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-secondCh
+
+	previewResp := env.postJSON(t, "/api/admin/storage/cleanup", map[string]any{
+		"dry_run":                   true,
+		"owner_id":                  "lab-user",
+		"keep_recent_conversations": 1,
+		"keep_recent_days":          0,
+	}, http.StatusOK)
+	plan := previewResp["plan"].(map[string]any)
+	if previewResp["dry_run"] != true || plan["dry_run"] != true {
+		t.Fatalf("cleanup preview should be dry-run only: %#v", previewResp)
+	}
+	if numericValue(plan["candidate_conversations"]) != 1 || numericValue(plan["candidate_messages"]) < 2 {
+		t.Fatalf("unexpected cleanup preview candidates: %#v", previewResp)
+	}
+	if numericValue(plan["estimated_reclaimable_bytes"]) <= 0 {
+		t.Fatalf("expected positive reclaimable estimate: %#v", previewResp)
+	}
+	byOwner := plan["by_owner"].([]any)
+	if len(byOwner) != 1 || nestedString(byOwner[0].(map[string]any), "owner_id") != "lab-user" {
+		t.Fatalf("unexpected cleanup owner plan: %#v", previewResp)
+	}
+}
+
+func TestAdminStorageCleanupRejectsNonDryRun(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := env.postText(t, "/api/admin/storage/cleanup", map[string]any{
+		"dry_run":                   false,
+		"keep_recent_conversations": 1,
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "only supports dry_run") {
+		t.Fatalf("expected non-dry-run rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
@@ -925,6 +984,13 @@ func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key storage admin rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appPostText(t, "/api/admin/storage/cleanup", appKey, map[string]any{
+		"dry_run": true,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key storage cleanup rejection: status=%d body=%q", status, body)
 	}
 }
 

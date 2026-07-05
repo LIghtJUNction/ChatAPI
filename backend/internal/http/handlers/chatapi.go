@@ -90,6 +90,10 @@ func (h ChatAPIHandler) CompleteOutput(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.Service.CompleteConversation(r.Context(), input)
 	if err != nil {
+		if errors.Is(err, service.ErrPendingConflict) || errors.Is(err, store.ErrTurnConflict) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		if errors.Is(err, service.ErrPendingNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -113,6 +117,14 @@ func (h ChatAPIHandler) DeltaOutput(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.Service.UpdateDraft(r.Context(), conversationID, stringValue(body["text"], ""))
 	if err != nil {
+		if errors.Is(err, service.ErrPendingConflict) || errors.Is(err, store.ErrTurnConflict) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if errors.Is(err, service.ErrPendingNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -132,6 +144,10 @@ func (h ChatAPIHandler) AbortConversation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := h.Service.AbortConversation(r.Context(), conversationID, reason); err != nil {
+		if errors.Is(err, service.ErrPendingConflict) || errors.Is(err, store.ErrTurnConflict) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		if errors.Is(err, service.ErrPendingNotFound) {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return

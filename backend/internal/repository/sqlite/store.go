@@ -24,6 +24,7 @@ type Store struct {
 }
 
 var errNotFound = errors.New("record not found")
+var errConflict = store.ErrTurnConflict
 
 func Open(dsn string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dsn), 0o755); err != nil {
@@ -260,7 +261,11 @@ func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (
 		return store.Conversation{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
+	if !isDraftWritable(metadata) {
+		return store.Conversation{}, errConflict
+	}
 	metadata["realtime_draft_text"] = input.DraftText
+	metadata["realtime_status"] = "streaming"
 	conversation.Metadata = metadata
 	conversation.UpdatedAt = time.Now().UTC()
 
@@ -280,6 +285,9 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 		return store.Conversation{}, store.Message{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
+	if !isTurnCompletable(metadata) {
+		return store.Conversation{}, store.Message{}, errConflict
+	}
 	draftText, _ := metadata["realtime_draft_text"].(string)
 	finalText := strings.TrimSpace(input.OutputText)
 	if finalText == "" {
@@ -362,6 +370,9 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 		return store.Conversation{}, store.Message{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
+	if !isTurnCompletable(metadata) {
+		return store.Conversation{}, store.Message{}, errConflict
+	}
 	metadata["realtime_status"] = "aborted"
 	metadata["realtime_draft_text"] = ""
 	now := time.Now().UTC()
@@ -472,6 +483,24 @@ func buildConversationTitle(userContent string) string {
 }
 
 func stringValue(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
+}
+
+func isDraftWritable(metadata map[string]any) bool {
+	status := metadataString(metadata, "realtime_status", "waiting")
+	return status == "waiting" || status == "streaming"
+}
+
+func isTurnCompletable(metadata map[string]any) bool {
+	status := metadataString(metadata, "realtime_status", "waiting")
+	return status == "waiting" || status == "streaming"
+}
+
+func metadataString(metadata map[string]any, key string, fallback string) string {
+	value, _ := metadata[key].(string)
 	if strings.TrimSpace(value) == "" {
 		return fallback
 	}

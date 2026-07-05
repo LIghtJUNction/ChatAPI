@@ -86,6 +86,49 @@ func TestResponsesAbort(t *testing.T) {
 	}
 }
 
+func TestDraftMarksConversationStreaming(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-streaming-status",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "streaming 状态测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "streaming 状态测试")
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "第一段草稿",
+	}, http.StatusOK)
+
+	workspace := env.getJSON(t, "/api/lab/workspace", http.StatusOK)
+	items := workspace["conversations"].([]any)
+	foundStreaming := false
+	for _, item := range items {
+		record := item.(map[string]any)
+		if nestedString(record, "id") == conversation["id"].(string) && nestedString(record["metadata"].(map[string]any), "realtime_status") == "streaming" {
+			foundStreaming = true
+			break
+		}
+	}
+	if !foundStreaming {
+		t.Fatalf("conversation did not transition to streaming: %#v", workspace)
+	}
+
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -277,6 +320,103 @@ func TestResponsesToolResultShape(t *testing.T) {
 	metadata := lastMessage["metadata"].(map[string]any)
 	if nestedString(metadata, "response_mode") != "tool_result" || nestedString(metadata, "output") != "{\"ok\":true}" {
 		t.Fatalf("unexpected tool result metadata: %#v", metadata)
+	}
+}
+
+func TestDeltaAfterCompleteReturnsConflict(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-delta-conflict",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "delta conflict 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "delta conflict 测试")
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "已结束",
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+
+	status, body := env.postText(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "不应该再写入",
+	})
+	if status != http.StatusConflict || !strings.Contains(body, "pending turn already finalized") {
+		t.Fatalf("unexpected delta conflict response: status=%d body=%q", status, body)
+	}
+}
+
+func TestAbortAfterCompleteReturnsConflict(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-abort-conflict",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "abort conflict 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "abort conflict 测试")
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "先完成",
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+
+	status, body := env.postText(t, "/api/conversations/"+conversation["id"].(string)+"/abort", map[string]any{
+		"error": "后续 abort",
+	})
+	if status != http.StatusConflict || !strings.Contains(body, "pending turn already finalized") {
+		t.Fatalf("unexpected abort conflict response: status=%d body=%q", status, body)
+	}
+}
+
+func TestCompleteAfterAbortReturnsConflict(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-complete-conflict",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "complete conflict 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "complete conflict 测试")
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/abort", map[string]any{
+		"error": "先 abort",
+	}, http.StatusOK)
+	<-resultCh
+
+	status, body := env.postText(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "后续完成",
+		"mode":            "assistant_message",
+	})
+	if status != http.StatusConflict || !strings.Contains(body, "pending turn already finalized") {
+		t.Fatalf("unexpected complete conflict response: status=%d body=%q", status, body)
 	}
 }
 
@@ -524,6 +664,32 @@ func (e *testEnv) postJSON(t *testing.T, path string, body map[string]any, wantS
 		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
 	}
 	return payload
+}
+
+func (e *testEnv) postText(t *testing.T, path string, body map[string]any) (int, string) {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do request %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
 }
 
 func (e *testEnv) getJSON(t *testing.T, path string, wantStatus int) map[string]any {

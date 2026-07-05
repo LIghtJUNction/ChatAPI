@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+var ErrTurnConflict = errors.New("turn state conflict")
 
 type Conversation struct {
 	ID                 string         `json:"id"`

@@ -28,6 +28,7 @@
 - `backend/internal/protocol` 已开始承接三套协议的请求提取与完成响应构造，后续会继续从 service/handler 中抽离更多协议细节。
 - 当前最小实现已覆盖 `assistant_message`、`thinking`、`tool_call`、`tool_result` 四种人工完成模式，并用集成测试守护消息持久化顺序与三套协议返回外壳。
 - `stream=true` 已开始走真实 SSE 链路，不再只支持等待最终非流式结果；当前已覆盖 OpenAI Responses、Chat Completions、Anthropic Messages 三套协议的最小流式集成测试，并补上了 `tool_call` 的基础流式返回外壳。
+- pending turn 已补上最小状态机约束：`delta` 会把会话推进到 `streaming`，终态后的 `delta` / `complete` / `abort` 会返回 `409`，并用集成测试守护这些行为。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 
@@ -1833,6 +1834,7 @@ make release-snapshot
 - 现有 `tests/` SDK 脚本通过。
 - 前端人工接管完整链路通过。
 - Go `httptest` 集成测试至少覆盖三套协议的非流式闭环，并覆盖 Responses / Chat Completions / Anthropic Messages 的 `stream=true` 基础 SSE 行为，以及 `tool_call` 的基础流式返回。
+- Go `httptest` 集成测试应覆盖 `waiting -> streaming -> closed/aborted` 的最小状态流转，以及终态后的 `delta` / `complete` / `abort` 返回 `409`。
 - Lab 模式下 OpenAI/Anthropic SDK 请求可进入等待态，浏览器完成输出后 SDK 收到兼容响应。
 - Tool Call 辅助不会自动发送，只能由用户审核后手动提交。
 - KirariNetwork token 过期时可自动 refresh；refresh 失败时提示用户重新连接，不泄露 token。

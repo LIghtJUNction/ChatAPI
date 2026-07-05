@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -85,8 +86,13 @@ func (s *ChatAPIService) ListMessages(ctx context.Context, conversationID string
 }
 
 func (s *ChatAPIService) UpdateDraft(ctx context.Context, conversationID string, chunk string) (map[string]any, error) {
+	previousState, err := s.pending.StartDelta(conversationID)
+	if err != nil {
+		return nil, s.resolveTurnMutationError(ctx, conversationID, err)
+	}
 	conversation, err := s.store.GetConversation(ctx, conversationID)
 	if err != nil {
+		s.pending.RevertFinalize(conversationID, previousState)
 		return nil, err
 	}
 	metadata := conversation.Metadata
@@ -97,6 +103,7 @@ func (s *ChatAPIService) UpdateDraft(ctx context.Context, conversationID string,
 		DraftText:      nextDraft,
 	})
 	if err != nil {
+		s.pending.RevertFinalize(conversationID, previousState)
 		return nil, err
 	}
 	_ = s.pending.Publish(conversationID, PendingEvent{
@@ -111,8 +118,13 @@ func (s *ChatAPIService) UpdateDraft(ctx context.Context, conversationID string,
 }
 
 func (s *ChatAPIService) CompleteConversation(ctx context.Context, input store.CompletePendingInput) (map[string]any, error) {
+	previousState, err := s.pending.StartComplete(input.ConversationID)
+	if err != nil {
+		return nil, s.resolveTurnMutationError(ctx, input.ConversationID, err)
+	}
 	conversation, message, err := s.store.CompletePendingTurn(ctx, input)
 	if err != nil {
+		s.pending.RevertFinalize(input.ConversationID, previousState)
 		return nil, err
 	}
 	messages, err := s.store.ListMessages(ctx, input.ConversationID)
@@ -151,11 +163,16 @@ func (s *ChatAPIService) CompleteConversation(ctx context.Context, input store.C
 }
 
 func (s *ChatAPIService) AbortConversation(ctx context.Context, conversationID string, reason string) error {
+	previousState, err := s.pending.StartAbort(conversationID)
+	if err != nil {
+		return s.resolveTurnMutationError(ctx, conversationID, err)
+	}
 	conversation, message, err := s.store.AbortPendingTurn(ctx, store.AbortPendingInput{
 		ConversationID: conversationID,
 		Reason:         reason,
 	})
 	if err != nil {
+		s.pending.RevertFinalize(conversationID, previousState)
 		return err
 	}
 	messages, listErr := s.store.ListMessages(ctx, conversationID)
@@ -178,6 +195,21 @@ func (s *ChatAPIService) AbortConversation(ctx context.Context, conversationID s
 	})
 
 	return s.pending.Abort(conversationID, body)
+}
+
+func (s *ChatAPIService) resolveTurnMutationError(ctx context.Context, conversationID string, err error) error {
+	if !errors.Is(err, ErrPendingNotFound) {
+		return err
+	}
+	conversation, getErr := s.store.GetConversation(ctx, conversationID)
+	if getErr != nil {
+		return err
+	}
+	status := stringValue(conversation.Metadata["realtime_status"], "")
+	if status == "closed" || status == "aborted" || status == "expired" {
+		return ErrPendingConflict
+	}
+	return err
 }
 
 func stringValue(value any, fallback string) string {

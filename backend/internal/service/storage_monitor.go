@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -62,9 +63,13 @@ type StorageCleanupPreview struct {
 	KeepRecentDays            int                       `json:"keep_recent_days"`
 	CandidateConversations    int                       `json:"candidate_conversations"`
 	CandidateMessages         int                       `json:"candidate_messages"`
+	CandidateImages           int                       `json:"candidate_images"`
+	CandidateImageBytes       int64                     `json:"candidate_image_bytes"`
 	EstimatedReclaimableBytes int64                     `json:"estimated_reclaimable_bytes"`
 	DeletedConversations      int                       `json:"deleted_conversations,omitempty"`
 	DeletedMessages           int                       `json:"deleted_messages,omitempty"`
+	DeletedImages             int                       `json:"deleted_images,omitempty"`
+	DeletedImageBytes         int64                     `json:"deleted_image_bytes,omitempty"`
 	ByOwner                   []StorageCleanupOwnerPlan `json:"by_owner"`
 }
 
@@ -72,6 +77,8 @@ type StorageCleanupOwnerPlan struct {
 	OwnerID                   string `json:"owner_id"`
 	CandidateConversations    int    `json:"candidate_conversations"`
 	CandidateMessages         int    `json:"candidate_messages"`
+	CandidateImages           int    `json:"candidate_images"`
+	CandidateImageBytes       int64  `json:"candidate_image_bytes"`
 	EstimatedReclaimableBytes int64  `json:"estimated_reclaimable_bytes"`
 }
 
@@ -87,6 +94,16 @@ type storageCleanupCandidate struct {
 	OwnerID        string
 	MessageCount   int
 	EstimatedBytes int64
+	ImageFilenames []string
+}
+
+type storageCleanupImagePlan struct {
+	Images []store.UploadedImage
+}
+
+type storageCleanupImageResult struct {
+	DeletedImages     int
+	DeletedImageBytes int64
 }
 
 type StorageOrphanImagesPreview struct {
@@ -241,12 +258,22 @@ func (s *StorageMonitorService) DeleteCleanupCandidates(ctx context.Context, inp
 	for _, candidate := range candidates {
 		ids = append(ids, candidate.ConversationID)
 	}
+	imagePlan, err := s.cleanupImagePlan(ctx, candidates)
+	if err != nil {
+		return StorageCleanupPreview{}, err
+	}
 	result, err := s.store.DeleteConversations(ctx, ids)
+	if err != nil {
+		return StorageCleanupPreview{}, err
+	}
+	imageResult, err := s.deleteCleanupImages(ctx, imagePlan)
 	if err != nil {
 		return StorageCleanupPreview{}, err
 	}
 	preview.DeletedConversations = result.DeletedConversations
 	preview.DeletedMessages = result.DeletedMessages
+	preview.DeletedImages = imageResult.DeletedImages
+	preview.DeletedImageBytes = imageResult.DeletedImageBytes
 	return preview, nil
 }
 
@@ -274,6 +301,14 @@ func (s *StorageMonitorService) cleanupPlan(ctx context.Context, input StorageCl
 	conversations, err := s.store.ListConversations(ctx)
 	if err != nil {
 		return StorageCleanupPreview{}, nil, err
+	}
+	uploadedImages, err := s.store.ListUploadedImages(ctx)
+	if err != nil {
+		return StorageCleanupPreview{}, nil, err
+	}
+	imageByFilename := map[string]store.UploadedImage{}
+	for _, image := range uploadedImages {
+		imageByFilename[image.Filename] = image
 	}
 	if input.KeepRecentConversations < 0 {
 		input.KeepRecentConversations = 0
@@ -334,23 +369,133 @@ func (s *StorageMonitorService) cleanupPlan(ctx context.Context, input StorageCl
 			if err != nil {
 				return StorageCleanupPreview{}, nil, err
 			}
-			bytes := storageConversationEstimatedBytes(conversation, messages)
+			imageRefs := storageImageReferences(conversation, messages)
+			imageCount, imageBytes := cleanupImageEstimate(imageRefs, imageByFilename)
+			bytes := storageConversationEstimatedBytes(conversation, messages) + imageBytes
 			candidates = append(candidates, storageCleanupCandidate{
 				ConversationID: conversation.ID,
 				OwnerID:        ownerID,
 				MessageCount:   len(messages),
 				EstimatedBytes: bytes,
+				ImageFilenames: mapKeys(imageRefs),
 			})
 			ownerPlan.CandidateConversations++
 			ownerPlan.CandidateMessages += len(messages)
+			ownerPlan.CandidateImages += imageCount
+			ownerPlan.CandidateImageBytes += imageBytes
 			ownerPlan.EstimatedReclaimableBytes += bytes
 			preview.CandidateConversations++
 			preview.CandidateMessages += len(messages)
+			preview.CandidateImages += imageCount
+			preview.CandidateImageBytes += imageBytes
 			preview.EstimatedReclaimableBytes += bytes
 		}
 		preview.ByOwner = append(preview.ByOwner, ownerPlan)
 	}
 	return preview, candidates, nil
+}
+
+func (s *StorageMonitorService) cleanupImagePlan(ctx context.Context, candidates []storageCleanupCandidate) (storageCleanupImagePlan, error) {
+	if len(candidates) == 0 {
+		return storageCleanupImagePlan{}, nil
+	}
+	candidateIDs := map[string]struct{}{}
+	candidateOwners := map[string]struct{}{}
+	candidateFilenames := map[string]struct{}{}
+	for _, candidate := range candidates {
+		candidateIDs[candidate.ConversationID] = struct{}{}
+		candidateOwners[candidate.OwnerID] = struct{}{}
+		for _, filename := range candidate.ImageFilenames {
+			candidateFilenames[filename] = struct{}{}
+		}
+	}
+	if len(candidateFilenames) == 0 {
+		return storageCleanupImagePlan{}, nil
+	}
+
+	stillReferenced, err := s.referencedImagesOutsideCandidates(ctx, candidateIDs)
+	if err != nil {
+		return storageCleanupImagePlan{}, err
+	}
+	uploadedImages, err := s.store.ListUploadedImages(ctx)
+	if err != nil {
+		return storageCleanupImagePlan{}, err
+	}
+	plan := storageCleanupImagePlan{Images: []store.UploadedImage{}}
+	for _, image := range uploadedImages {
+		if _, ok := candidateFilenames[image.Filename]; !ok {
+			continue
+		}
+		if _, ok := stillReferenced[image.Filename]; ok {
+			continue
+		}
+		if _, ok := candidateOwners[image.OwnerID]; !ok {
+			continue
+		}
+		plan.Images = append(plan.Images, image)
+	}
+	sort.SliceStable(plan.Images, func(i, j int) bool {
+		return plan.Images[i].Filename < plan.Images[j].Filename
+	})
+	return plan, nil
+}
+
+func (s *StorageMonitorService) referencedImagesOutsideCandidates(ctx context.Context, candidateIDs map[string]struct{}) (map[string]struct{}, error) {
+	conversations, err := s.store.ListConversations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	referenced := map[string]struct{}{}
+	for _, conversation := range conversations {
+		if _, ok := candidateIDs[conversation.ID]; ok {
+			continue
+		}
+		messages, err := s.store.ListMessages(ctx, conversation.ID)
+		if err != nil {
+			return nil, err
+		}
+		for filename := range storageImageReferences(conversation, messages) {
+			referenced[filename] = struct{}{}
+		}
+	}
+	return referenced, nil
+}
+
+func (s *StorageMonitorService) deleteCleanupImages(ctx context.Context, plan storageCleanupImagePlan) (storageCleanupImageResult, error) {
+	if len(plan.Images) == 0 {
+		return storageCleanupImageResult{}, nil
+	}
+	root := filepath.Join(s.cfg.DataDir, "uploads", "imgs")
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return storageCleanupImageResult{}, err
+	}
+	result := storageCleanupImageResult{}
+	deletedFilenames := make([]string, 0, len(plan.Images))
+	for _, image := range plan.Images {
+		select {
+		case <-ctx.Done():
+			return storageCleanupImageResult{}, ctx.Err()
+		default:
+		}
+		path := filepath.Join(absRoot, image.Filename)
+		if !isDirectChildPath(absRoot, path) {
+			continue
+		}
+		if err := os.Remove(path); err != nil {
+			if !os.IsNotExist(err) {
+				return storageCleanupImageResult{}, err
+			}
+		}
+		deletedFilenames = append(deletedFilenames, image.Filename)
+		result.DeletedImageBytes += image.Bytes
+	}
+	deleteResult, err := s.store.DeleteUploadedImagesByFilenames(ctx, deletedFilenames)
+	if err != nil {
+		return storageCleanupImageResult{}, err
+	}
+	result.DeletedImages = deleteResult.DeletedImages
+	return result, nil
 }
 
 func (s *StorageMonitorService) OrphanImagesPreview(ctx context.Context) (StorageOrphanImagesPreview, error) {
@@ -535,4 +680,66 @@ func storageConversationEstimatedBytes(conversation store.Conversation, messages
 		bytes += estimatedJSONBytes(message.Metadata)
 	}
 	return bytes
+}
+
+var uploadImageURLPattern = regexp.MustCompile(`/api/uploads/imgs/([A-Za-z0-9._-]+)`)
+
+func storageImageReferences(conversation store.Conversation, messages []store.Message) map[string]struct{} {
+	references := map[string]struct{}{}
+	addUploadImageReferences(references, conversation.Title)
+	addUploadImageReferences(references, conversation.LastUserText)
+	addUploadImageReferences(references, conversation.LastMessagePreview)
+	addUploadImageReferencesFromJSON(references, conversation.Metadata)
+	for _, message := range messages {
+		addUploadImageReferences(references, message.Content)
+		addUploadImageReferencesFromJSON(references, message.Metadata)
+	}
+	return references
+}
+
+func addUploadImageReferencesFromJSON(references map[string]struct{}, value any) {
+	if value == nil {
+		return
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	addUploadImageReferences(references, string(data))
+}
+
+func addUploadImageReferences(references map[string]struct{}, value string) {
+	for _, match := range uploadImageURLPattern.FindAllStringSubmatch(value, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		filename := strings.TrimSpace(match[1])
+		if filename == "" || filename == "." || filename == ".." || filepath.Base(filename) != filename {
+			continue
+		}
+		references[filename] = struct{}{}
+	}
+}
+
+func cleanupImageEstimate(references map[string]struct{}, imageByFilename map[string]store.UploadedImage) (int, int64) {
+	var count int
+	var bytes int64
+	for filename := range references {
+		image, ok := imageByFilename[filename]
+		if !ok {
+			continue
+		}
+		count++
+		bytes += image.Bytes
+	}
+	return count, bytes
+}
+
+func mapKeys(items map[string]struct{}) []string {
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

@@ -721,6 +721,28 @@ func (s *Store) ListUploadedImages(ctx context.Context) ([]store.UploadedImage, 
 	return items, rows.Err()
 }
 
+func (s *Store) DeleteUploadedImagesByFilenames(ctx context.Context, filenames []string) (store.DeleteUploadedImagesResult, error) {
+	filenames = uniqueNonEmptyStrings(filenames)
+	if len(filenames) == 0 {
+		return store.DeleteUploadedImagesResult{}, nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(filenames)), ",")
+	args := make([]any, 0, len(filenames))
+	for _, filename := range filenames {
+		args = append(args, filename)
+	}
+	query := fmt.Sprintf(`DELETE FROM uploaded_images WHERE filename IN (%s)`, placeholders)
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return store.DeleteUploadedImagesResult{}, err
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return store.DeleteUploadedImagesResult{}, err
+	}
+	return store.DeleteUploadedImagesResult{DeletedImages: int(rowsAffected)}, nil
+}
+
 func (s *Store) ListStorageUserQuotas(ctx context.Context) ([]store.StorageUserQuota, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT owner_id, quota_bytes, created_at, updated_at

@@ -196,6 +196,8 @@ func (h AdminStorageHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
 				"keep_recent_days":            input.KeepRecentDays,
 				"candidate_conversations":     preview.CandidateConversations,
 				"candidate_messages":          preview.CandidateMessages,
+				"candidate_images":            preview.CandidateImages,
+				"candidate_image_bytes":       preview.CandidateImageBytes,
 				"estimated_reclaimable_bytes": preview.EstimatedReclaimableBytes,
 			},
 		})
@@ -225,9 +227,13 @@ func (h AdminStorageHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
 			"keep_recent_days":            input.KeepRecentDays,
 			"candidate_conversations":     result.CandidateConversations,
 			"candidate_messages":          result.CandidateMessages,
+			"candidate_images":            result.CandidateImages,
+			"candidate_image_bytes":       result.CandidateImageBytes,
 			"estimated_reclaimable_bytes": result.EstimatedReclaimableBytes,
 			"deleted_conversations":       result.DeletedConversations,
 			"deleted_messages":            result.DeletedMessages,
+			"deleted_images":              result.DeletedImages,
+			"deleted_image_bytes":         result.DeletedImageBytes,
 		},
 	})
 	writeJSON(w, http.StatusOK, map[string]any{

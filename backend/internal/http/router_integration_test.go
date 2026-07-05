@@ -1542,6 +1542,122 @@ func TestAdminStorageCleanupExecuteDeletesClosedConversations(t *testing.T) {
 	assertAuditCount(t, env, "admin.storage", "storage", "lab-user", "cleanup", "success", 1)
 }
 
+func TestAdminStorageCleanupDeletesReferencedUploads(t *testing.T) {
+	env := newTestEnv(t)
+
+	uploadResp := env.postMultipart(t, "/api/uploads/imgs", "file", "cleanup.png", tinyPNG(), http.StatusOK)
+	upload := uploadResp["upload"].(map[string]any)
+	filename := nestedString(upload, "filename")
+	uploadURL := nestedString(upload, "url")
+	imagePath := filepath.Join(env.dataDir, "uploads", "imgs", filename)
+	if _, err := os.Stat(imagePath); err != nil {
+		t.Fatalf("expected uploaded image file before cleanup: %v", err)
+	}
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-cleanup-upload",
+		"input": "storage cleanup upload",
+	})
+	conversation := env.waitForWaitingConversation(t, "storage cleanup upload")
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "image: " + uploadURL,
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+
+	cleanupResp := env.postJSON(t, "/api/admin/storage/cleanup", map[string]any{
+		"dry_run":                   false,
+		"owner_id":                  "lab-user",
+		"keep_recent_conversations": 0,
+		"keep_recent_days":          0,
+	}, http.StatusOK)
+	result := cleanupResp["result"].(map[string]any)
+	if numericValue(result["candidate_images"]) != 1 || numericValue(result["deleted_images"]) != 1 {
+		t.Fatalf("expected cleanup to delete referenced upload: %#v", cleanupResp)
+	}
+	if numericValue(result["candidate_image_bytes"]) != len(tinyPNG()) || numericValue(result["deleted_image_bytes"]) != len(tinyPNG()) {
+		t.Fatalf("unexpected cleanup image bytes: %#v", cleanupResp)
+	}
+	if _, err := os.Stat(imagePath); !os.IsNotExist(err) {
+		t.Fatalf("expected uploaded image file to be removed, err=%v", err)
+	}
+	var uploadCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM uploaded_images
+		WHERE filename = ?
+	`, filename).Scan(&uploadCount); err != nil {
+		t.Fatalf("count uploaded image metadata: %v", err)
+	}
+	if uploadCount != 0 {
+		t.Fatalf("expected uploaded image metadata to be deleted, got %d", uploadCount)
+	}
+	assertAuditCount(t, env, "admin.storage", "storage", "lab-user", "cleanup", "success", 1)
+}
+
+func TestAdminStorageCleanupKeepsUploadsReferencedByRetainedConversation(t *testing.T) {
+	env := newTestEnv(t)
+
+	uploadResp := env.postMultipart(t, "/api/uploads/imgs", "file", "shared.png", tinyPNG(), http.StatusOK)
+	upload := uploadResp["upload"].(map[string]any)
+	filename := nestedString(upload, "filename")
+	uploadURL := nestedString(upload, "url")
+	imagePath := filepath.Join(env.dataDir, "uploads", "imgs", filename)
+
+	oldCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-cleanup-shared-old",
+		"input": "shared old",
+	})
+	oldConversation := env.waitForWaitingConversation(t, "shared old")
+	env.postJSON(t, "/api/conversations/"+oldConversation["id"].(string)+"/respond", map[string]any{
+		"text": "old image: " + uploadURL,
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-oldCh
+
+	newCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-cleanup-shared-new",
+		"input": "shared new",
+	})
+	newConversation := env.waitForWaitingConversation(t, "shared new")
+	env.postJSON(t, "/api/conversations/"+newConversation["id"].(string)+"/respond", map[string]any{
+		"text": "new image: " + uploadURL,
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-newCh
+
+	cleanupResp := env.postJSON(t, "/api/admin/storage/cleanup", map[string]any{
+		"dry_run":                   false,
+		"owner_id":                  "lab-user",
+		"keep_recent_conversations": 1,
+		"keep_recent_days":          0,
+	}, http.StatusOK)
+	result := cleanupResp["result"].(map[string]any)
+	if numericValue(result["candidate_conversations"]) != 1 || numericValue(result["candidate_images"]) != 1 || numericValue(result["deleted_images"]) != 0 {
+		t.Fatalf("expected shared upload to remain while old conversation is cleaned: %#v", cleanupResp)
+	}
+	if _, err := env.store.GetConversation(context.Background(), oldConversation["id"].(string)); err == nil {
+		t.Fatalf("expected old conversation to be deleted")
+	}
+	if _, err := env.store.GetConversation(context.Background(), newConversation["id"].(string)); err != nil {
+		t.Fatalf("expected retained conversation to remain: %v", err)
+	}
+	if _, err := os.Stat(imagePath); err != nil {
+		t.Fatalf("expected shared upload to remain: %v", err)
+	}
+	var uploadCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM uploaded_images
+		WHERE filename = ?
+	`, filename).Scan(&uploadCount); err != nil {
+		t.Fatalf("count uploaded image metadata: %v", err)
+	}
+	if uploadCount != 1 {
+		t.Fatalf("expected shared upload metadata to remain, got %d", uploadCount)
+	}
+}
+
 func TestAdminStorageCleanupRejectsMissingDryRun(t *testing.T) {
 	env := newTestEnv(t)
 

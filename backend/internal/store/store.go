@@ -247,6 +247,10 @@ type DeleteConversationsResult struct {
 	DeletedMessages      int `json:"deleted_messages"`
 }
 
+type DeleteUploadedImagesResult struct {
+	DeletedImages int `json:"deleted_images"`
+}
+
 type ExpirePendingTurnsResult struct {
 	ExpiredConversations int `json:"expired_conversations"`
 }
@@ -279,6 +283,7 @@ type Store interface {
 	CreateUploadedImage(context.Context, CreateUploadedImageInput) (UploadedImage, error)
 	ListUploadedImages(context.Context) ([]UploadedImage, error)
 	ListUploadedImagesByOwner(context.Context, string) ([]UploadedImage, error)
+	DeleteUploadedImagesByFilenames(context.Context, []string) (DeleteUploadedImagesResult, error)
 	ListStorageUserQuotas(context.Context) ([]StorageUserQuota, error)
 	GetStorageUserQuota(context.Context, string) (StorageUserQuota, error)
 	SetStorageUserQuota(context.Context, string, int64) (StorageUserQuota, error)

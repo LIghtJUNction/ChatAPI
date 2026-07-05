@@ -151,20 +151,8 @@ func (s *SMTPSender) Send(ctx context.Context, message Message) error {
 	}
 	defer client.Close()
 
-	if s.cfg.Security == "starttls" {
-		ok, _ := client.Extension("STARTTLS")
-		if !ok {
-			return errors.New("smtp server does not advertise STARTTLS")
-		}
-		if err := client.StartTLS(&tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12}); err != nil {
-			return fmt.Errorf("smtp starttls: %w", err)
-		}
-	}
-	if s.cfg.Username != "" {
-		auth := smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host)
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("smtp auth: %w", err)
-		}
+	if err := s.prepareSession(client); err != nil {
+		return err
 	}
 	if err := client.Mail(from); err != nil {
 		return fmt.Errorf("smtp mail from: %w", err)
@@ -186,6 +174,41 @@ func (s *SMTPSender) Send(ctx context.Context, message Message) error {
 		return fmt.Errorf("smtp close data: %w", err)
 	}
 	return client.Quit()
+}
+
+func (s *SMTPSender) CheckConnection(ctx context.Context) error {
+	check := CheckSMTPConfig(s.cfg)
+	if !check.OK {
+		return errors.New(strings.Join(check.Errors, "; "))
+	}
+	client, err := s.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := s.prepareSession(client); err != nil {
+		return err
+	}
+	return client.Quit()
+}
+
+func (s *SMTPSender) prepareSession(client *smtp.Client) error {
+	if s.cfg.Security == "starttls" {
+		ok, _ := client.Extension("STARTTLS")
+		if !ok {
+			return errors.New("smtp server does not advertise STARTTLS")
+		}
+		if err := client.StartTLS(&tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12}); err != nil {
+			return fmt.Errorf("smtp starttls: %w", err)
+		}
+	}
+	if s.cfg.Username != "" {
+		auth := smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host)
+		if err := client.Auth(auth); err != nil {
+			return fmt.Errorf("smtp auth: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *SMTPSender) connect(ctx context.Context) (*smtp.Client, error) {

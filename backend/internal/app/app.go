@@ -199,18 +199,19 @@ type dbCheckReport struct {
 }
 
 type smtpTestReport struct {
-	OK      bool                  `json:"ok"`
-	DryRun  bool                  `json:"dry_run"`
-	Sent    bool                  `json:"sent"`
-	To      string                `json:"to,omitempty"`
-	Check   email.SMTPCheckReport `json:"check"`
-	Error   string                `json:"error,omitempty"`
-	Warning string                `json:"warning,omitempty"`
+	OK          bool                  `json:"ok"`
+	DryRun      bool                  `json:"dry_run"`
+	ConnectOnly bool                  `json:"connect_only"`
+	Sent        bool                  `json:"sent"`
+	To          string                `json:"to,omitempty"`
+	Check       email.SMTPCheckReport `json:"check"`
+	Error       string                `json:"error,omitempty"`
+	Warning     string                `json:"warning,omitempty"`
 }
 
 func runSMTP(ctx context.Context, args []string, backendRoot string) error {
 	if len(args) == 0 || args[0] != "test" {
-		return fmt.Errorf("unknown smtp command, supported: test [--dry-run] [--to email]")
+		return fmt.Errorf("unknown smtp command, supported: test [--dry-run] [--connect-only] [--to email]")
 	}
 	options, err := parseSMTPTestOptions(args[1:])
 	if err != nil {
@@ -223,12 +224,13 @@ func runSMTP(ctx context.Context, args []string, backendRoot string) error {
 	smtpConfig := email.SMTPConfigFromConfig(cfg)
 	check := email.CheckSMTPConfig(smtpConfig)
 	report := smtpTestReport{
-		OK:     check.OK,
-		DryRun: options.dryRun || options.to == "",
-		To:     options.to,
-		Check:  check,
+		OK:          check.OK,
+		DryRun:      options.dryRun || (!options.connectOnly && options.to == ""),
+		ConnectOnly: options.connectOnly,
+		To:          options.to,
+		Check:       check,
 	}
-	if options.to == "" && !options.dryRun {
+	if options.to == "" && !options.dryRun && !options.connectOnly {
 		report.Warning = "no recipient provided; ran dry-run only"
 	}
 	if !check.OK {
@@ -237,6 +239,15 @@ func runSMTP(ctx context.Context, args []string, backendRoot string) error {
 		return errors.New(report.Error)
 	}
 	if report.DryRun {
+		return writeJSONReport(os.Stdout, report)
+	}
+	if report.ConnectOnly {
+		if err := email.NewSMTPSender(smtpConfig).CheckConnection(ctx); err != nil {
+			report.OK = false
+			report.Error = err.Error()
+			_ = writeJSONReport(os.Stdout, report)
+			return err
+		}
 		return writeJSONReport(os.Stdout, report)
 	}
 	message := email.Message{
@@ -255,9 +266,10 @@ func runSMTP(ctx context.Context, args []string, backendRoot string) error {
 }
 
 type smtpTestOptions struct {
-	dryRun  bool
-	to      string
-	subject string
+	dryRun      bool
+	connectOnly bool
+	to          string
+	subject     string
 }
 
 func parseSMTPTestOptions(args []string) (smtpTestOptions, error) {
@@ -266,6 +278,8 @@ func parseSMTPTestOptions(args []string) (smtpTestOptions, error) {
 		switch args[i] {
 		case "--dry-run":
 			options.dryRun = true
+		case "--connect-only":
+			options.connectOnly = true
 		case "--to":
 			if i+1 >= len(args) {
 				return smtpTestOptions{}, errors.New("--to requires an email address")
@@ -281,6 +295,9 @@ func parseSMTPTestOptions(args []string) (smtpTestOptions, error) {
 		default:
 			return smtpTestOptions{}, fmt.Errorf("unknown smtp test option %q", args[i])
 		}
+	}
+	if options.dryRun && options.connectOnly {
+		return smtpTestOptions{}, errors.New("--dry-run and --connect-only cannot be used together")
 	}
 	return options, nil
 }

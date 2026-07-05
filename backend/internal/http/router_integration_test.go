@@ -966,6 +966,9 @@ func TestMetricsEndpointWhenEnabled(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"# HELP chatapi_go_goroutines",
+		"chatapi_system_memory_total_bytes",
+		"chatapi_process_open_fds",
+		"chatapi_data_dir_disk_total_bytes",
 		"chatapi_pending_turns",
 		"chatapi_realtime_subscribers",
 		"chatapi_sqlite_database_bytes",
@@ -1167,8 +1170,12 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 
 	summaryResp := env.getJSON(t, "/api/admin/runtime/summary", http.StatusOK)
 	summary := summaryResp["summary"].(map[string]any)
-	if nestedPathString(summary, "go", "version") == "" || summary["memory"] == nil || summary["pending"] == nil || summary["realtime"] == nil {
+	if nestedPathString(summary, "go", "version") == "" || summary["system"] == nil || summary["memory"] == nil || summary["pending"] == nil || summary["realtime"] == nil {
 		t.Fatalf("unexpected runtime summary response: %#v", summaryResp)
+	}
+	system := summary["system"].(map[string]any)
+	if nestedString(system, "os") == "" || numericValue(system["num_cpu"]) <= 0 || numericValue(system["process_open_fds"]) <= 0 {
+		t.Fatalf("unexpected runtime system summary: %#v", summaryResp)
 	}
 	database := summary["database"].(map[string]any)
 	if nestedString(database, "driver") != "sqlite" {
@@ -1179,6 +1186,12 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	memory := memoryResp["memory"].(map[string]any)
 	if numericValue(memory["sys_bytes"]) <= 0 {
 		t.Fatalf("unexpected runtime memory response: %#v", memoryResp)
+	}
+
+	systemResp := env.getJSON(t, "/api/admin/runtime/system", http.StatusOK)
+	system = systemResp["system"].(map[string]any)
+	if numericValue(system["system_memory_total_bytes"]) <= 0 || numericValue(system["data_dir_disk_total_bytes"]) <= 0 || numericValue(system["process_rss_bytes"]) <= 0 {
+		t.Fatalf("unexpected runtime system response: %#v", systemResp)
 	}
 
 	gcResp := env.postJSON(t, "/api/admin/runtime/gc", map[string]any{}, http.StatusOK)

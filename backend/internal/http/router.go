@@ -145,6 +145,7 @@ func NewRouter(
 	adminRouter.Use(middleware.RequireAdminActor())
 	adminRouter.Get("/runtime/summary", adminRuntimeHandler.Summary)
 	adminRouter.Get("/runtime/memory", adminRuntimeHandler.Memory)
+	adminRouter.Get("/runtime/system", adminRuntimeHandler.System)
 	adminRouter.Get("/runtime/connections", adminRuntimeHandler.Connections)
 	adminRouter.Get("/runtime/queue", adminRuntimeHandler.Queue)
 	adminRouter.Get("/runtime/settings", adminRuntimeHandler.Settings)

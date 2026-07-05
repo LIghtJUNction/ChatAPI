@@ -44,7 +44,7 @@
 - 应用 API 当前已开始覆盖 `max_requests_per_minute` 资源限制：在单进程内按应用 API Key 做 1 分钟窗口限流，超限返回 `429` 并写入 `app_api_key_audit_logs`，管理员审计聚合视图中显示为 `app_api.request` failure / `rate_limited`。
 - 应用 API 当前已开始覆盖 `allowed_source_ips` 资源限制：支持精确 IP 和 CIDR，当前按直连 `RemoteAddr` 判断，不信任 `X-Forwarded-For` 等代理头；拒绝时返回 `403` 并记录 `source_ip_forbidden`。
 - 应用 API Key 创建已开始支持 `expires_at`：用户创建应用 API Key 时可传 RFC3339 过期时间，必须晚于当前时间；过期 key 鉴权返回 `401`。
-- 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
+- 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/system`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、Linux 系统内存/load/disk/RSS/FD、pending turn、realtime subscriber 和 SQLite 文件大小等可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
 - Realtime 事件广播已补上最小背压策略：每个订阅者使用固定队列，队列满时记录 recoverable drop，连续满队列会断开慢订阅者并累计 `slow_disconnects`；`/api/admin/runtime/queue` 和 `/metrics` 都会暴露相关计数。
 - Realtime 连接限额已补上最小统一池：`CHATAPI_REALTIME_MAX_CONNECTIONS`、`CHATAPI_REALTIME_MAX_CONNECTIONS_PER_USER`、`CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER` 控制全局、单用户和浏览器控制台预留名额；当前 `/api/ws` 作为 `webui` 连接接入，service 层已提供 `api` / `sse` lease，后续 API/SSE 长连接必须复用同一套限额，避免同用户 API/SSE 连接占满后 WebUI 进不来。管理员连接监控和 `/metrics` 已输出分类连接数与拒绝计数。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`、`POST /api/admin/storage/vacuum`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志；清理会识别候选会话正文和 metadata JSON 中的 `/api/uploads/imgs/{filename}` 引用，删除不再被保留会话引用的本地上传图片文件与 `uploaded_images` 元数据，并返回候选/已删除图片数量和字节数；SQLite vacuum 需要显式 `dry_run:false` 才会执行 WAL checkpoint 和 `VACUUM`。上传删除失败恢复队列仍待继续补齐。
@@ -958,6 +958,7 @@ type Hub struct {
 
 - `GET /api/admin/runtime/summary`
 - `GET /api/admin/runtime/memory`
+- `GET /api/admin/runtime/system`
 - `GET /api/admin/runtime/connections`
 - `GET /api/admin/runtime/queue`
 - `GET /api/admin/runtime/settings`
@@ -970,16 +971,17 @@ type Hub struct {
 - `POST /api/admin/storage/cleanup`
 - `POST /api/admin/runtime/gc`
 
-当前 Go 重构分支已先落地运行时监控的服务内指标：
+当前 Go 重构分支已先落地运行时监控的服务内指标和 Linux 系统级探针：
 
-- `GET /api/admin/runtime/summary`：返回 Go runtime 基本信息、内存快照、pending turn 统计、realtime subscriber 队列统计、SQLite 主库/WAL 文件大小。
+- `GET /api/admin/runtime/summary`：返回 Go runtime 基本信息、系统资源快照、Go 内存快照、pending turn 统计、realtime subscriber 队列统计、SQLite 主库/WAL 文件大小。
 - `GET /api/admin/runtime/memory`：返回当前 Go `runtime.MemStats` 的核心字段，包括 heap、sys、next GC、GC 次数和 pause 累计。
+- `GET /api/admin/runtime/system`：返回主机名、CPU 数、load average、系统总内存/可用内存、ChatAPI 进程 RSS、打开 FD 数，以及 `data_dir` 所在文件系统总容量/可用容量。当前实现使用 Linux `/proc` 和 `statfs`，非 Linux 部署后续按目标平台补齐。
 - `GET /api/admin/runtime/connections`：返回当前 realtime subscriber 数、WebUI subscriber 数、API/SSE lease 数、总连接数和被限额拒绝的连接数。当前 `/api/ws` 已按 `webui` 计数，后续 API/SSE 长连接接入时必须使用 realtime hub 的 `Acquire` / `Release`。
 - `GET /api/admin/runtime/queue`：返回 realtime subscriber 当前队列长度、总容量、recoverable/critical drop 和慢客户端断开计数字段；当前慢客户端策略为连续多次队列满后关闭订阅者。
 - `GET /api/admin/runtime/settings`：返回当前 ChatAPI 记录的运行时治理参数，包括 `gogc` 和 `memory_limit_bytes`。`0` 表示该项未由 ChatAPI 显式管理。
 - `PUT /api/admin/runtime/settings`：接受可选 `gogc`、`memory_limit_bytes` 非负值并立即作用于当前 Go 进程；成功修改会写入 `audit_logs`。当前持久化仍通过 `CHATAPI_RUNTIME_GOGC` 和 `CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES` 环境变量完成，管理接口修改重启后不会保留。通过接口写回 `0` 会恢复 Go 默认 GC 百分比和近似无限内存限制。
 - `POST /api/admin/runtime/gc`：触发一次 `runtime.GC()` 和 `debug.FreeOSMemory()`，返回 GC 后内存快照。
-- 当前还没有引入系统级探针，因此 CPU 使用率、系统可用内存、磁盘总容量、进程 RSS/FD 数仍属于后续运维监控扩展。
+- `/metrics` 已输出系统内存、进程 RSS/FD、data dir 磁盘容量和 load average 等 gauge。真正的 CPU usage 百分比需要跨采样窗口计算，后续可在 runtime monitor 中维护滑动窗口。
 - `GET /api/admin/storage/summary`：返回 SQLite 主库/WAL、uploads 目录大小、估算用户数、估算总字节数、会话数和消息数。
 - `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数、消息数、图片数、图片字节数、默认配额、单用户 override 配额、最终生效配额和是否超过配额。当前估算范围包含 conversation/message 文本、metadata JSON，以及已写入 `uploaded_images` 的图片字节数；孤儿文件仍只体现在 uploads 目录总量中。
 - `PUT /api/admin/storage/users/{owner_id}/quota`：设置单用户存储配额覆盖，body 为 `{"quota_bytes": 104857600}`；`quota_bytes=0` 表示该用户不限制。

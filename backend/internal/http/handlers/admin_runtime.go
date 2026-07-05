@@ -26,6 +26,13 @@ func (h AdminRuntimeHandler) Memory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h AdminRuntimeHandler) System(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"system": h.Monitor.System(),
+	})
+}
+
 func (h AdminRuntimeHandler) Connections(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":          true,

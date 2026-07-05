@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bufio"
 	"errors"
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +30,7 @@ type RuntimeSummary struct {
 	GeneratedAt time.Time      `json:"generated_at"`
 	Mode        config.Mode    `json:"mode"`
 	Go          GoRuntimeInfo  `json:"go"`
+	System      SystemSnapshot `json:"system"`
 	Memory      MemorySnapshot `json:"memory"`
 	Pending     PendingStats   `json:"pending"`
 	Realtime    RealtimeStats  `json:"realtime"`
@@ -48,6 +52,22 @@ type QueueSnapshot struct {
 	RecoverableDrops int `json:"recoverable_drops"`
 	CriticalDrops    int `json:"critical_drops"`
 	SlowDisconnects  int `json:"slow_disconnects"`
+}
+
+type SystemSnapshot struct {
+	OS                         string  `json:"os"`
+	Hostname                   string  `json:"hostname,omitempty"`
+	NumCPU                     int     `json:"num_cpu"`
+	LoadAverage1               float64 `json:"load_average_1,omitempty"`
+	LoadAverage5               float64 `json:"load_average_5,omitempty"`
+	LoadAverage15              float64 `json:"load_average_15,omitempty"`
+	SystemMemoryTotalBytes     uint64  `json:"system_memory_total_bytes,omitempty"`
+	SystemMemoryAvailableBytes uint64  `json:"system_memory_available_bytes,omitempty"`
+	ProcessRSSBytes            uint64  `json:"process_rss_bytes,omitempty"`
+	ProcessOpenFDs             int     `json:"process_open_fds,omitempty"`
+	DataDir                    string  `json:"data_dir,omitempty"`
+	DataDirDiskTotalBytes      uint64  `json:"data_dir_disk_total_bytes,omitempty"`
+	DataDirDiskAvailableBytes  uint64  `json:"data_dir_disk_available_bytes,omitempty"`
 }
 
 type GoRuntimeInfo struct {
@@ -109,6 +129,7 @@ func (s *RuntimeMonitorService) Summary() RuntimeSummary {
 		GeneratedAt: time.Now().UTC(),
 		Mode:        s.cfg.Mode,
 		Go:          goRuntimeInfo(),
+		System:      s.System(),
 		Memory:      ReadMemorySnapshot(),
 		Pending:     s.pending.Stats(),
 		Realtime:    s.realtime.Stats(),
@@ -118,6 +139,10 @@ func (s *RuntimeMonitorService) Summary() RuntimeSummary {
 
 func (s *RuntimeMonitorService) Memory() MemorySnapshot {
 	return ReadMemorySnapshot()
+}
+
+func (s *RuntimeMonitorService) System() SystemSnapshot {
+	return ReadSystemSnapshot(s.cfg.DataDir)
 }
 
 func (s *RuntimeMonitorService) Connections() ConnectionSnapshot {
@@ -130,6 +155,103 @@ func (s *RuntimeMonitorService) Connections() ConnectionSnapshot {
 		TotalConnections:    stats.TotalConnections,
 		RejectedConnections: stats.RejectedConnections,
 	}
+}
+
+func ReadSystemSnapshot(dataDir string) SystemSnapshot {
+	hostname, _ := os.Hostname()
+	snapshot := SystemSnapshot{
+		OS:       runtime.GOOS,
+		Hostname: hostname,
+		NumCPU:   runtime.NumCPU(),
+		DataDir:  dataDir,
+	}
+	load1, load5, load15 := readLoadAverage()
+	snapshot.LoadAverage1 = load1
+	snapshot.LoadAverage5 = load5
+	snapshot.LoadAverage15 = load15
+	total, available := readSystemMemory()
+	snapshot.SystemMemoryTotalBytes = total
+	snapshot.SystemMemoryAvailableBytes = available
+	snapshot.ProcessRSSBytes = readProcessRSS()
+	snapshot.ProcessOpenFDs = countOpenFDs()
+	diskTotal, diskAvailable := readDiskUsage(dataDir)
+	snapshot.DataDirDiskTotalBytes = diskTotal
+	snapshot.DataDirDiskAvailableBytes = diskAvailable
+	return snapshot
+}
+
+func readLoadAverage() (float64, float64, float64) {
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return 0, 0, 0
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) < 3 {
+		return 0, 0, 0
+	}
+	load1, _ := strconv.ParseFloat(fields[0], 64)
+	load5, _ := strconv.ParseFloat(fields[1], 64)
+	load15, _ := strconv.ParseFloat(fields[2], 64)
+	return load1, load5, load15
+}
+
+func readSystemMemory() (uint64, uint64) {
+	file, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0, 0
+	}
+	defer file.Close()
+
+	var total uint64
+	var available uint64
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		switch strings.TrimSuffix(fields[0], ":") {
+		case "MemTotal":
+			total = value * 1024
+		case "MemAvailable":
+			available = value * 1024
+		}
+	}
+	return total, available
+}
+
+func readProcessRSS() uint64 {
+	file, err := os.Open("/proc/self/status")
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 || strings.TrimSuffix(fields[0], ":") != "VmRSS" {
+			continue
+		}
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return value * 1024
+	}
+	return 0
+}
+
+func countOpenFDs() int {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return 0
+	}
+	return len(entries)
 }
 
 func (s *RuntimeMonitorService) Queue() QueueSnapshot {

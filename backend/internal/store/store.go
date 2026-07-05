@@ -93,6 +93,24 @@ type AutomationRule struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
+type MigrationStatus struct {
+	SchemaVersion  string             `json:"schema_version"`
+	AppVersion     string             `json:"app_version,omitempty"`
+	MigrationDirty bool               `json:"migration_dirty"`
+	MigrationLock  string             `json:"migration_lock,omitempty"`
+	CreatedBy      string             `json:"created_by,omitempty"`
+	LastMigratedAt string             `json:"last_migrated_at,omitempty"`
+	Applied        []AppliedMigration `json:"applied"`
+}
+
+type AppliedMigration struct {
+	Version   string `json:"version"`
+	Name      string `json:"name,omitempty"`
+	AppliedAt string `json:"applied_at"`
+	Checksum  string `json:"checksum,omitempty"`
+	Dirty     bool   `json:"dirty"`
+}
+
 type CreateAppAPIKeyInput struct {
 	ID             string
 	UserID         string
@@ -155,6 +173,7 @@ type AbortPendingInput struct {
 
 type Store interface {
 	Ping(context.Context) error
+	MigrationStatus(context.Context) (MigrationStatus, error)
 	ListConversations(context.Context) ([]Conversation, error)
 	GetConversation(context.Context, string) (Conversation, error)
 	ListRequests(context.Context) ([]Request, error)

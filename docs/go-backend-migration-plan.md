@@ -46,6 +46,7 @@
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope 等风险。
 - 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
 - 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出。
+- 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -419,6 +420,12 @@ PostgreSQL 连接建议：
 - `GET /api/health`：轻量健康检查，返回 `{ "ok": true, "title": "..." }`
 - `GET /api/ready`：可选，检查数据库可用性和 migration 状态
 - `GET /metrics`：默认关闭或仅管理员/内网开启，避免公开泄露运行信息
+
+当前 Go 重构分支已落地：
+
+- `GET /api/health`：执行轻量数据库 ping，返回 `ok`、运行模式和数据库 driver。
+- `GET /api/ready`：执行数据库 ping 并读取 migration 状态，返回 `database` 与 `migration` 分项；数据库不可用、migration 状态不可读或 dirty 时返回 `503`。
+- `GET /metrics` 尚未开放；后续应默认关闭或只允许管理员/内网访问。
 
 关键指标：
 

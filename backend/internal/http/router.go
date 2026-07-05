@@ -35,6 +35,7 @@ func NewRouter(
 	router.Use(middleware.RequireLabAccess(cfg))
 
 	healthHandler := handlers.HealthHandler{Config: cfg, Store: dataStore}
+	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
 	authHandler := handlers.AuthHandler{Config: cfg}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
@@ -52,6 +53,7 @@ func NewRouter(
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
 	router.Get("/api/health", healthHandler.ServeHTTP)
+	router.Get("/api/ready", readinessHandler.ServeHTTP)
 	router.Get("/api/auth/session", authHandler.Session)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)

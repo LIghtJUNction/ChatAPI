@@ -804,6 +804,40 @@ func TestAppAPIStatisticsSummaryRejectsMissingScope(t *testing.T) {
 	}
 }
 
+func TestHealthAndReadyEndpoints(t *testing.T) {
+	env := newTestEnv(t)
+
+	healthResp := env.getJSON(t, "/api/health", http.StatusOK)
+	if healthResp["ok"] != true || nestedString(healthResp, "driver") != "sqlite" {
+		t.Fatalf("unexpected health response: %#v", healthResp)
+	}
+
+	readyResp := env.getJSON(t, "/api/ready", http.StatusOK)
+	if readyResp["ok"] != true {
+		t.Fatalf("unexpected ready response: %#v", readyResp)
+	}
+	migration := readyResp["migration"].(map[string]any)
+	if migration["ok"] != true || nestedString(migration, "schema_version") == "" {
+		t.Fatalf("unexpected ready migration response: %#v", readyResp)
+	}
+}
+
+func TestReadyEndpointRejectsDirtyMigration(t *testing.T) {
+	env := newTestEnv(t)
+	if _, err := env.store.DB().ExecContext(context.Background(), `UPDATE db_meta SET value = '1' WHERE key = 'migration_dirty'`); err != nil {
+		t.Fatalf("mark migration dirty: %v", err)
+	}
+
+	readyResp := env.getJSON(t, "/api/ready", http.StatusServiceUnavailable)
+	if readyResp["ok"] != false {
+		t.Fatalf("expected not ready response: %#v", readyResp)
+	}
+	migration := readyResp["migration"].(map[string]any)
+	if migration["ok"] != false || migration["migration_dirty"] != true || nestedString(migration, "error") != "migration dirty" {
+		t.Fatalf("unexpected dirty migration readiness response: %#v", readyResp)
+	}
+}
+
 func TestAdminRuntimeEndpoints(t *testing.T) {
 	env := newTestEnv(t)
 

@@ -16,6 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/zyf/chatapi/internal/repository/migrations"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -53,6 +54,32 @@ func (s *Store) DB() *sql.DB {
 
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
+}
+
+func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, error) {
+	status, err := migrations.StatusReport(ctx, s.db)
+	if err != nil {
+		return store.MigrationStatus{}, err
+	}
+	applied := make([]store.AppliedMigration, 0, len(status.Applied))
+	for _, item := range status.Applied {
+		applied = append(applied, store.AppliedMigration{
+			Version:   item.Version,
+			Name:      item.Name,
+			AppliedAt: item.AppliedAt,
+			Checksum:  item.Checksum,
+			Dirty:     item.Dirty,
+		})
+	}
+	return store.MigrationStatus{
+		SchemaVersion:  status.SchemaVersion,
+		AppVersion:     status.AppVersion,
+		MigrationDirty: status.MigrationDirty,
+		MigrationLock:  status.MigrationLock,
+		CreatedBy:      status.CreatedBy,
+		LastMigratedAt: status.LastMigratedAt,
+		Applied:        applied,
+	}, nil
 }
 
 func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, error) {

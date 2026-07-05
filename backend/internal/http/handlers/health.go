@@ -5,12 +5,17 @@ import (
 	"net/http"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
 )
 
 type HealthHandler struct {
 	Config config.Config
 	Store  store.Store
+}
+
+type ReadinessHandler struct {
+	Service *service.ReadinessService
 }
 
 func (h HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -31,4 +36,13 @@ func (h HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Mode:   string(h.Config.Mode),
 		Driver: h.Config.DatabaseDriver,
 	})
+}
+
+func (h ReadinessHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	report := h.Service.Check(r.Context())
+	status := http.StatusOK
+	if !report.OK {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, report)
 }

@@ -56,7 +56,7 @@ func (s *Store) Ping(ctx context.Context) error {
 
 func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json
+		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(json_extract(metadata_json, '$.response_id'), '')
 		FROM conversations
 		ORDER BY updated_at DESC
 	`)
@@ -80,6 +80,7 @@ func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, er
 			&item.LastMessagePreview,
 			&item.LastUserText,
 			&metadataJSON,
+			&item.ResponseID,
 		); err != nil {
 			return nil, err
 		}
@@ -94,7 +95,7 @@ func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, er
 
 func (s *Store) GetConversation(ctx context.Context, conversationID string) (store.Conversation, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json
+		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(json_extract(metadata_json, '$.response_id'), '')
 		FROM conversations
 		WHERE id = ?
 	`, conversationID)
@@ -112,6 +113,7 @@ func (s *Store) GetConversation(ctx context.Context, conversationID string) (sto
 		&item.LastMessagePreview,
 		&item.LastUserText,
 		&metadataJSON,
+		&item.ResponseID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return store.Conversation{}, errNotFound
@@ -164,6 +166,8 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		"request_format":      input.RequestFormat,
 		"realtime_status":     "waiting",
 		"realtime_draft_text": "",
+		"response_id":         input.ResponseID,
+		"model":               input.Model,
 	}
 	userMessageMetadata := map[string]any{
 		"request_format": input.RequestFormat,
@@ -189,6 +193,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		MessageCount:       1,
 		LastMessagePreview: input.UserContent,
 		Metadata:           metadata,
+		ResponseID:         input.ResponseID,
 	}
 	responseID := input.ResponseID
 	message := store.Message{
@@ -338,8 +343,8 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 	return conversation, message, nil
 }
 
-func (s *Store) AbortPendingTurn(ctx context.Context, conversationID string, reason string) (store.Conversation, store.Message, error) {
-	conversation, err := s.GetConversation(ctx, conversationID)
+func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingInput) (store.Conversation, store.Message, error) {
+	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
 		return store.Conversation{}, store.Message{}, err
 	}
@@ -351,7 +356,7 @@ func (s *Store) AbortPendingTurn(ctx context.Context, conversationID string, rea
 	message := store.Message{
 		ID:        "msg_" + uuid.NewString(),
 		Role:      "assistant",
-		Content:   reason,
+		Content:   input.Reason,
 		CreatedAt: now,
 		Status:    "aborted",
 		Metadata: map[string]any{
@@ -362,7 +367,7 @@ func (s *Store) AbortPendingTurn(ctx context.Context, conversationID string, rea
 	conversation.UpdatedAt = now
 	conversation.LastMessageAt = now
 	conversation.MessageCount += 1
-	conversation.LastMessagePreview = reason
+	conversation.LastMessagePreview = input.Reason
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

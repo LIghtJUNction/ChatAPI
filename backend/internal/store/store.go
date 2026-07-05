@@ -15,6 +15,7 @@ type Conversation struct {
 	MessageCount       int            `json:"message_count"`
 	LastMessagePreview string         `json:"last_message_preview"`
 	Metadata           map[string]any `json:"metadata,omitempty"`
+	ResponseID         string         `json:"-"`
 }
 
 type Message struct {
@@ -52,6 +53,11 @@ type UpdateDraftInput struct {
 	DraftText      string
 }
 
+type AbortPendingInput struct {
+	ConversationID string
+	Reason         string
+}
+
 type Store interface {
 	Ping(context.Context) error
 	ListConversations(context.Context) ([]Conversation, error)
@@ -60,5 +66,5 @@ type Store interface {
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)
 	UpdateDraft(context.Context, UpdateDraftInput) (Conversation, error)
 	CompletePendingTurn(context.Context, CompletePendingInput) (Conversation, Message, error)
-	AbortPendingTurn(context.Context, string, string) (Conversation, Message, error)
+	AbortPendingTurn(context.Context, AbortPendingInput) (Conversation, Message, error)
 }

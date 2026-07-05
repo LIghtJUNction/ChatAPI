@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -871,6 +872,38 @@ func TestMetricsEndpointWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestUploadsImageReadAndUsage(t *testing.T) {
+	env := newTestEnv(t)
+	uploadDir := filepath.Join(env.dataDir, "uploads", "imgs")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("create upload dir: %v", err)
+	}
+	content := []byte("fake image bytes")
+	if err := os.WriteFile(filepath.Join(uploadDir, "demo.png"), content, 0o644); err != nil {
+		t.Fatalf("write upload file: %v", err)
+	}
+
+	status, body := env.getText(t, "/api/uploads/imgs/demo.png")
+	if status != http.StatusOK || body != string(content) {
+		t.Fatalf("unexpected upload image response: status=%d body=%q", status, body)
+	}
+
+	usageResp := env.getJSON(t, "/api/uploads/imgs/usage", http.StatusOK)
+	usage := usageResp["usage"].(map[string]any)
+	if numericValue(usage["file_count"]) != 1 || numericValue(usage["bytes"]) != len(content) {
+		t.Fatalf("unexpected upload usage response: %#v", usageResp)
+	}
+}
+
+func TestUploadsRejectsUnsafePath(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := env.getText(t, "/api/uploads/imgs/bad%5Cname.png")
+	if status != http.StatusBadRequest || !strings.Contains(body, "invalid upload path") {
+		t.Fatalf("expected unsafe upload path rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAdminRuntimeEndpoints(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1643,6 +1676,7 @@ type testEnv struct {
 	store           *sqlitestore.Store
 	appKeyService   *service.AppAPIKeyService
 	modelKeyService *service.ModelAPIKeyService
+	dataDir         string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -1700,6 +1734,7 @@ func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Co
 		store:           store,
 		appKeyService:   appKeyService,
 		modelKeyService: modelKeyService,
+		dataDir:         cfg.DataDir,
 	}
 }
 

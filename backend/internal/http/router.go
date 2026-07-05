@@ -40,6 +40,7 @@ func NewRouter(
 	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
 	authHandler := handlers.AuthHandler{Config: cfg}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
+	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg)}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
 	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)
 	automationRuleService := service.NewAutomationRuleService(dataStore)
@@ -71,6 +72,8 @@ func NewRouter(
 	router.Delete("/api/user/model-api-keys/{keyID}", userModelAPIKeysHandler.Delete)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
 	router.Get("/api/ws-info", labHandler.PingInfo)
+	router.Get("/api/uploads/imgs/usage", uploadsHandler.Usage)
+	router.Get("/api/uploads/imgs/{filename}", uploadsHandler.Image)
 	router.Get("/lab/requests", labHandler.ListRequests)
 	router.Get("/lab/requests/{requestID}", labHandler.GetRequest)
 	router.Post("/lab/requests/{requestID}/delta", labHandler.RequestDelta)

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/zyf/chatapi/internal/service"
@@ -36,6 +37,42 @@ func (h AdminRuntimeHandler) Queue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
 		"queue": h.Monitor.Queue(),
+	})
+}
+
+func (h AdminRuntimeHandler) Settings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"settings": h.Monitor.Settings(),
+	})
+}
+
+func (h AdminRuntimeHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	var input service.UpdateRuntimeSettingsInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid runtime settings request", http.StatusBadRequest)
+		return
+	}
+	settings, err := h.Monitor.ApplySettings(input)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "admin.runtime",
+		ResourceType: "runtime",
+		Action:       "settings_update",
+		Outcome:      "success",
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata: map[string]any{
+			"gogc":               settings.GOGC,
+			"memory_limit_bytes": settings.MemoryLimitBytes,
+		},
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"settings": settings,
 	})
 }
 

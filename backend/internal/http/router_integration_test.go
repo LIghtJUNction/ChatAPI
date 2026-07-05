@@ -1065,6 +1065,52 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	if _, ok := queue["queued_events"]; !ok {
 		t.Fatalf("unexpected runtime queue response: %#v", queueResp)
 	}
+
+	settingsResp := env.getJSON(t, "/api/admin/runtime/settings", http.StatusOK)
+	settings := settingsResp["settings"].(map[string]any)
+	if numericValue(settings["gogc"]) != 0 || numericValue(settings["memory_limit_bytes"]) != 0 {
+		t.Fatalf("unexpected default runtime settings response: %#v", settingsResp)
+	}
+
+	updateResp := env.putJSON(t, "/api/admin/runtime/settings", map[string]any{
+		"gogc":               100,
+		"memory_limit_bytes": 256 << 20,
+	}, http.StatusOK)
+	updated := updateResp["settings"].(map[string]any)
+	if numericValue(updated["gogc"]) != 100 || numericValue(updated["memory_limit_bytes"]) != 256<<20 {
+		t.Fatalf("unexpected updated runtime settings response: %#v", updateResp)
+	}
+	var settingsAuditCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'admin.runtime'
+			AND resource_type = 'runtime'
+			AND action = 'settings_update'
+			AND outcome = 'success'
+	`).Scan(&settingsAuditCount); err != nil {
+		t.Fatalf("count runtime settings audit logs: %v", err)
+	}
+	if settingsAuditCount != 1 {
+		t.Fatalf("expected runtime settings audit log entry, got %d", settingsAuditCount)
+	}
+
+	resetResp := env.putJSON(t, "/api/admin/runtime/settings", map[string]any{
+		"gogc":               0,
+		"memory_limit_bytes": 0,
+	}, http.StatusOK)
+	reset := resetResp["settings"].(map[string]any)
+	if numericValue(reset["gogc"]) != 0 || numericValue(reset["memory_limit_bytes"]) != 0 {
+		t.Fatalf("unexpected reset runtime settings response: %#v", resetResp)
+	}
+
+	status, body := env.putText(t, "/api/admin/runtime/settings", map[string]any{
+		"gogc": -1,
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "gogc must be non-negative") {
+		t.Fatalf("expected runtime settings validation error: status=%d body=%q", status, body)
+	}
 }
 
 func TestAdminRuntimeRejectsServeWithoutAdmin(t *testing.T) {
@@ -1100,6 +1146,13 @@ func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key runtime queue rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/runtime/settings", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key runtime settings rejection: status=%d body=%q", status, body)
 	}
 }
 
@@ -2049,6 +2102,62 @@ func (e *testEnv) postText(t *testing.T, path string, body map[string]any) (int,
 	}
 
 	req, err := http.NewRequest(http.MethodPost, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do request %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) putJSON(t *testing.T, path string, body map[string]any, wantStatus int) map[string]any {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPut, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do request %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response %s: %v", path, err)
+	}
+
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
+	}
+	return payload
+}
+
+func (e *testEnv) putText(t *testing.T, path string, body map[string]any) (int, string) {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPut, e.server.URL+path, bytes.NewReader(rawBody))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}

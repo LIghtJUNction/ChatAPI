@@ -1,18 +1,26 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"runtime"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/zyf/chatapi/internal/config"
 )
 
+const defaultRuntimeGOGC = 100
+const unlimitedMemoryLimitBytes = int64(^uint64(0) >> 1)
+
 type RuntimeMonitorService struct {
-	cfg      config.Config
-	realtime *RealtimeHub
-	pending  *PendingRegistry
+	cfg              config.Config
+	realtime         *RealtimeHub
+	pending          *PendingRegistry
+	settingsMu       sync.Mutex
+	gogc             int
+	memoryLimitBytes int64
 }
 
 type RuntimeSummary struct {
@@ -69,8 +77,26 @@ type DatabaseInfo struct {
 	SQLiteWALBytes int64  `json:"sqlite_wal_bytes,omitempty"`
 }
 
+type RuntimeSettings struct {
+	GOGC             int   `json:"gogc"`
+	MemoryLimitBytes int64 `json:"memory_limit_bytes"`
+}
+
+type UpdateRuntimeSettingsInput struct {
+	GOGC             *int   `json:"gogc,omitempty"`
+	MemoryLimitBytes *int64 `json:"memory_limit_bytes,omitempty"`
+}
+
 func NewRuntimeMonitorService(cfg config.Config, realtime *RealtimeHub, pending *PendingRegistry) *RuntimeMonitorService {
-	return &RuntimeMonitorService{cfg: cfg, realtime: realtime, pending: pending}
+	service := &RuntimeMonitorService{
+		cfg:              cfg,
+		realtime:         realtime,
+		pending:          pending,
+		gogc:             cfg.RuntimeGOGC,
+		memoryLimitBytes: cfg.RuntimeMemoryLimitBytes,
+	}
+	service.ApplyConfiguredSettings()
+	return service
 }
 
 func (s *RuntimeMonitorService) Summary() RuntimeSummary {
@@ -111,6 +137,62 @@ func (s *RuntimeMonitorService) ForceGC() MemorySnapshot {
 	runtime.GC()
 	debug.FreeOSMemory()
 	return ReadMemorySnapshot()
+}
+
+func (s *RuntimeMonitorService) Settings() RuntimeSettings {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	return RuntimeSettings{
+		GOGC:             s.gogc,
+		MemoryLimitBytes: s.memoryLimitBytes,
+	}
+}
+
+func (s *RuntimeMonitorService) ApplySettings(input UpdateRuntimeSettingsInput) (RuntimeSettings, error) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	applyGOGC := input.GOGC != nil
+	applyMemoryLimit := input.MemoryLimitBytes != nil
+	if input.GOGC != nil {
+		if *input.GOGC < 0 {
+			return RuntimeSettings{}, errors.New("gogc must be non-negative")
+		}
+		s.gogc = *input.GOGC
+	}
+	if input.MemoryLimitBytes != nil {
+		if *input.MemoryLimitBytes < 0 {
+			return RuntimeSettings{}, errors.New("memory_limit_bytes must be non-negative")
+		}
+		s.memoryLimitBytes = *input.MemoryLimitBytes
+	}
+	s.applyRuntimeSettingsLocked(applyGOGC, applyMemoryLimit, true)
+	return RuntimeSettings{
+		GOGC:             s.gogc,
+		MemoryLimitBytes: s.memoryLimitBytes,
+	}, nil
+}
+
+func (s *RuntimeMonitorService) ApplyConfiguredSettings() {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+	s.applyRuntimeSettingsLocked(s.gogc > 0, s.memoryLimitBytes > 0, false)
+}
+
+func (s *RuntimeMonitorService) applyRuntimeSettingsLocked(applyGOGC bool, applyMemoryLimit bool, resetZero bool) {
+	if applyGOGC {
+		if s.gogc > 0 {
+			debug.SetGCPercent(s.gogc)
+		} else if resetZero {
+			debug.SetGCPercent(defaultRuntimeGOGC)
+		}
+	}
+	if applyMemoryLimit {
+		if s.memoryLimitBytes > 0 {
+			debug.SetMemoryLimit(s.memoryLimitBytes)
+		} else if resetZero {
+			debug.SetMemoryLimit(unlimitedMemoryLimitBytes)
+		}
+	}
 }
 
 func ReadMemorySnapshot() MemorySnapshot {

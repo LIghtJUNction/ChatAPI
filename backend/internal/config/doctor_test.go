@@ -112,6 +112,19 @@ func TestFromEnvLoadsStorageQuota(t *testing.T) {
 	}
 }
 
+func TestFromEnvLoadsRuntimeSettings(t *testing.T) {
+	t.Setenv("CHATAPI_RUNTIME_GOGC", "75")
+	t.Setenv("CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES", "268435456")
+
+	cfg, err := FromEnvUnchecked(ModeLab, t.TempDir())
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if cfg.RuntimeGOGC != 75 || cfg.RuntimeMemoryLimitBytes != 268435456 {
+		t.Fatalf("unexpected runtime config: %#v", cfg)
+	}
+}
+
 func TestDiagnoseStorageQuota(t *testing.T) {
 	cfg := Default(ModeLab, t.TempDir())
 
@@ -124,6 +137,20 @@ func TestDiagnoseStorageQuota(t *testing.T) {
 	report = Diagnose(cfg, cfg.Validate())
 	if !hasDiagnostic(report, DiagnosticWarn, "storage.quota_low") {
 		t.Fatalf("missing low storage quota diagnostic: %#v", report)
+	}
+}
+
+func TestDiagnoseRuntimeSettings(t *testing.T) {
+	cfg := Default(ModeLab, t.TempDir())
+	cfg.RuntimeGOGC = 10
+	cfg.RuntimeMemoryLimitBytes = 32 << 20
+
+	report := Diagnose(cfg, cfg.Validate())
+	if !hasDiagnostic(report, DiagnosticWarn, "runtime.gogc_low") {
+		t.Fatalf("missing low runtime gogc diagnostic: %#v", report)
+	}
+	if !hasDiagnostic(report, DiagnosticWarn, "runtime.memory_limit_low") {
+		t.Fatalf("missing low runtime memory limit diagnostic: %#v", report)
 	}
 }
 

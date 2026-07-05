@@ -67,6 +67,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 	report.checkPaths(cfg)
 	report.checkCORS(cfg)
 	report.checkStorage(cfg)
+	report.checkRuntime(cfg)
 	report.checkSMTP(cfg)
 	report.checkOIDC(cfg)
 	report.checkLogLevel(cfg)
@@ -243,6 +244,19 @@ func (r *DiagnosticReport) checkStorage(cfg Config) {
 	}
 	if cfg.StorageDefaultQuotaBytes < 10<<20 {
 		r.add(DiagnosticWarn, "storage.quota_low", "默认用户存储配额低于 10MiB，可能影响正常图片上传。")
+	}
+}
+
+func (r *DiagnosticReport) checkRuntime(cfg Config) {
+	if cfg.RuntimeGOGC < 0 {
+		r.add(DiagnosticError, "runtime.gogc_invalid", "CHATAPI_RUNTIME_GOGC 不能为负数。")
+	} else if cfg.RuntimeGOGC > 0 && cfg.RuntimeGOGC < 20 {
+		r.add(DiagnosticWarn, "runtime.gogc_low", "CHATAPI_RUNTIME_GOGC 低于 20，可能导致过于频繁的 GC。")
+	}
+	if cfg.RuntimeMemoryLimitBytes < 0 {
+		r.add(DiagnosticError, "runtime.memory_limit_invalid", "CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES 不能为负数。")
+	} else if cfg.RuntimeMemoryLimitBytes > 0 && cfg.RuntimeMemoryLimitBytes < 64<<20 {
+		r.add(DiagnosticWarn, "runtime.memory_limit_low", "CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES 低于 64MiB，可能导致频繁 GC 或内存压力。")
 	}
 }
 

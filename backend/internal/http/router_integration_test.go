@@ -1210,13 +1210,18 @@ func TestAdminStorageEndpoints(t *testing.T) {
 func TestAdminStorageOrphanImagesPreview(t *testing.T) {
 	env := newTestEnv(t)
 
-	env.postMultipart(t, "/api/uploads/imgs", "file", "known.png", tinyPNG(), http.StatusOK)
+	knownResp := env.postMultipart(t, "/api/uploads/imgs", "file", "known.png", tinyPNG(), http.StatusOK)
+	knownURL := nestedPathString(knownResp, "upload", "url")
+	if knownURL == "" {
+		t.Fatalf("missing uploaded image url: %#v", knownResp)
+	}
 	uploadDir := filepath.Join(env.dataDir, "uploads", "imgs")
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
 		t.Fatalf("create upload dir: %v", err)
 	}
+	orphanPath := filepath.Join(uploadDir, "orphan.png")
 	orphanContent := []byte("orphan image bytes")
-	if err := os.WriteFile(filepath.Join(uploadDir, "orphan.png"), orphanContent, 0o644); err != nil {
+	if err := os.WriteFile(orphanPath, orphanContent, 0o644); err != nil {
 		t.Fatalf("write orphan upload: %v", err)
 	}
 
@@ -1232,6 +1237,40 @@ func TestAdminStorageOrphanImagesPreview(t *testing.T) {
 	if len(items) != 1 || nestedString(items[0].(map[string]any), "filename") != "orphan.png" {
 		t.Fatalf("unexpected orphan preview items: %#v", resp)
 	}
+
+	rejectStatus, rejectBody := env.postText(t, "/api/admin/storage/orphans/cleanup", map[string]any{
+		"dry_run": true,
+	})
+	if rejectStatus != http.StatusBadRequest || !strings.Contains(rejectBody, "dry_run=false") {
+		t.Fatalf("expected dry-run cleanup rejection: status=%d body=%q", rejectStatus, rejectBody)
+	}
+	rejectStatus, rejectBody = env.postText(t, "/api/admin/storage/orphans/cleanup", map[string]any{})
+	if rejectStatus != http.StatusBadRequest || !strings.Contains(rejectBody, "dry_run=false") {
+		t.Fatalf("expected missing dry_run cleanup rejection: status=%d body=%q", rejectStatus, rejectBody)
+	}
+
+	cleanupResp := env.postJSON(t, "/api/admin/storage/orphans/cleanup", map[string]any{
+		"dry_run": false,
+	}, http.StatusOK)
+	result := cleanupResp["result"].(map[string]any)
+	if result["dry_run"] != false || numericValue(result["deleted_count"]) != 1 || numericValue(result["deleted_bytes"]) != len(orphanContent) {
+		t.Fatalf("unexpected orphan cleanup result: %#v", cleanupResp)
+	}
+	if _, err := os.Stat(orphanPath); !os.IsNotExist(err) {
+		t.Fatalf("expected orphan file to be deleted, stat err=%v", err)
+	}
+
+	knownStatus, knownBody := env.getText(t, knownURL)
+	if knownStatus != http.StatusOK || len(knownBody) == 0 {
+		t.Fatalf("known upload should remain readable: status=%d body_len=%d", knownStatus, len(knownBody))
+	}
+
+	afterResp := env.getJSON(t, "/api/admin/storage/orphans", http.StatusOK)
+	afterPreview := afterResp["preview"].(map[string]any)
+	if numericValue(afterPreview["file_count"]) != 0 || numericValue(afterPreview["bytes"]) != 0 {
+		t.Fatalf("expected no orphan images after cleanup: %#v", afterResp)
+	}
+	assertAuditCount(t, env, "admin.storage", "storage_orphans", "", "cleanup", "success", 1)
 }
 
 func TestAdminStorageCleanupPreview(t *testing.T) {
@@ -1325,6 +1364,13 @@ func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key storage orphan rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appPostText(t, "/api/admin/storage/orphans/cleanup", appKey, map[string]any{
+		"dry_run": false,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key storage orphan cleanup rejection: status=%d body=%q", status, body)
 	}
 
 	status, body = env.appPostText(t, "/api/admin/storage/cleanup", appKey, map[string]any{

@@ -51,7 +51,7 @@
 - SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
-- Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片；单用户覆盖和孤儿图片删除仍待补齐。
+- Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志；单用户覆盖仍待补齐。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -929,7 +929,7 @@ type Hub struct {
 - `uploaded_images`：记录上传文件的 `owner_id`、服务端文件名、原始文件名、MIME、字节数、访问 URL 和创建时间。Lab 模式当前归属到 `lab-user`；生产模式后续接入 session/OIDC 后从统一 `RequestActor` 注入真实用户。
 - `GET /api/uploads/imgs/{filename}`：只接受单段文件名，拒绝空文件名、路径分隔符和 `..`，并在服务端解析后验证仍位于 `data/uploads/imgs` 根目录。
 - `GET /api/uploads/imgs/usage`：统计 uploads/imgs 目录的文件数和总字节数，目录不存在时返回 0。
-- 上传成功/失败会写入通用 `audit_logs`；用户配额和孤儿图片清理仍是后续工作。
+- 上传成功/失败会写入通用 `audit_logs`；管理员可通过 `GET /api/admin/storage/orphans` 预览无元数据的孤儿图片，并通过 `POST /api/admin/storage/orphans/cleanup` 显式执行删除。用户配额的单用户覆盖仍是后续工作。
 
 ### 6.6 资源治理与运维监控
 
@@ -957,6 +957,8 @@ type Hub struct {
 - `GET /api/admin/requests/overview`
 - `GET /api/admin/storage/summary`
 - `GET /api/admin/storage/users`
+- `GET /api/admin/storage/orphans`
+- `POST /api/admin/storage/orphans/cleanup`
 - `POST /api/admin/storage/cleanup`
 - `POST /api/admin/runtime/gc`
 
@@ -972,10 +974,11 @@ type Hub struct {
 - 当前还没有引入系统级探针，因此 CPU 使用率、系统可用内存、磁盘总容量、进程 RSS/FD 数、慢客户端断开计数仍属于后续运维监控扩展。
 - `GET /api/admin/storage/summary`：返回 SQLite 主库/WAL、uploads 目录大小、估算用户数、估算总字节数、会话数和消息数。
 - `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数、消息数、图片数、图片字节数、默认配额和是否超过默认配额。当前估算范围包含 conversation/message 文本、metadata JSON，以及已写入 `uploaded_images` 的图片字节数；孤儿文件仍只体现在 uploads 目录总量中。
-- `GET /api/admin/storage/orphans`：扫描 `data/uploads/imgs` 下没有 `uploaded_images` 元数据的单层文件，返回 dry-run 预览、文件数、字节数和文件列表；当前不删除文件。
+- `GET /api/admin/storage/orphans`：扫描 `data/uploads/imgs` 下没有 `uploaded_images` 元数据的单层文件，返回 dry-run 预览、文件数、字节数和文件列表。
+- `POST /api/admin/storage/orphans/cleanup`：要求显式传入 `{"dry_run": false}`，重新扫描当前 orphan 列表后只删除 uploads/imgs 根目录下的单层孤儿文件，返回候选文件数、候选字节数、实际删除文件数和实际删除字节数，并写入 `audit_logs`。
 - `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
 - `POST /api/admin/storage/cleanup`：当前只支持 dry-run 预览，必须传 `dry_run: true`；请求参数为 `owner_id`、`keep_recent_conversations`、`keep_recent_days`，返回候选会话数、候选消息数、估算可回收字节数和按 owner 聚合的计划。当前不会删除 conversations/messages、不会删除 uploads 文件、不会执行 SQLite vacuum。
-- 真正清理执行仍属于后续工作，必须补齐用户配额策略、保护最近会话、dry-run 审核、审计日志、上传文件删除、SQLite incremental vacuum / full vacuum 策略和失败恢复后再开放。
+- 真正的会话/消息清理执行仍属于后续工作，必须补齐用户配额策略、保护最近会话、dry-run 审核、审计日志、上传文件引用清理、SQLite incremental vacuum / full vacuum 策略和失败恢复后再开放。
 
 GC 设置：
 
@@ -1441,6 +1444,8 @@ Go 版首个可替换版本必须覆盖：
 - `POST /api/admin/runtime/gc`
 - `GET /api/admin/storage/summary`
 - `GET /api/admin/storage/users`
+- `GET /api/admin/storage/orphans`
+- `POST /api/admin/storage/orphans/cleanup`
 - `POST /api/admin/storage/cleanup`
 - `GET /api/conversations`
 - `POST /api/conversations`

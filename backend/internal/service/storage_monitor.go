@@ -70,12 +70,14 @@ type StorageCleanupOwnerPlan struct {
 }
 
 type StorageOrphanImagesPreview struct {
-	GeneratedAt time.Time            `json:"generated_at"`
-	DryRun      bool                 `json:"dry_run"`
-	Root        string               `json:"root"`
-	FileCount   int                  `json:"file_count"`
-	Bytes       int64                `json:"bytes"`
-	Items       []StorageOrphanImage `json:"items"`
+	GeneratedAt  time.Time            `json:"generated_at"`
+	DryRun       bool                 `json:"dry_run"`
+	Root         string               `json:"root"`
+	FileCount    int                  `json:"file_count"`
+	Bytes        int64                `json:"bytes"`
+	DeletedCount int                  `json:"deleted_count,omitempty"`
+	DeletedBytes int64                `json:"deleted_bytes,omitempty"`
+	Items        []StorageOrphanImage `json:"items"`
 }
 
 type StorageOrphanImage struct {
@@ -309,6 +311,49 @@ func (s *StorageMonitorService) OrphanImagesPreview(ctx context.Context) (Storag
 		return preview.Items[i].Filename < preview.Items[j].Filename
 	})
 	return preview, nil
+}
+
+func (s *StorageMonitorService) DeleteOrphanImages(ctx context.Context) (StorageOrphanImagesPreview, error) {
+	preview, err := s.OrphanImagesPreview(ctx)
+	if err != nil {
+		return StorageOrphanImagesPreview{}, err
+	}
+	preview.DryRun = false
+	for _, item := range preview.Items {
+		select {
+		case <-ctx.Done():
+			return StorageOrphanImagesPreview{}, ctx.Err()
+		default:
+		}
+		if !isDirectChildPath(preview.Root, item.Path) {
+			continue
+		}
+		if err := os.Remove(item.Path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return StorageOrphanImagesPreview{}, err
+		}
+		preview.DeletedCount++
+		preview.DeletedBytes += item.Bytes
+	}
+	return preview, nil
+}
+
+func isDirectChildPath(root string, path string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	relative, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return false
+	}
+	return relative != "." && relative != ".." && filepath.Dir(relative) == "."
 }
 
 func storageDatabaseInfo(cfg config.Config) DatabaseInfo {

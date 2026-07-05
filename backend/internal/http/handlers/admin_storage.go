@@ -50,6 +50,46 @@ func (h AdminStorageHandler) Orphans(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type storageOrphanCleanupRequest struct {
+	DryRun *bool `json:"dry_run"`
+}
+
+func (h AdminStorageHandler) CleanupOrphans(w http.ResponseWriter, r *http.Request) {
+	var input storageOrphanCleanupRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid orphan cleanup request", http.StatusBadRequest)
+		return
+	}
+	if input.DryRun == nil || *input.DryRun {
+		http.Error(w, "orphan cleanup requires dry_run=false after preview", http.StatusBadRequest)
+		return
+	}
+	result, err := h.Monitor.DeleteOrphanImages(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "admin.storage",
+		ResourceType: "storage_orphans",
+		Action:       "cleanup",
+		Outcome:      "success",
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata: map[string]any{
+			"dry_run":       false,
+			"file_count":    result.FileCount,
+			"bytes":         result.Bytes,
+			"deleted_count": result.DeletedCount,
+			"deleted_bytes": result.DeletedBytes,
+		},
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"result": result,
+	})
+}
+
 type storageCleanupRequest struct {
 	DryRun                  bool   `json:"dry_run"`
 	OwnerID                 string `json:"owner_id"`

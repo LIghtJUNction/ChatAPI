@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/netip"
 	"strings"
@@ -36,11 +37,16 @@ type AppAPIKeyService struct {
 const appAPIKeyLastUsedMinInterval = 5 * time.Minute
 const maxIntValue = int(^uint(0) >> 1)
 
+var ErrInvalidAppAPIKeyExpiry = errors.New("app api key expires_at must be in the future")
+
 func NewAppAPIKeyService(dataStore store.Store) *AppAPIKeyService {
 	return &AppAPIKeyService{store: dataStore, rateLimitHits: map[string][]time.Time{}}
 }
 
-func (s *AppAPIKeyService) CreateKey(ctx context.Context, userID string, name string, scopes []string, resourceLimits map[string]any) (store.AppAPIKey, string, error) {
+func (s *AppAPIKeyService) CreateKey(ctx context.Context, userID string, name string, scopes []string, resourceLimits map[string]any, expiresAt *time.Time) (store.AppAPIKey, string, error) {
+	if expiresAt != nil && !expiresAt.After(time.Now().UTC()) {
+		return store.AppAPIKey{}, "", ErrInvalidAppAPIKeyExpiry
+	}
 	raw := "ak-" + uuid.NewString()
 	item, err := s.store.CreateAppAPIKey(ctx, store.CreateAppAPIKeyInput{
 		ID:             "appkey_" + uuid.NewString(),
@@ -50,6 +56,7 @@ func (s *AppAPIKeyService) CreateKey(ctx context.Context, userID string, name st
 		KeyPrefix:      apikey.Prefix(raw),
 		Scopes:         scopes,
 		ResourceLimits: resourceLimits,
+		ExpiresAt:      expiresAt,
 	})
 	if err != nil {
 		return store.AppAPIKey{}, "", err

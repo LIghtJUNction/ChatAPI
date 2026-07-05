@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -17,9 +18,11 @@ import (
 
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
+	"github.com/zyf/chatapi/internal/platform/apikey"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service"
+	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestResponsesDeltaAndComplete(t *testing.T) {
@@ -516,11 +519,13 @@ func TestAppAPIConversationsOwnerIsolation(t *testing.T) {
 
 func TestUserAppAPIKeysManagement(t *testing.T) {
 	env := newTestEnv(t)
+	expiresAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 
 	createResp := env.postJSON(t, "/api/user/app-api-keys", map[string]any{
 		"name":            "managed-key",
 		"scopes":          []string{"requests:read"},
 		"resource_limits": map[string]any{"allowed_request_actions": []string{"complete"}},
+		"expires_at":      expiresAt.Format(time.RFC3339),
 	}, http.StatusOK)
 	rawKey := nestedString(createResp, "raw_key")
 	if !strings.HasPrefix(rawKey, "ak-") {
@@ -531,11 +536,17 @@ func TestUserAppAPIKeysManagement(t *testing.T) {
 	if keyID == "" {
 		t.Fatalf("missing key id: %#v", createResp)
 	}
+	if nestedString(item, "expires_at") != expiresAt.Format(time.RFC3339) {
+		t.Fatalf("unexpected app api key expires_at: %#v", createResp)
+	}
 
 	listResp := env.getJSON(t, "/api/user/app-api-keys", http.StatusOK)
 	items := listResp["items"].([]any)
 	if len(items) == 0 || nestedString(items[0].(map[string]any), "id") != keyID {
 		t.Fatalf("unexpected app api keys list: %#v", listResp)
+	}
+	if nestedString(items[0].(map[string]any), "expires_at") != expiresAt.Format(time.RFC3339) {
+		t.Fatalf("unexpected app api keys list expires_at: %#v", listResp)
 	}
 
 	status, body := env.deleteText(t, "/api/user/app-api-keys/"+keyID)
@@ -548,6 +559,42 @@ func TestUserAppAPIKeysManagement(t *testing.T) {
 	status, body = env.appGetText(t, "/api/app/me", rawKey)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("revoked key should be unauthorized: status=%d body=%q", status, body)
+	}
+
+	status, body = env.postText(t, "/api/user/app-api-keys", map[string]any{
+		"name":       "expired-key",
+		"scopes":     []string{"requests:read"},
+		"expires_at": time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "expires_at must be in the future") {
+		t.Fatalf("expected expired app key creation rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestExpiredAppAPIKeyRejected(t *testing.T) {
+	env := newTestEnv(t)
+	expiredAt := time.Now().UTC().Add(-time.Hour)
+	_, rawKey, err := env.appKeyService.CreateKey(context.Background(), "lab-user", "already-expired", []string{"requests:read"}, nil, &expiredAt)
+	if !errors.Is(err, service.ErrInvalidAppAPIKeyExpiry) {
+		t.Fatalf("service should reject expired key creation, got raw=%q err=%v", rawKey, err)
+	}
+
+	item, err := env.store.CreateAppAPIKey(context.Background(), store.CreateAppAPIKeyInput{
+		ID:        "appkey_expired_test",
+		UserID:    "lab-user",
+		Name:      "expired fixture",
+		KeyHash:   apikey.Hash("ak-expired-fixture"),
+		KeyPrefix: apikey.Prefix("ak-expired-fixture"),
+		Scopes:    []string{"requests:read"},
+		ExpiresAt: &expiredAt,
+	})
+	if err != nil {
+		t.Fatalf("seed expired app api key: %v", err)
+	}
+	_ = item
+	status, body := env.appGetText(t, "/api/app/me", "ak-expired-fixture")
+	if status != http.StatusUnauthorized || !strings.Contains(body, "unauthorized") {
+		t.Fatalf("expected expired app api key rejection: status=%d body=%q", status, body)
 	}
 }
 
@@ -2530,7 +2577,7 @@ func (e *testEnv) appDeleteText(t *testing.T, path string, appKey string) (int, 
 
 func (e *testEnv) seedAppAPIKey(t *testing.T, userID string, scopes []string, resourceLimits map[string]any) string {
 	t.Helper()
-	_, raw, err := e.appKeyService.CreateKey(context.Background(), userID, "test-key", scopes, resourceLimits)
+	_, raw, err := e.appKeyService.CreateKey(context.Background(), userID, "test-key", scopes, resourceLimits, nil)
 	if err != nil {
 		t.Fatalf("create app api key: %v", err)
 	}

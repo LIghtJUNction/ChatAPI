@@ -42,6 +42,7 @@
 - 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、按模型和状态聚合、最老 pending 等待秒数。
 - 应用 API 当前已开始覆盖 `max_requests_per_minute` 资源限制：在单进程内按应用 API Key 做 1 分钟窗口限流，超限返回 `429` 并写入 `app_api_key_audit_logs`，管理员审计聚合视图中显示为 `app_api.request` failure / `rate_limited`。
 - 应用 API 当前已开始覆盖 `allowed_source_ips` 资源限制：支持精确 IP 和 CIDR，当前按直连 `RemoteAddr` 判断，不信任 `X-Forwarded-For` 等代理头；拒绝时返回 `403` 并记录 `source_ip_forbidden`。
+- 应用 API Key 创建已开始支持 `expires_at`：用户创建应用 API Key 时可传 RFC3339 过期时间，必须晚于当前时间；过期 key 鉴权返回 `401`。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及 dry-run 清理候选预览；当前 cleanup 只允许 `dry_run: true`，不执行删除、文件清理或 SQLite vacuum。
 - 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、`storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
@@ -1323,7 +1324,7 @@ user_app_api_keys
 用户管理自己的应用 API Key 的 session 路由：
 
 - `GET /api/user/app-api-keys`
-- `POST /api/user/app-api-keys`
+- `POST /api/user/app-api-keys`：当前支持 `name`、`scopes`、`resource_limits` 和可选 RFC3339 `expires_at`。
 - `DELETE /api/user/app-api-keys/{key_id}`
 
 用户管理自己的虚拟模型 API Key 的 session 路由：
@@ -1343,7 +1344,7 @@ user_app_api_keys
 - 每个应用 API 请求都必须绑定 owner_id，只能访问 key 所属用户的数据。
 - 每个接口都要检查 scope，不能只检查 key 有效。
 - scope 通过后仍要检查 resource limits，不能只靠 owner_id 粗粒度授权。
-- 支持过期时间和撤销。
+- 支持过期时间和撤销。当前 Go 重构分支的用户侧应用 API Key 创建接口已支持 `expires_at`，过期时间必须晚于当前时间。
 - 记录 `last_used_at`，但写入频率要节流，避免高频请求导致 SQLite 写放大。
 - 对 `requests:respond` 加限流，避免外部自动化错误循环刷屏。
 - 对 `model_keys:write` 加数量限制和频率限制，复用系统/用户的虚拟模型 API Key 数量上限。

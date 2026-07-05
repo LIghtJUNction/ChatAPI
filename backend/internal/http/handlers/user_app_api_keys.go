@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -46,19 +47,30 @@ func (h UserAppAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 	name := stringValue(body["name"], "app key")
 	scopes := stringSlice(body["scopes"])
 	resourceLimits := mapValue(body["resource_limits"])
-	item, rawKey, err := h.AppAPIKeys.CreateKey(r.Context(), userID, name, scopes, resourceLimits)
+	expiresAt, err := parseOptionalTime(body["expires_at"])
+	if err != nil {
+		http.Error(w, "invalid expires_at", http.StatusBadRequest)
+		return
+	}
+	item, rawKey, err := h.AppAPIKeys.CreateKey(r.Context(), userID, name, scopes, resourceLimits, expiresAt)
 	if err != nil {
 		h.recordAudit(r, "create", "failure", "", map[string]any{
-			"name":   name,
-			"scopes": scopes,
-			"error":  err.Error(),
+			"name":       name,
+			"scopes":     scopes,
+			"expires_at": stringValue(body["expires_at"], ""),
+			"error":      err.Error(),
 		})
+		if errors.Is(err, service.ErrInvalidAppAPIKeyExpiry) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	h.recordAudit(r, "create", "success", item.ID, map[string]any{
-		"name":   item.Name,
-		"scopes": item.Scopes,
+		"name":       item.Name,
+		"scopes":     item.Scopes,
+		"expires_at": formatOptionalTime(item.ExpiresAt),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
@@ -138,4 +150,24 @@ func stringSlice(value any) []string {
 func mapValue(value any) map[string]any {
 	record, _ := value.(map[string]any)
 	return record
+}
+
+func parseOptionalTime(value any) (*time.Time, error) {
+	raw := strings.TrimSpace(stringValue(value, ""))
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, err
+	}
+	parsed = parsed.UTC()
+	return &parsed, nil
+}
+
+func formatOptionalTime(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
 }

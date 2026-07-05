@@ -92,6 +92,7 @@ func (s *MetricsService) PrometheusText() string {
 	writeMetric(&builder, "chatapi_realtime_queued_events", "Current queued realtime events.", "gauge", float64(summary.Realtime.QueuedEvents))
 	writeMetric(&builder, "chatapi_realtime_recoverable_drops_total", "Recoverable realtime event drops.", "counter", float64(summary.Realtime.RecoverableDrops))
 	writeMetric(&builder, "chatapi_realtime_critical_drops_total", "Critical realtime event drops.", "counter", float64(summary.Realtime.CriticalDrops))
+	writeMetric(&builder, "chatapi_realtime_slow_disconnects_total", "Realtime subscribers disconnected due to backpressure.", "counter", float64(summary.Realtime.SlowDisconnects))
 	if summary.Database.Driver == "sqlite" {
 		writeMetric(&builder, "chatapi_sqlite_database_bytes", "SQLite database file bytes.", "gauge", float64(summary.Database.SQLiteBytes))
 		writeMetric(&builder, "chatapi_sqlite_wal_bytes", "SQLite WAL file bytes.", "gauge", float64(summary.Database.SQLiteWALBytes))

@@ -1212,6 +1212,9 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	if _, ok := queue["queued_events"]; !ok {
 		t.Fatalf("unexpected runtime queue response: %#v", queueResp)
 	}
+	if _, ok := queue["slow_disconnects"]; !ok {
+		t.Fatalf("unexpected runtime queue response: %#v", queueResp)
+	}
 
 	settingsResp := env.getJSON(t, "/api/admin/runtime/settings", http.StatusOK)
 	settings := settingsResp["settings"].(map[string]any)

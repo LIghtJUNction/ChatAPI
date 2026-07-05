@@ -45,6 +45,7 @@
 - 应用 API 当前已开始覆盖 `allowed_source_ips` 资源限制：支持精确 IP 和 CIDR，当前按直连 `RemoteAddr` 判断，不信任 `X-Forwarded-For` 等代理头；拒绝时返回 `403` 并记录 `source_ip_forbidden`。
 - 应用 API Key 创建已开始支持 `expires_at`：用户创建应用 API Key 时可传 RFC3339 过期时间，必须晚于当前时间；过期 key 鉴权返回 `401`。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
+- Realtime 事件广播已补上最小背压策略：每个订阅者使用固定队列，队列满时记录 recoverable drop，连续满队列会断开慢订阅者并累计 `slow_disconnects`；`/api/admin/runtime/queue` 和 `/metrics` 都会暴露相关计数。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志。SQLite vacuum、上传文件引用清理和失败恢复策略仍待继续补齐。
 - 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、默认配额、单用户 override、最终 `storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
@@ -899,7 +900,7 @@ type Hub struct {
 要求：
 
 - 每个 subscriber 有有限队列，满队列时按策略断开或丢弃旧事件。
-- 事件广播必须有背压策略：每个连接设置 send queue 上限，慢客户端超过阈值后断开或只丢弃可恢复的 snapshot/update 事件。
+- 事件广播必须有背压策略：每个连接设置 send queue 上限，慢客户端超过阈值后断开或只丢弃可恢复的 snapshot/update 事件。当前 Go 重构分支已按订阅者固定队列实现 recoverable drop 计数和慢订阅者断开计数。
 - 事件需要区分关键事件和可恢复事件；complete、abort、权限变更等关键事件不能静默丢弃，conversation list refresh、connection count 等可由重连后 snapshot 修复。
 - 浏览器重连后必须能拉取 owner 级 snapshot，避免中途丢事件导致 UI 永久不一致。
 - 全局连接数和单用户连接数与系统配置保持一致，但必须区分浏览器控制台连接和 API/SSE 连接。
@@ -973,11 +974,11 @@ type Hub struct {
 - `GET /api/admin/runtime/summary`：返回 Go runtime 基本信息、内存快照、pending turn 统计、realtime subscriber 队列统计、SQLite 主库/WAL 文件大小。
 - `GET /api/admin/runtime/memory`：返回当前 Go `runtime.MemStats` 的核心字段，包括 heap、sys、next GC、GC 次数和 pause 累计。
 - `GET /api/admin/runtime/connections`：返回当前 realtime subscriber 数；当前 subscriber 主要对应 WebUI WebSocket，后续接入 API/SSE/app 连接池后再扩展分类计数。
-- `GET /api/admin/runtime/queue`：返回 realtime subscriber 当前队列长度、总容量和事件丢弃计数字段；当前还没有慢客户端断开计数，后续背压策略完善后再记录 recoverable/critical drop。
+- `GET /api/admin/runtime/queue`：返回 realtime subscriber 当前队列长度、总容量、recoverable/critical drop 和慢客户端断开计数字段；当前慢客户端策略为连续多次队列满后关闭订阅者。
 - `GET /api/admin/runtime/settings`：返回当前 ChatAPI 记录的运行时治理参数，包括 `gogc` 和 `memory_limit_bytes`。`0` 表示该项未由 ChatAPI 显式管理。
 - `PUT /api/admin/runtime/settings`：接受可选 `gogc`、`memory_limit_bytes` 非负值并立即作用于当前 Go 进程；成功修改会写入 `audit_logs`。当前持久化仍通过 `CHATAPI_RUNTIME_GOGC` 和 `CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES` 环境变量完成，管理接口修改重启后不会保留。通过接口写回 `0` 会恢复 Go 默认 GC 百分比和近似无限内存限制。
 - `POST /api/admin/runtime/gc`：触发一次 `runtime.GC()` 和 `debug.FreeOSMemory()`，返回 GC 后内存快照。
-- 当前还没有引入系统级探针，因此 CPU 使用率、系统可用内存、磁盘总容量、进程 RSS/FD 数、慢客户端断开计数仍属于后续运维监控扩展。
+- 当前还没有引入系统级探针，因此 CPU 使用率、系统可用内存、磁盘总容量、进程 RSS/FD 数仍属于后续运维监控扩展。
 - `GET /api/admin/storage/summary`：返回 SQLite 主库/WAL、uploads 目录大小、估算用户数、估算总字节数、会话数和消息数。
 - `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数、消息数、图片数、图片字节数、默认配额、单用户 override 配额、最终生效配额和是否超过配额。当前估算范围包含 conversation/message 文本、metadata JSON，以及已写入 `uploaded_images` 的图片字节数；孤儿文件仍只体现在 uploads 目录总量中。
 - `PUT /api/admin/storage/users/{owner_id}/quota`：设置单用户存储配额覆盖，body 为 `{"quota_bytes": 104857600}`；`quota_bytes=0` 表示该用户不限制。

@@ -3,9 +3,12 @@ package service
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/zyf/chatapi/internal/store"
 )
+
+const realtimeSlowDisconnectThreshold = 3
 
 type Event struct {
 	Type                   string               `json:"type"`
@@ -17,13 +20,17 @@ type Event struct {
 }
 
 type Subscription struct {
-	Events chan Event
+	Events     chan Event
+	dropStreak int
 }
 
 type RealtimeHub struct {
-	mu    sync.RWMutex
-	subs  map[*Subscription]struct{}
-	store store.Store
+	mu              sync.RWMutex
+	subs            map[*Subscription]struct{}
+	store           store.Store
+	recoverableDrop atomic.Int64
+	criticalDrop    atomic.Int64
+	slowDisconnect  atomic.Int64
 }
 
 type RealtimeStats struct {
@@ -32,6 +39,7 @@ type RealtimeStats struct {
 	MaxQueueCapacity int `json:"max_queue_capacity"`
 	RecoverableDrops int `json:"recoverable_drops"`
 	CriticalDrops    int `json:"critical_drops"`
+	SlowDisconnects  int `json:"slow_disconnects"`
 }
 
 func NewRealtimeHub(dataStore store.Store) *RealtimeHub {
@@ -99,7 +107,11 @@ func (h *RealtimeHub) PublishConversationDelete(conversationID string) {
 func (h *RealtimeHub) Stats() RealtimeStats {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	stats := RealtimeStats{}
+	stats := RealtimeStats{
+		RecoverableDrops: int(h.recoverableDrop.Load()),
+		CriticalDrops:    int(h.criticalDrop.Load()),
+		SlowDisconnects:  int(h.slowDisconnect.Load()),
+	}
 	for sub := range h.subs {
 		stats.Subscribers++
 		stats.QueuedEvents += len(sub.Events)
@@ -109,12 +121,34 @@ func (h *RealtimeHub) Stats() RealtimeStats {
 }
 
 func (h *RealtimeHub) broadcast(event Event) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	countChanged := false
 	for sub := range h.subs {
 		select {
 		case sub.Events <- event:
+			sub.dropStreak = 0
 		default:
+			h.recoverableDrop.Add(1)
+			sub.dropStreak++
+			if sub.dropStreak >= realtimeSlowDisconnectThreshold {
+				delete(h.subs, sub)
+				close(sub.Events)
+				h.slowDisconnect.Add(1)
+				countChanged = true
+			}
+		}
+	}
+	if !countChanged || event.Type == "connection_count" {
+		return
+	}
+	count := len(h.subs)
+	for sub := range h.subs {
+		select {
+		case sub.Events <- Event{Type: "connection_count", CurrentConnectionCount: count}:
+			sub.dropStreak = 0
+		default:
+			h.criticalDrop.Add(1)
 		}
 	}
 }

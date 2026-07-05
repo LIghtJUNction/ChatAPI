@@ -43,6 +43,7 @@ type QueueSnapshot struct {
 	MaxQueueCapacity int `json:"max_queue_capacity"`
 	RecoverableDrops int `json:"recoverable_drops"`
 	CriticalDrops    int `json:"critical_drops"`
+	SlowDisconnects  int `json:"slow_disconnects"`
 }
 
 type GoRuntimeInfo struct {
@@ -130,6 +131,7 @@ func (s *RuntimeMonitorService) Queue() QueueSnapshot {
 		MaxQueueCapacity: stats.MaxQueueCapacity,
 		RecoverableDrops: stats.RecoverableDrops,
 		CriticalDrops:    stats.CriticalDrops,
+		SlowDisconnects:  stats.SlowDisconnects,
 	}
 }
 

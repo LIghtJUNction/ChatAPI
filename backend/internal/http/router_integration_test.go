@@ -1581,6 +1581,49 @@ func TestAppAPIAuditLogWrittenForForbidden(t *testing.T) {
 	<-resultCh
 }
 
+func TestAppAPIRateLimit(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, map[string]any{
+		"max_requests_per_minute": 1,
+	})
+
+	env.appGetJSON(t, "/api/app/me", appKey, http.StatusOK)
+	status, body := env.appGetText(t, "/api/app/me", appKey)
+	if status != http.StatusTooManyRequests || !strings.Contains(body, "rate limited") {
+		t.Fatalf("expected app api rate limit: status=%d body=%q", status, body)
+	}
+
+	var rateLimitedCount int
+	if err := env.store.DB().QueryRow(`
+		SELECT COUNT(*)
+		FROM app_api_key_audit_logs
+		WHERE status_code = 429
+			AND error_code = 'rate_limited'
+	`).Scan(&rateLimitedCount); err != nil {
+		t.Fatalf("count rate limited audit logs: %v", err)
+	}
+	if rateLimitedCount != 1 {
+		t.Fatalf("expected one rate limited audit log, got %d", rateLimitedCount)
+	}
+
+	combinedResp := env.getJSON(t, "/api/admin/audit/logs?include_app_api=1&event_type=app_api.request&actor_user_id=lab-user&limit=10", http.StatusOK)
+	items := combinedResp["items"].([]any)
+	foundRateLimited := false
+	for _, rawItem := range items {
+		item := rawItem.(map[string]any)
+		metadata := item["metadata"].(map[string]any)
+		if nestedString(item, "outcome") == "failure" &&
+			numericValue(metadata["status_code"]) == http.StatusTooManyRequests &&
+			nestedString(metadata, "error_code") == "rate_limited" {
+			foundRateLimited = true
+			break
+		}
+	}
+	if !foundRateLimited {
+		t.Fatalf("expected rate limited audit in combined admin view: %#v", combinedResp)
+	}
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 

@@ -37,6 +37,8 @@ func AuditAppAPIRequests(auditService *service.AppAPIKeyService) func(http.Handl
 				errorCode = "conflict"
 			case http.StatusNotFound:
 				errorCode = "not_found"
+			case http.StatusTooManyRequests:
+				errorCode = "rate_limited"
 			}
 
 			auditService.RecordAudit(r.Context(), principal, r.URL.Path, recorder.statusCode, errorCode)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zyf/chatapi/internal/service"
 )
@@ -32,6 +33,11 @@ func RequireAppAPIKey(authService *service.AppAPIKeyService, scopes ...string) f
 					http.Error(w, "app api key forbidden", http.StatusForbidden)
 					return
 				}
+			}
+			if !authService.AllowRequest(principal, time.Now().UTC()) {
+				authService.RecordAudit(ctx, principal, r.URL.Path, http.StatusTooManyRequests, "rate_limited")
+				http.Error(w, "app api key rate limited", http.StatusTooManyRequests)
+				return
 			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

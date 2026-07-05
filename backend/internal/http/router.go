@@ -35,7 +35,7 @@ func NewRouter(
 
 	healthHandler := handlers.HealthHandler{Config: cfg, Store: dataStore}
 	authHandler := handlers.AuthHandler{Config: cfg}
-	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore}
+	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -45,6 +45,10 @@ func NewRouter(
 	router.Post("/api/auth/logout", authHandler.Logout)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
 	router.Get("/api/ws-info", labHandler.PingInfo)
+	router.Get("/lab/requests/{requestID}", labHandler.GetRequest)
+	router.Post("/lab/requests/{requestID}/delta", labHandler.RequestDelta)
+	router.Post("/lab/requests/{requestID}/complete", labHandler.RequestComplete)
+	router.Post("/lab/requests/{requestID}/abort", labHandler.RequestAbort)
 	router.Get("/api/ws", realtimeHandler.WebSocket)
 	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
 	router.Post("/api/conversations/{conversationID}/abort", chatHandler.AbortConversation)

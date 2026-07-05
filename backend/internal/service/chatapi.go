@@ -85,6 +85,10 @@ func (s *ChatAPIService) ListMessages(ctx context.Context, conversationID string
 	return s.store.ListMessages(ctx, conversationID)
 }
 
+func (s *ChatAPIService) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
+	return s.store.GetRequest(ctx, requestID)
+}
+
 func (s *ChatAPIService) UpdateDraft(ctx context.Context, conversationID string, chunk string) (map[string]any, error) {
 	previousState, err := s.pending.StartDelta(conversationID)
 	if err != nil {

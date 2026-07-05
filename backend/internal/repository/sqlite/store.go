@@ -128,6 +128,58 @@ func (s *Store) GetConversation(ctx context.Context, conversationID string) (sto
 	return item, nil
 }
 
+func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT
+			m.conversation_id,
+			m.created_at,
+			m.metadata_json,
+			c.updated_at,
+			c.metadata_json
+		FROM messages m
+		JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.role = 'user'
+			AND json_extract(m.metadata_json, '$.request_debug.request_id') = ?
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT 1
+	`, requestID)
+
+	var item store.Request
+	var createdAt string
+	var updatedAt string
+	var messageMetadataJSON string
+	var conversationMetadataJSON string
+	if err := row.Scan(
+		&item.ConversationID,
+		&createdAt,
+		&messageMetadataJSON,
+		&updatedAt,
+		&conversationMetadataJSON,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.Request{}, errNotFound
+		}
+		return store.Request{}, err
+	}
+
+	messageMetadata := parseJSONMap(messageMetadataJSON)
+	requestDebug, _ := messageMetadata["request_debug"].(map[string]any)
+	conversationMetadata := parseJSONMap(conversationMetadataJSON)
+
+	item.RequestID = metadataString(requestDebug, "request_id", requestID)
+	item.ResponseID = metadataString(requestDebug, "response_id", "")
+	item.RequestFormat = metadataString(requestDebug, "request_format", "")
+	item.Model = metadataString(requestDebug, "model", "")
+	item.InputText = metadataString(requestDebug, "input_text", "")
+	item.Status = metadataString(conversationMetadata, "realtime_status", "")
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
+	item.Metadata = messageMetadata
+	item.RequestBody, _ = requestDebug["request_body"].(map[string]any)
+	item.ToolSchemas, _ = requestDebug["tool_schemas"].([]any)
+	return item, nil
+}
+
 func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json

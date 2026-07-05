@@ -76,3 +76,12 @@ func (s *ChatAPIService) ExecuteTurnControl(ctx context.Context, command TurnCon
 		return nil, fmt.Errorf("unsupported turn control kind: %s", command.Kind)
 	}
 }
+
+func (s *ChatAPIService) ExecuteTurnControlByRequestID(ctx context.Context, requestID string, command TurnControlCommand) (map[string]any, error) {
+	request, err := s.store.GetRequest(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+	command.ConversationID = request.ConversationID
+	return s.ExecuteTurnControl(ctx, command)
+}

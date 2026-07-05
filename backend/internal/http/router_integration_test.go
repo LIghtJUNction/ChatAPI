@@ -193,6 +193,47 @@ func TestStreamDeltaPathEndpoint(t *testing.T) {
 	}
 }
 
+func TestLabRequestEndpointsByRequestID(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-lab-request-id",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "lab request id 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "lab request id 测试")
+	messagesResp := env.getJSON(t, "/api/conversations/"+conversation["id"].(string)+"/messages", http.StatusOK)
+	items := messagesResp["items"].([]any)
+	requestDebug := items[0].(map[string]any)["metadata"].(map[string]any)["request_debug"].(map[string]any)
+	requestID := requestDebug["request_id"].(string)
+
+	requestResp := env.getJSON(t, "/lab/requests/"+requestID, http.StatusOK)
+	requestRecord := requestResp["request"].(map[string]any)
+	if nestedString(requestRecord, "request_id") != requestID || nestedString(requestRecord, "conversation_id") != conversation["id"].(string) {
+		t.Fatalf("unexpected lab request payload: %#v", requestResp)
+	}
+
+	env.postJSON(t, "/lab/requests/"+requestID+"/delta", map[string]any{
+		"text": "通过 request_id 输出",
+	}, http.StatusOK)
+	env.postJSON(t, "/lab/requests/"+requestID+"/complete", map[string]any{
+		"mode": "assistant_message",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "output_text"); got != "通过 request_id 输出" {
+		t.Fatalf("unexpected final request-id output_text: %#v", finalResp)
+	}
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 

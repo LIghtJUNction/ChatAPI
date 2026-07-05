@@ -31,6 +31,7 @@
 - `stream=true` 已开始走真实 SSE 链路，不再只支持等待最终非流式结果；当前已覆盖 OpenAI Responses、Chat Completions、Anthropic Messages 三套协议的最小流式集成测试，并补上了 `tool_call` 的基础流式返回外壳。
 - pending turn 已补上最小状态机约束：`delta` 会把会话推进到 `streaming`，终态后的 `delta` / `complete` / `abort` 会返回 `409`，并用集成测试守护这些行为。
 - `backend/internal/service` 已开始收敛统一的 `TurnControlCommand`，把 WebUI 手工回复、后续应用 API 和自动化规则共享的 turn control 输入模型从 handler 中抽离出来。
+- 已补上 `request_id -> conversation_id -> TurnControlCommand` 的最小解析链路，并先用于 `lab` 路由；后续应用 API 的 `/api/app/requests/{request_id}/*` 将直接复用这层能力。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 
@@ -1589,6 +1590,7 @@ Lab 模式建议路由：
 实现建议：
 
 - Lab 模式复用 protocol adapter、pending turn manager、SSE encoder 和 manual output controller，不复制另一套协议实现。
+- `lab` 的 `{request_id}` 控制链路应与后续应用 API 共享同一个 request resolver：先按 `request_id` 找到 pending turn / conversation，再统一翻译成 `TurnControlCommand` 执行。
 - 使用独立的 `LabAuth` 或路由分组绕过鉴权，避免在正式 auth 中间件里加入大量例外。
 - 前端可以复用现有对话组件，但应构建一个更轻量的 debug shell，只保留请求查看、手工输出、curl 复制等控件。
 - 自动打开浏览器可使用小型跨平台库，或按 OS 调用 `xdg-open`、`open`、`rundll32`；失败时只打印 URL。

@@ -31,6 +31,21 @@ type Message struct {
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
+type Request struct {
+	RequestID      string         `json:"request_id"`
+	ConversationID string         `json:"conversation_id"`
+	ResponseID     string         `json:"response_id,omitempty"`
+	RequestFormat  string         `json:"request_format,omitempty"`
+	Model          string         `json:"model,omitempty"`
+	InputText      string         `json:"input_text,omitempty"`
+	Status         string         `json:"status,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	RequestBody    map[string]any `json:"request_body,omitempty"`
+	ToolSchemas    []any          `json:"tool_schemas,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+}
+
 type CreatePendingInput struct {
 	ConversationID string
 	RequestID      string
@@ -67,6 +82,7 @@ type Store interface {
 	Ping(context.Context) error
 	ListConversations(context.Context) ([]Conversation, error)
 	GetConversation(context.Context, string) (Conversation, error)
+	GetRequest(context.Context, string) (Request, error)
 	ListMessages(context.Context, string) ([]Message, error)
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)
 	UpdateDraft(context.Context, UpdateDraftInput) (Conversation, error)

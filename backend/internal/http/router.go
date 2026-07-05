@@ -35,6 +35,7 @@ func NewRouter(
 	router.Use(middleware.RecordHTTPMetrics(httpMetrics))
 	router.Use(middleware.InjectLabRequestActor(cfg))
 	router.Use(middleware.InjectSessionRequestActor(cfg))
+	router.Use(middleware.RequireSessionCSRF(cfg))
 	router.Use(middleware.RequireLabAccess(cfg))
 
 	healthHandler := handlers.HealthHandler{Config: cfg, Store: dataStore}

@@ -59,7 +59,7 @@
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
-- 本地管理员 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 校验 `admin` 用户，成功后写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。完整 users 表、注册、密码重置、TOTP、CSRF 和 OIDC RP 登录仍是后续工作。
+- 本地管理员 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 校验 `admin` 用户，成功后写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。完整 users 表、注册、密码重置、TOTP 和 OIDC RP 登录仍是后续工作。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -467,6 +467,7 @@ PostgreSQL 连接建议：
 - 生产 HTTPS 时 `Secure=true`
 - 所有 session 认证的非 GET `/api/*` 请求执行 Origin/Referer 校验，保持现有 CSRF 语义。
 - API Key 请求不依赖 Cookie，不走 CSRF 校验。
+- 当前 Go 重构分支已先实现 session actor 的 Origin/Referer 同源校验：`Origin` 优先，缺失时回退 `Referer`；允许与当前请求 origin 或 `CHATAPI_BASE_URL` origin 相同；跨站或缺失来源的 session mutation 返回 `403 csrf origin check failed`。
 
 ### 4.7 OAuth 2.0 / OIDC 登录
 
@@ -1555,7 +1556,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 - 虚拟模型 API Key 使用服务端可解密密文存储，便于调试场景回看和复制；密文加密依赖 master key，生产部署必须备份 master key。
 - 应用 API Key 只存 hash，必须按 scope 和 resource limits 授权，不能访问管理员接口、系统配置、其他用户数据；只有带 `model_keys:*` scope 且通过 resource limits 时才能管理自己的虚拟模型 API Key。
 - 上游模型 API Key 默认只保存在浏览器本地，不写入服务端数据库；如未来启用服务端上游代理，必须使用加密存储和脱敏展示。
-- API Key 管理接口只能通过 session 访问。当前 Go 重构分支已先支持 Lab actor 和本地管理员 session actor。
+- API Key 管理接口只能通过 session 访问。当前 Go 重构分支已先支持 Lab actor 和本地管理员 session actor；serve 模式 session mutation 已加 Origin/Referer CSRF 校验。
 - 管理员接口必须 session 登录且 role 为 admin。当前 Go 重构分支已支持 serve 模式 `admin` 本地 session，且继续拒绝 `ak-` / `sk-` bearer key。
 - 所有上传、ntfy URL、邮件目标都做输入校验。
 - 管理员资源监控接口必须只允许 admin session 访问，不能通过应用 API Key 访问。
@@ -1980,9 +1981,9 @@ make release-snapshot
 
 工作：
 
-- 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。
+- 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地管理员登录/登出/session，完整用户体系仍待补齐。
 - 用户配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。
-- CSRF、CORS、Cookie 策略。
+- CSRF、CORS、Cookie 策略。当前已先落地 session mutation Origin/Referer 校验和 HttpOnly SameSite cookie。
 
 验收：
 

@@ -1324,7 +1324,20 @@ func TestServeAdminSessionLoginAndLogout(t *testing.T) {
 		t.Fatalf("expected authenticated admin session: %#v", sessionResp)
 	}
 
-	_, logoutCookies := env.postJSONWithCookie(t, "/api/auth/logout", map[string]any{}, sessionCookie, http.StatusOK)
+	status, body, _ = env.postJSONWithCookieText(t, "/api/admin/runtime/gc", map[string]any{}, sessionCookie, nil)
+	if status != http.StatusForbidden || !strings.Contains(body, "csrf origin check failed") {
+		t.Fatalf("expected csrf rejection for session mutation without origin: status=%d body=%q", status, body)
+	}
+	gcResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/runtime/gc", map[string]any{}, sessionCookie, map[string]string{
+		"Origin": env.server.URL,
+	}, http.StatusOK)
+	if gcResp["memory"] == nil {
+		t.Fatalf("expected csrf-approved gc response: %#v", gcResp)
+	}
+
+	_, logoutCookies := env.postJSONWithCookieAndHeaders(t, "/api/auth/logout", map[string]any{}, sessionCookie, map[string]string{
+		"Origin": env.server.URL,
+	}, http.StatusOK)
 	expiredCookie := findCookie(logoutCookies, service.SessionCookieName)
 	if expiredCookie == nil || expiredCookie.MaxAge >= 0 {
 		t.Fatalf("expected logout to expire session cookie: %#v", logoutCookies)
@@ -2660,6 +2673,24 @@ func (e *testEnv) postJSONWithCookies(t *testing.T, path string, body map[string
 
 func (e *testEnv) postJSONWithCookie(t *testing.T, path string, body map[string]any, cookie *http.Cookie, wantStatus int) (map[string]any, []*http.Cookie) {
 	t.Helper()
+	return e.postJSONWithCookieAndHeaders(t, path, body, cookie, nil, wantStatus)
+}
+
+func (e *testEnv) postJSONWithCookieAndHeaders(t *testing.T, path string, body map[string]any, cookie *http.Cookie, headers map[string]string, wantStatus int) (map[string]any, []*http.Cookie) {
+	t.Helper()
+	status, rawBody, cookies := e.postJSONWithCookieText(t, path, body, cookie, headers)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(rawBody), &payload); err != nil {
+		t.Fatalf("decode response %s: %v body=%q", path, err, rawBody)
+	}
+	if status != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, status, wantStatus, payload)
+	}
+	return payload, cookies
+}
+
+func (e *testEnv) postJSONWithCookieText(t *testing.T, path string, body map[string]any, cookie *http.Cookie, headers map[string]string) (int, string, []*http.Cookie) {
+	t.Helper()
 	rawBody, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
@@ -2672,19 +2703,19 @@ func (e *testEnv) postJSONWithCookie(t *testing.T, path string, body map[string]
 	if cookie != nil {
 		req.AddCookie(cookie)
 	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 	resp, err := e.client.Do(req)
 	if err != nil {
 		t.Fatalf("do request %s: %v", path, err)
 	}
 	defer resp.Body.Close()
-	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode response %s: %v", path, err)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
 	}
-	if resp.StatusCode != wantStatus {
-		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
-	}
-	return payload, resp.Cookies()
+	return resp.StatusCode, string(data), resp.Cookies()
 }
 
 func (e *testEnv) getJSONWithCookie(t *testing.T, path string, cookie *http.Cookie, wantStatus int) map[string]any {

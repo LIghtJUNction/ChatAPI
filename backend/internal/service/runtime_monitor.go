@@ -25,6 +25,18 @@ type RuntimeSummary struct {
 	Database    DatabaseInfo   `json:"database"`
 }
 
+type ConnectionSnapshot struct {
+	WebUISubscribers int `json:"webui_subscribers"`
+	TotalSubscribers int `json:"total_subscribers"`
+}
+
+type QueueSnapshot struct {
+	QueuedEvents     int `json:"queued_events"`
+	MaxQueueCapacity int `json:"max_queue_capacity"`
+	RecoverableDrops int `json:"recoverable_drops"`
+	CriticalDrops    int `json:"critical_drops"`
+}
+
 type GoRuntimeInfo struct {
 	Version      string `json:"version"`
 	OS           string `json:"os"`
@@ -75,6 +87,24 @@ func (s *RuntimeMonitorService) Summary() RuntimeSummary {
 
 func (s *RuntimeMonitorService) Memory() MemorySnapshot {
 	return ReadMemorySnapshot()
+}
+
+func (s *RuntimeMonitorService) Connections() ConnectionSnapshot {
+	stats := s.realtime.Stats()
+	return ConnectionSnapshot{
+		WebUISubscribers: stats.Subscribers,
+		TotalSubscribers: stats.Subscribers,
+	}
+}
+
+func (s *RuntimeMonitorService) Queue() QueueSnapshot {
+	stats := s.realtime.Stats()
+	return QueueSnapshot{
+		QueuedEvents:     stats.QueuedEvents,
+		MaxQueueCapacity: stats.MaxQueueCapacity,
+		RecoverableDrops: stats.RecoverableDrops,
+		CriticalDrops:    stats.CriticalDrops,
+	}
 }
 
 func (s *RuntimeMonitorService) ForceGC() MemorySnapshot {

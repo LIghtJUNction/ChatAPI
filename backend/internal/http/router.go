@@ -131,6 +131,8 @@ func NewRouter(
 	adminRouter.Use(middleware.RequireAdminActor())
 	adminRouter.Get("/runtime/summary", adminRuntimeHandler.Summary)
 	adminRouter.Get("/runtime/memory", adminRuntimeHandler.Memory)
+	adminRouter.Get("/runtime/connections", adminRuntimeHandler.Connections)
+	adminRouter.Get("/runtime/queue", adminRuntimeHandler.Queue)
 	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
 	adminRouter.Get("/storage/summary", adminStorageHandler.Summary)
 	adminRouter.Get("/storage/users", adminStorageHandler.Users)

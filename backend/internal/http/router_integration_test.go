@@ -827,6 +827,18 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	if gcResp["memory"] == nil {
 		t.Fatalf("unexpected runtime gc response: %#v", gcResp)
 	}
+
+	connectionsResp := env.getJSON(t, "/api/admin/runtime/connections", http.StatusOK)
+	connections := connectionsResp["connections"].(map[string]any)
+	if _, ok := connections["total_subscribers"]; !ok {
+		t.Fatalf("unexpected runtime connections response: %#v", connectionsResp)
+	}
+
+	queueResp := env.getJSON(t, "/api/admin/runtime/queue", http.StatusOK)
+	queue := queueResp["queue"].(map[string]any)
+	if _, ok := queue["queued_events"]; !ok {
+		t.Fatalf("unexpected runtime queue response: %#v", queueResp)
+	}
 }
 
 func TestAdminRuntimeRejectsServeWithoutAdmin(t *testing.T) {
@@ -855,6 +867,13 @@ func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected model api key admin rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/runtime/queue", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key runtime queue rejection: status=%d body=%q", status, body)
 	}
 }
 

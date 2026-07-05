@@ -37,6 +37,7 @@ type Config struct {
 	LogLevel       string
 	CORSOrigins    []string
 	MetricsEnabled bool
+	UploadMaxBytes int64
 
 	OIDCEnabled        bool
 	OIDCProviderName   string
@@ -95,6 +96,7 @@ func Default(mode Mode, backendRoot string) Config {
 		LogLevel:       "info",
 		CORSOrigins:    []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		MetricsEnabled: false,
+		UploadMaxBytes: 10 << 20,
 
 		OIDCEnabled:        false,
 		OIDCProviderName:   "",
@@ -135,6 +137,13 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))
 	cfg.AdminPassword = strings.TrimSpace(os.Getenv("CHATAPI_ADMIN_PASSWORD"))
 	cfg.MetricsEnabled = parseBool(os.Getenv("CHATAPI_METRICS_ENABLED"), cfg.MetricsEnabled)
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_UPLOAD_MAX_BYTES")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_UPLOAD_MAX_BYTES: %w", err)
+		}
+		cfg.UploadMaxBytes = value
+	}
 
 	cfg.OIDCEnabled = parseBool(os.Getenv("CHATAPI_OIDC_ENABLED"), cfg.OIDCEnabled)
 	cfg.OIDCProviderName = strings.TrimSpace(os.Getenv("CHATAPI_OIDC_PROVIDER_NAME"))
@@ -196,6 +205,9 @@ func (c Config) Validate() error {
 	}
 	if c.DatabaseDriver == "sqlite" && strings.TrimSpace(c.DatabaseDSN) == "" {
 		return errors.New("sqlite database dsn is required")
+	}
+	if c.UploadMaxBytes <= 0 {
+		return errors.New("upload max bytes must be positive")
 	}
 	return nil
 }

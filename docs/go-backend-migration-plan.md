@@ -48,7 +48,7 @@
 - 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
-- Upload/Image Store 已落地只读兼容接口：`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取 `data/uploads/imgs`，`GET /api/uploads/imgs/usage` 返回文件数与字节数；上传写入、MIME 嗅探、大小限制和用户配额仍待补齐。
+- Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；图片归属、用户配额和数据库元数据仍待补齐。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -912,11 +912,12 @@ type Hub struct {
 - 执行单文件大小、单请求大小、用户总量限制。
 - 保持 `/api/uploads/imgs/<filename>` 兼容。
 
-当前 Go 重构分支已先落地只读兼容面：
+当前 Go 重构分支已先落地最小兼容面：
 
+- `POST /api/uploads/imgs`：接受 multipart 文件字段 `file` / `image` / `upload`，使用 `http.DetectContentType` 嗅探 PNG/JPEG/GIF/WebP，服务端生成 UUID 文件名，写入 `data/uploads/imgs`；默认 `CHATAPI_UPLOAD_MAX_BYTES=10485760`。
 - `GET /api/uploads/imgs/{filename}`：只接受单段文件名，拒绝空文件名、路径分隔符和 `..`，并在服务端解析后验证仍位于 `data/uploads/imgs` 根目录。
 - `GET /api/uploads/imgs/usage`：统计 uploads/imgs 目录的文件数和总字节数，目录不存在时返回 0。
-- `POST` 上传、内容嗅探、文件名生成、图片归属、配额和孤儿清理仍是后续工作。
+- 图片归属、用户配额、数据库元数据、孤儿图片清理和上传审计仍是后续工作。
 
 ### 6.6 资源治理与运维监控
 

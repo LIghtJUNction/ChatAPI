@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -895,6 +896,42 @@ func TestUploadsImageReadAndUsage(t *testing.T) {
 	}
 }
 
+func TestUploadsImageCreate(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.postMultipart(t, "/api/uploads/imgs", "file", "tiny.png", tinyPNG(), http.StatusOK)
+	upload := resp["upload"].(map[string]any)
+	filename := nestedString(upload, "filename")
+	if !strings.HasSuffix(filename, ".png") || nestedString(upload, "content_type") != "image/png" {
+		t.Fatalf("unexpected upload response: %#v", resp)
+	}
+
+	status, body := env.getText(t, nestedString(upload, "url"))
+	if status != http.StatusOK || len(body) != len(tinyPNG()) {
+		t.Fatalf("unexpected uploaded image read: status=%d len=%d", status, len(body))
+	}
+}
+
+func TestUploadsRejectsUnsupportedType(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := env.postMultipartText(t, "/api/uploads/imgs", "file", "note.txt", []byte("not an image"))
+	if status != http.StatusUnsupportedMediaType || !strings.Contains(body, "unsupported upload type") {
+		t.Fatalf("expected unsupported upload rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestUploadsRejectsTooLargeFile(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.UploadMaxBytes = 16
+	})
+
+	status, body := env.postMultipartText(t, "/api/uploads/imgs", "file", "tiny.png", tinyPNG())
+	if status != http.StatusRequestEntityTooLarge || !strings.Contains(body, "upload too large") {
+		t.Fatalf("expected too large upload rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestUploadsRejectsUnsafePath(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1768,6 +1805,50 @@ func (e *testEnv) postJSON(t *testing.T, path string, body map[string]any, wantS
 	return payload
 }
 
+func (e *testEnv) postMultipart(t *testing.T, path string, field string, filename string, data []byte, wantStatus int) map[string]any {
+	t.Helper()
+	status, body := e.postMultipartText(t, path, field, filename, data)
+	if status != wantStatus {
+		t.Fatalf("unexpected multipart status for %s: got %d want %d body=%q", path, status, wantStatus, body)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode multipart response %s: %v body=%q", path, err, body)
+	}
+	return payload
+}
+
+func (e *testEnv) postMultipartText(t *testing.T, path string, field string, filename string, data []byte) (int, string) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile(field, filename)
+	if err != nil {
+		t.Fatalf("create multipart file: %v", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		t.Fatalf("write multipart file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, e.server.URL+path, &body)
+	if err != nil {
+		t.Fatalf("new multipart request: %v", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do multipart request %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read multipart response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(responseBody)
+}
+
 func (e *testEnv) postText(t *testing.T, path string, body map[string]any) (int, string) {
 	t.Helper()
 	rawBody, err := json.Marshal(body)
@@ -2085,6 +2166,20 @@ func (e *testEnv) waitForWaitingConversation(t *testing.T, title string) map[str
 func startJSONRequest(t *testing.T, url string, body map[string]any) <-chan map[string]any {
 	t.Helper()
 	return startJSONRequestWithHeaders(t, url, nil, body)
+}
+
+func tinyPNG() []byte {
+	return []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+		0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+		0x42, 0x60, 0x82,
+	}
 }
 
 func startJSONRequestWithHeaders(t *testing.T, url string, headers map[string]string, body map[string]any) <-chan map[string]any {

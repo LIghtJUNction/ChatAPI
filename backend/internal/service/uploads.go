@@ -3,18 +3,27 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/zyf/chatapi/internal/config"
 )
 
 var ErrUploadNotFound = errors.New("upload not found")
 var ErrInvalidUploadPath = errors.New("invalid upload path")
+var ErrUnsupportedUploadType = errors.New("unsupported upload type")
+var ErrUploadTooLarge = errors.New("upload too large")
 
 type UploadService struct {
-	root string
+	root     string
+	maxBytes int64
 }
 
 type UploadUsage struct {
@@ -23,8 +32,33 @@ type UploadUsage struct {
 	FileCount int    `json:"file_count"`
 }
 
+type UploadResult struct {
+	Filename    string `json:"filename"`
+	URL         string `json:"url"`
+	Bytes       int64  `json:"bytes"`
+	ContentType string `json:"content_type"`
+}
+
 func NewUploadService(cfg config.Config) *UploadService {
-	return &UploadService{root: filepath.Join(cfg.DataDir, "uploads", "imgs")}
+	return &UploadService{
+		root:     filepath.Join(cfg.DataDir, "uploads", "imgs"),
+		maxBytes: cfg.UploadMaxBytes,
+	}
+}
+
+func (s *UploadService) MaxRequestBytes() int64 {
+	limit := s.maxBytes
+	if limit <= 0 {
+		limit = 10 << 20
+	}
+	return limit + 4096
+}
+
+var uploadExtensionsByMIME = map[string]string{
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/gif":  ".gif",
+	"image/webp": ".webp",
 }
 
 func (s *UploadService) ResolveImagePath(filename string) (string, error) {
@@ -61,6 +95,62 @@ func (s *UploadService) ResolveImagePath(filename string) (string, error) {
 		return "", ErrUploadNotFound
 	}
 	return path, nil
+}
+
+func (s *UploadService) SaveImage(ctx context.Context, file multipart.File) (UploadResult, error) {
+	if file == nil {
+		return UploadResult{}, ErrInvalidUploadPath
+	}
+	limit := s.maxBytes
+	if limit <= 0 {
+		limit = 10 << 20
+	}
+	reader := io.LimitReader(file, limit+1)
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	if int64(len(data)) > limit {
+		return UploadResult{}, ErrUploadTooLarge
+	}
+	contentType := http.DetectContentType(data)
+	extension, ok := uploadExtensionsByMIME[contentType]
+	if !ok {
+		return UploadResult{}, ErrUnsupportedUploadType
+	}
+	root, err := filepath.Abs(s.root)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return UploadResult{}, err
+	}
+	filename := uuid.NewString() + extension
+	path, err := filepath.Abs(filepath.Join(root, filename))
+	if err != nil {
+		return UploadResult{}, err
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	if strings.HasPrefix(relative, ".."+string(filepath.Separator)) || relative == ".." {
+		return UploadResult{}, ErrInvalidUploadPath
+	}
+	select {
+	case <-ctx.Done():
+		return UploadResult{}, ctx.Err()
+	default:
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return UploadResult{}, fmt.Errorf("write upload: %w", err)
+	}
+	return UploadResult{
+		Filename:    filename,
+		URL:         "/api/uploads/imgs/" + filename,
+		Bytes:       int64(len(data)),
+		ContentType: contentType,
+	}, nil
 }
 
 func (s *UploadService) Usage(ctx context.Context) (UploadUsage, error) {

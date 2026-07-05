@@ -72,6 +72,7 @@ func NewRouter(
 	router.Delete("/api/user/model-api-keys/{keyID}", userModelAPIKeysHandler.Delete)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
 	router.Get("/api/ws-info", labHandler.PingInfo)
+	router.Post("/api/uploads/imgs", uploadsHandler.CreateImage)
 	router.Get("/api/uploads/imgs/usage", uploadsHandler.Usage)
 	router.Get("/api/uploads/imgs/{filename}", uploadsHandler.Image)
 	router.Get("/lab/requests", labHandler.ListRequests)

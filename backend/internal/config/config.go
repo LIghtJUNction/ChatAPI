@@ -28,6 +28,7 @@ type Config struct {
 	DataDir        string
 	DatabaseDriver string
 	DatabaseDSN    string
+	MasterKey      string
 	AllowRemoteLab bool
 	OpenBrowser    bool
 	LabToken       string
@@ -56,9 +57,11 @@ func Default(mode Mode, backendRoot string) Config {
 	dataDir := filepath.Join(backendRoot, "data")
 	host := "0.0.0.0"
 	openBrowser := false
+	masterKey := ""
 	if mode == ModeLab {
 		host = "127.0.0.1"
 		openBrowser = true
+		masterKey = "chatapi-lab-insecure-master-key"
 	}
 	return Config{
 		Mode:           mode,
@@ -69,6 +72,7 @@ func Default(mode Mode, backendRoot string) Config {
 		DataDir:        dataDir,
 		DatabaseDriver: "sqlite",
 		DatabaseDSN:    filepath.Join(dataDir, "chatapi.sqlite3"),
+		MasterKey:      masterKey,
 		AllowRemoteLab: false,
 		OpenBrowser:    openBrowser,
 		LabToken:       "",
@@ -86,6 +90,7 @@ func FromEnv(mode Mode, backendRoot string) (Config, error) {
 	cfg.DataDir = firstNonEmpty(os.Getenv("CHATAPI_DATA_DIR"), cfg.DataDir)
 	cfg.DatabaseDriver = firstNonEmpty(os.Getenv("CHATAPI_DB_DRIVER"), cfg.DatabaseDriver)
 	cfg.DatabaseDSN = firstNonEmpty(os.Getenv("CHATAPI_DB_DSN"), cfg.DatabaseDSN)
+	cfg.MasterKey = strings.TrimSpace(os.Getenv("CHATAPI_MASTER_KEY"))
 	cfg.LogLevel = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_LEVEL"), cfg.LogLevel))
 	cfg.LabToken = strings.TrimSpace(os.Getenv("CHATAPI_LAB_TOKEN"))
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))

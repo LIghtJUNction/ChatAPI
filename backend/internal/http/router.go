@@ -38,8 +38,10 @@ func NewRouter(
 	authHandler := handlers.AuthHandler{Config: cfg}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
-	appAPIHandler := handlers.AppAPIHandler{Service: chatService}
+	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)
+	appAPIHandler := handlers.AppAPIHandler{Service: chatService, ModelAPIKeys: modelAPIKeyService}
 	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService}
+	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -50,6 +52,9 @@ func NewRouter(
 	router.Get("/api/user/app-api-keys", userAppAPIKeysHandler.List)
 	router.Post("/api/user/app-api-keys", userAppAPIKeysHandler.Create)
 	router.Delete("/api/user/app-api-keys/{keyID}", userAppAPIKeysHandler.Delete)
+	router.Get("/api/user/model-api-keys", userModelAPIKeysHandler.List)
+	router.Post("/api/user/model-api-keys", userModelAPIKeysHandler.Create)
+	router.Delete("/api/user/model-api-keys/{keyID}", userModelAPIKeysHandler.Delete)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
 	router.Get("/api/ws-info", labHandler.PingInfo)
 	router.Get("/lab/requests", labHandler.ListRequests)
@@ -80,6 +85,18 @@ func NewRouter(
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/conversations/{conversationID}/messages", appAPIHandler.ListConversationMessages)
 	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "model_keys:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/model-keys", appAPIHandler.ListModelAPIKeys)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "model_keys:write"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Post("/model-keys", appAPIHandler.CreateModelAPIKey)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "model_keys:delete"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Delete("/model-keys/{keyID}", appAPIHandler.DeleteModelAPIKey)
+	appRouter.With(
 		middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Post("/requests/{requestID}/delta", appAPIHandler.RequestDelta)
@@ -99,14 +116,15 @@ func NewRouter(
 	router.Post("/api/conversations/{conversationID}/stream/complete", chatHandler.RespondConversation)
 	router.Post("/api/chat/output/delta", chatHandler.DeltaOutput)
 	router.Post("/api/chat/output/complete", chatHandler.CompleteOutput)
-	router.Post("/responses", chatHandler.Responses)
-	router.Post("/v1/responses", chatHandler.Responses)
-	router.Post("/chat/completions", chatHandler.ChatCompletions)
-	router.Post("/v1/chat/completions", chatHandler.ChatCompletions)
-	router.Post("/messages", chatHandler.AnthropicMessages)
-	router.Post("/v1/messages", chatHandler.AnthropicMessages)
+	modelRouter := router.With(middleware.RequireModelAPIKey(cfg, modelAPIKeyService))
+	modelRouter.Post("/responses", chatHandler.Responses)
+	modelRouter.Post("/v1/responses", chatHandler.Responses)
+	modelRouter.Post("/chat/completions", chatHandler.ChatCompletions)
+	modelRouter.Post("/v1/chat/completions", chatHandler.ChatCompletions)
+	modelRouter.Post("/messages", chatHandler.AnthropicMessages)
+	modelRouter.Post("/v1/messages", chatHandler.AnthropicMessages)
 
-	router.Get("/models", func(w http.ResponseWriter, r *http.Request) {
+	modelRouter.Get("/models", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"object": "list",
@@ -115,7 +133,7 @@ func NewRouter(
 			},
 		})
 	})
-	router.Get("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+	modelRouter.Get("/v1/models", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/models", http.StatusTemporaryRedirect)
 	})
 

@@ -299,6 +299,121 @@ func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKe
 	return err
 }
 
+func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAPIKeyInput) (store.ModelAPIKey, error) {
+	createdAt := time.Now().UTC()
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO user_api_keys(
+			id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		input.ID,
+		input.UserID,
+		input.Name,
+		input.KeyCiphertext,
+		input.KeyPrefix,
+		input.Model,
+		nil,
+		formatTime(createdAt),
+		nil,
+	); err != nil {
+		return store.ModelAPIKey{}, err
+	}
+	return store.ModelAPIKey{
+		ID:            input.ID,
+		UserID:        input.UserID,
+		Name:          input.Name,
+		KeyCiphertext: input.KeyCiphertext,
+		KeyPrefix:     input.KeyPrefix,
+		Model:         input.Model,
+		CreatedAt:     createdAt,
+	}, nil
+}
+
+func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]store.ModelAPIKey, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
+		FROM user_api_keys
+		WHERE user_id = ?
+		ORDER BY created_at DESC, id DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.ModelAPIKey, 0)
+	for rows.Next() {
+		item, err := scanModelAPIKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetModelAPIKeyByPrefix(ctx context.Context, prefix string) (store.ModelAPIKey, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
+		FROM user_api_keys
+		WHERE key_prefix = ?
+		LIMIT 1
+	`, prefix)
+	item, err := scanModelAPIKey(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ModelAPIKey{}, errNotFound
+		}
+		return store.ModelAPIKey{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) GetModelAPIKeyByID(ctx context.Context, id string) (store.ModelAPIKey, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
+		FROM user_api_keys
+		WHERE id = ?
+		LIMIT 1
+	`, id)
+	item, err := scanModelAPIKey(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ModelAPIKey{}, errNotFound
+		}
+		return store.ModelAPIKey{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) UpdateModelAPIKeyLastUsedAt(ctx context.Context, id string, usedAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE user_api_keys
+		SET last_used_at = ?
+		WHERE id = ?
+	`, formatTime(usedAt), id)
+	return err
+}
+
+func (s *Store) RevokeModelAPIKey(ctx context.Context, id string, userID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE user_api_keys
+		SET revoked_at = ?
+		WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+	`, formatTime(time.Now().UTC()), id, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json
@@ -687,6 +802,10 @@ type appAPIKeyScanner interface {
 	Scan(dest ...any) error
 }
 
+type modelAPIKeyScanner interface {
+	Scan(dest ...any) error
+}
+
 func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	var item store.Request
 	var createdAt string
@@ -751,6 +870,38 @@ func scanAppAPIKey(scanner appAPIKeyScanner) (store.AppAPIKey, error) {
 		value := parseTime(expiresAt.String)
 		item.ExpiresAt = &value
 	}
+	if lastUsedAt.Valid {
+		value := parseTime(lastUsedAt.String)
+		item.LastUsedAt = &value
+	}
+	item.CreatedAt = parseTime(createdAt)
+	if revokedAt.Valid {
+		value := parseTime(revokedAt.String)
+		item.RevokedAt = &value
+	}
+	return item, nil
+}
+
+func scanModelAPIKey(scanner modelAPIKeyScanner) (store.ModelAPIKey, error) {
+	var item store.ModelAPIKey
+	var model string
+	var lastUsedAt sql.NullString
+	var createdAt string
+	var revokedAt sql.NullString
+	if err := scanner.Scan(
+		&item.ID,
+		&item.UserID,
+		&item.Name,
+		&item.KeyCiphertext,
+		&item.KeyPrefix,
+		&model,
+		&lastUsedAt,
+		&createdAt,
+		&revokedAt,
+	); err != nil {
+		return store.ModelAPIKey{}, err
+	}
+	item.Model = strings.TrimSpace(model)
 	if lastUsedAt.Valid {
 		value := parseTime(lastUsedAt.String)
 		item.LastUsedAt = &value

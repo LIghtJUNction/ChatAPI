@@ -36,7 +36,9 @@
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
 - 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在当前 lab 用户语境下工作，`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
-- `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor 和 app api principal，后续接 session、虚拟模型 key、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
+- 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 可在当前 lab 用户语境下工作；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
+- 应用 API 当前已开始覆盖 `model_keys:read` / `model_keys:write` / `model_keys:delete`：`/api/app/model-keys` 可按 scope 和 `allowed_virtual_models` / `allowed_model_key_ids` 管理当前用户自己的虚拟模型 API Key。
+- `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 
@@ -548,7 +550,7 @@ CHATAPI_OIDC_AUTO_CREATE_USER=0
 
 - 登录时识别旧 hash 格式，验证成功后自动重写为 Argon2id。
 - 虚拟模型 API Key 从 Go 重构版开始使用可解密密文存储；应用 API Key 只存 hash；上游模型 API Key 默认只存浏览器本地，不进入服务端数据库。
-- 需要可解密存储的服务端密钥统一使用 `CHATAPI_SECRET_KEY` 或等价 master key 派生加密密钥；未配置时可以自动生成并持久化，但生产部署必须提示管理员显式配置和备份。
+- 需要可解密存储的服务端密钥统一使用 `CHATAPI_MASTER_KEY` 派生加密密钥；Lab 模式可以使用本地调试默认 master key，生产部署必须提示管理员显式配置和备份。
 
 ### 4.10 邮件、通知和外部 API
 
@@ -1237,9 +1239,9 @@ user_app_api_keys
 - `GET /api/app/conversations/{conversation_id}/messages`
 - `GET /api/app/automation-rules`
 - `PUT /api/app/automation-rules`
-- `GET /api/app/model-api-keys`
-- `POST /api/app/model-api-keys`
-- `DELETE /api/app/model-api-keys/{key_id}`
+- `GET /api/app/model-keys`
+- `POST /api/app/model-keys`
+- `DELETE /api/app/model-keys/{key_id}`
 - `GET /api/app/statistics/summary`
 
 用户管理自己的应用 API Key 的 session 路由：
@@ -1247,6 +1249,12 @@ user_app_api_keys
 - `GET /api/user/app-api-keys`
 - `POST /api/user/app-api-keys`
 - `DELETE /api/user/app-api-keys/{key_id}`
+
+用户管理自己的虚拟模型 API Key 的 session 路由：
+
+- `GET /api/user/model-api-keys`
+- `POST /api/user/model-api-keys`
+- `DELETE /api/user/model-api-keys/{key_id}`
 
 认证方式：
 
@@ -1263,6 +1271,13 @@ user_app_api_keys
 - 记录 `last_used_at`，但写入频率要节流，避免高频请求导致 SQLite 写放大。
 - 对 `requests:respond` 加限流，避免外部自动化错误循环刷屏。
 - 对 `model_keys:write` 加数量限制和频率限制，复用系统/用户的虚拟模型 API Key 数量上限。
+
+当前 Go 重构分支已落地的最小接口形状：
+
+- `GET /api/app/model-keys`：需要 `model_keys:read`，返回当前用户自己的虚拟模型 API Key；如果配置了 `allowed_model_key_ids`，只返回允许的 key。
+- `POST /api/app/model-keys`：需要 `model_keys:write`，请求体包含 `name`、`model`；如果配置了 `allowed_virtual_models`，只能为允许的虚拟模型创建 key。
+- `DELETE /api/app/model-keys/{key_id}`：需要 `model_keys:delete`，只能删除当前用户自己的 key；如果配置了 `allowed_model_key_ids`，只能删除允许的 key。
+- 虚拟模型 key 使用 `sk-` 前缀和可解密密文保存；应用 API Key 使用 `ak-` 前缀和 hash 保存。两套鉴权中间件完全分离，`ak-` 不能访问模型兼容入口，`sk-` 不能访问 `/api/app/*`。
 - 所有应用 API 响应都使用稳定 JSON，方便脚本调用。
 - `complete` 和 `abort` 与 Web 控制台操作共享同一个 Turn Manager 状态机，避免双写和竞态。
 
@@ -1329,10 +1344,13 @@ Go 版首个可替换版本必须覆盖：
 - `GET /api/app/conversations/{conversation_id}/messages`
 - `GET /api/app/automation-rules`
 - `PUT /api/app/automation-rules`
-- `GET /api/app/model-api-keys`
-- `POST /api/app/model-api-keys`
-- `DELETE /api/app/model-api-keys/{key_id}`
+- `GET /api/app/model-keys`
+- `POST /api/app/model-keys`
+- `DELETE /api/app/model-keys/{key_id}`
 - `GET /api/app/statistics/summary`
+- `GET /api/user/model-api-keys`
+- `POST /api/user/model-api-keys`
+- `DELETE /api/user/model-api-keys/{key_id}`
 - `GET /api/admin/users`
 - `GET /api/admin/users/{user_id}/history`
 - `POST /api/admin/users`
@@ -1891,6 +1909,7 @@ make release-snapshot
 - 前端人工接管完整链路通过。
 - Go `httptest` 集成测试至少覆盖三套协议的非流式闭环，并覆盖 Responses / Chat Completions / Anthropic Messages 的 `stream=true` 基础 SSE 行为，以及 `tool_call` 的基础流式返回。
 - Go `httptest` 集成测试应覆盖 `waiting -> streaming -> closed/aborted` 的最小状态流转，以及终态后的 `delta` / `complete` / `abort` 返回 `409`。
+- Go `httptest` 集成测试应覆盖虚拟模型 API Key 的创建、可解密回看、撤销后拒绝访问、模型兼容入口 owner 归属，以及应用 API Key 通过 `model_keys:*` scope 和 resource limits 管理虚拟模型 API Key。
 - Lab 模式下 OpenAI/Anthropic SDK 请求可进入等待态，浏览器完成输出后 SDK 收到兼容响应。
 - Tool Call 辅助不会自动发送，只能由用户审核后手动提交。
 - KirariNetwork token 过期时可自动 refresh；refresh 失败时提示用户重新连接，不泄露 token。

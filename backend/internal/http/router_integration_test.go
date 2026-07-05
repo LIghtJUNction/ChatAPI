@@ -547,6 +547,137 @@ func TestUserAppAPIKeysManagement(t *testing.T) {
 	}
 }
 
+func TestUserModelAPIKeysManagement(t *testing.T) {
+	env := newTestEnv(t)
+
+	createResp := env.postJSON(t, "/api/user/model-api-keys", map[string]any{
+		"name":  "managed-model-key",
+		"model": "demo-managed-model",
+	}, http.StatusOK)
+	rawKey := nestedString(createResp, "raw_key")
+	if !strings.HasPrefix(rawKey, "sk-") {
+		t.Fatalf("unexpected raw model key payload: %#v", createResp)
+	}
+	item := createResp["item"].(map[string]any)
+	keyID := nestedString(item, "id")
+	if keyID == "" || nestedString(item, "raw_key") != rawKey {
+		t.Fatalf("unexpected created model key item: %#v", createResp)
+	}
+
+	listResp := env.getJSON(t, "/api/user/model-api-keys", http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) == 0 || nestedString(items[0].(map[string]any), "raw_key") != rawKey {
+		t.Fatalf("expected encrypted model key to be readable by owner: %#v", listResp)
+	}
+
+	status, body := env.deleteText(t, "/api/user/model-api-keys/"+keyID)
+	if status != http.StatusOK || !strings.Contains(body, "\"ok\":true") {
+		t.Fatalf("unexpected model key delete response: status=%d body=%q", status, body)
+	}
+
+	status, body = postExternalText(t, env.server.URL+"/v1/responses", map[string]string{
+		"Authorization": "Bearer " + rawKey,
+	}, map[string]any{
+		"model": "demo-managed-model",
+		"input": "revoked key should fail",
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "model api key unauthorized") {
+		t.Fatalf("revoked model key should be unauthorized: status=%d body=%q", status, body)
+	}
+}
+
+func TestModelAPIKeyOwnsProtocolRequests(t *testing.T) {
+	env := newTestEnv(t)
+	modelKey := env.seedModelAPIKey(t, "model-user", "owner-key", "demo-owner-model")
+
+	resultCh := startJSONRequestWithHeaders(t, env.server.URL+"/v1/responses", map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	}, map[string]any{
+		"model": "demo-owner-model",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "model key owner 测试"}},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "model key owner 测试")
+	metadata := conversation["metadata"].(map[string]any)
+	if got := nestedString(metadata, "owner_id"); got != "model-user" {
+		t.Fatalf("expected model key owner_id, got %q metadata=%#v", got, metadata)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "model key owner response",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "output_text"); got != "model key owner response" {
+		t.Fatalf("unexpected model key final response: %#v", finalResp)
+	}
+}
+
+func TestServeModeRejectsMissingModelAPIKey(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+
+	status, body := postExternalText(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "demo-serve-auth",
+		"input": "serve mode requires model api key",
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "model api key unauthorized") {
+		t.Fatalf("expected missing model api key rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestAppAPIModelKeysManagement(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"model_keys:read", "model_keys:write", "model_keys:delete"}, map[string]any{
+		"allowed_virtual_models": []string{"demo-app-managed-model"},
+	})
+
+	createResp := env.appPostJSON(t, "/api/app/model-keys", appKey, map[string]any{
+		"name":  "app-managed-model-key",
+		"model": "demo-app-managed-model",
+	}, http.StatusOK)
+	rawKey := nestedString(createResp, "raw_key")
+	item := createResp["item"].(map[string]any)
+	keyID := nestedString(item, "id")
+	if !strings.HasPrefix(rawKey, "sk-") || keyID == "" {
+		t.Fatalf("unexpected app model key create response: %#v", createResp)
+	}
+
+	status, body := env.appPostText(t, "/api/app/model-keys", appKey, map[string]any{
+		"name":  "disallowed-model-key",
+		"model": "blocked-model",
+	})
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("expected resource-limited model create rejection: status=%d body=%q", status, body)
+	}
+
+	listResp := env.appGetJSON(t, "/api/app/model-keys", appKey, http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) == 0 || nestedString(items[0].(map[string]any), "id") != keyID {
+		t.Fatalf("unexpected app model key list: %#v", listResp)
+	}
+
+	status, body = env.appDeleteText(t, "/api/app/model-keys/"+keyID, appKey)
+	if status != http.StatusOK || !strings.Contains(body, "\"ok\":true") {
+		t.Fatalf("unexpected app model key delete response: status=%d body=%q", status, body)
+	}
+
+	status, body = postExternalText(t, env.server.URL+"/v1/responses", map[string]string{
+		"Authorization": "Bearer " + rawKey,
+	}, map[string]any{
+		"model": "demo-app-managed-model",
+		"input": "deleted app managed key should fail",
+	})
+	if status != http.StatusUnauthorized {
+		t.Fatalf("deleted app-managed model key should be unauthorized: status=%d body=%q", status, body)
+	}
+}
+
 func TestAppAPIAuditLogWritten(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
@@ -1068,18 +1199,24 @@ func TestAnthropicMessagesToolCallSSEStream(t *testing.T) {
 }
 
 type testEnv struct {
-	server        *httptest.Server
-	client        *http.Client
-	store         *sqlitestore.Store
-	appKeyService *service.AppAPIKeyService
+	server          *httptest.Server
+	client          *http.Client
+	store           *sqlitestore.Store
+	appKeyService   *service.AppAPIKeyService
+	modelKeyService *service.ModelAPIKeyService
 }
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
+	return newTestEnvWithMode(t, config.ModeLab)
+}
+
+func newTestEnvWithMode(t *testing.T, mode config.Mode) *testEnv {
+	t.Helper()
 
 	tempDir := t.TempDir()
 	cfg := config.Config{
-		Mode:           config.ModeLab,
+		Mode:           mode,
 		Host:           "127.0.0.1",
 		Port:           0,
 		WebDistDir:     tempDir,
@@ -1088,6 +1225,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		DatabaseDSN:    filepath.Join(tempDir, "chatapi.sqlite3"),
 		AllowRemoteLab: false,
 		OpenBrowser:    false,
+		MasterKey:      "test-master-key",
 		LogLevel:       "error",
 		CORSOrigins:    []string{"http://localhost"},
 	}
@@ -1104,15 +1242,17 @@ func newTestEnv(t *testing.T) *testEnv {
 	realtimeHub := service.NewRealtimeHub(store)
 	chatService := service.NewChatAPIService(store, pendingRegistry, realtimeHub)
 	appKeyService := service.NewAppAPIKeyService(store)
+	modelKeyService := service.NewModelAPIKeyService(store, cfg.MasterKey)
 
 	server := httptest.NewServer(httpapi.NewRouter(cfg, store, chatService, realtimeHub, pendingRegistry))
 	t.Cleanup(server.Close)
 
 	return &testEnv{
-		server:        server,
-		client:        server.Client(),
-		store:         store,
-		appKeyService: appKeyService,
+		server:          server,
+		client:          server.Client(),
+		store:           store,
+		appKeyService:   appKeyService,
+		modelKeyService: modelKeyService,
 	}
 }
 
@@ -1283,11 +1423,39 @@ func (e *testEnv) appPostText(t *testing.T, path string, appKey string, body map
 	return resp.StatusCode, string(data)
 }
 
+func (e *testEnv) appDeleteText(t *testing.T, path string, appKey string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+appKey)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do app delete %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
+}
+
 func (e *testEnv) seedAppAPIKey(t *testing.T, userID string, scopes []string, resourceLimits map[string]any) string {
 	t.Helper()
 	_, raw, err := e.appKeyService.CreateKey(context.Background(), userID, "test-key", scopes, resourceLimits)
 	if err != nil {
 		t.Fatalf("create app api key: %v", err)
+	}
+	return raw
+}
+
+func (e *testEnv) seedModelAPIKey(t *testing.T, userID string, name string, model string) string {
+	t.Helper()
+	_, raw, err := e.modelKeyService.CreateKey(context.Background(), userID, name, model)
+	if err != nil {
+		t.Fatalf("create model api key: %v", err)
 	}
 	return raw
 }
@@ -1357,6 +1525,11 @@ func (e *testEnv) waitForWaitingConversation(t *testing.T, title string) map[str
 
 func startJSONRequest(t *testing.T, url string, body map[string]any) <-chan map[string]any {
 	t.Helper()
+	return startJSONRequestWithHeaders(t, url, nil, body)
+}
+
+func startJSONRequestWithHeaders(t *testing.T, url string, headers map[string]string, body map[string]any) <-chan map[string]any {
+	t.Helper()
 	resultCh := make(chan map[string]any, 1)
 
 	go func() {
@@ -1372,6 +1545,9 @@ func startJSONRequest(t *testing.T, url string, body map[string]any) <-chan map[
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1393,6 +1569,32 @@ func startJSONRequest(t *testing.T, url string, body map[string]any) <-chan map[
 	}()
 
 	return resultCh
+}
+
+func postExternalText(t *testing.T, url string, headers map[string]string, body map[string]any) (int, string) {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do external post %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read external response %s: %v", url, err)
+	}
+	return resp.StatusCode, string(data)
 }
 
 func startTextRequest(t *testing.T, url string, body map[string]any) <-chan string {

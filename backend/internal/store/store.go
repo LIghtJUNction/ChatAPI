@@ -71,6 +71,19 @@ type AppAPIKeyAuditLog struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type ModelAPIKey struct {
+	ID            string     `json:"id"`
+	UserID        string     `json:"user_id"`
+	Name          string     `json:"name"`
+	KeyCiphertext string     `json:"-"`
+	KeyPrefix     string     `json:"key_prefix"`
+	Model         string     `json:"model,omitempty"`
+	RawKey        string     `json:"raw_key,omitempty"`
+	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
+}
+
 type CreateAppAPIKeyInput struct {
 	ID             string
 	UserID         string
@@ -80,6 +93,15 @@ type CreateAppAPIKeyInput struct {
 	Scopes         []string
 	ResourceLimits map[string]any
 	ExpiresAt      *time.Time
+}
+
+type CreateModelAPIKeyInput struct {
+	ID            string
+	UserID        string
+	Name          string
+	KeyCiphertext string
+	KeyPrefix     string
+	Model         string
 }
 
 type CreatePendingInput struct {
@@ -127,6 +149,12 @@ type Store interface {
 	UpdateAppAPIKeyLastUsedAt(context.Context, string, time.Time) error
 	RevokeAppAPIKey(context.Context, string, string) error
 	CreateAppAPIKeyAuditLog(context.Context, AppAPIKeyAuditLog) error
+	CreateModelAPIKey(context.Context, CreateModelAPIKeyInput) (ModelAPIKey, error)
+	ListModelAPIKeysByUser(context.Context, string) ([]ModelAPIKey, error)
+	GetModelAPIKeyByPrefix(context.Context, string) (ModelAPIKey, error)
+	GetModelAPIKeyByID(context.Context, string) (ModelAPIKey, error)
+	UpdateModelAPIKeyLastUsedAt(context.Context, string, time.Time) error
+	RevokeModelAPIKey(context.Context, string, string) error
 	ListMessages(context.Context, string) ([]Message, error)
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)
 	UpdateDraft(context.Context, UpdateDraftInput) (Conversation, error)

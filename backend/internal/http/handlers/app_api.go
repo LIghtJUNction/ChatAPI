@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -13,7 +14,8 @@ import (
 )
 
 type AppAPIHandler struct {
-	Service *service.ChatAPIService
+	Service      *service.ChatAPIService
+	ModelAPIKeys *service.ModelAPIKeyService
 }
 
 func (h AppAPIHandler) Me(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +99,86 @@ func (h AppAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
+func (h AppAPIHandler) ListModelAPIKeys(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	items, err := h.ModelAPIKeys.ListKeysForUser(r.Context(), principal.UserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	allowedIDs := stringSetFromAny(principal.ResourceLimits["allowed_model_key_ids"])
+	if len(allowedIDs) > 0 {
+		filtered := make([]store.ModelAPIKey, 0, len(items))
+		for _, item := range items {
+			if _, ok := allowedIDs[item.ID]; ok {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+}
+
+func (h AppAPIHandler) CreateModelAPIKey(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	model := stringValue(body["model"], "")
+	allowedModels := stringSetFromAny(principal.ResourceLimits["allowed_virtual_models"])
+	if len(allowedModels) > 0 {
+		if _, ok := allowedModels[model]; !ok {
+			http.Error(w, "app api key forbidden", http.StatusForbidden)
+			return
+		}
+	}
+	item, rawKey, err := h.ModelAPIKeys.CreateKey(r.Context(), principal.UserID, stringValue(body["name"], "model key"), model)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"item":    item,
+		"raw_key": rawKey,
+	})
+}
+
+func (h AppAPIHandler) DeleteModelAPIKey(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	keyID := strings.TrimSpace(chi.URLParam(r, "keyID"))
+	if keyID == "" {
+		http.Error(w, "key_id is required", http.StatusBadRequest)
+		return
+	}
+	allowedIDs := stringSetFromAny(principal.ResourceLimits["allowed_model_key_ids"])
+	if len(allowedIDs) > 0 {
+		if _, ok := allowedIDs[keyID]; !ok {
+			http.Error(w, "app api key forbidden", http.StatusForbidden)
+			return
+		}
+	}
+	if err := h.ModelAPIKeys.RevokeKey(r.Context(), principal.UserID, keyID); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (h AppAPIHandler) RequestDelta(w http.ResponseWriter, r *http.Request) {
 	h.executeRequestTurnControl(w, r, "delta", service.TurnControlStreamDelta)
 }
@@ -170,4 +252,19 @@ func (h AppAPIHandler) writeRequestError(w http.ResponseWriter, err error) {
 	default:
 		http.Error(w, err.Error(), http.StatusNotFound)
 	}
+}
+
+func stringSetFromAny(value any) map[string]struct{} {
+	items := stringSlice(value)
+	if len(items) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out[item] = struct{}{}
+		}
+	}
+	return out
 }

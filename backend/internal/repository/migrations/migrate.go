@@ -43,6 +43,24 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_created_at
 ON messages(conversation_id, created_at, id);
 
+CREATE TABLE IF NOT EXISTS user_api_keys (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	name TEXT NOT NULL,
+	key_ciphertext TEXT NOT NULL,
+	key_prefix TEXT NOT NULL,
+	model TEXT NOT NULL DEFAULT '',
+	last_used_at TEXT,
+	created_at TEXT NOT NULL,
+	revoked_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_api_keys_key_prefix
+ON user_api_keys(key_prefix);
+
+CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_id
+ON user_api_keys(user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS user_app_api_keys (
 	id TEXT PRIMARY KEY,
 	user_id TEXT NOT NULL,

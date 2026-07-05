@@ -64,6 +64,39 @@ func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item})
 }
 
+func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	items, err := h.Service.ListConversationsForOwner(r.Context(), principal.UserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+}
+
+func (h AppAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
+	items, err := h.Service.ListMessagesForOwner(r.Context(), conversationID, principal.UserID)
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+}
+
 func (h AppAPIHandler) RequestDelta(w http.ResponseWriter, r *http.Request) {
 	h.executeRequestTurnControl(w, r, "delta", service.TurnControlStreamDelta)
 }

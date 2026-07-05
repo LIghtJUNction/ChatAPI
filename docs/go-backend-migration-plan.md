@@ -35,6 +35,7 @@
 - 已补上统一的 request 读取视图（列表 + 详情）并先用于 `GET /lab/requests`、`GET /lab/requests/{request_id}`；后续 `/api/app/requests` 应直接复用这套 request reader，而不是再单独拼查询结构。
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
 - 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在当前 lab 用户语境下工作，`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
+- 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 

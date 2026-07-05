@@ -436,6 +436,82 @@ func TestAppAPIOwnerIsolation(t *testing.T) {
 	<-resultCh
 }
 
+func TestAppAPIConversationsRead(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"conversations:read"}, nil)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-app-conversations",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "app conversations 测试"}},
+			},
+		},
+	})
+	conversation := env.waitForWaitingConversation(t, "app conversations 测试")
+
+	listResp := env.appGetJSON(t, "/api/app/conversations", appKey, http.StatusOK)
+	items := listResp["items"].([]any)
+	foundConversation := false
+	for _, item := range items {
+		record := item.(map[string]any)
+		if nestedString(record, "id") == conversation["id"].(string) {
+			foundConversation = true
+			break
+		}
+	}
+	if !foundConversation {
+		t.Fatalf("expected conversation in app api list: %#v", listResp)
+	}
+
+	messagesResp := env.appGetJSON(t, "/api/app/conversations/"+conversation["id"].(string)+"/messages", appKey, http.StatusOK)
+	messageItems := messagesResp["items"].([]any)
+	if len(messageItems) == 0 || nestedString(messageItems[0].(map[string]any), "content") != "app conversations 测试" {
+		t.Fatalf("unexpected app api messages response: %#v", messagesResp)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
+func TestAppAPIConversationsOwnerIsolation(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "other-user", []string{"conversations:read"}, nil)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-app-conversations-owner",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "app conv owner"}},
+			},
+		},
+	})
+	conversation := env.waitForWaitingConversation(t, "app conv owner")
+
+	listResp := env.appGetJSON(t, "/api/app/conversations", appKey, http.StatusOK)
+	if items := listResp["items"].([]any); len(items) != 0 {
+		t.Fatalf("foreign owner should not see conversations: %#v", listResp)
+	}
+
+	status, body := env.appGetText(t, "/api/app/conversations/"+conversation["id"].(string)+"/messages", appKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "forbidden") {
+		t.Fatalf("unexpected foreign conversation messages response: status=%d body=%q", status, body)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
 func TestUserAppAPIKeysManagement(t *testing.T) {
 	env := newTestEnv(t)
 

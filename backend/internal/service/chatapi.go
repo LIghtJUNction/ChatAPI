@@ -86,6 +86,31 @@ func (s *ChatAPIService) ListMessages(ctx context.Context, conversationID string
 	return s.store.ListMessages(ctx, conversationID)
 }
 
+func (s *ChatAPIService) ListMessagesForOwner(ctx context.Context, conversationID string, ownerID string) ([]store.Message, error) {
+	conversation, err := s.store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	if ownerID != "" && stringValue(conversation.Metadata["owner_id"], "") != ownerID {
+		return nil, ErrForbidden
+	}
+	return s.store.ListMessages(ctx, conversationID)
+}
+
+func (s *ChatAPIService) ListConversationsForOwner(ctx context.Context, ownerID string) ([]store.Conversation, error) {
+	items, err := s.store.ListConversations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]store.Conversation, 0, len(items))
+	for _, item := range items {
+		if ownerID == "" || stringValue(item.Metadata["owner_id"], "") == ownerID {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
+}
+
 func (s *ChatAPIService) ListRequests(ctx context.Context) ([]store.Request, error) {
 	return s.store.ListRequests(ctx)
 }

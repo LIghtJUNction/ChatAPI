@@ -71,6 +71,14 @@ func NewRouter(
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/requests/{requestID}", appAPIHandler.GetRequest)
 	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "conversations:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/conversations", appAPIHandler.ListConversations)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "conversations:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/conversations/{conversationID}/messages", appAPIHandler.ListConversationMessages)
+	appRouter.With(
 		middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Post("/requests/{requestID}/delta", appAPIHandler.RequestDelta)

@@ -18,7 +18,7 @@ type UserAppAPIKeysHandler struct {
 }
 
 func (h UserAppAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID()
+	userID, err := h.currentUserID(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotImplemented)
 		return
@@ -32,7 +32,7 @@ func (h UserAppAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserAppAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID()
+	userID, err := h.currentUserID(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotImplemented)
 		return
@@ -58,7 +58,7 @@ func (h UserAppAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserAppAPIKeysHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID()
+	userID, err := h.currentUserID(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotImplemented)
 		return
@@ -79,9 +79,12 @@ func (h UserAppAPIKeysHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (h UserAppAPIKeysHandler) currentUserID() (string, error) {
+func (h UserAppAPIKeysHandler) currentUserID(r *http.Request) (string, error) {
+	if actor, ok := service.RequestActorFromContext(r.Context()); ok && strings.TrimSpace(actor.UserID) != "" {
+		return strings.TrimSpace(actor.UserID), nil
+	}
 	if h.Config.Mode == config.ModeLab {
-		return "lab-user", nil
+		return "", errors.New("lab request actor is missing")
 	}
 	return "", errors.New("session-backed app api key management is not implemented yet")
 }

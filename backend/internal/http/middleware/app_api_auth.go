@@ -20,6 +20,12 @@ func RequireAppAPIKey(authService *service.AppAPIKeyService, scopes ...string) f
 				return
 			}
 			ctx := context.WithValue(r.Context(), appAPIPrincipalContextKey{}, principal)
+			ctx = service.WithRequestActor(ctx, service.RequestActor{
+				UserID:   principal.UserID,
+				Username: principal.Name,
+				Role:     "app_api",
+				Source:   "app_api_key",
+			})
 			for _, scope := range scopes {
 				if _, ok := principal.Scopes[scope]; !ok {
 					authService.RecordAudit(ctx, principal, r.URL.Path, http.StatusForbidden, "forbidden")

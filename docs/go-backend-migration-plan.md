@@ -36,6 +36,7 @@
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
 - 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在当前 lab 用户语境下工作，`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
+- `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor 和 app api principal，后续接 session、虚拟模型 key、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 
@@ -741,6 +742,19 @@ type TurnControlCommand struct {
 ```
 
 WebUI、应用 API、自动化规则都只负责把各自请求翻译成这一个命令对象，再交给 Turn Manager / service 执行，避免三套入口各自拼字段、各自做状态判断。
+
+与之配套，建议把“当前请求归属于哪个用户/身份”的问题也统一收束到一个共享 request actor 上下文，例如：
+
+```go
+type RequestActor struct {
+    UserID   string
+    Username string
+    Role     string
+    Source   string
+}
+```
+
+Lab 模式、session 用户、应用 API Key、后续虚拟模型 API Key 中间件都只负责把 actor 注入到 context；Turn Manager / service 从 context 读取 owner，而不是在业务逻辑里硬编码 `lab-user` 或散落各自的用户解析逻辑。
 
 推荐模型：
 

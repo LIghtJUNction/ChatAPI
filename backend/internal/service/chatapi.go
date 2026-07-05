@@ -57,7 +57,7 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 		ConversationID: conversationID,
 		RequestID:      requestID,
 		ResponseID:     responseID,
-		OwnerID:        "lab-user",
+		OwnerID:        OwnerIDFromContext(ctx),
 		RequestFormat:  parsed.RequestFormat,
 		Model:          parsed.Model,
 		UserContent:    parsed.UserContent,

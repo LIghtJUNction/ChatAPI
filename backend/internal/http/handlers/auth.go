@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/service"
 )
 
 type AuthHandler struct {
@@ -38,19 +39,23 @@ func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 		CurrentConnectionCount:        0,
 		RealtimeMaxConnectionsPerUser: 0,
 	}
-	if h.Config.Mode == config.ModeLab {
+	if actor, ok := service.RequestActorFromContext(r.Context()); ok {
 		payload.Authenticated = true
-		payload.User = &user{ID: "lab-user", Username: "lab", Role: "admin"}
+		payload.User = &user{ID: actor.UserID, Username: actor.Username, Role: actor.Role}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	userPayload := map[string]any{}
+	if actor, ok := service.RequestActorFromContext(r.Context()); ok {
+		userPayload = map[string]any{"id": actor.UserID, "username": actor.Username, "role": actor.Role}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":   h.Config.Mode == config.ModeLab,
-		"user": map[string]any{"id": "lab-user", "username": "lab", "role": "admin"},
+		"user": userPayload,
 	})
 }
 

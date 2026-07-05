@@ -31,6 +31,7 @@ func NewRouter(
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+	router.Use(middleware.InjectLabRequestActor(cfg))
 	router.Use(middleware.RequireLabAccess(cfg))
 
 	healthHandler := handlers.HealthHandler{Config: cfg, Store: dataStore}

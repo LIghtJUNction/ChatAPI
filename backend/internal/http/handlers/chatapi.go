@@ -71,12 +71,13 @@ func (h ChatAPIHandler) CompleteOutput(w http.ResponseWriter, r *http.Request) {
 	}
 
 	input := store.CompletePendingInput{
-		ConversationID: conversationID,
-		ResponseID:     stringValue(body["response_id"], ""),
-		OutputText:     stringValue(body["text"], ""),
-		Mode:           stringValue(body["mode"], "assistant_message"),
-		ToolName:       stringValue(body["tool_name"], ""),
-		ToolCallID:     stringValue(body["tool_call_id"], ""),
+		ConversationID:      conversationID,
+		ResponseID:          stringValue(body["response_id"], ""),
+		OutputText:          stringValue(body["text"], ""),
+		Mode:                stringValue(body["mode"], "assistant_message"),
+		ToolName:            stringValue(body["tool_name"], ""),
+		ToolCallID:          stringValue(body["tool_call_id"], ""),
+		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
 	}
 
 	result, err := h.Service.CompleteConversation(r.Context(), input)

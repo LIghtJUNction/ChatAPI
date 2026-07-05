@@ -40,12 +40,13 @@ type CreatePendingInput struct {
 }
 
 type CompletePendingInput struct {
-	ConversationID string
-	ResponseID     string
-	OutputText     string
-	Mode           string
-	ToolName       string
-	ToolCallID     string
+	ConversationID      string
+	ResponseID          string
+	OutputText          string
+	Mode                string
+	ToolName            string
+	ToolCallID          string
+	ReasoningStreamMode string
 }
 
 type UpdateDraftInput struct {

@@ -26,6 +26,7 @@
 - `/api/ws` 已切到真实 WebSocket 广播骨架，可发送 snapshot / conversation_upsert / connection_count 事件。
 - 已新增 Go `httptest` 集成测试，覆盖 `responses`、`chat/completions`、`messages` 三套协议的 pending/complete/abort 基础链路。
 - `backend/internal/protocol` 已开始承接三套协议的请求提取与完成响应构造，后续会继续从 service/handler 中抽离更多协议细节。
+- 当前最小实现已覆盖 `assistant_message`、`thinking`、`tool_call` 三种人工完成模式，并用集成测试守护消息持久化顺序与三套协议返回外壳。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 

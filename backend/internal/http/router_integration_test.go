@@ -156,6 +156,84 @@ func TestAnthropicMessagesProtocolShape(t *testing.T) {
 	}
 }
 
+func TestResponsesThinkingModePersistsThinkBlock(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-thinking",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "thinking 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "thinking 测试")
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id":       conversation["id"],
+		"text":                  "内部思考内容",
+		"mode":                  "thinking",
+		"reasoning_stream_mode": "reasoning",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "output_text"); got != "<think>内部思考内容</think>" {
+		t.Fatalf("unexpected responses thinking output_text: %#v", finalResp)
+	}
+
+	messagesResp := env.getJSON(t, "/api/conversations/"+conversation["id"].(string)+"/messages", http.StatusOK)
+	items := messagesResp["items"].([]any)
+	lastMessage := items[len(items)-1].(map[string]any)
+	if got := nestedString(lastMessage, "content"); got != "<think>内部思考内容</think>" {
+		t.Fatalf("unexpected thinking message content: %#v", lastMessage)
+	}
+}
+
+func TestChatCompletionsToolCallShape(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
+		"model": "demo-tool-call",
+		"messages": []map[string]any{
+			{"role": "user", "content": "tool call 测试"},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "tool call 测试")
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "{\"city\":\"Shanghai\"}",
+		"mode":            "tool_call",
+		"tool_name":       "get_weather",
+		"tool_call_id":    "call_test_1",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	choices := finalResp["choices"].([]any)
+	message := choices[0].(map[string]any)["message"].(map[string]any)
+	toolCalls := message["tool_calls"].([]any)
+	firstToolCall := toolCalls[0].(map[string]any)
+	if nestedString(firstToolCall, "id") != "call_test_1" {
+		t.Fatalf("unexpected tool_call id: %#v", firstToolCall)
+	}
+	functionPart := firstToolCall["function"].(map[string]any)
+	if nestedString(functionPart, "name") != "get_weather" || nestedString(functionPart, "arguments") != "{\"city\":\"Shanghai\"}" {
+		t.Fatalf("unexpected function payload: %#v", functionPart)
+	}
+
+	messagesResp := env.getJSON(t, "/api/conversations/"+conversation["id"].(string)+"/messages", http.StatusOK)
+	items := messagesResp["items"].([]any)
+	lastMessage := items[len(items)-1].(map[string]any)
+	metadata := lastMessage["metadata"].(map[string]any)
+	if nestedString(metadata, "response_mode") != "tool_call" || nestedString(metadata, "tool_name") != "get_weather" {
+		t.Fatalf("unexpected tool call message metadata: %#v", metadata)
+	}
+}
+
 type testEnv struct {
 	server *httptest.Server
 	client *http.Client
@@ -224,6 +302,24 @@ func (e *testEnv) postJSON(t *testing.T, path string, body map[string]any, wantS
 		t.Fatalf("decode response %s: %v", path, err)
 	}
 
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
+	}
+	return payload
+}
+
+func (e *testEnv) getJSON(t *testing.T, path string, wantStatus int) map[string]any {
+	t.Helper()
+	resp, err := e.client.Get(e.server.URL + path)
+	if err != nil {
+		t.Fatalf("get request %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response %s: %v", path, err)
+	}
 	if resp.StatusCode != wantStatus {
 		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
 	}

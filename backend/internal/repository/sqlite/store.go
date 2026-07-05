@@ -285,6 +285,10 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 	if finalText == "" {
 		finalText = draftText
 	}
+	messageContent := finalText
+	if input.Mode == "thinking" && finalText != "" {
+		messageContent = "<think>" + finalText + "</think>"
+	}
 	now := time.Now().UTC()
 	metadata["realtime_status"] = "closed"
 	metadata["realtime_draft_text"] = ""
@@ -298,11 +302,17 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 	if input.ToolCallID != "" {
 		messageMetadata["tool_call_id"] = input.ToolCallID
 	}
+	if input.Mode == "tool_call" {
+		messageMetadata["arguments"] = finalText
+	}
+	if input.ReasoningStreamMode != "" {
+		messageMetadata["reasoning_stream_mode"] = input.ReasoningStreamMode
+	}
 	responseID := input.ResponseID
 	message := store.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "assistant",
-		Content:    finalText,
+		Content:    messageContent,
 		CreatedAt:  now,
 		Status:     "completed",
 		ResponseID: &responseID,
@@ -396,7 +406,11 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 }
 
 func parseTime(raw string) time.Time {
-	t, err := time.Parse(time.RFC3339, raw)
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err == nil {
+		return t
+	}
+	t, err = time.Parse(time.RFC3339, raw)
 	if err == nil {
 		return t
 	}
@@ -430,7 +444,7 @@ func mustJSON(value any) string {
 }
 
 func formatTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339)
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func keysOf(value map[string]any) []string {

@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -234,6 +236,122 @@ func TestChatCompletionsToolCallShape(t *testing.T) {
 	}
 }
 
+func TestResponsesToolResultShape(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-tool-result",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "tool result 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "tool result 测试")
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "{\"ok\":true}",
+		"output":          "{\"ok\":true}",
+		"mode":            "tool_result",
+		"tool_call_id":    "call_result_1",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	output := finalResp["output"].([]any)
+	firstOutput := output[0].(map[string]any)
+	if nestedString(firstOutput, "type") != "function_call_output" || nestedString(firstOutput, "call_id") != "call_result_1" {
+		t.Fatalf("unexpected tool result output payload: %#v", firstOutput)
+	}
+	if nestedString(firstOutput, "output") != "{\"ok\":true}" {
+		t.Fatalf("unexpected tool result output body: %#v", firstOutput)
+	}
+
+	messagesResp := env.getJSON(t, "/api/conversations/"+conversation["id"].(string)+"/messages", http.StatusOK)
+	items := messagesResp["items"].([]any)
+	lastMessage := items[len(items)-1].(map[string]any)
+	metadata := lastMessage["metadata"].(map[string]any)
+	if nestedString(metadata, "response_mode") != "tool_result" || nestedString(metadata, "output") != "{\"ok\":true}" {
+		t.Fatalf("unexpected tool result metadata: %#v", metadata)
+	}
+}
+
+func TestResponsesSSEStream(t *testing.T) {
+	env := newTestEnv(t)
+
+	streamCh := startTextRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model":  "demo-stream",
+		"stream": true,
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "responses sse 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "responses sse 测试")
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "第一段",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	streamBody := <-streamCh
+	if !strings.Contains(streamBody, "event: response.created") {
+		t.Fatalf("missing response.created event: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"delta\":\"第一段\"") {
+		t.Fatalf("missing delta payload: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "event: response.completed") || !strings.Contains(streamBody, "\"output_text\":\"第一段\"") {
+		t.Fatalf("missing completed payload: %s", streamBody)
+	}
+}
+
+func TestChatCompletionsSSEStream(t *testing.T) {
+	env := newTestEnv(t)
+
+	streamCh := startTextRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
+		"model":  "demo-chat-stream",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "chat stream 测试"},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "chat stream 测试")
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "流式回复",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	streamBody := <-streamCh
+	if !strings.Contains(streamBody, "\"object\":\"chat.completion.chunk\"") {
+		t.Fatalf("missing chat completion chunk: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"content\":\"流式回复\"") {
+		t.Fatalf("missing chat completion delta content: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "data: [DONE]") {
+		t.Fatalf("missing done marker: %s", streamBody)
+	}
+}
+
 type testEnv struct {
 	server *httptest.Server
 	client *http.Client
@@ -391,6 +509,42 @@ func startJSONRequest(t *testing.T, url string, body map[string]any) <-chan map[
 			return
 		}
 		resultCh <- payload
+	}()
+
+	return resultCh
+}
+
+func startTextRequest(t *testing.T, url string, body map[string]any) <-chan string {
+	t.Helper()
+	resultCh := make(chan string, 1)
+
+	go func() {
+		rawBody, err := json.Marshal(body)
+		if err != nil {
+			resultCh <- "__error__:" + err.Error()
+			return
+		}
+
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(rawBody))
+		if err != nil {
+			resultCh <- "__error__:" + err.Error()
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			resultCh <- "__error__:" + err.Error()
+			return
+		}
+		defer resp.Body.Close()
+
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			resultCh <- "__error__:" + err.Error()
+			return
+		}
+		resultCh <- string(data)
 	}()
 
 	return resultCh

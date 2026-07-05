@@ -14,6 +14,7 @@ type CompletePayload struct {
 	Mode       string
 	ToolName   string
 	ToolCallID string
+	ToolOutput string
 }
 
 func BuildResponse(conversation store.Conversation, payload CompletePayload) map[string]any {
@@ -76,6 +77,12 @@ func BuildResponse(conversation store.Conversation, payload CompletePayload) map
 				"name":      payload.ToolName,
 				"call_id":   stringValue(payload.ToolCallID, "call_"+uuid.NewString()),
 				"arguments": payload.OutputText,
+			}}
+		} else if payload.Mode == "tool_result" {
+			output = []map[string]any{{
+				"type":    "function_call_output",
+				"call_id": stringValue(payload.ToolCallID, "call_"+uuid.NewString()),
+				"output":  stringValue(payload.ToolOutput, payload.OutputText),
 			}}
 		}
 		return map[string]any{

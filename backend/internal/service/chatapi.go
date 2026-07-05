@@ -27,6 +27,27 @@ func NewChatAPIService(dataStore store.Store, pending *PendingRegistry, realtime
 
 func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, requestFormat string, body map[string]any) (map[string]any, error) {
 	parsed := protocol.ParseRequest(requestFormat, body)
+	turn, _, _, err := s.createPendingTurn(ctx, parsed, body)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.pending.Wait(ctx, turn.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	return result.ResponseBody, nil
+}
+
+func (s *ChatAPIService) CreatePendingStream(ctx context.Context, requestFormat string, body map[string]any) (*PendingTurn, store.Conversation, error) {
+	parsed := protocol.ParseRequest(requestFormat, body)
+	turn, conversation, _, err := s.createPendingTurn(ctx, parsed, body)
+	if err != nil {
+		return nil, store.Conversation{}, err
+	}
+	return turn, conversation, nil
+}
+
+func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.ParsedRequest, body map[string]any) (*PendingTurn, store.Conversation, store.Message, error) {
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
 	conversationID := "conv_" + uuid.NewString()
@@ -42,24 +63,21 @@ func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, requestForma
 		ToolSchemas:    parsed.ToolSchemas,
 	})
 	if err != nil {
-		return nil, err
+		return nil, store.Conversation{}, store.Message{}, err
 	}
 
-	s.pending.Add(&PendingTurn{
+	turn := &PendingTurn{
 		RequestID:      requestID,
 		ConversationID: conversationID,
 		ResponseID:     responseID,
 		RequestFormat:  parsed.RequestFormat,
 		Model:          parsed.Model,
+		Events:         make(chan PendingEvent, 32),
 		done:           make(chan PendingResult, 1),
-	})
-	s.realtime.PublishConversationUpsert(conversation, []store.Message{message})
-
-	result, err := s.pending.Wait(ctx, conversationID)
-	if err != nil {
-		return nil, err
 	}
-	return result.ResponseBody, nil
+	s.pending.Add(turn)
+	s.realtime.PublishConversationUpsert(conversation, []store.Message{message})
+	return turn, conversation, message, nil
 }
 
 func (s *ChatAPIService) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
@@ -81,6 +99,10 @@ func (s *ChatAPIService) UpdateDraft(ctx context.Context, conversationID string,
 	if err != nil {
 		return nil, err
 	}
+	_ = s.pending.Publish(conversationID, PendingEvent{
+		Type:      "delta",
+		DeltaText: chunk,
+	})
 	s.realtime.PublishConversationUpsert(updated, nil)
 	return map[string]any{
 		"draft_text":   nextDraft,
@@ -106,6 +128,16 @@ func (s *ChatAPIService) CompleteConversation(ctx context.Context, input store.C
 		Mode:       input.Mode,
 		ToolName:   input.ToolName,
 		ToolCallID: input.ToolCallID,
+		ToolOutput: stringValue(input.ToolOutput, message.Content),
+	})
+	_ = s.pending.Publish(input.ConversationID, PendingEvent{
+		Type:         "complete",
+		OutputText:   message.Content,
+		Mode:         input.Mode,
+		ToolName:     input.ToolName,
+		ToolCallID:   input.ToolCallID,
+		ToolOutput:   stringValue(input.ToolOutput, message.Content),
+		ResponseBody: responseBody,
 	})
 
 	if err := s.pending.Resolve(input.ConversationID, PendingResult{ResponseBody: responseBody}); err != nil {
@@ -133,13 +165,19 @@ func (s *ChatAPIService) AbortConversation(ctx context.Context, conversationID s
 		s.realtime.PublishConversationUpsert(conversation, []store.Message{message})
 	}
 
-	return s.pending.Abort(conversationID, map[string]any{
+	body := map[string]any{
 		"error": map[string]any{
 			"message": reason,
 			"type":    "request_aborted",
 			"code":    "request_aborted",
 		},
+	}
+	_ = s.pending.Publish(conversationID, PendingEvent{
+		Type:      "abort",
+		ErrorBody: body,
 	})
+
+	return s.pending.Abort(conversationID, body)
 }
 
 func stringValue(value any, fallback string) string {

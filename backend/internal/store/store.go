@@ -46,6 +46,7 @@ type CompletePendingInput struct {
 	Mode                string
 	ToolName            string
 	ToolCallID          string
+	ToolOutput          string
 	ReasoningStreamMode string
 }
 

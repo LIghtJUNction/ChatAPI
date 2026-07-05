@@ -12,12 +12,25 @@ type PendingResult struct {
 	ResponseBody map[string]any
 }
 
+type PendingEvent struct {
+	Type         string
+	DeltaText    string
+	OutputText   string
+	Mode         string
+	ToolName     string
+	ToolCallID   string
+	ToolOutput   string
+	ResponseBody map[string]any
+	ErrorBody    map[string]any
+}
+
 type PendingTurn struct {
 	RequestID      string
 	ConversationID string
 	ResponseID     string
 	RequestFormat  string
 	Model          string
+	Events         chan PendingEvent
 	done           chan PendingResult
 }
 
@@ -55,6 +68,7 @@ func (r *PendingRegistry) Resolve(conversationID string, result PendingResult) e
 	if !ok {
 		return ErrPendingNotFound
 	}
+	close(turn.Events)
 	turn.done <- result
 	close(turn.done)
 	return nil
@@ -75,4 +89,18 @@ func (r *PendingRegistry) Wait(ctx context.Context, conversationID string) (Pend
 	case result := <-turn.done:
 		return result, nil
 	}
+}
+
+func (r *PendingRegistry) Publish(conversationID string, event PendingEvent) error {
+	r.mu.RLock()
+	turn, ok := r.byConversationID[conversationID]
+	r.mu.RUnlock()
+	if !ok {
+		return ErrPendingNotFound
+	}
+	select {
+	case turn.Events <- event:
+	default:
+	}
+	return nil
 }

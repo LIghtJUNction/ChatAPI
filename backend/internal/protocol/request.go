@@ -5,6 +5,7 @@ import "strings"
 type ParsedRequest struct {
 	RequestFormat string
 	Model         string
+	Stream        bool
 	UserContent   string
 	ToolSchemas   []any
 }
@@ -13,6 +14,7 @@ func ParseRequest(requestFormat string, body map[string]any) ParsedRequest {
 	return ParsedRequest{
 		RequestFormat: requestFormat,
 		Model:         stringValue(body["model"], "chatapi-lab"),
+		Stream:        boolValue(body["stream"]),
 		UserContent:   extractUserText(body),
 		ToolSchemas:   extractToolSchemas(body),
 	}
@@ -23,6 +25,11 @@ func stringValue(value any, fallback string) string {
 		return strings.TrimSpace(raw)
 	}
 	return fallback
+}
+
+func boolValue(value any) bool {
+	flag, _ := value.(bool)
+	return flag
 }
 
 func extractUserText(body map[string]any) string {

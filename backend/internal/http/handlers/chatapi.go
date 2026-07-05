@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/zyf/chatapi/internal/protocol"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
 )
@@ -33,6 +34,12 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+
+	parsed := protocol.ParseRequest(requestFormat, body)
+	if parsed.Stream {
+		h.handleStreamRequest(w, r, requestFormat, body)
 		return
 	}
 
@@ -77,6 +84,7 @@ func (h ChatAPIHandler) CompleteOutput(w http.ResponseWriter, r *http.Request) {
 		Mode:                stringValue(body["mode"], "assistant_message"),
 		ToolName:            stringValue(body["tool_name"], ""),
 		ToolCallID:          stringValue(body["tool_call_id"], ""),
+		ToolOutput:          stringValue(body["output"], stringValue(body["text"], "")),
 		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
 	}
 
@@ -145,4 +153,92 @@ func stringValue(value any, fallback string) string {
 		return strings.TrimSpace(raw)
 	}
 	return fallback
+}
+
+func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, requestFormat string, body map[string]any) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	turn, conversation, err := h.Service.CreatePendingStream(r.Context(), requestFormat, body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	for _, event := range protocol.BuildStreamStart(conversation) {
+		if err := writeSSEEvent(w, event); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-turn.Events:
+			if !ok {
+				return
+			}
+			streamEvents := buildPendingStreamEvents(conversation, event)
+			for _, streamEvent := range streamEvents {
+				if err := writeSSEEvent(w, streamEvent); err != nil {
+					return
+				}
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+func buildPendingStreamEvents(conversation store.Conversation, event service.PendingEvent) []protocol.StreamEvent {
+	switch event.Type {
+	case "delta":
+		return protocol.BuildStreamDelta(conversation, event.DeltaText)
+	case "abort":
+		return protocol.BuildStreamAbort(conversation, event.ErrorBody)
+	case "complete":
+		return protocol.BuildStreamComplete(conversation, protocol.CompletePayload{
+			ResponseID: stringValue(conversation.ResponseID, ""),
+			OutputText: event.OutputText,
+			Mode:       event.Mode,
+			ToolName:   event.ToolName,
+			ToolCallID: event.ToolCallID,
+			ToolOutput: event.ToolOutput,
+		})
+	default:
+		return nil
+	}
+}
+
+func writeSSEEvent(w http.ResponseWriter, event protocol.StreamEvent) error {
+	if event.Event != "" {
+		if _, err := w.Write([]byte("event: " + event.Event + "\n")); err != nil {
+			return err
+		}
+	}
+
+	switch data := event.Data.(type) {
+	case string:
+		if _, err := w.Write([]byte("data: " + data + "\n\n")); err != nil {
+			return err
+		}
+	default:
+		raw, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte("data: " + string(raw) + "\n\n")); err != nil {
+			return err
+		}
+	}
+	return nil
 }

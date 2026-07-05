@@ -305,6 +305,9 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 	if input.Mode == "tool_call" {
 		messageMetadata["arguments"] = finalText
 	}
+	if input.Mode == "tool_result" {
+		messageMetadata["output"] = stringValue(input.ToolOutput, finalText)
+	}
 	if input.ReasoningStreamMode != "" {
 		messageMetadata["reasoning_stream_mode"] = input.ReasoningStreamMode
 	}
@@ -466,4 +469,11 @@ func buildConversationTitle(userContent string) string {
 		return string(runes[:24])
 	}
 	return text
+}
+
+func stringValue(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
 }

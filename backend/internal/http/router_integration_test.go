@@ -688,6 +688,7 @@ func TestAppAPIModelKeysManagement(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"model_keys:read", "model_keys:write", "model_keys:delete"}, map[string]any{
 		"allowed_virtual_models": []string{"demo-app-managed-model"},
+		"max_model_keys":         1,
 	})
 
 	createResp := env.appPostJSON(t, "/api/app/model-keys", appKey, map[string]any{
@@ -702,6 +703,14 @@ func TestAppAPIModelKeysManagement(t *testing.T) {
 	}
 
 	status, body := env.appPostText(t, "/api/app/model-keys", appKey, map[string]any{
+		"name":  "second-managed-model-key",
+		"model": "demo-app-managed-model",
+	})
+	if status != http.StatusForbidden || !strings.Contains(body, "model key limit exceeded") {
+		t.Fatalf("expected model key count limit rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appPostText(t, "/api/app/model-keys", appKey, map[string]any{
 		"name":  "disallowed-model-key",
 		"model": "blocked-model",
 	})
@@ -718,6 +727,13 @@ func TestAppAPIModelKeysManagement(t *testing.T) {
 	status, body = env.appDeleteText(t, "/api/app/model-keys/"+keyID, appKey)
 	if status != http.StatusOK || !strings.Contains(body, "\"ok\":true") {
 		t.Fatalf("unexpected app model key delete response: status=%d body=%q", status, body)
+	}
+	recreateResp := env.appPostJSON(t, "/api/app/model-keys", appKey, map[string]any{
+		"name":  "recreated-managed-model-key",
+		"model": "demo-app-managed-model",
+	}, http.StatusOK)
+	if !strings.HasPrefix(nestedString(recreateResp, "raw_key"), "sk-") {
+		t.Fatalf("expected revoked model key not to count against limit: %#v", recreateResp)
 	}
 
 	status, body = postExternalText(t, env.server.URL+"/v1/responses", map[string]string{

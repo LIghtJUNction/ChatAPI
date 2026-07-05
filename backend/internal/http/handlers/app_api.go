@@ -143,6 +143,24 @@ func (h AppAPIHandler) CreateModelAPIKey(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	maxModelKeys := positiveIntFromAny(principal.ResourceLimits["max_model_keys"])
+	if maxModelKeys > 0 {
+		items, err := h.ModelAPIKeys.ListKeysForUser(r.Context(), principal.UserID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		activeCount := 0
+		for _, item := range items {
+			if item.RevokedAt == nil {
+				activeCount++
+			}
+		}
+		if activeCount >= maxModelKeys {
+			http.Error(w, "app api key model key limit exceeded", http.StatusForbidden)
+			return
+		}
+	}
 	item, rawKey, err := h.ModelAPIKeys.CreateKey(r.Context(), principal.UserID, stringValue(body["name"], "model key"), model)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -329,6 +347,26 @@ func stringSetFromAny(value any) map[string]struct{} {
 	}
 	return out
 }
+
+func positiveIntFromAny(value any) int {
+	switch raw := value.(type) {
+	case int:
+		if raw > 0 {
+			return raw
+		}
+	case int64:
+		if raw > 0 && raw <= int64(maxIntForHandler) {
+			return int(raw)
+		}
+	case float64:
+		if raw > 0 && raw <= float64(maxIntForHandler) {
+			return int(raw)
+		}
+	}
+	return 0
+}
+
+const maxIntForHandler = int(^uint(0) >> 1)
 
 func mapSlice(value any) ([]map[string]any, error) {
 	rawItems, ok := value.([]any)

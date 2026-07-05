@@ -38,6 +38,7 @@
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
 - 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 可在当前 lab 用户语境下工作；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
 - 应用 API 当前已开始覆盖 `model_keys:read` / `model_keys:write` / `model_keys:delete`：`/api/app/model-keys` 可按 scope 和 `allowed_virtual_models` / `allowed_model_key_ids` 管理当前用户自己的虚拟模型 API Key。
+- 应用 API 创建虚拟模型 API Key 时已开始支持 `max_model_keys`：按当前用户未撤销虚拟模型 key 数量限制创建，达到上限返回 `403`。
 - 应用 API 当前已开始覆盖 `automation:read` / `automation:write`：`GET/PUT /api/app/automation-rules` 可读写当前用户自己的自动化规则，并支持 `allowed_automation_rule_ids` 限制外部程序只能管理指定规则。
 - 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、按模型和状态聚合、最老 pending 等待秒数。
 - 应用 API 当前已开始覆盖 `max_requests_per_minute` 资源限制：在单进程内按应用 API Key 做 1 分钟窗口限流，超限返回 `429` 并写入 `app_api_key_audit_logs`，管理员审计聚合视图中显示为 `app_api.request` failure / `rate_limited`。
@@ -1302,6 +1303,7 @@ user_app_api_keys
 - `allowed_automation_rule_ids`：只允许读写指定自动化规则。
 - `allowed_request_actions`：细分 `delta`、`complete`、`abort`，避免只需要流式输出的程序获得终止能力。
 - `max_requests_per_minute`：覆盖默认限流。
+- `max_model_keys`：限制该应用 API Key 创建虚拟模型 API Key 时，当前用户最多可持有的未撤销虚拟模型 key 数量。
 - `allowed_source_ips`：可选 IP allowlist，适合部署在固定出口的自动化程序。当前 Go 重构分支已支持精确 IP 和 CIDR，按直连 `RemoteAddr` 判断；如果部署在反向代理后，需要后续增加可信代理配置后才能安全读取转发头。
 
 建议应用 API 路由统一放在 `/api/app/*`，只接受应用 API Key，不接受浏览器 session：
@@ -1347,7 +1349,7 @@ user_app_api_keys
 - 支持过期时间和撤销。当前 Go 重构分支的用户侧应用 API Key 创建接口已支持 `expires_at`，过期时间必须晚于当前时间。
 - 记录 `last_used_at`，但写入频率要节流，避免高频请求导致 SQLite 写放大。
 - 对 `requests:respond` 加限流，避免外部自动化错误循环刷屏。
-- 对 `model_keys:write` 加数量限制和频率限制，复用系统/用户的虚拟模型 API Key 数量上限。
+- 对 `model_keys:write` 加数量限制和频率限制。当前 Go 重构分支先支持 `max_model_keys`，按当前用户未撤销虚拟模型 key 数量限制创建；后续再接系统/用户默认上限。
 
 当前 Go 重构分支已落地的最小接口形状：
 
@@ -1356,7 +1358,7 @@ user_app_api_keys
 - `max_requests_per_minute`：当前已按应用 API Key 在单 Go 进程内实现 1 分钟窗口限流；值为空或 `0` 表示不限流。超限请求返回 `429 app api key rate limited`，并记录 `error_code=rate_limited`。后续多实例部署需要迁移到 Redis 或数据库限流器。
 - `allowed_source_ips`：当前已在应用 API 鉴权后、scope 校验前执行。未配置时不限制；配置后请求来源 IP 不匹配则返回 `403 app api key source ip forbidden`，并记录 `error_code=source_ip_forbidden`。
 - `GET /api/app/model-keys`：需要 `model_keys:read`，返回当前用户自己的虚拟模型 API Key；如果配置了 `allowed_model_key_ids`，只返回允许的 key。
-- `POST /api/app/model-keys`：需要 `model_keys:write`，请求体包含 `name`、`model`；如果配置了 `allowed_virtual_models`，只能为允许的虚拟模型创建 key。
+- `POST /api/app/model-keys`：需要 `model_keys:write`，请求体包含 `name`、`model`；如果配置了 `allowed_virtual_models`，只能为允许的虚拟模型创建 key；如果配置了 `max_model_keys`，当前用户未撤销虚拟模型 key 数量达到上限时返回 `403`。
 - `DELETE /api/app/model-keys/{key_id}`：需要 `model_keys:delete`，只能删除当前用户自己的 key；如果配置了 `allowed_model_key_ids`，只能删除允许的 key。
 - `GET /api/app/statistics/summary`：需要 `statistics:read`，当前返回请求态势摘要；首版不返回 token、价格、平均耗时等需要额外计量的数据，避免给外部自动化暴露误导性指标。
 - 虚拟模型 key 使用 `sk-` 前缀和可解密密文保存；应用 API Key 使用 `ak-` 前缀和 hash 保存。两套鉴权中间件完全分离，`ak-` 不能访问模型兼容入口，`sk-` 不能访问 `/api/app/*`。

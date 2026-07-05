@@ -43,6 +43,8 @@ func NewRouter(
 	appAPIHandler := handlers.AppAPIHandler{Service: chatService, ModelAPIKeys: modelAPIKeyService, AutomationRules: automationRuleService}
 	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService}
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService}
+	runtimeMonitor := service.NewRuntimeMonitorService(cfg, realtimeHub, pending)
+	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -122,6 +124,12 @@ func NewRouter(
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Post("/requests/{requestID}/abort", appAPIHandler.RequestAbort)
 	router.Mount("/api/app", appRouter)
+	adminRouter := chi.NewRouter()
+	adminRouter.Use(middleware.RequireAdminActor())
+	adminRouter.Get("/runtime/summary", adminRuntimeHandler.Summary)
+	adminRouter.Get("/runtime/memory", adminRuntimeHandler.Memory)
+	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
+	router.Mount("/api/admin", adminRouter)
 	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
 	router.Post("/api/conversations/{conversationID}/abort", chatHandler.AbortConversation)
 	router.Post("/api/conversations/{conversationID}/respond", chatHandler.RespondConversation)

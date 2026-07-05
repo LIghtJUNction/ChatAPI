@@ -40,6 +40,7 @@
 - 应用 API 当前已开始覆盖 `model_keys:read` / `model_keys:write` / `model_keys:delete`：`/api/app/model-keys` 可按 scope 和 `allowed_virtual_models` / `allowed_model_key_ids` 管理当前用户自己的虚拟模型 API Key。
 - 应用 API 当前已开始覆盖 `automation:read` / `automation:write`：`GET/PUT /api/app/automation-rules` 可读写当前用户自己的自动化规则，并支持 `allowed_automation_rule_ids` 限制外部程序只能管理指定规则。
 - 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、按模型和状态聚合、最老 pending 等待秒数。
+- 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -909,6 +910,13 @@ type Hub struct {
 - `GET /api/admin/storage/users`
 - `POST /api/admin/storage/cleanup`
 - `POST /api/admin/runtime/gc`
+
+当前 Go 重构分支已先落地运行时监控的服务内指标：
+
+- `GET /api/admin/runtime/summary`：返回 Go runtime 基本信息、内存快照、pending turn 统计、realtime subscriber 队列统计、SQLite 主库/WAL 文件大小。
+- `GET /api/admin/runtime/memory`：返回当前 Go `runtime.MemStats` 的核心字段，包括 heap、sys、next GC、GC 次数和 pause 累计。
+- `POST /api/admin/runtime/gc`：触发一次 `runtime.GC()` 和 `debug.FreeOSMemory()`，返回 GC 后内存快照。
+- 当前还没有引入系统级探针，因此 CPU 使用率、系统可用内存、磁盘总容量、进程 RSS/FD 数、慢客户端断开计数仍属于后续运维监控扩展。
 
 GC 设置：
 
@@ -1918,6 +1926,7 @@ make release-snapshot
 - Go `httptest` 集成测试应覆盖虚拟模型 API Key 的创建、可解密回看、撤销后拒绝访问、模型兼容入口 owner 归属，以及应用 API Key 通过 `model_keys:*` scope 和 resource limits 管理虚拟模型 API Key。
 - Go `httptest` 集成测试应覆盖应用 API Key 通过 `automation:read/write` 读写自动化规则，并覆盖缺少 scope 与 `allowed_automation_rule_ids` 拒绝。
 - Go `httptest` 集成测试应覆盖应用 API Key 通过 `statistics:read` 读取自己的请求统计摘要，验证 owner 隔离和缺少 scope 拒绝。
+- Go `httptest` 集成测试应覆盖管理员运行时监控接口、GC 触发接口、serve 模式无 admin session 拒绝，以及 `ak-` / `sk-` key 不能访问管理员接口。
 - Lab 模式下 OpenAI/Anthropic SDK 请求可进入等待态，浏览器完成输出后 SDK 收到兼容响应。
 - Tool Call 辅助不会自动发送，只能由用户审核后手动提交。
 - KirariNetwork token 过期时可自动 refresh；refresh 失败时提示用户重新连接，不泄露 token。

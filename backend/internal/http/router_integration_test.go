@@ -804,6 +804,60 @@ func TestAppAPIStatisticsSummaryRejectsMissingScope(t *testing.T) {
 	}
 }
 
+func TestAdminRuntimeEndpoints(t *testing.T) {
+	env := newTestEnv(t)
+
+	summaryResp := env.getJSON(t, "/api/admin/runtime/summary", http.StatusOK)
+	summary := summaryResp["summary"].(map[string]any)
+	if nestedPathString(summary, "go", "version") == "" || summary["memory"] == nil || summary["pending"] == nil || summary["realtime"] == nil {
+		t.Fatalf("unexpected runtime summary response: %#v", summaryResp)
+	}
+	database := summary["database"].(map[string]any)
+	if nestedString(database, "driver") != "sqlite" {
+		t.Fatalf("unexpected database runtime info: %#v", summaryResp)
+	}
+
+	memoryResp := env.getJSON(t, "/api/admin/runtime/memory", http.StatusOK)
+	memory := memoryResp["memory"].(map[string]any)
+	if numericValue(memory["sys_bytes"]) <= 0 {
+		t.Fatalf("unexpected runtime memory response: %#v", memoryResp)
+	}
+
+	gcResp := env.postJSON(t, "/api/admin/runtime/gc", map[string]any{}, http.StatusOK)
+	if gcResp["memory"] == nil {
+		t.Fatalf("unexpected runtime gc response: %#v", gcResp)
+	}
+}
+
+func TestAdminRuntimeRejectsServeWithoutAdmin(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+
+	status, body := env.getText(t, "/api/admin/runtime/summary")
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected admin rejection in serve mode: status=%d body=%q", status, body)
+	}
+}
+
+func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
+	modelKey := env.seedModelAPIKey(t, "lab-user", "admin-denied-model-key", "admin-denied")
+
+	status, body := env.getTextWithHeaders(t, "/api/admin/runtime/summary", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key admin rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/runtime/summary", map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected model api key admin rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAppAPIAuditLogWritten(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
@@ -1668,6 +1722,32 @@ func (e *testEnv) getJSON(t *testing.T, path string, wantStatus int) map[string]
 		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
 	}
 	return payload
+}
+
+func (e *testEnv) getText(t *testing.T, path string) (int, string) {
+	t.Helper()
+	return e.getTextWithHeaders(t, path, nil)
+}
+
+func (e *testEnv) getTextWithHeaders(t *testing.T, path string, headers map[string]string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("get request %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
 }
 
 func (e *testEnv) waitForWaitingConversation(t *testing.T, title string) map[string]any {

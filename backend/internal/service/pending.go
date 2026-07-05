@@ -41,6 +41,13 @@ type PendingRegistry struct {
 	byConversationID map[string]*PendingTurn
 }
 
+type PendingStats struct {
+	Active   int            `json:"active"`
+	ByState  map[string]int `json:"by_state"`
+	ByModel  map[string]int `json:"by_model"`
+	ByFormat map[string]int `json:"by_format"`
+}
+
 func NewPendingRegistry() *PendingRegistry {
 	return &PendingRegistry{
 		byConversationID: make(map[string]*PendingTurn),
@@ -61,6 +68,35 @@ func (r *PendingRegistry) GetByConversationID(conversationID string) (*PendingTu
 	defer r.mu.RUnlock()
 	turn, ok := r.byConversationID[conversationID]
 	return turn, ok
+}
+
+func (r *PendingRegistry) Stats() PendingStats {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	stats := PendingStats{
+		Active:   len(r.byConversationID),
+		ByState:  map[string]int{},
+		ByModel:  map[string]int{},
+		ByFormat: map[string]int{},
+	}
+	for _, turn := range r.byConversationID {
+		state := turn.State
+		if state == "" {
+			state = "pending"
+		}
+		stats.ByState[state]++
+		model := turn.Model
+		if model == "" {
+			model = "unknown"
+		}
+		stats.ByModel[model]++
+		format := turn.RequestFormat
+		if format == "" {
+			format = "unknown"
+		}
+		stats.ByFormat[format]++
+	}
+	return stats
 }
 
 func (r *PendingRegistry) Resolve(conversationID string, result PendingResult) error {

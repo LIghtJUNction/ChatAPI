@@ -26,6 +26,14 @@ type RealtimeHub struct {
 	store store.Store
 }
 
+type RealtimeStats struct {
+	Subscribers      int `json:"subscribers"`
+	QueuedEvents     int `json:"queued_events"`
+	MaxQueueCapacity int `json:"max_queue_capacity"`
+	RecoverableDrops int `json:"recoverable_drops"`
+	CriticalDrops    int `json:"critical_drops"`
+}
+
 func NewRealtimeHub(dataStore store.Store) *RealtimeHub {
 	return &RealtimeHub{
 		subs:  make(map[*Subscription]struct{}),
@@ -86,6 +94,18 @@ func (h *RealtimeHub) PublishConversationDelete(conversationID string) {
 		Type:           "conversation_delete",
 		ConversationID: conversationID,
 	})
+}
+
+func (h *RealtimeHub) Stats() RealtimeStats {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	stats := RealtimeStats{}
+	for sub := range h.subs {
+		stats.Subscribers++
+		stats.QueuedEvents += len(sub.Events)
+		stats.MaxQueueCapacity += cap(sub.Events)
+	}
+	return stats
 }
 
 func (h *RealtimeHub) broadcast(event Event) {

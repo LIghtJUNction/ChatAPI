@@ -27,6 +27,11 @@ func RequireAppAPIKey(authService *service.AppAPIKeyService, scopes ...string) f
 				Role:     "app_api",
 				Source:   "app_api_key",
 			})
+			if !authService.AllowSourceIP(principal, r.RemoteAddr) {
+				authService.RecordAudit(ctx, principal, r.URL.Path, http.StatusForbidden, "source_ip_forbidden")
+				http.Error(w, "app api key source ip forbidden", http.StatusForbidden)
+				return
+			}
 			for _, scope := range scopes {
 				if _, ok := principal.Scopes[scope]; !ok {
 					authService.RecordAudit(ctx, principal, r.URL.Path, http.StatusForbidden, "forbidden")

@@ -1624,6 +1624,42 @@ func TestAppAPIRateLimit(t *testing.T) {
 	}
 }
 
+func TestAppAPISourceIPLimit(t *testing.T) {
+	env := newTestEnv(t)
+	allowedKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, map[string]any{
+		"allowed_source_ips": []string{"127.0.0.0/8"},
+	})
+	allowedResp := env.appGetJSON(t, "/api/app/me", allowedKey, http.StatusOK)
+	if nestedPathString(allowedResp, "user", "id") != "lab-user" {
+		t.Fatalf("unexpected allowed source ip response: %#v", allowedResp)
+	}
+
+	blockedKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, map[string]any{
+		"allowed_source_ips": []string{"203.0.113.1"},
+	})
+	status, body := env.appGetText(t, "/api/app/me", blockedKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "source ip forbidden") {
+		t.Fatalf("expected source ip rejection: status=%d body=%q", status, body)
+	}
+
+	combinedResp := env.getJSON(t, "/api/admin/audit/logs?include_app_api=1&event_type=app_api.request&actor_user_id=lab-user&limit=20", http.StatusOK)
+	items := combinedResp["items"].([]any)
+	foundSourceIPFailure := false
+	for _, rawItem := range items {
+		item := rawItem.(map[string]any)
+		metadata := item["metadata"].(map[string]any)
+		if nestedString(item, "outcome") == "failure" &&
+			numericValue(metadata["status_code"]) == http.StatusForbidden &&
+			nestedString(metadata, "error_code") == "source_ip_forbidden" {
+			foundSourceIPFailure = true
+			break
+		}
+	}
+	if !foundSourceIPFailure {
+		t.Fatalf("expected source ip audit in combined admin view: %#v", combinedResp)
+	}
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 

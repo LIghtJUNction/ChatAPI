@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,7 @@ type AppAPIPrincipal struct {
 	ResourceLimits       map[string]any
 	AllowedActions       map[string]struct{}
 	MaxRequestsPerMinute int
+	AllowedSourceIPs     []string
 }
 
 type AppAPIKeyService struct {
@@ -85,6 +88,7 @@ func (s *AppAPIKeyService) Authenticate(ctx context.Context, rawKey string) (App
 		ResourceLimits:       item.ResourceLimits,
 		AllowedActions:       make(map[string]struct{}),
 		MaxRequestsPerMinute: positiveInt(item.ResourceLimits["max_requests_per_minute"]),
+		AllowedSourceIPs:     stringArray(item.ResourceLimits["allowed_source_ips"]),
 	}
 	for _, scope := range item.Scopes {
 		principal.Scopes[strings.TrimSpace(scope)] = struct{}{}
@@ -93,6 +97,38 @@ func (s *AppAPIKeyService) Authenticate(ctx context.Context, rawKey string) (App
 		principal.AllowedActions[action] = struct{}{}
 	}
 	return principal, nil
+}
+
+func (s *AppAPIKeyService) AllowSourceIP(principal AppAPIPrincipal, remoteAddr string) bool {
+	if len(principal.AllowedSourceIPs) == 0 {
+		return true
+	}
+	host := strings.TrimSpace(remoteAddr)
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	for _, rawRule := range principal.AllowedSourceIPs {
+		rule := strings.TrimSpace(rawRule)
+		if rule == "" {
+			continue
+		}
+		if strings.Contains(rule, "/") {
+			prefix, err := netip.ParsePrefix(rule)
+			if err == nil && prefix.Contains(addr) {
+				return true
+			}
+			continue
+		}
+		allowedAddr, err := netip.ParseAddr(rule)
+		if err == nil && allowedAddr == addr {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AppAPIKeyService) AllowRequest(principal AppAPIPrincipal, now time.Time) bool {

@@ -45,6 +45,7 @@ func NewRouter(
 	router.Post("/api/auth/logout", authHandler.Logout)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
 	router.Get("/api/ws-info", labHandler.PingInfo)
+	router.Get("/lab/requests", labHandler.ListRequests)
 	router.Get("/lab/requests/{requestID}", labHandler.GetRequest)
 	router.Post("/lab/requests/{requestID}/delta", labHandler.RequestDelta)
 	router.Post("/lab/requests/{requestID}/complete", labHandler.RequestComplete)

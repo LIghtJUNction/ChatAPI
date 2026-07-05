@@ -85,6 +85,10 @@ func (s *ChatAPIService) ListMessages(ctx context.Context, conversationID string
 	return s.store.ListMessages(ctx, conversationID)
 }
 
+func (s *ChatAPIService) ListRequests(ctx context.Context) ([]store.Request, error) {
+	return s.store.ListRequests(ctx)
+}
+
 func (s *ChatAPIService) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
 	return s.store.GetRequest(ctx, requestID)
 }

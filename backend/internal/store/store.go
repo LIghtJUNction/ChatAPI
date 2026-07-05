@@ -82,6 +82,7 @@ type Store interface {
 	Ping(context.Context) error
 	ListConversations(context.Context) ([]Conversation, error)
 	GetConversation(context.Context, string) (Conversation, error)
+	ListRequests(context.Context) ([]Request, error)
 	GetRequest(context.Context, string) (Request, error)
 	ListMessages(context.Context, string) ([]Message, error)
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)

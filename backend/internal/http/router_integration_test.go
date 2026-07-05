@@ -234,6 +234,62 @@ func TestLabRequestEndpointsByRequestID(t *testing.T) {
 	}
 }
 
+func TestLabRequestsList(t *testing.T) {
+	env := newTestEnv(t)
+
+	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-list-1",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "list 请求 1"}},
+			},
+		},
+	})
+	secondCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
+		"model": "demo-list-2",
+		"messages": []map[string]any{
+			{"role": "user", "content": "list 请求 2"},
+		},
+	})
+
+	firstConversation := env.waitForWaitingConversation(t, "list 请求 1")
+	secondConversation := env.waitForWaitingConversation(t, "list 请求 2")
+
+	listResp := env.getJSON(t, "/lab/requests", http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) < 2 {
+		t.Fatalf("unexpected lab requests list: %#v", listResp)
+	}
+
+	foundFirst := false
+	foundSecond := false
+	for _, item := range items {
+		record := item.(map[string]any)
+		switch nestedString(record, "conversation_id") {
+		case firstConversation["id"].(string):
+			foundFirst = nestedString(record, "input_text") == "list 请求 1" && nestedString(record, "status") == "waiting"
+		case secondConversation["id"].(string):
+			foundSecond = nestedString(record, "input_text") == "list 请求 2" && nestedString(record, "request_format") == "chat_completions"
+		}
+	}
+	if !foundFirst || !foundSecond {
+		t.Fatalf("missing expected requests in list: %#v", listResp)
+	}
+
+	env.postJSON(t, "/api/conversations/"+firstConversation["id"].(string)+"/respond", map[string]any{
+		"text": "done1",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/conversations/"+secondConversation["id"].(string)+"/respond", map[string]any{
+		"text": "done2",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-firstCh
+	<-secondCh
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 

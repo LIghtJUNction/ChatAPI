@@ -38,6 +38,18 @@ func (h LabHandler) PingInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h LabHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
+	items, err := h.Service.ListRequests(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"items": items,
+	})
+}
+
 func (h LabHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
 	if requestID == "" {

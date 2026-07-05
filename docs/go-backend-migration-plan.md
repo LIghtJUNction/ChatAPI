@@ -32,6 +32,7 @@
 - pending turn 已补上最小状态机约束：`delta` 会把会话推进到 `streaming`，终态后的 `delta` / `complete` / `abort` 会返回 `409`，并用集成测试守护这些行为。
 - `backend/internal/service` 已开始收敛统一的 `TurnControlCommand`，把 WebUI 手工回复、后续应用 API 和自动化规则共享的 turn control 输入模型从 handler 中抽离出来。
 - 已补上 `request_id -> conversation_id -> TurnControlCommand` 的最小解析链路，并先用于 `lab` 路由；后续应用 API 的 `/api/app/requests/{request_id}/*` 将直接复用这层能力。
+- 已补上统一的 request 读取视图（列表 + 详情）并先用于 `GET /lab/requests`、`GET /lab/requests/{request_id}`；后续 `/api/app/requests` 应直接复用这套 request reader，而不是再单独拼查询结构。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 

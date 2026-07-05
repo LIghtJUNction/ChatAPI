@@ -94,6 +94,10 @@ func NewRouter(
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Put("/automation-rules", appAPIHandler.PutAutomationRules)
 	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "statistics:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/statistics/summary", appAPIHandler.StatisticsSummary)
+	appRouter.With(
 		middleware.RequireAppAPIKey(appAPIKeyService, "model_keys:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/model-keys", appAPIHandler.ListModelAPIKeys)

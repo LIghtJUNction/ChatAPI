@@ -749,6 +749,61 @@ func TestAppAPIAutomationRulesResourceLimit(t *testing.T) {
 	}
 }
 
+func TestAppAPIStatisticsSummary(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
+	otherKey := env.seedAppAPIKey(t, "other-user", []string{"statistics:read"}, nil)
+
+	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "stats-model-a",
+		"input": "统计请求 A",
+	})
+	secondCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "stats-model-b",
+		"input": "统计请求 B",
+	})
+
+	firstConversation := env.waitForWaitingConversation(t, "统计请求 A")
+	secondConversation := env.waitForWaitingConversation(t, "统计请求 B")
+	env.postJSON(t, "/api/conversations/"+firstConversation["id"].(string)+"/respond", map[string]any{
+		"text": "stats done",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-firstCh
+
+	resp := env.appGetJSON(t, "/api/app/statistics/summary", appKey, http.StatusOK)
+	summary := resp["summary"].(map[string]any)
+	if numericValue(summary["total_requests"]) != 2 || numericValue(summary["closed_requests"]) != 1 || numericValue(summary["pending_requests"]) != 1 {
+		t.Fatalf("unexpected statistics summary: %#v", resp)
+	}
+	byModel := summary["by_model"].(map[string]any)
+	if numericValue(byModel["stats-model-a"]) != 1 || numericValue(byModel["stats-model-b"]) != 1 {
+		t.Fatalf("unexpected statistics by_model: %#v", resp)
+	}
+
+	otherResp := env.appGetJSON(t, "/api/app/statistics/summary", otherKey, http.StatusOK)
+	otherSummary := otherResp["summary"].(map[string]any)
+	if numericValue(otherSummary["total_requests"]) != 0 {
+		t.Fatalf("foreign owner should not see statistics: %#v", otherResp)
+	}
+
+	env.postJSON(t, "/api/conversations/"+secondConversation["id"].(string)+"/respond", map[string]any{
+		"text": "stats cleanup",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-secondCh
+}
+
+func TestAppAPIStatisticsSummaryRejectsMissingScope(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
+
+	status, body := env.appGetText(t, "/api/app/statistics/summary", appKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("expected statistics scope rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAppAPIAuditLogWritten(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
@@ -1775,4 +1830,15 @@ func nestedPathString(record map[string]any, path ...string) string {
 		return value
 	}
 	return ""
+}
+
+func numericValue(value any) int {
+	switch raw := value.(type) {
+	case float64:
+		return int(raw)
+	case int:
+		return raw
+	default:
+		return 0
+	}
 }

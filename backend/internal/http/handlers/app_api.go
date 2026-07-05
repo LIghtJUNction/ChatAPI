@@ -226,6 +226,20 @@ func (h AppAPIHandler) PutAutomationRules(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": nextRules})
 }
 
+func (h AppAPIHandler) StatisticsSummary(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	summary, err := h.Service.StatisticsSummaryForOwner(r.Context(), principal.UserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "summary": summary})
+}
+
 func (h AppAPIHandler) RequestDelta(w http.ResponseWriter, r *http.Request) {
 	h.executeRequestTurnControl(w, r, "delta", service.TurnControlStreamDelta)
 }

@@ -172,6 +172,7 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	anthropicBlockStarted := false
 
 	for _, event := range protocol.BuildStreamStart(conversation) {
 		if err := writeSSEEvent(w, event); err != nil {
@@ -188,7 +189,8 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 			if !ok {
 				return
 			}
-			streamEvents := buildPendingStreamEvents(conversation, event)
+			streamEvents, nextAnthropicBlockStarted := buildPendingStreamEvents(conversation, event, anthropicBlockStarted)
+			anthropicBlockStarted = nextAnthropicBlockStarted
 			for _, streamEvent := range streamEvents {
 				if err := writeSSEEvent(w, streamEvent); err != nil {
 					return
@@ -199,12 +201,42 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func buildPendingStreamEvents(conversation store.Conversation, event service.PendingEvent) []protocol.StreamEvent {
+func buildPendingStreamEvents(conversation store.Conversation, event service.PendingEvent, anthropicBlockStarted bool) ([]protocol.StreamEvent, bool) {
+	format := stringValue(conversation.Metadata["request_format"], "responses")
+	if format == "anthropic_messages" {
+		payload := protocol.CompletePayload{
+			ResponseID: stringValue(conversation.ResponseID, ""),
+			OutputText: event.OutputText,
+			Mode:       event.Mode,
+			ToolName:   event.ToolName,
+			ToolCallID: event.ToolCallID,
+			ToolOutput: event.ToolOutput,
+		}
+		switch event.Type {
+		case "delta":
+			if !anthropicBlockStarted {
+				return append([]protocol.StreamEvent{protocol.BuildAnthropicContentBlockStart(payload)}, protocol.BuildStreamDelta(conversation, event.DeltaText)...), true
+			}
+			return protocol.BuildStreamDelta(conversation, event.DeltaText), true
+		case "complete":
+			streamEvents := make([]protocol.StreamEvent, 0, 4)
+			if !anthropicBlockStarted {
+				streamEvents = append(streamEvents, protocol.BuildAnthropicContentBlockStart(payload))
+			}
+			streamEvents = append(streamEvents, protocol.BuildStreamComplete(conversation, payload)...)
+			return streamEvents, true
+		case "abort":
+			return protocol.BuildStreamAbort(conversation, event.ErrorBody), anthropicBlockStarted
+		default:
+			return nil, anthropicBlockStarted
+		}
+	}
+
 	switch event.Type {
 	case "delta":
-		return protocol.BuildStreamDelta(conversation, event.DeltaText)
+		return protocol.BuildStreamDelta(conversation, event.DeltaText), anthropicBlockStarted
 	case "abort":
-		return protocol.BuildStreamAbort(conversation, event.ErrorBody)
+		return protocol.BuildStreamAbort(conversation, event.ErrorBody), anthropicBlockStarted
 	case "complete":
 		return protocol.BuildStreamComplete(conversation, protocol.CompletePayload{
 			ResponseID: stringValue(conversation.ResponseID, ""),
@@ -213,9 +245,9 @@ func buildPendingStreamEvents(conversation store.Conversation, event service.Pen
 			ToolName:   event.ToolName,
 			ToolCallID: event.ToolCallID,
 			ToolOutput: event.ToolOutput,
-		})
+		}), anthropicBlockStarted
 	default:
-		return nil
+		return nil, anthropicBlockStarted
 	}
 }
 

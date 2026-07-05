@@ -31,32 +31,19 @@ func BuildStreamStart(conversation store.Conversation) []StreamEvent {
 			},
 		}}
 	case "anthropic_messages":
-		return []StreamEvent{
-			{
-				Event: "message_start",
-				Data: map[string]any{
-					"type": "message_start",
-					"message": map[string]any{
-						"id":      "msg_" + uuid.NewString(),
-						"type":    "message",
-						"role":    "assistant",
-						"model":   model,
-						"content": []any{},
-					},
+		return []StreamEvent{{
+			Event: "message_start",
+			Data: map[string]any{
+				"type": "message_start",
+				"message": map[string]any{
+					"id":      "msg_" + uuid.NewString(),
+					"type":    "message",
+					"role":    "assistant",
+					"model":   model,
+					"content": []any{},
 				},
 			},
-			{
-				Event: "content_block_start",
-				Data: map[string]any{
-					"type":  "content_block_start",
-					"index": 0,
-					"content_block": map[string]any{
-						"type": "text",
-						"text": "",
-					},
-				},
-			},
-		}
+		}}
 	default:
 		return []StreamEvent{{
 			Event: "response.created",
@@ -143,6 +130,10 @@ func BuildStreamComplete(conversation store.Conversation, payload CompletePayloa
 		}
 		return []StreamEvent{{Data: chunk}, {Data: "[DONE]", Done: true}}
 	case "anthropic_messages":
+		stopReason := "end_turn"
+		if payload.Mode == "tool_call" {
+			stopReason = "tool_use"
+		}
 		return []StreamEvent{
 			{
 				Event: "content_block_stop",
@@ -156,7 +147,7 @@ func BuildStreamComplete(conversation store.Conversation, payload CompletePayloa
 				Data: map[string]any{
 					"type": "message_delta",
 					"delta": map[string]any{
-						"stop_reason": "end_turn",
+						"stop_reason": stopReason,
 					},
 				},
 			},
@@ -175,6 +166,29 @@ func BuildStreamComplete(conversation store.Conversation, payload CompletePayloa
 				"response": BuildResponse(conversation, payload),
 			},
 		}}
+	}
+}
+
+func BuildAnthropicContentBlockStart(payload CompletePayload) StreamEvent {
+	block := map[string]any{
+		"type": "text",
+		"text": "",
+	}
+	if payload.Mode == "tool_call" {
+		block = map[string]any{
+			"type":  "tool_use",
+			"id":    stringValue(payload.ToolCallID, "toolu_"+uuid.NewString()),
+			"name":  payload.ToolName,
+			"input": parseJSONValue(payload.OutputText),
+		}
+	}
+	return StreamEvent{
+		Event: "content_block_start",
+		Data: map[string]any{
+			"type":          "content_block_start",
+			"index":         0,
+			"content_block": block,
+		},
 	}
 }
 

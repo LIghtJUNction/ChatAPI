@@ -352,6 +352,106 @@ func TestChatCompletionsSSEStream(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsToolCallSSEStream(t *testing.T) {
+	env := newTestEnv(t)
+
+	streamCh := startTextRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
+		"model":  "demo-chat-tool-stream",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "chat tool stream 测试"},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "chat tool stream 测试")
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "{\"city\":\"Shanghai\"}",
+		"mode":            "tool_call",
+		"tool_name":       "get_weather",
+		"tool_call_id":    "call_stream_1",
+	}, http.StatusOK)
+
+	streamBody := <-streamCh
+	if !strings.Contains(streamBody, "\"tool_calls\"") {
+		t.Fatalf("missing tool_calls chunk: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"name\":\"get_weather\"") || !strings.Contains(streamBody, "\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\"") {
+		t.Fatalf("missing tool call function payload: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"finish_reason\":\"tool_calls\"") || !strings.Contains(streamBody, "data: [DONE]") {
+		t.Fatalf("missing tool_calls finish marker: %s", streamBody)
+	}
+}
+
+func TestAnthropicMessagesSSEStream(t *testing.T) {
+	env := newTestEnv(t)
+
+	streamCh := startTextRequest(t, env.server.URL+"/messages", map[string]any{
+		"model":  "claude-stream-demo",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "anthropic stream 测试"},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "anthropic stream 测试")
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "Anthropic 流式回复",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	streamBody := <-streamCh
+	if !strings.Contains(streamBody, "event: message_start") {
+		t.Fatalf("missing anthropic message_start: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "event: content_block_start") || !strings.Contains(streamBody, "\"type\":\"text\"") {
+		t.Fatalf("missing anthropic text block start: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "event: content_block_delta") || !strings.Contains(streamBody, "\"text\":\"Anthropic 流式回复\"") {
+		t.Fatalf("missing anthropic delta: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"stop_reason\":\"end_turn\"") || !strings.Contains(streamBody, "event: message_stop") {
+		t.Fatalf("missing anthropic completion markers: %s", streamBody)
+	}
+}
+
+func TestAnthropicMessagesToolCallSSEStream(t *testing.T) {
+	env := newTestEnv(t)
+
+	streamCh := startTextRequest(t, env.server.URL+"/messages", map[string]any{
+		"model":  "claude-tool-stream-demo",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "anthropic tool stream 测试"},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "anthropic tool stream 测试")
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "{\"city\":\"Shanghai\"}",
+		"mode":            "tool_call",
+		"tool_name":       "get_weather",
+		"tool_call_id":    "toolu_stream_1",
+	}, http.StatusOK)
+
+	streamBody := <-streamCh
+	if !strings.Contains(streamBody, "event: content_block_start") || !strings.Contains(streamBody, "\"type\":\"tool_use\"") {
+		t.Fatalf("missing anthropic tool_use block start: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"name\":\"get_weather\"") || !strings.Contains(streamBody, "\"city\":\"Shanghai\"") {
+		t.Fatalf("missing anthropic tool_use payload: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"stop_reason\":\"tool_use\"") || !strings.Contains(streamBody, "event: message_stop") {
+		t.Fatalf("missing anthropic tool_use completion markers: %s", streamBody)
+	}
+}
+
 type testEnv struct {
 	server *httptest.Server
 	client *http.Client

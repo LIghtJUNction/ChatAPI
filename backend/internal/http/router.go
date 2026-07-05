@@ -34,13 +34,14 @@ func NewRouter(
 	}))
 	router.Use(middleware.RecordHTTPMetrics(httpMetrics))
 	router.Use(middleware.InjectLabRequestActor(cfg))
+	router.Use(middleware.InjectSessionRequestActor(cfg))
 	router.Use(middleware.RequireLabAccess(cfg))
 
 	healthHandler := handlers.HealthHandler{Config: cfg, Store: dataStore}
 	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
-	authHandler := handlers.AuthHandler{Config: cfg}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	auditService := service.NewAuditService(dataStore)
+	authHandler := handlers.AuthHandler{Config: cfg, Audit: auditService}
 	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore), Audit: auditService}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
 	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)

@@ -1285,6 +1285,54 @@ func TestAdminRuntimeRejectsServeWithoutAdmin(t *testing.T) {
 	}
 }
 
+func TestServeAdminSessionLoginAndLogout(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.AdminPassword = "admin-secret"
+	})
+
+	sessionResp := env.getJSON(t, "/api/auth/session", http.StatusOK)
+	if sessionResp["authenticated"] != false {
+		t.Fatalf("expected unauthenticated session before login: %#v", sessionResp)
+	}
+
+	status, body := env.postText(t, "/api/auth/login", map[string]any{
+		"username": "admin",
+		"password": "wrong",
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "invalid username or password") {
+		t.Fatalf("expected invalid login rejection: status=%d body=%q", status, body)
+	}
+
+	loginResp, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "admin",
+		"password": "admin-secret",
+	}, http.StatusOK)
+	if loginResp["ok"] != true || nestedPathString(loginResp, "user", "role") != "admin" {
+		t.Fatalf("unexpected login response: %#v", loginResp)
+	}
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil || sessionCookie.Value == "" || !sessionCookie.HttpOnly {
+		t.Fatalf("expected signed session cookie, got %#v", cookies)
+	}
+
+	adminResp := env.getJSONWithCookie(t, "/api/admin/runtime/summary", sessionCookie, http.StatusOK)
+	if adminResp["summary"] == nil {
+		t.Fatalf("expected admin runtime summary with session cookie: %#v", adminResp)
+	}
+	sessionResp = env.getJSONWithCookie(t, "/api/auth/session", sessionCookie, http.StatusOK)
+	if sessionResp["authenticated"] != true || nestedPathString(sessionResp, "user", "id") != "admin" {
+		t.Fatalf("expected authenticated admin session: %#v", sessionResp)
+	}
+
+	_, logoutCookies := env.postJSONWithCookie(t, "/api/auth/logout", map[string]any{}, sessionCookie, http.StatusOK)
+	expiredCookie := findCookie(logoutCookies, service.SessionCookieName)
+	if expiredCookie == nil || expiredCookie.MaxAge >= 0 {
+		t.Fatalf("expected logout to expire session cookie: %#v", logoutCookies)
+	}
+	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "login", "success", 1)
+	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "logout", "success", 1)
+}
+
 func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
@@ -2605,6 +2653,64 @@ func (e *testEnv) postJSON(t *testing.T, path string, body map[string]any, wantS
 	return payload
 }
 
+func (e *testEnv) postJSONWithCookies(t *testing.T, path string, body map[string]any, wantStatus int) (map[string]any, []*http.Cookie) {
+	t.Helper()
+	return e.postJSONWithCookie(t, path, body, nil, wantStatus)
+}
+
+func (e *testEnv) postJSONWithCookie(t *testing.T, path string, body map[string]any, cookie *http.Cookie, wantStatus int) (map[string]any, []*http.Cookie) {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do request %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response %s: %v", path, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
+	}
+	return payload, resp.Cookies()
+}
+
+func (e *testEnv) getJSONWithCookie(t *testing.T, path string, cookie *http.Cookie, wantStatus int) map[string]any {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do get %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response %s: %v", path, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
+	}
+	return payload
+}
+
 func (e *testEnv) postMultipart(t *testing.T, path string, field string, filename string, data []byte, wantStatus int) map[string]any {
 	t.Helper()
 	status, body := e.postMultipartText(t, path, field, filename, data)
@@ -2945,17 +3051,22 @@ func (e *testEnv) seedModelAPIKey(t *testing.T, userID string, name string, mode
 
 func assertAuditCount(t *testing.T, env *testEnv, eventType string, resourceType string, resourceID string, action string, outcome string, want int) {
 	t.Helper()
+	assertAuditCountForActor(t, env, "lab-user", eventType, resourceType, resourceID, action, outcome, want)
+}
+
+func assertAuditCountForActor(t *testing.T, env *testEnv, actorUserID string, eventType string, resourceType string, resourceID string, action string, outcome string, want int) {
+	t.Helper()
 	var count int
 	if err := env.store.DB().QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM audit_logs
-		WHERE actor_user_id = 'lab-user'
+		WHERE actor_user_id = ?
 			AND event_type = ?
 			AND resource_type = ?
 			AND resource_id = ?
 			AND action = ?
 			AND outcome = ?
-	`, eventType, resourceType, resourceID, action, outcome).Scan(&count); err != nil {
+	`, actorUserID, eventType, resourceType, resourceID, action, outcome).Scan(&count); err != nil {
 		t.Fatalf("count audit logs: %v", err)
 	}
 	if count != want {
@@ -3207,4 +3318,13 @@ func numericValue(value any) int {
 	default:
 		return 0
 	}
+}
+
+func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, cookie := range cookies {
+		if cookie != nil && cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
 }

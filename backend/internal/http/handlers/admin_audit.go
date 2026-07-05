@@ -23,9 +23,10 @@ func (h AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		limit = value
 	}
 	items, err := h.Audit.List(r.Context(), service.ListAuditLogsInput{
-		Limit:       limit,
-		EventType:   r.URL.Query().Get("event_type"),
-		ActorUserID: r.URL.Query().Get("actor_user_id"),
+		Limit:         limit,
+		EventType:     r.URL.Query().Get("event_type"),
+		ActorUserID:   r.URL.Query().Get("actor_user_id"),
+		IncludeAppAPI: parseBoolQuery(r.URL.Query().Get("include_app_api")),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -36,4 +37,13 @@ func (h AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		"count": len(items),
 		"items": items,
 	})
+}
+
+func parseBoolQuery(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

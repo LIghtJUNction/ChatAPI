@@ -326,6 +326,43 @@ func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKe
 	return err
 }
 
+func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppAPIKeyAuditLogsInput) ([]store.AppAPIKeyAuditLog, error) {
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := `
+		SELECT id, app_api_key_id, user_id, route, status_code, error_code, created_at
+		FROM app_api_key_audit_logs
+	`
+	args := make([]any, 0, 2)
+	if strings.TrimSpace(input.UserID) != "" {
+		query += " WHERE user_id = ?"
+		args = append(args, strings.TrimSpace(input.UserID))
+	}
+	query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.AppAPIKeyAuditLog, 0)
+	for rows.Next() {
+		item, err := scanAppAPIKeyAuditLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogInput) (store.AuditLog, error) {
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
@@ -1069,6 +1106,10 @@ type appAPIKeyScanner interface {
 	Scan(dest ...any) error
 }
 
+type appAPIKeyAuditLogScanner interface {
+	Scan(dest ...any) error
+}
+
 type modelAPIKeyScanner interface {
 	Scan(dest ...any) error
 }
@@ -1158,6 +1199,24 @@ func scanAppAPIKey(scanner appAPIKeyScanner) (store.AppAPIKey, error) {
 		value := parseTime(revokedAt.String)
 		item.RevokedAt = &value
 	}
+	return item, nil
+}
+
+func scanAppAPIKeyAuditLog(scanner appAPIKeyAuditLogScanner) (store.AppAPIKeyAuditLog, error) {
+	var item store.AppAPIKeyAuditLog
+	var createdAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.AppAPIKeyID,
+		&item.UserID,
+		&item.Route,
+		&item.StatusCode,
+		&item.ErrorCode,
+		&createdAt,
+	); err != nil {
+		return store.AppAPIKeyAuditLog{}, err
+	}
+	item.CreatedAt = parseTime(createdAt)
 	return item, nil
 }
 

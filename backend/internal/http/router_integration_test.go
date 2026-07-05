@@ -1498,6 +1498,30 @@ func TestAppAPIAuditLogWritten(t *testing.T) {
 	if count == 0 {
 		t.Fatalf("expected audit log entry to be written")
 	}
+
+	defaultAuditResp := env.getJSON(t, "/api/admin/audit/logs?event_type=app_api.request&limit=10", http.StatusOK)
+	if len(defaultAuditResp["items"].([]any)) != 0 {
+		t.Fatalf("app api audit should be excluded by default: %#v", defaultAuditResp)
+	}
+
+	combinedResp := env.getJSON(t, "/api/admin/audit/logs?include_app_api=1&event_type=app_api.request&limit=10", http.StatusOK)
+	items := combinedResp["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected app api audit in combined admin view: %#v", combinedResp)
+	}
+	item := items[0].(map[string]any)
+	if nestedString(item, "event_type") != "app_api.request" ||
+		nestedString(item, "actor_user_id") != "lab-user" ||
+		nestedString(item, "actor_source") != "app_api_key" ||
+		nestedString(item, "resource_type") != "app_api_key" ||
+		nestedString(item, "action") != "request" ||
+		nestedString(item, "outcome") != "success" {
+		t.Fatalf("unexpected combined app api audit item: %#v", item)
+	}
+	metadata := item["metadata"].(map[string]any)
+	if nestedString(metadata, "route") != "/api/app/me" || numericValue(metadata["status_code"]) != http.StatusOK {
+		t.Fatalf("unexpected combined app api audit metadata: %#v", item)
+	}
 }
 
 func TestAppAPIAuditLogWrittenForForbidden(t *testing.T) {
@@ -1530,6 +1554,24 @@ func TestAppAPIAuditLogWrittenForForbidden(t *testing.T) {
 	}
 	if forbiddenCount == 0 {
 		t.Fatalf("expected forbidden audit log entry")
+	}
+
+	combinedResp := env.getJSON(t, "/api/admin/audit/logs?include_app_api=1&event_type=app_api.request&actor_user_id=lab-user&limit=10", http.StatusOK)
+	items := combinedResp["items"].([]any)
+	foundForbidden := false
+	for _, rawItem := range items {
+		item := rawItem.(map[string]any)
+		if nestedString(item, "outcome") != "failure" {
+			continue
+		}
+		metadata := item["metadata"].(map[string]any)
+		if numericValue(metadata["status_code"]) == http.StatusForbidden && nestedString(metadata, "error_code") == "forbidden" {
+			foundForbidden = true
+			break
+		}
+	}
+	if !foundForbidden {
+		t.Fatalf("expected forbidden app api audit in combined admin view: %#v", combinedResp)
 	}
 
 	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -25,9 +26,10 @@ type AuditEventInput struct {
 }
 
 type ListAuditLogsInput struct {
-	Limit       int
-	EventType   string
-	ActorUserID string
+	Limit         int
+	EventType     string
+	ActorUserID   string
+	IncludeAppAPI bool
 }
 
 func NewAuditService(dataStore store.Store) *AuditService {
@@ -75,11 +77,68 @@ func (s *AuditService) List(ctx context.Context, input ListAuditLogsInput) ([]st
 	if limit > 200 {
 		limit = 200
 	}
-	return s.store.ListAuditLogs(ctx, store.ListAuditLogsInput{
+	items, err := s.store.ListAuditLogs(ctx, store.ListAuditLogsInput{
 		Limit:       limit,
 		EventType:   strings.TrimSpace(input.EventType),
 		ActorUserID: strings.TrimSpace(input.ActorUserID),
 	})
+	if err != nil {
+		return nil, err
+	}
+	if input.IncludeAppAPI && shouldIncludeAppAPIAudit(input.EventType) {
+		appItems, err := s.store.ListAppAPIKeyAuditLogs(ctx, store.ListAppAPIKeyAuditLogsInput{
+			Limit:  limit,
+			UserID: strings.TrimSpace(input.ActorUserID),
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, appItem := range appItems {
+			items = append(items, appAPIKeyAuditLogToAuditLog(appItem))
+		}
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+				return items[i].ID > items[j].ID
+			}
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		})
+		if len(items) > limit {
+			items = items[:limit]
+		}
+	}
+	return items, nil
+}
+
+func shouldIncludeAppAPIAudit(eventType string) bool {
+	eventType = strings.TrimSpace(eventType)
+	return eventType == "" || eventType == "app_api.request"
+}
+
+func appAPIKeyAuditLogToAuditLog(item store.AppAPIKeyAuditLog) store.AuditLog {
+	outcome := "success"
+	if item.StatusCode >= 400 {
+		outcome = "failure"
+	}
+	metadata := map[string]any{
+		"route":       item.Route,
+		"status_code": item.StatusCode,
+	}
+	if strings.TrimSpace(item.ErrorCode) != "" {
+		metadata["error_code"] = strings.TrimSpace(item.ErrorCode)
+	}
+	return store.AuditLog{
+		ID:           item.ID,
+		ActorUserID:  strings.TrimSpace(item.UserID),
+		ActorRole:    "user",
+		ActorSource:  "app_api_key",
+		EventType:    "app_api.request",
+		ResourceType: "app_api_key",
+		ResourceID:   strings.TrimSpace(item.AppAPIKeyID),
+		Action:       "request",
+		Outcome:      outcome,
+		Metadata:     metadata,
+		CreatedAt:    item.CreatedAt,
+	}
 }
 
 func sanitizeAuditMetadata(metadata map[string]any) map[string]any {

@@ -71,6 +71,11 @@ type AppAPIKeyAuditLog struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type ListAppAPIKeyAuditLogsInput struct {
+	Limit  int
+	UserID string
+}
+
 type AuditLog struct {
 	ID           string         `json:"id"`
 	ActorUserID  string         `json:"actor_user_id,omitempty"`
@@ -242,6 +247,7 @@ type Store interface {
 	UpdateAppAPIKeyLastUsedAt(context.Context, string, time.Time) error
 	RevokeAppAPIKey(context.Context, string, string) error
 	CreateAppAPIKeyAuditLog(context.Context, AppAPIKeyAuditLog) error
+	ListAppAPIKeyAuditLogs(context.Context, ListAppAPIKeyAuditLogsInput) ([]AppAPIKeyAuditLog, error)
 	CreateAuditLog(context.Context, CreateAuditLogInput) (AuditLog, error)
 	ListAuditLogs(context.Context, ListAuditLogsInput) ([]AuditLog, error)
 	CreateModelAPIKey(context.Context, CreateModelAPIKeyInput) (ModelAPIKey, error)

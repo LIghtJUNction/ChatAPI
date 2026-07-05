@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	_ "modernc.org/sqlite"
 
@@ -155,19 +159,235 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 }
 
 func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePendingInput) (store.Conversation, store.Message, error) {
-	return store.Conversation{}, store.Message{}, errors.New("CreatePendingTurn not implemented yet")
+	now := time.Now().UTC()
+	metadata := map[string]any{
+		"request_format":      input.RequestFormat,
+		"realtime_status":     "waiting",
+		"realtime_draft_text": "",
+	}
+	userMessageMetadata := map[string]any{
+		"request_format": input.RequestFormat,
+		"model":          input.Model,
+		"request_debug": map[string]any{
+			"request_id":     input.RequestID,
+			"response_id":    input.ResponseID,
+			"model":          input.Model,
+			"request_format": input.RequestFormat,
+			"request_keys":   keysOf(input.RequestBody),
+			"input_text":     input.UserContent,
+			"request_body":   input.RequestBody,
+			"tool_schemas":   input.ToolSchemas,
+		},
+	}
+	conversation := store.Conversation{
+		ID:                 input.ConversationID,
+		Title:              buildConversationTitle(input.UserContent),
+		LastUserText:       input.UserContent,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		LastMessageAt:      now,
+		MessageCount:       1,
+		LastMessagePreview: input.UserContent,
+		Metadata:           metadata,
+	}
+	responseID := input.ResponseID
+	message := store.Message{
+		ID:         "msg_" + uuid.NewString(),
+		Role:       "user",
+		Content:    input.UserContent,
+		CreatedAt:  now,
+		Status:     "pending",
+		ResponseID: &responseID,
+		Metadata:   userMessageMetadata,
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO conversations(
+			id, title, created_at, updated_at, last_message_at,
+			message_count, last_message_preview, last_user_text, metadata_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		conversation.ID,
+		conversation.Title,
+		formatTime(now),
+		formatTime(now),
+		formatTime(now),
+		conversation.MessageCount,
+		conversation.LastMessagePreview,
+		conversation.LastUserText,
+		mustJSON(metadata),
+	); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO messages(
+			id, conversation_id, role, content, created_at, status, response_id, metadata_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		message.ID,
+		conversation.ID,
+		message.Role,
+		message.Content,
+		formatTime(now),
+		message.Status,
+		responseID,
+		mustJSON(userMessageMetadata),
+	); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	return conversation, message, nil
 }
 
 func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (store.Conversation, error) {
-	return store.Conversation{}, errors.New("UpdateDraft not implemented yet")
+	conversation, err := s.GetConversation(ctx, input.ConversationID)
+	if err != nil {
+		return store.Conversation{}, err
+	}
+	metadata := ensureMap(conversation.Metadata)
+	metadata["realtime_draft_text"] = input.DraftText
+	conversation.Metadata = metadata
+	conversation.UpdatedAt = time.Now().UTC()
+
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE conversations
+		SET updated_at = ?, metadata_json = ?
+		WHERE id = ?
+	`, formatTime(conversation.UpdatedAt), mustJSON(metadata), conversation.ID); err != nil {
+		return store.Conversation{}, err
+	}
+	return conversation, nil
 }
 
 func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePendingInput) (store.Conversation, store.Message, error) {
-	return store.Conversation{}, store.Message{}, errors.New("CompletePendingTurn not implemented yet")
+	conversation, err := s.GetConversation(ctx, input.ConversationID)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	metadata := ensureMap(conversation.Metadata)
+	draftText, _ := metadata["realtime_draft_text"].(string)
+	finalText := strings.TrimSpace(input.OutputText)
+	if finalText == "" {
+		finalText = draftText
+	}
+	now := time.Now().UTC()
+	metadata["realtime_status"] = "closed"
+	metadata["realtime_draft_text"] = ""
+
+	messageMetadata := map[string]any{
+		"response_mode": input.Mode,
+	}
+	if input.ToolName != "" {
+		messageMetadata["tool_name"] = input.ToolName
+	}
+	if input.ToolCallID != "" {
+		messageMetadata["tool_call_id"] = input.ToolCallID
+	}
+	responseID := input.ResponseID
+	message := store.Message{
+		ID:         "msg_" + uuid.NewString(),
+		Role:       "assistant",
+		Content:    finalText,
+		CreatedAt:  now,
+		Status:     "completed",
+		ResponseID: &responseID,
+		Metadata:   messageMetadata,
+	}
+
+	conversation.Metadata = metadata
+	conversation.UpdatedAt = now
+	conversation.LastMessageAt = now
+	conversation.MessageCount += 1
+	conversation.LastMessagePreview = finalText
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO messages(
+			id, conversation_id, role, content, created_at, status, response_id, metadata_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, message.ID, conversation.ID, message.Role, message.Content, formatTime(now), message.Status, responseID, mustJSON(messageMetadata)); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE conversations
+		SET updated_at = ?, last_message_at = ?, message_count = ?, last_message_preview = ?, metadata_json = ?
+		WHERE id = ?
+	`, formatTime(now), formatTime(now), conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	return conversation, message, nil
 }
 
 func (s *Store) AbortPendingTurn(ctx context.Context, conversationID string, reason string) (store.Conversation, store.Message, error) {
-	return store.Conversation{}, store.Message{}, errors.New("AbortPendingTurn not implemented yet")
+	conversation, err := s.GetConversation(ctx, conversationID)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	metadata := ensureMap(conversation.Metadata)
+	metadata["realtime_status"] = "aborted"
+	metadata["realtime_draft_text"] = ""
+	now := time.Now().UTC()
+
+	message := store.Message{
+		ID:        "msg_" + uuid.NewString(),
+		Role:      "assistant",
+		Content:   reason,
+		CreatedAt: now,
+		Status:    "aborted",
+		Metadata: map[string]any{
+			"response_mode": "assistant_message",
+		},
+	}
+	conversation.Metadata = metadata
+	conversation.UpdatedAt = now
+	conversation.LastMessageAt = now
+	conversation.MessageCount += 1
+	conversation.LastMessagePreview = reason
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO messages(
+			id, conversation_id, role, content, created_at, status, response_id, metadata_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, message.ID, conversation.ID, message.Role, message.Content, formatTime(now), message.Status, nil, mustJSON(message.Metadata)); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE conversations
+		SET updated_at = ?, last_message_at = ?, message_count = ?, last_message_preview = ?, metadata_json = ?
+		WHERE id = ?
+	`, formatTime(now), formatTime(now), conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	return conversation, message, nil
 }
 
 func parseTime(raw string) time.Time {
@@ -187,4 +407,44 @@ func parseJSONMap(raw string) map[string]any {
 		return nil
 	}
 	return value
+}
+
+func ensureMap(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
+}
+
+func mustJSON(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func formatTime(value time.Time) string {
+	return value.UTC().Format(time.RFC3339)
+}
+
+func keysOf(value map[string]any) []string {
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func buildConversationTitle(userContent string) string {
+	text := strings.TrimSpace(userContent)
+	if text == "" {
+		return "新会话"
+	}
+	runes := []rune(text)
+	if len(runes) > 24 {
+		return string(runes[:24])
+	}
+	return text
 }

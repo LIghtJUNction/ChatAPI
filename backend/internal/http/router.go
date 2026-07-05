@@ -12,10 +12,17 @@ import (
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/http/handlers"
 	"github.com/zyf/chatapi/internal/http/middleware"
+	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
 )
 
-func NewRouter(cfg config.Config, dataStore store.Store) http.Handler {
+func NewRouter(
+	cfg config.Config,
+	dataStore store.Store,
+	chatService *service.ChatAPIService,
+	realtimeHub *service.RealtimeHub,
+	pending *service.PendingRegistry,
+) http.Handler {
 	router := chi.NewRouter()
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
@@ -29,19 +36,24 @@ func NewRouter(cfg config.Config, dataStore store.Store) http.Handler {
 	healthHandler := handlers.HealthHandler{Config: cfg, Store: dataStore}
 	authHandler := handlers.AuthHandler{Config: cfg}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore}
+	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
+	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
 	router.Get("/api/health", healthHandler.ServeHTTP)
 	router.Get("/api/auth/session", authHandler.Session)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
-	router.Get("/api/ws", labHandler.WSInfo)
-	router.Post("/responses", labHandler.VirtualModel)
-	router.Post("/v1/responses", labHandler.VirtualModel)
-	router.Post("/chat/completions", labHandler.VirtualModel)
-	router.Post("/v1/chat/completions", labHandler.VirtualModel)
-	router.Post("/messages", labHandler.VirtualModel)
-	router.Post("/v1/messages", labHandler.VirtualModel)
+	router.Get("/api/ws-info", labHandler.PingInfo)
+	router.Get("/api/ws", realtimeHandler.WebSocket)
+	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
+	router.Post("/api/chat/output/complete", chatHandler.CompleteOutput)
+	router.Post("/responses", chatHandler.Responses)
+	router.Post("/v1/responses", chatHandler.Responses)
+	router.Post("/chat/completions", chatHandler.Responses)
+	router.Post("/v1/chat/completions", chatHandler.Responses)
+	router.Post("/messages", chatHandler.Responses)
+	router.Post("/v1/messages", chatHandler.Responses)
 
 	router.Get("/models", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

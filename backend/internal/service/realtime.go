@@ -33,14 +33,21 @@ func NewRealtimeHub(dataStore store.Store) *RealtimeHub {
 	}
 }
 
-func (h *RealtimeHub) Subscribe() *Subscription {
+func (h *RealtimeHub) Subscribe(ctx context.Context) (*Subscription, Event, error) {
 	sub := &Subscription{Events: make(chan Event, 16)}
+
+	snapshot, err := h.snapshot(ctx)
+	if err != nil {
+		return nil, Event{}, err
+	}
+
 	h.mu.Lock()
 	h.subs[sub] = struct{}{}
 	count := len(h.subs)
 	h.mu.Unlock()
+
 	h.broadcast(Event{Type: "connection_count", CurrentConnectionCount: count})
-	return sub
+	return sub, snapshot, nil
 }
 
 func (h *RealtimeHub) Unsubscribe(sub *Subscription) {
@@ -51,11 +58,12 @@ func (h *RealtimeHub) Unsubscribe(sub *Subscription) {
 	}
 	count := len(h.subs)
 	h.mu.Unlock()
+
 	h.broadcast(Event{Type: "connection_count", CurrentConnectionCount: count})
 }
 
-func (h *RealtimeHub) Snapshot() (Event, error) {
-	conversations, err := h.store.ListConversations(context.Background())
+func (h *RealtimeHub) snapshot(ctx context.Context) (Event, error) {
+	conversations, err := h.store.ListConversations(ctx)
 	if err != nil {
 		return Event{}, err
 	}

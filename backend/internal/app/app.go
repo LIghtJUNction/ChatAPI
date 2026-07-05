@@ -15,6 +15,7 @@ import (
 	"github.com/zyf/chatapi/internal/platform/browser"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
+	"github.com/zyf/chatapi/internal/service"
 )
 
 func Run(ctx context.Context, args []string) error {
@@ -49,10 +50,13 @@ func Run(ctx context.Context, args []string) error {
 	if err := migrations.Bootstrap(ctx, dataStore.DB()); err != nil {
 		return err
 	}
+	pendingRegistry := service.NewPendingRegistry()
+	realtimeHub := service.NewRealtimeHub(dataStore)
+	chatService := service.NewChatAPIService(dataStore, pendingRegistry, realtimeHub)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr(),
-		Handler:           httpapi.NewRouter(cfg, dataStore),
+		Handler:           httpapi.NewRouter(cfg, dataStore, chatService, realtimeHub, pendingRegistry),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

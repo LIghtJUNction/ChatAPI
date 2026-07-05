@@ -21,8 +21,27 @@ CREATE TABLE IF NOT EXISTS conversations (
 	id TEXT PRIMARY KEY,
 	title TEXT NOT NULL,
 	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	updated_at TEXT NOT NULL,
+	last_message_at TEXT NOT NULL,
+	message_count INTEGER NOT NULL DEFAULT 0,
+	last_message_preview TEXT NOT NULL DEFAULT '',
+	last_user_text TEXT NOT NULL DEFAULT '',
+	metadata_json TEXT NOT NULL DEFAULT '{}'
 );
+
+CREATE TABLE IF NOT EXISTS messages (
+	id TEXT PRIMARY KEY,
+	conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+	role TEXT NOT NULL,
+	content TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	status TEXT,
+	response_id TEXT,
+	metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_created_at
+ON messages(conversation_id, created_at, id);
 `
 
 func Bootstrap(ctx context.Context, db *sql.DB) error {
@@ -32,7 +51,7 @@ func Bootstrap(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO db_meta(key, value)
 		VALUES ('schema_version', '0001_bootstrap')
-		ON CONFLICT(key) DO NOTHING
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
 	`); err != nil {
 		return fmt.Errorf("seed db_meta: %w", err)
 	}

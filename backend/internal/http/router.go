@@ -38,6 +38,7 @@ func NewRouter(
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
 	appAPIHandler := handlers.AppAPIHandler{Service: chatService}
+	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -45,6 +46,9 @@ func NewRouter(
 	router.Get("/api/auth/session", authHandler.Session)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)
+	router.Get("/api/user/app-api-keys", userAppAPIKeysHandler.List)
+	router.Post("/api/user/app-api-keys", userAppAPIKeysHandler.Create)
+	router.Delete("/api/user/app-api-keys/{keyID}", userAppAPIKeysHandler.Delete)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
 	router.Get("/api/ws-info", labHandler.PingInfo)
 	router.Get("/lab/requests", labHandler.ListRequests)
@@ -53,12 +57,32 @@ func NewRouter(
 	router.Post("/lab/requests/{requestID}/complete", labHandler.RequestComplete)
 	router.Post("/lab/requests/{requestID}/abort", labHandler.RequestAbort)
 	router.Get("/api/ws", realtimeHandler.WebSocket)
-	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:read")).Get("/api/app/me", appAPIHandler.Me)
-	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:read")).Get("/api/app/requests", appAPIHandler.ListRequests)
-	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:read")).Get("/api/app/requests/{requestID}", appAPIHandler.GetRequest)
-	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond")).Post("/api/app/requests/{requestID}/delta", appAPIHandler.RequestDelta)
-	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond")).Post("/api/app/requests/{requestID}/complete", appAPIHandler.RequestComplete)
-	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond")).Post("/api/app/requests/{requestID}/abort", appAPIHandler.RequestAbort)
+	appRouter := chi.NewRouter()
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "requests:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/me", appAPIHandler.Me)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "requests:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/requests", appAPIHandler.ListRequests)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "requests:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/requests/{requestID}", appAPIHandler.GetRequest)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Post("/requests/{requestID}/delta", appAPIHandler.RequestDelta)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Post("/requests/{requestID}/complete", appAPIHandler.RequestComplete)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Post("/requests/{requestID}/abort", appAPIHandler.RequestAbort)
+	router.Mount("/api/app", appRouter)
 	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
 	router.Post("/api/conversations/{conversationID}/abort", chatHandler.AbortConversation)
 	router.Post("/api/conversations/{conversationID}/respond", chatHandler.RespondConversation)

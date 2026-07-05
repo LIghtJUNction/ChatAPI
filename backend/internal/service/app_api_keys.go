@@ -25,6 +25,8 @@ type AppAPIKeyService struct {
 	store store.Store
 }
 
+const appAPIKeyLastUsedMinInterval = 5 * time.Minute
+
 func NewAppAPIKeyService(dataStore store.Store) *AppAPIKeyService {
 	return &AppAPIKeyService{store: dataStore}
 }
@@ -64,7 +66,10 @@ func (s *AppAPIKeyService) Authenticate(ctx context.Context, rawKey string) (App
 	if !apikey.Verify(rawKey, item.KeyHash) {
 		return AppAPIPrincipal{}, ErrForbidden
 	}
-	_ = s.store.UpdateAppAPIKeyLastUsedAt(ctx, item.ID, time.Now().UTC())
+	now := time.Now().UTC()
+	if item.LastUsedAt == nil || now.Sub(*item.LastUsedAt) >= appAPIKeyLastUsedMinInterval {
+		_ = s.store.UpdateAppAPIKeyLastUsedAt(ctx, item.ID, now)
+	}
 	principal := AppAPIPrincipal{
 		KeyID:          item.ID,
 		UserID:         item.UserID,
@@ -81,6 +86,26 @@ func (s *AppAPIKeyService) Authenticate(ctx context.Context, rawKey string) (App
 		principal.AllowedActions[action] = struct{}{}
 	}
 	return principal, nil
+}
+
+func (s *AppAPIKeyService) ListKeysForUser(ctx context.Context, userID string) ([]store.AppAPIKey, error) {
+	return s.store.ListAppAPIKeysByUser(ctx, strings.TrimSpace(userID))
+}
+
+func (s *AppAPIKeyService) RevokeKey(ctx context.Context, userID string, keyID string) error {
+	return s.store.RevokeAppAPIKey(ctx, strings.TrimSpace(keyID), strings.TrimSpace(userID))
+}
+
+func (s *AppAPIKeyService) RecordAudit(ctx context.Context, principal AppAPIPrincipal, route string, statusCode int, errorCode string) {
+	_ = s.store.CreateAppAPIKeyAuditLog(ctx, store.AppAPIKeyAuditLog{
+		ID:          "applog_" + uuid.NewString(),
+		AppAPIKeyID: principal.KeyID,
+		UserID:      principal.UserID,
+		Route:       strings.TrimSpace(route),
+		StatusCode:  statusCode,
+		ErrorCode:   strings.TrimSpace(errorCode),
+		CreatedAt:   time.Now().UTC(),
+	})
 }
 
 func stringArray(value any) []string {

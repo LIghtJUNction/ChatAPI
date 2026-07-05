@@ -34,6 +34,7 @@
 - 已补上 `request_id -> conversation_id -> TurnControlCommand` 的最小解析链路，并先用于 `lab` 路由；后续应用 API 的 `/api/app/requests/{request_id}/*` 将直接复用这层能力。
 - 已补上统一的 request 读取视图（列表 + 详情）并先用于 `GET /lab/requests`、`GET /lab/requests/{request_id}`；后续 `/api/app/requests` 应直接复用这套 request reader，而不是再单独拼查询结构。
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
+- 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在当前 lab 用户语境下工作，`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 
@@ -1264,7 +1265,7 @@ user_app_api_keys
 - 先完成 `user_app_api_keys` 存储、`ak-` 前缀密钥哈希校验、scope 校验和 `allowed_request_actions` 校验。
 - 先打通 `/api/app/requests*` 这一组最关键的自动化调试接口。
 - 先在当前单用户 Lab 语境下通过 `owner_id` 做 owner 隔离验证，后续接入正式 session / 用户体系后沿用相同 owner 约束。
-- 会话侧的应用 API Key 管理接口（`/api/user/app-api-keys`）和完整审计日志、频率限制、resource limits 细项 UI 仍待继续补齐。
+- 会话侧的应用 API Key 管理接口（`/api/user/app-api-keys`）已先以当前 lab 用户语境落地最小版本；完整 session 用户体系、审计查询页、频率限制、resource limits 细项 UI 仍待继续补齐。
 
 ## 8. API 兼容计划
 

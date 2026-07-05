@@ -436,6 +436,98 @@ func TestAppAPIOwnerIsolation(t *testing.T) {
 	<-resultCh
 }
 
+func TestUserAppAPIKeysManagement(t *testing.T) {
+	env := newTestEnv(t)
+
+	createResp := env.postJSON(t, "/api/user/app-api-keys", map[string]any{
+		"name":            "managed-key",
+		"scopes":          []string{"requests:read"},
+		"resource_limits": map[string]any{"allowed_request_actions": []string{"complete"}},
+	}, http.StatusOK)
+	rawKey := nestedString(createResp, "raw_key")
+	if !strings.HasPrefix(rawKey, "ak-") {
+		t.Fatalf("unexpected raw key payload: %#v", createResp)
+	}
+	item := createResp["item"].(map[string]any)
+	keyID := nestedString(item, "id")
+	if keyID == "" {
+		t.Fatalf("missing key id: %#v", createResp)
+	}
+
+	listResp := env.getJSON(t, "/api/user/app-api-keys", http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) == 0 || nestedString(items[0].(map[string]any), "id") != keyID {
+		t.Fatalf("unexpected app api keys list: %#v", listResp)
+	}
+
+	status, body := env.deleteText(t, "/api/user/app-api-keys/"+keyID)
+	if status != http.StatusOK || !strings.Contains(body, "\"ok\":true") {
+		t.Fatalf("unexpected delete response: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appGetText(t, "/api/app/me", rawKey)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("revoked key should be unauthorized: status=%d body=%q", status, body)
+	}
+}
+
+func TestAppAPIAuditLogWritten(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
+
+	resp := env.appGetJSON(t, "/api/app/me", appKey, http.StatusOK)
+	if nestedPathString(resp, "user", "id") != "lab-user" {
+		t.Fatalf("unexpected /api/app/me response: %#v", resp)
+	}
+
+	var count int
+	if err := env.store.DB().QueryRow(`SELECT COUNT(*) FROM app_api_key_audit_logs`).Scan(&count); err != nil {
+		t.Fatalf("count audit logs: %v", err)
+	}
+	if count == 0 {
+		t.Fatalf("expected audit log entry to be written")
+	}
+}
+
+func TestAppAPIAuditLogWrittenForForbidden(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-app-audit-forbidden",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "audit forbidden 测试"}},
+			},
+		},
+	})
+	conversation := env.waitForWaitingConversation(t, "audit forbidden 测试")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+	status, _ := env.appPostText(t, "/api/app/requests/"+requestID+"/complete", appKey, map[string]any{
+		"text": "不允许",
+		"mode": "assistant_message",
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("expected forbidden status, got %d", status)
+	}
+
+	var forbiddenCount int
+	if err := env.store.DB().QueryRow(`SELECT COUNT(*) FROM app_api_key_audit_logs WHERE status_code = 403 AND error_code = 'forbidden'`).Scan(&forbiddenCount); err != nil {
+		t.Fatalf("count forbidden audit logs: %v", err)
+	}
+	if forbiddenCount == 0 {
+		t.Fatalf("expected forbidden audit log entry")
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -997,6 +1089,24 @@ func (e *testEnv) postText(t *testing.T, path string, body map[string]any) (int,
 	}
 	defer resp.Body.Close()
 
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) deleteText(t *testing.T, path string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do delete %s: %v", path, err)
+	}
+	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read response %s: %v", path, err)

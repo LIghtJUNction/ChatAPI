@@ -19,13 +19,15 @@ func RequireAppAPIKey(authService *service.AppAPIKeyService, scopes ...string) f
 				http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
 				return
 			}
+			ctx := context.WithValue(r.Context(), appAPIPrincipalContextKey{}, principal)
 			for _, scope := range scopes {
 				if _, ok := principal.Scopes[scope]; !ok {
+					authService.RecordAudit(ctx, principal, r.URL.Path, http.StatusForbidden, "forbidden")
 					http.Error(w, "app api key forbidden", http.StatusForbidden)
 					return
 				}
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), appAPIPrincipalContextKey{}, principal)))
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

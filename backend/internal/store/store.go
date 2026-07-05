@@ -61,6 +61,16 @@ type AppAPIKey struct {
 	RevokedAt      *time.Time     `json:"revoked_at,omitempty"`
 }
 
+type AppAPIKeyAuditLog struct {
+	ID          string    `json:"id"`
+	AppAPIKeyID string    `json:"app_api_key_id"`
+	UserID      string    `json:"user_id"`
+	Route       string    `json:"route"`
+	StatusCode  int       `json:"status_code"`
+	ErrorCode   string    `json:"error_code,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type CreateAppAPIKeyInput struct {
 	ID             string
 	UserID         string
@@ -112,8 +122,11 @@ type Store interface {
 	ListRequests(context.Context) ([]Request, error)
 	GetRequest(context.Context, string) (Request, error)
 	CreateAppAPIKey(context.Context, CreateAppAPIKeyInput) (AppAPIKey, error)
+	ListAppAPIKeysByUser(context.Context, string) ([]AppAPIKey, error)
 	GetAppAPIKeyByPrefix(context.Context, string) (AppAPIKey, error)
 	UpdateAppAPIKeyLastUsedAt(context.Context, string, time.Time) error
+	RevokeAppAPIKey(context.Context, string, string) error
+	CreateAppAPIKeyAuditLog(context.Context, AppAPIKeyAuditLog) error
 	ListMessages(context.Context, string) ([]Message, error)
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)
 	UpdateDraft(context.Context, UpdateDraftInput) (Conversation, error)

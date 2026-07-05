@@ -221,6 +221,29 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input store.CreateAppAPIKey
 	}, nil
 }
 
+func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]store.AppAPIKey, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		FROM user_app_api_keys
+		WHERE user_id = ?
+		ORDER BY created_at DESC, id DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.AppAPIKey, 0)
+	for rows.Next() {
+		item, err := scanAppAPIKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (store.AppAPIKey, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
@@ -229,45 +252,12 @@ func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (store.
 		LIMIT 1
 	`, prefix)
 
-	var item store.AppAPIKey
-	var scopesJSON string
-	var resourceLimitsJSON string
-	var expiresAt sql.NullString
-	var lastUsedAt sql.NullString
-	var createdAt string
-	var revokedAt sql.NullString
-	if err := row.Scan(
-		&item.ID,
-		&item.UserID,
-		&item.Name,
-		&item.KeyHash,
-		&item.KeyPrefix,
-		&scopesJSON,
-		&resourceLimitsJSON,
-		&expiresAt,
-		&lastUsedAt,
-		&createdAt,
-		&revokedAt,
-	); err != nil {
+	item, err := scanAppAPIKey(row)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return store.AppAPIKey{}, errNotFound
 		}
 		return store.AppAPIKey{}, err
-	}
-	item.Scopes = parseJSONStringArray(scopesJSON)
-	item.ResourceLimits = parseJSONMap(resourceLimitsJSON)
-	if expiresAt.Valid {
-		value := parseTime(expiresAt.String)
-		item.ExpiresAt = &value
-	}
-	if lastUsedAt.Valid {
-		value := parseTime(lastUsedAt.String)
-		item.LastUsedAt = &value
-	}
-	item.CreatedAt = parseTime(createdAt)
-	if revokedAt.Valid {
-		value := parseTime(revokedAt.String)
-		item.RevokedAt = &value
 	}
 	return item, nil
 }
@@ -278,6 +268,34 @@ func (s *Store) UpdateAppAPIKeyLastUsedAt(ctx context.Context, id string, usedAt
 		SET last_used_at = ?
 		WHERE id = ?
 	`, formatTime(usedAt), id)
+	return err
+}
+
+func (s *Store) RevokeAppAPIKey(ctx context.Context, id string, userID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE user_app_api_keys
+		SET revoked_at = ?
+		WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+	`, formatTime(time.Now().UTC()), id, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errNotFound
+	}
+	return nil
+}
+
+func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKeyAuditLog) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO app_api_key_audit_logs(
+			id, app_api_key_id, user_id, route, status_code, error_code, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, item.ID, item.AppAPIKeyID, item.UserID, item.Route, item.StatusCode, item.ErrorCode, formatTime(item.CreatedAt))
 	return err
 }
 
@@ -665,6 +683,10 @@ type requestScanner interface {
 	Scan(dest ...any) error
 }
 
+type appAPIKeyScanner interface {
+	Scan(dest ...any) error
+}
+
 func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	var item store.Request
 	var createdAt string
@@ -697,6 +719,47 @@ func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	item.Metadata = messageMetadata
 	item.RequestBody, _ = requestDebug["request_body"].(map[string]any)
 	item.ToolSchemas, _ = requestDebug["tool_schemas"].([]any)
+	return item, nil
+}
+
+func scanAppAPIKey(scanner appAPIKeyScanner) (store.AppAPIKey, error) {
+	var item store.AppAPIKey
+	var scopesJSON string
+	var resourceLimitsJSON string
+	var expiresAt sql.NullString
+	var lastUsedAt sql.NullString
+	var createdAt string
+	var revokedAt sql.NullString
+	if err := scanner.Scan(
+		&item.ID,
+		&item.UserID,
+		&item.Name,
+		&item.KeyHash,
+		&item.KeyPrefix,
+		&scopesJSON,
+		&resourceLimitsJSON,
+		&expiresAt,
+		&lastUsedAt,
+		&createdAt,
+		&revokedAt,
+	); err != nil {
+		return store.AppAPIKey{}, err
+	}
+	item.Scopes = parseJSONStringArray(scopesJSON)
+	item.ResourceLimits = parseJSONMap(resourceLimitsJSON)
+	if expiresAt.Valid {
+		value := parseTime(expiresAt.String)
+		item.ExpiresAt = &value
+	}
+	if lastUsedAt.Valid {
+		value := parseTime(lastUsedAt.String)
+		item.LastUsedAt = &value
+	}
+	item.CreatedAt = parseTime(createdAt)
+	if revokedAt.Valid {
+		value := parseTime(revokedAt.String)
+		item.RevokedAt = &value
+	}
 	return item, nil
 }
 

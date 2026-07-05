@@ -19,6 +19,12 @@ import (
 	"github.com/zyf/chatapi/internal/service"
 )
 
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+)
+
 func Run(ctx context.Context, args []string) error {
 	backendRoot, err := os.Getwd()
 	if err != nil {
@@ -33,6 +39,12 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if len(args) > 0 && args[0] == "db" {
 		return runDB(args[1:], backendRoot)
+	}
+	if len(args) > 0 && args[0] == "config" {
+		return runConfig(args[1:], backendRoot)
+	}
+	if len(args) > 0 && args[0] == "version" {
+		return runVersion()
 	}
 
 	mode, err := parseMode(args)
@@ -98,6 +110,20 @@ func Run(ctx context.Context, args []string) error {
 	}
 }
 
+type versionReport struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	BuildDate string `json:"build_date"`
+}
+
+func runVersion() error {
+	return writeJSONReport(os.Stdout, versionReport{
+		Version:   Version,
+		Commit:    Commit,
+		BuildDate: BuildDate,
+	})
+}
+
 func runDoctor(args []string, backendRoot string) error {
 	mode := config.ModeServe
 	if len(args) > 0 {
@@ -123,6 +149,40 @@ func runDoctor(args []string, backendRoot string) error {
 		return config.ErrDoctorFailed
 	}
 	return nil
+}
+
+type configPrintReport struct {
+	OK     bool                  `json:"ok"`
+	Config config.RedactedConfig `json:"config"`
+	Error  string                `json:"error,omitempty"`
+}
+
+func runConfig(args []string, backendRoot string) error {
+	if len(args) < 2 || args[0] != "print" || args[1] != "--redact" {
+		return fmt.Errorf("unknown config command, supported: print --redact [serve|lab]")
+	}
+	mode := config.ModeServe
+	if len(args) > 2 {
+		switch args[2] {
+		case "serve":
+			mode = config.ModeServe
+		case "lab":
+			mode = config.ModeLab
+		default:
+			return fmt.Errorf("unknown config print mode %q, supported: serve, lab", args[2])
+		}
+	}
+	cfg, loadErr := config.FromEnvUnchecked(mode, backendRoot)
+	report := configPrintReport{
+		OK:     loadErr == nil,
+		Config: cfg.Redacted(),
+	}
+	if loadErr != nil {
+		report.Error = loadErr.Error()
+		_ = writeJSONReport(os.Stdout, report)
+		return loadErr
+	}
+	return writeJSONReport(os.Stdout, report)
 }
 
 type dbCheckReport struct {
@@ -199,7 +259,7 @@ func parseMode(args []string) (config.Mode, error) {
 	case "lab":
 		return config.ModeLab, nil
 	default:
-		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check", args[0])
+		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check, config print --redact, version", args[0])
 	}
 }
 

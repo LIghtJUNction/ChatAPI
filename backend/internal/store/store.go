@@ -7,6 +7,7 @@ import (
 )
 
 var ErrTurnConflict = errors.New("turn state conflict")
+var ErrNotFound = errors.New("record not found")
 
 type Conversation struct {
 	ID                 string         `json:"id"`
@@ -123,6 +124,13 @@ type UploadedImage struct {
 	Bytes            int64     `json:"bytes"`
 	URL              string    `json:"url"`
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+type StorageUserQuota struct {
+	OwnerID    string    `json:"owner_id"`
+	QuotaBytes int64     `json:"quota_bytes"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type MigrationStatus struct {
@@ -270,6 +278,10 @@ type Store interface {
 	CreateUploadedImage(context.Context, CreateUploadedImageInput) (UploadedImage, error)
 	ListUploadedImages(context.Context) ([]UploadedImage, error)
 	ListUploadedImagesByOwner(context.Context, string) ([]UploadedImage, error)
+	ListStorageUserQuotas(context.Context) ([]StorageUserQuota, error)
+	GetStorageUserQuota(context.Context, string) (StorageUserQuota, error)
+	SetStorageUserQuota(context.Context, string, int64) (StorageUserQuota, error)
+	DeleteStorageUserQuota(context.Context, string) error
 	ListMessages(context.Context, string) ([]Message, error)
 	DeleteConversations(context.Context, []string) (DeleteConversationsResult, error)
 	ExpirePendingTurns(context.Context, time.Time) (ExpirePendingTurnsResult, error)

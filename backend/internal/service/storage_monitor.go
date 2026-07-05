@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/zyf/chatapi/internal/config"
@@ -34,14 +36,16 @@ type DirectoryInfo struct {
 }
 
 type UserStorageUsage struct {
-	UserID            string `json:"user_id"`
-	EstimatedBytes    int64  `json:"estimated_bytes"`
-	StorageQuotaBytes int64  `json:"storage_quota_bytes"`
-	StorageOverQuota  bool   `json:"storage_over_quota"`
-	ConversationCount int    `json:"conversation_count"`
-	MessageCount      int    `json:"message_count"`
-	ImageCount        int    `json:"image_count"`
-	ImageBytes        int64  `json:"image_bytes"`
+	UserID                    string `json:"user_id"`
+	EstimatedBytes            int64  `json:"estimated_bytes"`
+	StorageQuotaBytes         int64  `json:"storage_quota_bytes"`
+	StorageQuotaDefaultBytes  int64  `json:"storage_quota_default_bytes"`
+	StorageQuotaOverrideBytes *int64 `json:"storage_quota_override_bytes,omitempty"`
+	StorageOverQuota          bool   `json:"storage_over_quota"`
+	ConversationCount         int    `json:"conversation_count"`
+	MessageCount              int    `json:"message_count"`
+	ImageCount                int    `json:"image_count"`
+	ImageBytes                int64  `json:"image_bytes"`
 }
 
 type StorageCleanupPreviewInput struct {
@@ -166,13 +170,53 @@ func (s *StorageMonitorService) Users(ctx context.Context) ([]UserStorageUsage, 
 		usage.ImageBytes += image.Bytes
 		usage.EstimatedBytes += image.Bytes
 	}
+	quotas, err := s.store.ListStorageUserQuotas(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, quota := range quotas {
+		usage := byUser[quota.OwnerID]
+		if usage == nil {
+			usage = &UserStorageUsage{UserID: quota.OwnerID}
+			byUser[quota.OwnerID] = usage
+		}
+		quotaBytes := quota.QuotaBytes
+		usage.StorageQuotaOverrideBytes = &quotaBytes
+	}
 	items := make([]UserStorageUsage, 0, len(byUser))
 	for _, item := range byUser {
-		item.StorageQuotaBytes = s.cfg.StorageDefaultQuotaBytes
+		item.StorageQuotaDefaultBytes = s.cfg.StorageDefaultQuotaBytes
+		item.StorageQuotaBytes = s.effectiveQuotaBytes(*item)
 		item.StorageOverQuota = item.StorageQuotaBytes > 0 && item.EstimatedBytes > item.StorageQuotaBytes
 		items = append(items, *item)
 	}
 	return items, nil
+}
+
+func (s *StorageMonitorService) SetUserQuota(ctx context.Context, ownerID string, quotaBytes int64) (store.StorageUserQuota, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return store.StorageUserQuota{}, errors.New("owner_id is required")
+	}
+	if quotaBytes < 0 {
+		return store.StorageUserQuota{}, errors.New("quota_bytes must be non-negative")
+	}
+	return s.store.SetStorageUserQuota(ctx, ownerID, quotaBytes)
+}
+
+func (s *StorageMonitorService) DeleteUserQuota(ctx context.Context, ownerID string) error {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return errors.New("owner_id is required")
+	}
+	return s.store.DeleteStorageUserQuota(ctx, ownerID)
+}
+
+func (s *StorageMonitorService) effectiveQuotaBytes(usage UserStorageUsage) int64 {
+	if usage.StorageQuotaOverrideBytes != nil {
+		return *usage.StorageQuotaOverrideBytes
+	}
+	return s.cfg.StorageDefaultQuotaBytes
 }
 
 func (s *StorageMonitorService) CleanupPreview(ctx context.Context, input StorageCleanupPreviewInput) (StorageCleanupPreview, error) {

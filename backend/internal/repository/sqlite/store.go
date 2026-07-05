@@ -24,7 +24,7 @@ type Store struct {
 	db *sql.DB
 }
 
-var errNotFound = errors.New("record not found")
+var errNotFound = store.ErrNotFound
 var errConflict = store.ErrTurnConflict
 
 func Open(dsn string) (*Store, error) {
@@ -711,6 +711,63 @@ func (s *Store) ListUploadedImages(ctx context.Context) ([]store.UploadedImage, 
 	return items, rows.Err()
 }
 
+func (s *Store) ListStorageUserQuotas(ctx context.Context) ([]store.StorageUserQuota, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT owner_id, quota_bytes, created_at, updated_at
+		FROM storage_user_quotas
+		ORDER BY owner_id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.StorageUserQuota, 0)
+	for rows.Next() {
+		item, err := scanStorageUserQuota(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetStorageUserQuota(ctx context.Context, ownerID string) (store.StorageUserQuota, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT owner_id, quota_bytes, created_at, updated_at
+		FROM storage_user_quotas
+		WHERE owner_id = ?
+	`, ownerID)
+	item, err := scanStorageUserQuota(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.StorageUserQuota{}, errNotFound
+		}
+		return store.StorageUserQuota{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) SetStorageUserQuota(ctx context.Context, ownerID string, quotaBytes int64) (store.StorageUserQuota, error) {
+	now := formatTime(time.Now().UTC())
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO storage_user_quotas(owner_id, quota_bytes, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(owner_id) DO UPDATE SET
+			quota_bytes = excluded.quota_bytes,
+			updated_at = excluded.updated_at
+	`, ownerID, quotaBytes, now, now); err != nil {
+		return store.StorageUserQuota{}, err
+	}
+	return s.GetStorageUserQuota(ctx, ownerID)
+}
+
+func (s *Store) DeleteStorageUserQuota(ctx context.Context, ownerID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM storage_user_quotas WHERE owner_id = ?`, ownerID)
+	return err
+}
+
 func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json
@@ -1244,6 +1301,10 @@ type uploadedImageScanner interface {
 	Scan(dest ...any) error
 }
 
+type storageUserQuotaScanner interface {
+	Scan(dest ...any) error
+}
+
 type auditLogScanner interface {
 	Scan(dest ...any) error
 }
@@ -1413,6 +1474,22 @@ func scanUploadedImage(scanner uploadedImageScanner) (store.UploadedImage, error
 		return store.UploadedImage{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
+	return item, nil
+}
+
+func scanStorageUserQuota(scanner storageUserQuotaScanner) (store.StorageUserQuota, error) {
+	var item store.StorageUserQuota
+	var createdAt, updatedAt string
+	if err := scanner.Scan(
+		&item.OwnerID,
+		&item.QuotaBytes,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return store.StorageUserQuota{}, err
+	}
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
 	return item, nil
 }
 

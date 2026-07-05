@@ -1111,6 +1111,48 @@ func TestUploadsRejectsStorageQuotaExceeded(t *testing.T) {
 	}
 }
 
+func TestAdminStorageUserQuotaOverrideControlsUploads(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.StorageDefaultQuotaBytes = 1 << 20
+	})
+
+	quotaResp := env.putJSON(t, "/api/admin/storage/users/lab-user/quota", map[string]any{
+		"quota_bytes": len(tinyPNG()) + 1,
+	}, http.StatusOK)
+	quota := quotaResp["quota"].(map[string]any)
+	if nestedString(quota, "owner_id") != "lab-user" || numericValue(quota["quota_bytes"]) != len(tinyPNG())+1 {
+		t.Fatalf("unexpected quota response: %#v", quotaResp)
+	}
+
+	env.postMultipart(t, "/api/uploads/imgs", "file", "first.png", tinyPNG(), http.StatusOK)
+	status, body := env.postMultipartText(t, "/api/uploads/imgs", "file", "second.png", tinyPNG())
+	if status != http.StatusInsufficientStorage || !strings.Contains(body, "storage quota exceeded") {
+		t.Fatalf("expected override quota rejection: status=%d body=%q", status, body)
+	}
+
+	usersResp := env.getJSON(t, "/api/admin/storage/users", http.StatusOK)
+	items := usersResp["items"].([]any)
+	foundOverride := false
+	for _, item := range items {
+		record := item.(map[string]any)
+		if nestedString(record, "user_id") == "lab-user" &&
+			numericValue(record["storage_quota_default_bytes"]) == 1<<20 &&
+			numericValue(record["storage_quota_override_bytes"]) == len(tinyPNG())+1 &&
+			numericValue(record["storage_quota_bytes"]) == len(tinyPNG())+1 {
+			foundOverride = true
+			break
+		}
+	}
+	if !foundOverride {
+		t.Fatalf("expected storage quota override in users response: %#v", usersResp)
+	}
+
+	env.deleteJSON(t, "/api/admin/storage/users/lab-user/quota", http.StatusOK)
+	env.postMultipart(t, "/api/uploads/imgs", "file", "second.png", tinyPNG(), http.StatusOK)
+	assertAuditCount(t, env, "admin.storage", "storage_user_quota", "lab-user", "set_quota", "success", 1)
+	assertAuditCount(t, env, "admin.storage", "storage_user_quota", "lab-user", "delete_quota", "success", 1)
+}
+
 func TestUploadsRejectsUnsafePath(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1538,6 +1580,18 @@ func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key storage cleanup rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appPutText(t, "/api/admin/storage/users/lab-user/quota", appKey, map[string]any{
+		"quota_bytes": 1024,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key storage quota update rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appDeleteText(t, "/api/admin/storage/users/lab-user/quota", appKey)
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key storage quota delete rejection: status=%d body=%q", status, body)
 	}
 }
 
@@ -2527,6 +2581,19 @@ func (e *testEnv) deleteText(t *testing.T, path string) (int, string) {
 		t.Fatalf("read response %s: %v", path, err)
 	}
 	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) deleteJSON(t *testing.T, path string, wantStatus int) map[string]any {
+	t.Helper()
+	status, body := e.deleteText(t, path)
+	if status != wantStatus {
+		t.Fatalf("unexpected delete status for %s: got %d want %d body=%q", path, status, wantStatus, body)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode delete response %s: %v body=%q", path, err, body)
+	}
+	return payload
 }
 
 func (e *testEnv) appGetJSON(t *testing.T, path string, appKey string, wantStatus int) map[string]any {

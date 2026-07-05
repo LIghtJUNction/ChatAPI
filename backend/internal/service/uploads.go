@@ -190,7 +190,16 @@ func (s *UploadService) SaveImage(ctx context.Context, file multipart.File, orig
 }
 
 func (s *UploadService) checkOwnerImageQuota(ctx context.Context, ownerID string, nextBytes int64) error {
-	if s.quotaBytes <= 0 || s.store == nil {
+	if s.store == nil {
+		return nil
+	}
+	quotaBytes := s.quotaBytes
+	if quota, err := s.store.GetStorageUserQuota(ctx, ownerID); err == nil {
+		quotaBytes = quota.QuotaBytes
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if quotaBytes <= 0 {
 		return nil
 	}
 	images, err := s.store.ListUploadedImagesByOwner(ctx, ownerID)
@@ -201,7 +210,7 @@ func (s *UploadService) checkOwnerImageQuota(ctx context.Context, ownerID string
 	for _, image := range images {
 		used += image.Bytes
 	}
-	if used+nextBytes > s.quotaBytes {
+	if used+nextBytes > quotaBytes {
 		return ErrStorageQuotaExceeded
 	}
 	return nil

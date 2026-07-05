@@ -152,6 +152,8 @@ func NewRouter(
 	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
 	adminRouter.Get("/storage/summary", adminStorageHandler.Summary)
 	adminRouter.Get("/storage/users", adminStorageHandler.Users)
+	adminRouter.Put("/storage/users/{ownerID}/quota", adminStorageHandler.SetUserQuota)
+	adminRouter.Delete("/storage/users/{ownerID}/quota", adminStorageHandler.DeleteUserQuota)
 	adminRouter.Get("/storage/orphans", adminStorageHandler.Orphans)
 	adminRouter.Post("/storage/orphans/cleanup", adminStorageHandler.CleanupOrphans)
 	adminRouter.Post("/storage/cleanup", adminStorageHandler.Cleanup)

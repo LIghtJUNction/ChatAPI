@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/zyf/chatapi/internal/service"
 )
 
@@ -34,6 +36,64 @@ func (h AdminStorageHandler) Users(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":    true,
 		"items": users,
+	})
+}
+
+type storageUserQuotaRequest struct {
+	QuotaBytes *int64 `json:"quota_bytes"`
+}
+
+func (h AdminStorageHandler) SetUserQuota(w http.ResponseWriter, r *http.Request) {
+	ownerID := strings.TrimSpace(chi.URLParam(r, "ownerID"))
+	var input storageUserQuotaRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid quota request", http.StatusBadRequest)
+		return
+	}
+	if input.QuotaBytes == nil {
+		http.Error(w, "quota_bytes is required", http.StatusBadRequest)
+		return
+	}
+	quota, err := h.Monitor.SetUserQuota(r.Context(), ownerID, *input.QuotaBytes)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "admin.storage",
+		ResourceType: "storage_user_quota",
+		ResourceID:   ownerID,
+		Action:       "set_quota",
+		Outcome:      "success",
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata: map[string]any{
+			"quota_bytes": quota.QuotaBytes,
+		},
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"quota": quota,
+	})
+}
+
+func (h AdminStorageHandler) DeleteUserQuota(w http.ResponseWriter, r *http.Request) {
+	ownerID := strings.TrimSpace(chi.URLParam(r, "ownerID"))
+	if err := h.Monitor.DeleteUserQuota(r.Context(), ownerID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "admin.storage",
+		ResourceType: "storage_user_quota",
+		ResourceID:   ownerID,
+		Action:       "delete_quota",
+		Outcome:      "success",
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
 	})
 }
 

@@ -148,6 +148,13 @@ ON uploaded_images(filename);
 
 CREATE INDEX IF NOT EXISTS idx_uploaded_images_owner_created
 ON uploaded_images(owner_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS storage_user_quotas (
+	owner_id TEXT PRIMARY KEY,
+	quota_bytes INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
 `
 
 type Status struct {

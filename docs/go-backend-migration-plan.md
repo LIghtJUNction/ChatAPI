@@ -46,7 +46,7 @@
 - 应用 API Key 创建已开始支持 `expires_at`：用户创建应用 API Key 时可传 RFC3339 过期时间，必须晚于当前时间；过期 key 鉴权返回 `401`。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志。SQLite vacuum、上传文件引用清理和失败恢复策略仍待继续补齐。
-- 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、`storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
+- 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、默认配额、单用户 override、最终 `storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
 - 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
@@ -56,7 +56,7 @@
 - SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --connect-only` 可执行 SMTP 连接/TLS/Auth 握手但不发信，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
-- Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志；单用户覆盖仍待补齐。
+- Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -979,7 +979,9 @@ type Hub struct {
 - `POST /api/admin/runtime/gc`：触发一次 `runtime.GC()` 和 `debug.FreeOSMemory()`，返回 GC 后内存快照。
 - 当前还没有引入系统级探针，因此 CPU 使用率、系统可用内存、磁盘总容量、进程 RSS/FD 数、慢客户端断开计数仍属于后续运维监控扩展。
 - `GET /api/admin/storage/summary`：返回 SQLite 主库/WAL、uploads 目录大小、估算用户数、估算总字节数、会话数和消息数。
-- `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数、消息数、图片数、图片字节数、默认配额和是否超过默认配额。当前估算范围包含 conversation/message 文本、metadata JSON，以及已写入 `uploaded_images` 的图片字节数；孤儿文件仍只体现在 uploads 目录总量中。
+- `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数、消息数、图片数、图片字节数、默认配额、单用户 override 配额、最终生效配额和是否超过配额。当前估算范围包含 conversation/message 文本、metadata JSON，以及已写入 `uploaded_images` 的图片字节数；孤儿文件仍只体现在 uploads 目录总量中。
+- `PUT /api/admin/storage/users/{owner_id}/quota`：设置单用户存储配额覆盖，body 为 `{"quota_bytes": 104857600}`；`quota_bytes=0` 表示该用户不限制。
+- `DELETE /api/admin/storage/users/{owner_id}/quota`：删除单用户覆盖，恢复使用全局默认配额。
 - `GET /api/admin/storage/orphans`：扫描 `data/uploads/imgs` 下没有 `uploaded_images` 元数据的单层文件，返回 dry-run 预览、文件数、字节数和文件列表。
 - `POST /api/admin/storage/orphans/cleanup`：要求显式传入 `{"dry_run": false}`，重新扫描当前 orphan 列表后只删除 uploads/imgs 根目录下的单层孤儿文件，返回候选文件数、候选字节数、实际删除文件数和实际删除字节数，并写入 `audit_logs`。
 - `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
@@ -1006,7 +1008,7 @@ GC 设置：
 用户存储配额：
 
 - 支持全局默认用户存储上限。当前 Go 重构分支已先通过 `CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 实现默认用户图片上传配额，值为 `0` 表示不限制；超过后 `POST /api/uploads/imgs` 返回 `507` 并写入失败审计。
-- 支持单用户覆盖上限。
+- 支持单用户覆盖上限。当前 Go 重构分支已通过 `storage_user_quotas` 和管理员 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 落地；上传校验会优先使用 override，否则回退全局默认值。
 - 支持超额策略：
   - `block_new_uploads`：阻止新图片上传。
   - `block_new_conversations`：阻止新会话。
@@ -1593,7 +1595,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 
 - 已记录图片上传成功/失败，包括 actor、来源、文件元数据、结果和错误类别。
 - 已记录管理员手动 GC，包括 GC 后内存摘要。
-- 已记录管理员存储 cleanup dry-run 预览和实际执行，包括保留策略、候选会话数、候选消息数、估算可回收字节数，以及执行时的实际删除会话/消息数。
+- 已记录管理员存储 cleanup dry-run 预览和实际执行，包括保留策略、候选会话数、候选消息数、估算可回收字节数，以及执行时的实际删除会话/消息数；已记录管理员设置/删除单用户存储配额覆盖。
 - `GET /api/admin/audit/logs` 已提供通用审计日志查询，支持 `limit`、`event_type`、`actor_user_id` 基础过滤，仅允许 admin session actor 访问；默认查询范围是 `audit_logs`，传 `include_app_api=1` 时会把 `app_api_key_audit_logs` 映射为 `event_type=app_api.request` 的统一审计条目并合并返回。
 - 审计 metadata 会过滤包含 password、secret、token、authorization、key 的字段，避免误写敏感值。
 - 应用 API Key 请求当前仍写入 `app_api_key_audit_logs`，用于保留 key id、scope 拒绝和状态码等细节；管理员审计查询可通过 `include_app_api=1` 聚合查看这些请求，后续再扩展更细的分页游标和 source 过滤。

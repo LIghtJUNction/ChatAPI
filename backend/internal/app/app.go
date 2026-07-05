@@ -31,6 +31,9 @@ func Run(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "doctor" {
 		return runDoctor(args[1:], backendRoot)
 	}
+	if len(args) > 0 && args[0] == "db" {
+		return runDB(args[1:], backendRoot)
+	}
 
 	mode, err := parseMode(args)
 	if err != nil {
@@ -113,15 +116,77 @@ func runDoctor(args []string, backendRoot string) error {
 		validationErr = cfg.Validate()
 	}
 	report := config.Diagnose(cfg, errors.Join(loadErr, validationErr))
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(report); err != nil {
+	if err := writeJSONReport(os.Stdout, report); err != nil {
 		return err
 	}
 	if report.HasErrors() {
 		return config.ErrDoctorFailed
 	}
 	return nil
+}
+
+type dbCheckReport struct {
+	OK     bool              `json:"ok"`
+	Driver string            `json:"driver"`
+	DSN    string            `json:"dsn"`
+	Status migrations.Status `json:"status,omitempty"`
+	Error  string            `json:"error,omitempty"`
+}
+
+func runDB(args []string, backendRoot string) error {
+	if len(args) == 0 || args[0] != "check" {
+		return fmt.Errorf("unknown db command, supported: check")
+	}
+	cfg, err := config.FromEnvUnchecked(config.ModeServe, backendRoot)
+	if err != nil {
+		return err
+	}
+	report := dbCheckReport{
+		OK:     true,
+		Driver: cfg.DatabaseDriver,
+		DSN:    cfg.DatabaseDSN,
+	}
+	if cfg.DatabaseDriver != "sqlite" {
+		report.OK = false
+		report.Error = "only sqlite db check is implemented in the current Go refactor branch"
+		_ = writeJSONReport(os.Stdout, report)
+		return errors.New(report.Error)
+	}
+	dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
+	if err != nil {
+		report.OK = false
+		report.Error = err.Error()
+		_ = writeJSONReport(os.Stdout, report)
+		return err
+	}
+	defer dataStore.DB().Close()
+	if err := migrations.Bootstrap(context.Background(), dataStore.DB()); err != nil {
+		report.OK = false
+		report.Error = err.Error()
+		_ = writeJSONReport(os.Stdout, report)
+		return err
+	}
+	status, err := migrations.StatusReport(context.Background(), dataStore.DB())
+	if err != nil {
+		report.OK = false
+		report.Error = err.Error()
+		_ = writeJSONReport(os.Stdout, report)
+		return err
+	}
+	report.Status = status
+	if status.MigrationDirty {
+		report.OK = false
+		report.Error = "migration dirty"
+		_ = writeJSONReport(os.Stdout, report)
+		return errors.New(report.Error)
+	}
+	return writeJSONReport(os.Stdout, report)
+}
+
+func writeJSONReport(file *os.File, payload any) error {
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(payload)
 }
 
 func parseMode(args []string) (config.Mode, error) {
@@ -134,7 +199,7 @@ func parseMode(args []string) (config.Mode, error) {
 	case "lab":
 		return config.ModeLab, nil
 	default:
-		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor", args[0])
+		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check", args[0])
 	}
 }
 

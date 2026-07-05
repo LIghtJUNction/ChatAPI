@@ -44,6 +44,7 @@
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及 dry-run 清理候选预览；当前 cleanup 只允许 `dry_run: true`，不执行删除、文件清理或 SQLite vacuum。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope 等风险。
+- 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -659,7 +660,7 @@ CREATE TABLE IF NOT EXISTS db_meta (
 
 ```sql
 CREATE TABLE IF NOT EXISTS schema_migrations (
-  version INTEGER PRIMARY KEY,
+  version TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   applied_at TEXT NOT NULL,
   checksum TEXT NOT NULL DEFAULT '',
@@ -668,6 +669,13 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 ```
 
 如果使用 `golang-migrate`，可以沿用其默认表结构，但仍建议保留 `db_meta` 作为 ChatAPI 自己的版本和诊断键值表。
+
+当前 Go 重构分支的 SQLite bootstrap 已先落地最小可诊断版本：
+
+- `db_meta` 包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at`，并为每个键维护 `updated_at`。
+- `schema_migrations` 包含 `version`、`name`、`applied_at`、`checksum`、`dirty`。
+- 当前版本号使用可读字符串 `0001_bootstrap`；后续引入正式 migration 文件时可以继续使用 `0002_xxx` 这种单调递增文本版本，或迁移到 `golang-migrate` 的整数版本，同时保持 `db_meta.schema_version` 可诊断。
+- bootstrap 会向前兼容旧的薄 `db_meta` / `schema_migrations` 表，自动补齐缺失列。
 
 启动升级流程：
 
@@ -1585,7 +1593,7 @@ chatapi smtp test
 chatapi version
 ```
 
-首版至少应包含 `serve`、`lab`、`doctor` 和 `version`；migration 能力必须可由启动流程调用，独立 `migrate` 命令可以后续补齐。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab` 和 `doctor`，`version` / `migrate` / `setup` 仍待补。
+首版至少应包含 `serve`、`lab`、`doctor`、`db check` 和 `version`；migration 能力必须可由启动流程调用，独立 `migrate` 命令可以后续补齐。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor` 和 `db check`，`version` / `migrate` / `setup` 仍待补。
 
 首次启动向导：
 
@@ -1598,9 +1606,10 @@ chatapi version
 
 - `chatapi doctor`：检查配置、数据库、migration dirty 状态、静态前端目录、uploads 权限、session/master key、SQLite 降级阈值和端口监听建议。
 - 当前 Go 重构分支的 `chatapi doctor [serve|lab]` 输出 JSON 报告，包含 `ok`、`summary` 和 `items`；已覆盖配置校验错误、serve 模式 master key、默认管理员密码、SQLite serve 降级提示、Lab 远程暴露风险、前端 dist 目录、CORS wildcard、OIDC 私密 RP 必填项、OIDC HTTPS redirect、`openid` scope 和日志等级。存在 `error` 级诊断时命令以非零状态退出；`warn` 只提示不阻止。
-- 当前 `doctor` 尚不连接数据库，不检查 migration dirty、schema version、SQLite WAL、PostgreSQL 连接池和 uploads 归属；这些应由后续 `chatapi db check` 或扩展版 doctor 负责。
+- 当前 `doctor` 尚不连接数据库，不检查 migration dirty、schema version、SQLite WAL、PostgreSQL 连接池和 uploads 归属；数据库状态由 `chatapi db check` 负责。
 - `chatapi config print --redact`：打印最终配置，敏感字段脱敏。
 - `chatapi db check`：检查数据库连接、schema version、migration 历史、SQLite WAL 状态或 PostgreSQL 连接池配置。
+- 当前 Go 重构分支的 `chatapi db check` 支持 SQLite，输出 JSON，包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at` 和 `applied` migration 列表；如果 dirty 为 true 或数据库不可打开，命令以非零状态退出。PostgreSQL repository 尚未落地，因此 postgres DSN 会返回明确错误。
 - `chatapi oidc test`：拉取 discovery document，校验 issuer、redirect URL、client id 配置，不打印 client secret。
 - `chatapi smtp test`：发送测试邮件或只做 SMTP 握手，输出 TLS/auth 诊断。
 

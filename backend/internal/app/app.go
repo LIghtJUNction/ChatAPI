@@ -42,6 +42,9 @@ func Run(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "db" {
 		return runDB(args[1:], backendRoot)
 	}
+	if len(args) > 0 && args[0] == "migrate" {
+		return runMigrate(ctx, args[1:], backendRoot)
+	}
 	if len(args) > 0 && args[0] == "config" {
 		return runConfig(args[1:], backendRoot)
 	}
@@ -198,6 +201,15 @@ type dbCheckReport struct {
 	Error  string            `json:"error,omitempty"`
 }
 
+type migrateReport struct {
+	OK      bool              `json:"ok"`
+	Command string            `json:"command"`
+	Driver  string            `json:"driver"`
+	DSN     string            `json:"dsn"`
+	Status  migrations.Status `json:"status,omitempty"`
+	Error   string            `json:"error,omitempty"`
+}
+
 type smtpTestReport struct {
 	OK          bool                  `json:"ok"`
 	DryRun      bool                  `json:"dry_run"`
@@ -315,27 +327,7 @@ func runDB(args []string, backendRoot string) error {
 		Driver: cfg.DatabaseDriver,
 		DSN:    cfg.DatabaseDSN,
 	}
-	if cfg.DatabaseDriver != "sqlite" {
-		report.OK = false
-		report.Error = "only sqlite db check is implemented in the current Go refactor branch"
-		_ = writeJSONReport(os.Stdout, report)
-		return errors.New(report.Error)
-	}
-	dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
-	if err != nil {
-		report.OK = false
-		report.Error = err.Error()
-		_ = writeJSONReport(os.Stdout, report)
-		return err
-	}
-	defer dataStore.DB().Close()
-	if err := migrations.Bootstrap(context.Background(), dataStore.DB()); err != nil {
-		report.OK = false
-		report.Error = err.Error()
-		_ = writeJSONReport(os.Stdout, report)
-		return err
-	}
-	status, err := migrations.StatusReport(context.Background(), dataStore.DB())
+	status, err := sqliteMigrationStatus(context.Background(), cfg, true)
 	if err != nil {
 		report.OK = false
 		report.Error = err.Error()
@@ -350,6 +342,71 @@ func runDB(args []string, backendRoot string) error {
 		return errors.New(report.Error)
 	}
 	return writeJSONReport(os.Stdout, report)
+}
+
+func runMigrate(ctx context.Context, args []string, backendRoot string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("unknown migrate command, supported: up, status")
+	}
+	switch args[0] {
+	case "up", "status":
+	default:
+		return fmt.Errorf("unknown migrate command %q, supported: up, status", args[0])
+	}
+	report, err := migrateCommand(ctx, args[0], backendRoot)
+	if err != nil {
+		_ = writeJSONReport(os.Stdout, report)
+		return err
+	}
+	if err := writeJSONReport(os.Stdout, report); err != nil {
+		return err
+	}
+	if report.Status.MigrationDirty {
+		return errors.New("migration dirty")
+	}
+	return nil
+}
+
+func migrateCommand(ctx context.Context, command string, backendRoot string) (migrateReport, error) {
+	cfg, err := config.FromEnvUnchecked(config.ModeServe, backendRoot)
+	if err != nil {
+		return migrateReport{OK: false, Command: command, Error: err.Error()}, err
+	}
+	report := migrateReport{
+		OK:      true,
+		Command: command,
+		Driver:  cfg.DatabaseDriver,
+		DSN:     cfg.DatabaseDSN,
+	}
+	status, err := sqliteMigrationStatus(ctx, cfg, command == "up")
+	if err != nil {
+		report.OK = false
+		report.Error = err.Error()
+		return report, err
+	}
+	report.Status = status
+	if status.MigrationDirty {
+		report.OK = false
+		report.Error = "migration dirty"
+	}
+	return report, nil
+}
+
+func sqliteMigrationStatus(ctx context.Context, cfg config.Config, bootstrap bool) (migrations.Status, error) {
+	if cfg.DatabaseDriver != "sqlite" {
+		return migrations.Status{}, errors.New("only sqlite migration is implemented in the current Go refactor branch")
+	}
+	dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
+	if err != nil {
+		return migrations.Status{}, err
+	}
+	defer dataStore.DB().Close()
+	if bootstrap {
+		if err := migrations.Bootstrap(ctx, dataStore.DB()); err != nil {
+			return migrations.Status{}, err
+		}
+	}
+	return migrations.StatusReport(ctx, dataStore.DB())
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -378,7 +435,7 @@ func parseMode(args []string) (config.Mode, error) {
 	case "lab":
 		return config.ModeLab, nil
 	default:
-		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check, config print --redact, version", args[0])
+		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check, migrate, config print --redact, smtp, version", args[0])
 	}
 }
 

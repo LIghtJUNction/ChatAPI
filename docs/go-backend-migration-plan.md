@@ -51,7 +51,7 @@
 - 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope 等风险。
 - 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
-- 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出。
+- 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出；`chatapi migrate up|status` 可对当前 SQLite schema 执行 bootstrap migration 并输出 schema status。
 - SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --connect-only` 可执行 SMTP 连接/TLS/Auth 握手但不发信，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
@@ -1642,6 +1642,7 @@ chatapi lab --host 127.0.0.1 --port 5000 --open-browser
 chatapi lab --host 0.0.0.0 --port 5000 --allow-remote-lab --open-browser
 chatapi lab --host 0.0.0.0 --port 5000 --allow-remote-lab --password "dev-password"
 chatapi migrate up
+chatapi migrate status
 chatapi migrate down
 chatapi migrate-db sqlite-to-postgres --sqlite ./data/chatapi.sqlite3 --postgres "$CHATAPI_DATABASE_URL"
 chatapi admin reset-password --username admin
@@ -1654,7 +1655,7 @@ chatapi smtp test
 chatapi version
 ```
 
-首版至少应包含 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`；migration 能力必须可由启动流程调用，独立 `migrate` 命令可以后续补齐。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor`、`db check`、`config print --redact`、`smtp test` 和 `version`，`migrate` / `setup` 仍待补。
+首版至少应包含 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`；migration 能力必须可由启动流程和独立 CLI 调用。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor`、`db check`、`config print --redact`、`smtp test`、`version` 和 SQLite `migrate up|status`，`migrate down` / `setup` 仍待补。
 
 首次启动向导：
 
@@ -1671,6 +1672,9 @@ chatapi version
 - `chatapi config print --redact`：打印最终配置，敏感字段脱敏。当前 Go 重构分支已支持可选模式参数 `serve|lab`，默认按 `serve` 解析；敏感字段仅显示 `<redacted>` 或空字符串。
 - `chatapi db check`：检查数据库连接、schema version、migration 历史、SQLite WAL 状态或 PostgreSQL 连接池配置。
 - 当前 Go 重构分支的 `chatapi db check` 支持 SQLite，输出 JSON，包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at` 和 `applied` migration 列表；如果 dirty 为 true 或数据库不可打开，命令以非零状态退出。PostgreSQL repository 尚未落地，因此 postgres DSN 会返回明确错误。
+- `chatapi migrate up`：当前对 SQLite 执行幂等 bootstrap migration，创建/补齐当前 Go schema 和 `db_meta` / `schema_migrations` 元数据，并输出 JSON status。
+- `chatapi migrate status`：当前只读取 SQLite migration status，不执行 bootstrap；如果 schema 尚未初始化或 dirty 为 true，以非零状态退出。
+- `chatapi migrate down`：尚未实现。当前 bootstrap schema 不提供自动回滚，后续引入正式 migration 文件后再按版本实现。
 - `chatapi oidc test`：拉取 discovery document，校验 issuer、redirect URL、client id 配置，不打印 client secret。
 - `chatapi smtp test`：当前支持 `--dry-run` 配置校验、`--connect-only` 连接/TLS/Auth 握手诊断和 `--to` 测试邮件发送，输出 TLS/auth 诊断。
 

@@ -65,101 +65,41 @@ func (h ChatAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.
 }
 
 func (h ChatAPIHandler) RespondConversation(w http.ResponseWriter, r *http.Request) {
-	h.completeOutput(w, r, conversationIDFromPath(r))
+	h.executeTurnControl(w, r, service.TurnControlRespond, conversationIDFromPath(r))
 }
 
 func (h ChatAPIHandler) CompleteOutput(w http.ResponseWriter, r *http.Request) {
-	h.completeOutput(w, r, "")
-}
-
-func (h ChatAPIHandler) completeOutput(w http.ResponseWriter, r *http.Request, conversationIDFromRoute string) {
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
-		return
-	}
-
-	conversationID, err := mustConversationID(body, conversationIDFromRoute)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	input := store.CompletePendingInput{
-		ConversationID:      conversationID,
-		ResponseID:          stringValue(body["response_id"], ""),
-		OutputText:          stringValue(body["text"], ""),
-		Mode:                stringValue(body["mode"], "assistant_message"),
-		ToolName:            stringValue(body["tool_name"], ""),
-		ToolCallID:          stringValue(body["tool_call_id"], ""),
-		ToolOutput:          stringValue(body["output"], stringValue(body["text"], "")),
-		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
-	}
-
-	result, err := h.Service.CompleteConversation(r.Context(), input)
-	if err != nil {
-		if errors.Is(err, service.ErrPendingConflict) || errors.Is(err, store.ErrTurnConflict) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		if errors.Is(err, service.ErrPendingNotFound) {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
+	h.executeTurnControl(w, r, service.TurnControlStreamComplete, "")
 }
 
 func (h ChatAPIHandler) StreamDeltaConversation(w http.ResponseWriter, r *http.Request) {
-	h.deltaOutput(w, r, conversationIDFromPath(r))
+	h.executeTurnControl(w, r, service.TurnControlStreamDelta, conversationIDFromPath(r))
 }
 
 func (h ChatAPIHandler) DeltaOutput(w http.ResponseWriter, r *http.Request) {
-	h.deltaOutput(w, r, "")
-}
-
-func (h ChatAPIHandler) deltaOutput(w http.ResponseWriter, r *http.Request, conversationIDFromRoute string) {
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
-		return
-	}
-	conversationID, err := mustConversationID(body, conversationIDFromRoute)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	result, err := h.Service.UpdateDraft(r.Context(), conversationID, stringValue(body["text"], ""))
-	if err != nil {
-		if errors.Is(err, service.ErrPendingConflict) || errors.Is(err, store.ErrTurnConflict) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		if errors.Is(err, service.ErrPendingNotFound) {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
+	h.executeTurnControl(w, r, service.TurnControlStreamDelta, "")
 }
 
 func (h ChatAPIHandler) AbortConversation(w http.ResponseWriter, r *http.Request) {
+	h.executeTurnControl(w, r, service.TurnControlAbort, conversationIDFromPath(r))
+}
+
+func (h ChatAPIHandler) executeTurnControl(w http.ResponseWriter, r *http.Request, kind service.TurnControlKind, conversationIDFromRoute string) {
 	conversationID := chi.URLParam(r, "conversationID")
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	reason := stringValue(body["error"], "")
-	if reason == "" {
-		http.Error(w, "error is required", http.StatusBadRequest)
+
+	command, err := buildTurnControlCommand(kind, body, chooseConversationID(conversationIDFromRoute, conversationID))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := h.Service.AbortConversation(r.Context(), conversationID, reason); err != nil {
+
+	result, err := h.Service.ExecuteTurnControl(r.Context(), command)
+	if err != nil {
 		if errors.Is(err, service.ErrPendingConflict) || errors.Is(err, store.ErrTurnConflict) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -171,7 +111,7 @@ func (h ChatAPIHandler) AbortConversation(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -196,6 +136,34 @@ func mustConversationID(input map[string]any, fromRoute string) (string, error) 
 		return strings.TrimSpace(fromRoute), nil
 	}
 	return service.MustConversationID(input)
+}
+
+func chooseConversationID(ids ...string) string {
+	for _, id := range ids {
+		if strings.TrimSpace(id) != "" {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
+}
+
+func buildTurnControlCommand(kind service.TurnControlKind, body map[string]any, conversationIDFromRoute string) (service.TurnControlCommand, error) {
+	conversationID, err := mustConversationID(body, conversationIDFromRoute)
+	if err != nil {
+		return service.TurnControlCommand{}, err
+	}
+	return service.TurnControlCommand{
+		Kind:                kind,
+		ConversationID:      conversationID,
+		ResponseID:          stringValue(body["response_id"], ""),
+		OutputText:          stringValue(body["text"], ""),
+		Mode:                stringValue(body["mode"], "assistant_message"),
+		ToolName:            stringValue(body["tool_name"], ""),
+		ToolCallID:          stringValue(body["tool_call_id"], ""),
+		ToolOutput:          stringValue(body["output"], stringValue(body["text"], "")),
+		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
+		AbortReason:         stringValue(body["error"], ""),
+	}, nil
 }
 
 func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, requestFormat string, body map[string]any) {

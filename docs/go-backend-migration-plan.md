@@ -30,6 +30,7 @@
 - 当前最小实现已覆盖 `assistant_message`、`thinking`、`tool_call`、`tool_result` 四种人工完成模式，并用集成测试守护消息持久化顺序与三套协议返回外壳。
 - `stream=true` 已开始走真实 SSE 链路，不再只支持等待最终非流式结果；当前已覆盖 OpenAI Responses、Chat Completions、Anthropic Messages 三套协议的最小流式集成测试，并补上了 `tool_call` 的基础流式返回外壳。
 - pending turn 已补上最小状态机约束：`delta` 会把会话推进到 `streaming`，终态后的 `delta` / `complete` / `abort` 会返回 `409`，并用集成测试守护这些行为。
+- `backend/internal/service` 已开始收敛统一的 `TurnControlCommand`，把 WebUI 手工回复、后续应用 API 和自动化规则共享的 turn control 输入模型从 handler 中抽离出来。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 
@@ -716,6 +717,25 @@ Turn Manager 是 Go 迁移成败的核心。
 - 支持自动化规则直接完成。
 - 负责等待态和会话 metadata 的一致性。
 - 对 SSE/WebSocket 发布状态变化。
+
+建议把所有人工/自动化回复入口统一收束到一个共享命令模型，例如 `TurnControlCommand`：
+
+```go
+type TurnControlCommand struct {
+    Kind                TurnControlKind
+    ConversationID      string
+    ResponseID          string
+    OutputText          string
+    Mode                string
+    ToolName            string
+    ToolCallID          string
+    ToolOutput          string
+    ReasoningStreamMode string
+    AbortReason         string
+}
+```
+
+WebUI、应用 API、自动化规则都只负责把各自请求翻译成这一个命令对象，再交给 Turn Manager / service 执行，避免三套入口各自拼字段、各自做状态判断。
 
 推荐模型：
 

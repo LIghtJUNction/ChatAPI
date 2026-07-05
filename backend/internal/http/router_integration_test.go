@@ -542,6 +542,8 @@ func TestUserAppAPIKeysManagement(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(body, "\"ok\":true") {
 		t.Fatalf("unexpected delete response: status=%d body=%q", status, body)
 	}
+	assertAuditCount(t, env, "user.app_api_key", "app_api_key", keyID, "create", "success", 1)
+	assertAuditCount(t, env, "user.app_api_key", "app_api_key", keyID, "delete", "success", 1)
 
 	status, body = env.appGetText(t, "/api/app/me", rawKey)
 	if status != http.StatusUnauthorized {
@@ -576,6 +578,8 @@ func TestUserModelAPIKeysManagement(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(body, "\"ok\":true") {
 		t.Fatalf("unexpected model key delete response: status=%d body=%q", status, body)
 	}
+	assertAuditCount(t, env, "user.model_api_key", "model_api_key", keyID, "create", "success", 1)
+	assertAuditCount(t, env, "user.model_api_key", "model_api_key", keyID, "delete", "success", 1)
 
 	status, body = postExternalText(t, env.server.URL+"/v1/responses", map[string]string{
 		"Authorization": "Bearer " + rawKey,
@@ -2373,6 +2377,26 @@ func (e *testEnv) seedModelAPIKey(t *testing.T, userID string, name string, mode
 		t.Fatalf("create model api key: %v", err)
 	}
 	return raw
+}
+
+func assertAuditCount(t *testing.T, env *testEnv, eventType string, resourceType string, resourceID string, action string, outcome string, want int) {
+	t.Helper()
+	var count int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = ?
+			AND resource_type = ?
+			AND resource_id = ?
+			AND action = ?
+			AND outcome = ?
+	`, eventType, resourceType, resourceID, action, outcome).Scan(&count); err != nil {
+		t.Fatalf("count audit logs: %v", err)
+	}
+	if count != want {
+		t.Fatalf("expected %s/%s audit count %d, got %d", eventType, action, want, count)
+	}
 }
 
 func (e *testEnv) requestIDForConversation(t *testing.T, conversationID string) string {

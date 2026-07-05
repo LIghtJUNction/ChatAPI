@@ -15,6 +15,7 @@ import (
 type UserAppAPIKeysHandler struct {
 	Config     config.Config
 	AppAPIKeys *service.AppAPIKeyService
+	Audit      *service.AuditService
 }
 
 func (h UserAppAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -47,9 +48,18 @@ func (h UserAppAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 	resourceLimits := mapValue(body["resource_limits"])
 	item, rawKey, err := h.AppAPIKeys.CreateKey(r.Context(), userID, name, scopes, resourceLimits)
 	if err != nil {
+		h.recordAudit(r, "create", "failure", "", map[string]any{
+			"name":   name,
+			"scopes": scopes,
+			"error":  err.Error(),
+		})
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	h.recordAudit(r, "create", "success", item.ID, map[string]any{
+		"name":   item.Name,
+		"scopes": item.Scopes,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"item":    item,
@@ -69,6 +79,9 @@ func (h UserAppAPIKeysHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.AppAPIKeys.RevokeKey(r.Context(), userID, keyID); err != nil {
+		h.recordAudit(r, "delete", "failure", keyID, map[string]any{
+			"error": err.Error(),
+		})
 		if errors.Is(err, service.ErrForbidden) {
 			http.Error(w, err.Error(), http.StatusForbidden)
 			return
@@ -76,7 +89,21 @@ func (h UserAppAPIKeysHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	h.recordAudit(r, "delete", "success", keyID, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h UserAppAPIKeysHandler) recordAudit(r *http.Request, action string, outcome string, keyID string, metadata map[string]any) {
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "user.app_api_key",
+		ResourceType: "app_api_key",
+		ResourceID:   keyID,
+		Action:       action,
+		Outcome:      outcome,
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata:     metadata,
+	})
 }
 
 func (h UserAppAPIKeysHandler) currentUserID(r *http.Request) (string, error) {

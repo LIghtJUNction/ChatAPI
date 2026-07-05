@@ -33,8 +33,21 @@ type Config struct {
 	OpenBrowser    bool
 	LabToken       string
 	LabPassword    string
+	AdminPassword  string
 	LogLevel       string
 	CORSOrigins    []string
+
+	OIDCEnabled        bool
+	OIDCProviderName   string
+	OIDCIssuerURL      string
+	OIDCClientID       string
+	OIDCClientSecret   string
+	OIDCRedirectURL    string
+	OIDCScopes         []string
+	OIDCAllowedDomains []string
+	OIDCAllowedEmails  []string
+	OIDCAdminEmails    []string
+	OIDCAutoCreateUser bool
 }
 
 func LoadEnv(backendRoot string) error {
@@ -77,12 +90,36 @@ func Default(mode Mode, backendRoot string) Config {
 		OpenBrowser:    openBrowser,
 		LabToken:       "",
 		LabPassword:    "",
+		AdminPassword:  "",
 		LogLevel:       "info",
 		CORSOrigins:    []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+
+		OIDCEnabled:        false,
+		OIDCProviderName:   "",
+		OIDCIssuerURL:      "",
+		OIDCClientID:       "",
+		OIDCClientSecret:   "",
+		OIDCRedirectURL:    "",
+		OIDCScopes:         []string{"openid", "email", "profile"},
+		OIDCAllowedDomains: nil,
+		OIDCAllowedEmails:  nil,
+		OIDCAdminEmails:    nil,
+		OIDCAutoCreateUser: false,
 	}
 }
 
 func FromEnv(mode Mode, backendRoot string) (Config, error) {
+	cfg, err := FromEnvUnchecked(mode, backendRoot)
+	if err != nil {
+		return Config{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg := Default(mode, backendRoot)
 	cfg.Host = firstNonEmpty(os.Getenv("CHATAPI_HOST"), cfg.Host)
 	cfg.BaseURL = strings.TrimSpace(os.Getenv("CHATAPI_BASE_URL"))
@@ -90,10 +127,25 @@ func FromEnv(mode Mode, backendRoot string) (Config, error) {
 	cfg.DataDir = firstNonEmpty(os.Getenv("CHATAPI_DATA_DIR"), cfg.DataDir)
 	cfg.DatabaseDriver = firstNonEmpty(os.Getenv("CHATAPI_DB_DRIVER"), cfg.DatabaseDriver)
 	cfg.DatabaseDSN = firstNonEmpty(os.Getenv("CHATAPI_DB_DSN"), cfg.DatabaseDSN)
-	cfg.MasterKey = strings.TrimSpace(os.Getenv("CHATAPI_MASTER_KEY"))
+	cfg.MasterKey = firstNonEmpty(os.Getenv("CHATAPI_MASTER_KEY"), cfg.MasterKey)
 	cfg.LogLevel = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_LEVEL"), cfg.LogLevel))
 	cfg.LabToken = strings.TrimSpace(os.Getenv("CHATAPI_LAB_TOKEN"))
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))
+	cfg.AdminPassword = strings.TrimSpace(os.Getenv("CHATAPI_ADMIN_PASSWORD"))
+
+	cfg.OIDCEnabled = parseBool(os.Getenv("CHATAPI_OIDC_ENABLED"), cfg.OIDCEnabled)
+	cfg.OIDCProviderName = strings.TrimSpace(os.Getenv("CHATAPI_OIDC_PROVIDER_NAME"))
+	cfg.OIDCIssuerURL = strings.TrimSpace(os.Getenv("CHATAPI_OIDC_ISSUER_URL"))
+	cfg.OIDCClientID = strings.TrimSpace(os.Getenv("CHATAPI_OIDC_CLIENT_ID"))
+	cfg.OIDCClientSecret = strings.TrimSpace(os.Getenv("CHATAPI_OIDC_CLIENT_SECRET"))
+	cfg.OIDCRedirectURL = strings.TrimSpace(os.Getenv("CHATAPI_OIDC_REDIRECT_URL"))
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_OIDC_SCOPES")); raw != "" {
+		cfg.OIDCScopes = splitCSV(raw)
+	}
+	cfg.OIDCAllowedDomains = splitCSV(os.Getenv("CHATAPI_OIDC_ALLOWED_DOMAINS"))
+	cfg.OIDCAllowedEmails = splitCSV(os.Getenv("CHATAPI_OIDC_ALLOWED_EMAILS"))
+	cfg.OIDCAdminEmails = splitCSV(os.Getenv("CHATAPI_OIDC_ADMIN_EMAILS"))
+	cfg.OIDCAutoCreateUser = parseBool(os.Getenv("CHATAPI_OIDC_AUTO_CREATE_USER"), cfg.OIDCAutoCreateUser)
 
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_PORT")); raw != "" {
 		port, err := strconv.Atoi(raw)
@@ -120,9 +172,6 @@ func FromEnv(mode Mode, backendRoot string) (Config, error) {
 		cfg.DatabaseDSN = filepath.Join(backendRoot, cfg.DatabaseDSN)
 	}
 
-	if err := cfg.Validate(); err != nil {
-		return Config{}, err
-	}
 	return cfg, nil
 }
 

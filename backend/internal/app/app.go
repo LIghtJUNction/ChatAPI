@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -25,6 +26,10 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if err := config.LoadEnv(backendRoot); err != nil {
 		return err
+	}
+
+	if len(args) > 0 && args[0] == "doctor" {
+		return runDoctor(args[1:], backendRoot)
 	}
 
 	mode, err := parseMode(args)
@@ -90,6 +95,35 @@ func Run(ctx context.Context, args []string) error {
 	}
 }
 
+func runDoctor(args []string, backendRoot string) error {
+	mode := config.ModeServe
+	if len(args) > 0 {
+		switch args[0] {
+		case "serve":
+			mode = config.ModeServe
+		case "lab":
+			mode = config.ModeLab
+		default:
+			return fmt.Errorf("unknown doctor mode %q, supported: serve, lab", args[0])
+		}
+	}
+	cfg, loadErr := config.FromEnvUnchecked(mode, backendRoot)
+	var validationErr error
+	if loadErr == nil {
+		validationErr = cfg.Validate()
+	}
+	report := config.Diagnose(cfg, errors.Join(loadErr, validationErr))
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(report); err != nil {
+		return err
+	}
+	if report.HasErrors() {
+		return config.ErrDoctorFailed
+	}
+	return nil
+}
+
 func parseMode(args []string) (config.Mode, error) {
 	if len(args) == 0 {
 		return config.ModeServe, nil
@@ -100,7 +134,7 @@ func parseMode(args []string) (config.Mode, error) {
 	case "lab":
 		return config.ModeLab, nil
 	default:
-		return "", fmt.Errorf("unknown command %q, supported: serve, lab", args[0])
+		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor", args[0])
 	}
 }
 

@@ -43,6 +43,7 @@
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及 dry-run 清理候选预览；当前 cleanup 只允许 `dry_run: true`，不执行删除、文件清理或 SQLite vacuum。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
+- 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope 等风险。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -1584,7 +1585,7 @@ chatapi smtp test
 chatapi version
 ```
 
-首版至少应包含 `serve`、`lab` 和 `version`；migration 能力必须可由启动流程调用，独立 `migrate` 命令可以后续补齐。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。
+首版至少应包含 `serve`、`lab`、`doctor` 和 `version`；migration 能力必须可由启动流程调用，独立 `migrate` 命令可以后续补齐。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab` 和 `doctor`，`version` / `migrate` / `setup` 仍待补。
 
 首次启动向导：
 
@@ -1596,6 +1597,8 @@ chatapi version
 配置诊断命令：
 
 - `chatapi doctor`：检查配置、数据库、migration dirty 状态、静态前端目录、uploads 权限、session/master key、SQLite 降级阈值和端口监听建议。
+- 当前 Go 重构分支的 `chatapi doctor [serve|lab]` 输出 JSON 报告，包含 `ok`、`summary` 和 `items`；已覆盖配置校验错误、serve 模式 master key、默认管理员密码、SQLite serve 降级提示、Lab 远程暴露风险、前端 dist 目录、CORS wildcard、OIDC 私密 RP 必填项、OIDC HTTPS redirect、`openid` scope 和日志等级。存在 `error` 级诊断时命令以非零状态退出；`warn` 只提示不阻止。
+- 当前 `doctor` 尚不连接数据库，不检查 migration dirty、schema version、SQLite WAL、PostgreSQL 连接池和 uploads 归属；这些应由后续 `chatapi db check` 或扩展版 doctor 负责。
 - `chatapi config print --redact`：打印最终配置，敏感字段脱敏。
 - `chatapi db check`：检查数据库连接、schema version、migration 历史、SQLite WAL 状态或 PostgreSQL 连接池配置。
 - `chatapi oidc test`：拉取 discovery document，校验 issuer、redirect URL、client id 配置，不打印 client secret。

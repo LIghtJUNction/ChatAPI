@@ -46,12 +46,13 @@
 - 应用 API Key 创建已开始支持 `expires_at`：用户创建应用 API Key 时可传 RFC3339 过期时间，必须晚于当前时间；过期 key 鉴权返回 `401`。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
 - Realtime 事件广播已补上最小背压策略：每个订阅者使用固定队列，队列满时记录 recoverable drop，连续满队列会断开慢订阅者并累计 `slow_disconnects`；`/api/admin/runtime/queue` 和 `/metrics` 都会暴露相关计数。
+- Realtime 连接限额已补上最小统一池：`CHATAPI_REALTIME_MAX_CONNECTIONS`、`CHATAPI_REALTIME_MAX_CONNECTIONS_PER_USER`、`CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER` 控制全局、单用户和浏览器控制台预留名额；当前 `/api/ws` 作为 `webui` 连接接入，service 层已提供 `api` / `sse` lease，后续 API/SSE 长连接必须复用同一套限额，避免同用户 API/SSE 连接占满后 WebUI 进不来。管理员连接监控和 `/metrics` 已输出分类连接数与拒绝计数。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`、`POST /api/admin/storage/vacuum`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志；SQLite vacuum 需要显式 `dry_run:false` 才会执行 WAL checkpoint 和 `VACUUM`。上传文件引用清理和失败恢复策略仍待继续补齐。
 - 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、默认配额、单用户 override、最终 `storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
 - 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
-- 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope 等风险。
+- 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope、realtime 连接预留配置等风险。
 - 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
 - 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出；`chatapi migrate up|status` 可对当前 SQLite schema 执行 bootstrap migration 并输出 schema status。
 - SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --connect-only` 可执行 SMTP 连接/TLS/Auth 握手但不发信，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
@@ -903,8 +904,8 @@ type Hub struct {
 - 事件广播必须有背压策略：每个连接设置 send queue 上限，慢客户端超过阈值后断开或只丢弃可恢复的 snapshot/update 事件。当前 Go 重构分支已按订阅者固定队列实现 recoverable drop 计数和慢订阅者断开计数。
 - 事件需要区分关键事件和可恢复事件；complete、abort、权限变更等关键事件不能静默丢弃，conversation list refresh、connection count 等可由重连后 snapshot 修复。
 - 浏览器重连后必须能拉取 owner 级 snapshot，避免中途丢事件导致 UI 永久不一致。
-- 全局连接数和单用户连接数与系统配置保持一致，但必须区分浏览器控制台连接和 API/SSE 连接。
-- 单用户连接限制必须为浏览器控制台预留连接名额，避免 API/SSE 连接占满后用户无法打开 WebUI。
+- 全局连接数和单用户连接数与系统配置保持一致，但必须区分浏览器控制台连接和 API/SSE 连接。当前 Go 重构分支已实现统一连接 lease 和分类计数，`webui` / `api` / `sse` 会进入同一个限额池。
+- 单用户连接限制必须为浏览器控制台预留连接名额，避免 API/SSE 连接占满后用户无法打开 WebUI。当前实现通过 `CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER` 在同用户非 WebUI 连接申请时保留名额，WebUI 连接可以使用该预留位。
 - 推荐做法是按连接 kind 分池计数：`webui_ws`、`api_sse`、`app_api`、`lab`，分别配置上限，并提供 `webui_reserved_connections_per_user`。
 - 如果采用统一连接池，也必须在驱逐策略中优先驱逐同用户最旧的 API/SSE 连接，不能驱逐最后一个浏览器控制台连接。
 - WebSocket 写操作单 goroutine 化，避免并发写 panic。
@@ -936,7 +937,7 @@ type Hub struct {
 - `uploaded_images`：记录上传文件的 `owner_id`、服务端文件名、原始文件名、MIME、字节数、访问 URL 和创建时间。Lab 模式当前归属到 `lab-user`；生产模式后续接入 session/OIDC 后从统一 `RequestActor` 注入真实用户。
 - `GET /api/uploads/imgs/{filename}`：只接受单段文件名，拒绝空文件名、路径分隔符和 `..`，并在服务端解析后验证仍位于 `data/uploads/imgs` 根目录。
 - `GET /api/uploads/imgs/usage`：统计 uploads/imgs 目录的文件数和总字节数，目录不存在时返回 0。
-- 上传成功/失败会写入通用 `audit_logs`；管理员可通过 `GET /api/admin/storage/orphans` 预览无元数据的孤儿图片，并通过 `POST /api/admin/storage/orphans/cleanup` 显式执行删除。用户配额的单用户覆盖仍是后续工作。
+- 上传成功/失败会写入通用 `audit_logs`；管理员可通过 `GET /api/admin/storage/orphans` 预览无元数据的孤儿图片，并通过 `POST /api/admin/storage/orphans/cleanup` 显式执行删除。用户配额已支持 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 做单用户覆盖或恢复默认值。
 
 ### 6.6 资源治理与运维监控
 
@@ -973,7 +974,7 @@ type Hub struct {
 
 - `GET /api/admin/runtime/summary`：返回 Go runtime 基本信息、内存快照、pending turn 统计、realtime subscriber 队列统计、SQLite 主库/WAL 文件大小。
 - `GET /api/admin/runtime/memory`：返回当前 Go `runtime.MemStats` 的核心字段，包括 heap、sys、next GC、GC 次数和 pause 累计。
-- `GET /api/admin/runtime/connections`：返回当前 realtime subscriber 数；当前 subscriber 主要对应 WebUI WebSocket，后续接入 API/SSE/app 连接池后再扩展分类计数。
+- `GET /api/admin/runtime/connections`：返回当前 realtime subscriber 数、WebUI subscriber 数、API/SSE lease 数、总连接数和被限额拒绝的连接数。当前 `/api/ws` 已按 `webui` 计数，后续 API/SSE 长连接接入时必须使用 realtime hub 的 `Acquire` / `Release`。
 - `GET /api/admin/runtime/queue`：返回 realtime subscriber 当前队列长度、总容量、recoverable/critical drop 和慢客户端断开计数字段；当前慢客户端策略为连续多次队列满后关闭订阅者。
 - `GET /api/admin/runtime/settings`：返回当前 ChatAPI 记录的运行时治理参数，包括 `gogc` 和 `memory_limit_bytes`。`0` 表示该项未由 ChatAPI 显式管理。
 - `PUT /api/admin/runtime/settings`：接受可选 `gogc`、`memory_limit_bytes` 非负值并立即作用于当前 Go 进程；成功修改会写入 `audit_logs`。当前持久化仍通过 `CHATAPI_RUNTIME_GOGC` 和 `CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES` 环境变量完成，管理接口修改重启后不会保留。通过接口写回 `0` 会恢复 Go 默认 GC 百分比和近似无限内存限制。
@@ -1673,7 +1674,7 @@ chatapi version
 配置诊断命令：
 
 - `chatapi doctor`：检查配置、数据库、migration dirty 状态、静态前端目录、uploads 权限、session/master key、SQLite 降级阈值和端口监听建议。
-- 当前 Go 重构分支的 `chatapi doctor [serve|lab]` 输出 JSON 报告，包含 `ok`、`summary` 和 `items`；已覆盖配置校验错误、serve 模式 master key、默认管理员密码、SQLite serve 降级提示、Lab 远程暴露风险、前端 dist 目录、CORS wildcard、OIDC 私密 RP 必填项、OIDC HTTPS redirect、`openid` scope 和日志等级。存在 `error` 级诊断时命令以非零状态退出；`warn` 只提示不阻止。
+- 当前 Go 重构分支的 `chatapi doctor [serve|lab]` 输出 JSON 报告，包含 `ok`、`summary` 和 `items`；已覆盖配置校验错误、serve 模式 master key、默认管理员密码、SQLite serve 降级提示、Lab 远程暴露风险、前端 dist 目录、CORS wildcard、OIDC 私密 RP 必填项、OIDC HTTPS redirect、`openid` scope、realtime 连接预留配置和日志等级。存在 `error` 级诊断时命令以非零状态退出；`warn` 只提示不阻止。
 - 当前 `doctor` 尚不连接数据库，不检查 migration dirty、schema version、SQLite WAL、PostgreSQL 连接池和 uploads 归属；数据库状态由 `chatapi db check` 负责。
 - `chatapi config print --redact`：打印最终配置，敏感字段脱敏。当前 Go 重构分支已支持可选模式参数 `serve|lab`，默认按 `serve` 解析；敏感字段仅显示 `<redacted>` 或空字符串。
 - `chatapi db check`：检查数据库连接、schema version、migration 历史、SQLite WAL 状态或 PostgreSQL 连接池配置。
@@ -2044,7 +2045,7 @@ make release-snapshot
 - SMTP 邮件模块。
 - 管理员运行时监控、内存/GC 监控、连接监控。
 - 用户存储占用估算、存储配额、定时清理和空间回收。
-- Realtime 连接限额修正，为浏览器控制台预留 WebSocket 名额。
+- Realtime 连接限额修正，为浏览器控制台预留 WebSocket 名额。当前已完成 service 层统一 lease、WebUI 预留规则和分类监控；后续 API/SSE 长连接入口接入时复用该能力。
 - metrics、doctor、systemd、compose、nginx 文档。
 
 验收：

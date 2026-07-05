@@ -69,6 +69,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 	report.checkStorage(cfg)
 	report.checkPending(cfg)
 	report.checkRuntime(cfg)
+	report.checkRealtime(cfg)
 	report.checkSMTP(cfg)
 	report.checkOIDC(cfg)
 	report.checkLogLevel(cfg)
@@ -258,6 +259,26 @@ func (r *DiagnosticReport) checkRuntime(cfg Config) {
 		r.add(DiagnosticError, "runtime.memory_limit_invalid", "CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES 不能为负数。")
 	} else if cfg.RuntimeMemoryLimitBytes > 0 && cfg.RuntimeMemoryLimitBytes < 64<<20 {
 		r.add(DiagnosticWarn, "runtime.memory_limit_low", "CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES 低于 64MiB，可能导致频繁 GC 或内存压力。")
+	}
+}
+
+func (r *DiagnosticReport) checkRealtime(cfg Config) {
+	if cfg.RealtimeMaxConnections < 0 {
+		r.add(DiagnosticError, "realtime.max_connections_invalid", "CHATAPI_REALTIME_MAX_CONNECTIONS 不能为负数。")
+	}
+	if cfg.RealtimeMaxConnectionsPerUser < 0 {
+		r.add(DiagnosticError, "realtime.max_connections_per_user_invalid", "CHATAPI_REALTIME_MAX_CONNECTIONS_PER_USER 不能为负数。")
+	}
+	if cfg.RealtimeWebUIReservedPerUser < 0 {
+		r.add(DiagnosticError, "realtime.webui_reserved_invalid", "CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER 不能为负数。")
+		return
+	}
+	if cfg.RealtimeMaxConnectionsPerUser == 0 && cfg.RealtimeWebUIReservedPerUser > 0 {
+		r.add(DiagnosticInfo, "realtime.webui_reservation_inactive", "未配置单用户 realtime 连接上限；浏览器控制台预留名额暂不会触发。")
+		return
+	}
+	if cfg.RealtimeMaxConnectionsPerUser > 0 && cfg.RealtimeWebUIReservedPerUser >= cfg.RealtimeMaxConnectionsPerUser {
+		r.add(DiagnosticWarn, "realtime.webui_reserved_too_high", "CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER 不应大于或等于单用户 realtime 连接上限，否则 API/SSE 连接会被完全挤出。")
 	}
 }
 

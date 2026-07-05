@@ -34,8 +34,12 @@ type RuntimeSummary struct {
 }
 
 type ConnectionSnapshot struct {
-	WebUISubscribers int `json:"webui_subscribers"`
-	TotalSubscribers int `json:"total_subscribers"`
+	WebUISubscribers    int `json:"webui_subscribers"`
+	APIConnections      int `json:"api_connections"`
+	SSEConnections      int `json:"sse_connections"`
+	TotalSubscribers    int `json:"total_subscribers"`
+	TotalConnections    int `json:"total_connections"`
+	RejectedConnections int `json:"rejected_connections"`
 }
 
 type QueueSnapshot struct {
@@ -119,8 +123,12 @@ func (s *RuntimeMonitorService) Memory() MemorySnapshot {
 func (s *RuntimeMonitorService) Connections() ConnectionSnapshot {
 	stats := s.realtime.Stats()
 	return ConnectionSnapshot{
-		WebUISubscribers: stats.Subscribers,
-		TotalSubscribers: stats.Subscribers,
+		WebUISubscribers:    stats.WebUISubscribers,
+		APIConnections:      stats.APIConnections,
+		SSEConnections:      stats.SSEConnections,
+		TotalSubscribers:    stats.Subscribers,
+		TotalConnections:    stats.TotalConnections,
+		RejectedConnections: stats.RejectedConnections,
 	}
 }
 

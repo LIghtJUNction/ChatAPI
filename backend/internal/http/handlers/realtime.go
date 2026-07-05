@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -24,8 +25,15 @@ func (h RealtimeHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	sub, snapshot, err := h.Hub.Subscribe(r.Context())
+	sub, snapshot, err := h.Hub.Subscribe(r.Context(), service.RealtimeSubscribeOptions{
+		OwnerID: service.OwnerIDFromContext(r.Context()),
+		Kind:    service.RealtimeConnectionWebUI,
+	})
 	if err != nil {
+		if errors.Is(err, service.ErrRealtimeConnectionLimitExceeded) {
+			_ = conn.WriteJSON(map[string]any{"type": "disconnect", "reason": "connection_limit_exceeded"})
+			return
+		}
 		_ = conn.WriteJSON(map[string]any{"type": "disconnect", "reason": err.Error()})
 		return
 	}

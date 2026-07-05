@@ -125,6 +125,20 @@ func TestFromEnvLoadsRuntimeSettings(t *testing.T) {
 	}
 }
 
+func TestFromEnvLoadsRealtimeLimits(t *testing.T) {
+	t.Setenv("CHATAPI_REALTIME_MAX_CONNECTIONS", "100")
+	t.Setenv("CHATAPI_REALTIME_MAX_CONNECTIONS_PER_USER", "8")
+	t.Setenv("CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER", "2")
+
+	cfg, err := FromEnvUnchecked(ModeLab, t.TempDir())
+	if err != nil {
+		t.Fatalf("load realtime config: %v", err)
+	}
+	if cfg.RealtimeMaxConnections != 100 || cfg.RealtimeMaxConnectionsPerUser != 8 || cfg.RealtimeWebUIReservedPerUser != 2 {
+		t.Fatalf("unexpected realtime config: %#v", cfg)
+	}
+}
+
 func TestDiagnoseStorageQuota(t *testing.T) {
 	cfg := Default(ModeLab, t.TempDir())
 
@@ -151,6 +165,22 @@ func TestDiagnoseRuntimeSettings(t *testing.T) {
 	}
 	if !hasDiagnostic(report, DiagnosticWarn, "runtime.memory_limit_low") {
 		t.Fatalf("missing low runtime memory limit diagnostic: %#v", report)
+	}
+}
+
+func TestDiagnoseRealtimeLimits(t *testing.T) {
+	cfg := Default(ModeLab, t.TempDir())
+
+	report := Diagnose(cfg, cfg.Validate())
+	if !hasDiagnostic(report, DiagnosticInfo, "realtime.webui_reservation_inactive") {
+		t.Fatalf("missing inactive realtime reservation diagnostic: %#v", report)
+	}
+
+	cfg.RealtimeMaxConnectionsPerUser = 1
+	cfg.RealtimeWebUIReservedPerUser = 1
+	report = Diagnose(cfg, cfg.Validate())
+	if !hasDiagnostic(report, DiagnosticWarn, "realtime.webui_reserved_too_high") {
+		t.Fatalf("missing high realtime reservation diagnostic: %#v", report)
 	}
 }
 

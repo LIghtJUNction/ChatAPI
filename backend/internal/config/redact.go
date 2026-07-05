@@ -1,29 +1,32 @@
 package config
 
 type RedactedConfig struct {
-	Mode                     Mode     `json:"mode"`
-	Host                     string   `json:"host"`
-	Port                     int      `json:"port"`
-	ListenAddr               string   `json:"listen_addr"`
-	BaseURL                  string   `json:"base_url,omitempty"`
-	WebDistDir               string   `json:"web_dist_dir"`
-	DataDir                  string   `json:"data_dir"`
-	DatabaseDriver           string   `json:"database_driver"`
-	DatabaseDSN              string   `json:"database_dsn"`
-	MasterKey                string   `json:"master_key"`
-	AllowRemoteLab           bool     `json:"allow_remote_lab"`
-	OpenBrowser              bool     `json:"open_browser"`
-	LabToken                 string   `json:"lab_token"`
-	LabPassword              string   `json:"lab_password"`
-	AdminPassword            string   `json:"admin_password"`
-	LogLevel                 string   `json:"log_level"`
-	CORSOrigins              []string `json:"cors_origins"`
-	MetricsEnabled           bool     `json:"metrics_enabled"`
-	UploadMaxBytes           int64    `json:"upload_max_bytes"`
-	StorageDefaultQuotaBytes int64    `json:"storage_default_quota_bytes"`
-	PendingTurnTTL           string   `json:"pending_turn_ttl"`
-	RuntimeGOGC              int      `json:"runtime_gogc"`
-	RuntimeMemoryLimitBytes  int64    `json:"runtime_memory_limit_bytes"`
+	Mode                          Mode     `json:"mode"`
+	Host                          string   `json:"host"`
+	Port                          int      `json:"port"`
+	ListenAddr                    string   `json:"listen_addr"`
+	BaseURL                       string   `json:"base_url,omitempty"`
+	WebDistDir                    string   `json:"web_dist_dir"`
+	DataDir                       string   `json:"data_dir"`
+	DatabaseDriver                string   `json:"database_driver"`
+	DatabaseDSN                   string   `json:"database_dsn"`
+	MasterKey                     string   `json:"master_key"`
+	AllowRemoteLab                bool     `json:"allow_remote_lab"`
+	OpenBrowser                   bool     `json:"open_browser"`
+	LabToken                      string   `json:"lab_token"`
+	LabPassword                   string   `json:"lab_password"`
+	AdminPassword                 string   `json:"admin_password"`
+	LogLevel                      string   `json:"log_level"`
+	CORSOrigins                   []string `json:"cors_origins"`
+	MetricsEnabled                bool     `json:"metrics_enabled"`
+	UploadMaxBytes                int64    `json:"upload_max_bytes"`
+	StorageDefaultQuotaBytes      int64    `json:"storage_default_quota_bytes"`
+	PendingTurnTTL                string   `json:"pending_turn_ttl"`
+	RuntimeGOGC                   int      `json:"runtime_gogc"`
+	RuntimeMemoryLimitBytes       int64    `json:"runtime_memory_limit_bytes"`
+	RealtimeMaxConnections        int      `json:"realtime_max_connections"`
+	RealtimeMaxConnectionsPerUser int      `json:"realtime_max_connections_per_user"`
+	RealtimeWebUIReservedPerUser  int      `json:"realtime_webui_reserved_per_user"`
 
 	SMTPEnabled  bool   `json:"smtp_enabled"`
 	SMTPHost     string `json:"smtp_host,omitempty"`
@@ -49,48 +52,51 @@ type RedactedConfig struct {
 
 func (c Config) Redacted() RedactedConfig {
 	return RedactedConfig{
-		Mode:                     c.Mode,
-		Host:                     c.Host,
-		Port:                     c.Port,
-		ListenAddr:               c.ListenAddr(),
-		BaseURL:                  c.BaseURL,
-		WebDistDir:               c.WebDistDir,
-		DataDir:                  c.DataDir,
-		DatabaseDriver:           c.DatabaseDriver,
-		DatabaseDSN:              redactDatabaseDSN(c),
-		MasterKey:                redactSecret(c.MasterKey),
-		AllowRemoteLab:           c.AllowRemoteLab,
-		OpenBrowser:              c.OpenBrowser,
-		LabToken:                 redactSecret(c.LabToken),
-		LabPassword:              redactSecret(c.LabPassword),
-		AdminPassword:            redactSecret(c.AdminPassword),
-		LogLevel:                 c.LogLevel,
-		CORSOrigins:              append([]string(nil), c.CORSOrigins...),
-		MetricsEnabled:           c.MetricsEnabled,
-		UploadMaxBytes:           c.UploadMaxBytes,
-		StorageDefaultQuotaBytes: c.StorageDefaultQuotaBytes,
-		PendingTurnTTL:           c.PendingTurnTTL.String(),
-		RuntimeGOGC:              c.RuntimeGOGC,
-		RuntimeMemoryLimitBytes:  c.RuntimeMemoryLimitBytes,
-		SMTPEnabled:              c.SMTPEnabled,
-		SMTPHost:                 c.SMTPHost,
-		SMTPPort:                 c.SMTPPort,
-		SMTPUsername:             c.SMTPUsername,
-		SMTPPassword:             redactSecret(c.SMTPPassword),
-		SMTPFrom:                 c.SMTPFrom,
-		SMTPSecurity:             c.SMTPSecurity,
-		SMTPTimeout:              c.SMTPTimeout.String(),
-		OIDCEnabled:              c.OIDCEnabled,
-		OIDCProviderName:         c.OIDCProviderName,
-		OIDCIssuerURL:            c.OIDCIssuerURL,
-		OIDCClientID:             c.OIDCClientID,
-		OIDCClientSecret:         redactSecret(c.OIDCClientSecret),
-		OIDCRedirectURL:          c.OIDCRedirectURL,
-		OIDCScopes:               append([]string(nil), c.OIDCScopes...),
-		OIDCAllowedDomains:       append([]string(nil), c.OIDCAllowedDomains...),
-		OIDCAllowedEmails:        append([]string(nil), c.OIDCAllowedEmails...),
-		OIDCAdminEmails:          append([]string(nil), c.OIDCAdminEmails...),
-		OIDCAutoCreateUser:       c.OIDCAutoCreateUser,
+		Mode:                          c.Mode,
+		Host:                          c.Host,
+		Port:                          c.Port,
+		ListenAddr:                    c.ListenAddr(),
+		BaseURL:                       c.BaseURL,
+		WebDistDir:                    c.WebDistDir,
+		DataDir:                       c.DataDir,
+		DatabaseDriver:                c.DatabaseDriver,
+		DatabaseDSN:                   redactDatabaseDSN(c),
+		MasterKey:                     redactSecret(c.MasterKey),
+		AllowRemoteLab:                c.AllowRemoteLab,
+		OpenBrowser:                   c.OpenBrowser,
+		LabToken:                      redactSecret(c.LabToken),
+		LabPassword:                   redactSecret(c.LabPassword),
+		AdminPassword:                 redactSecret(c.AdminPassword),
+		LogLevel:                      c.LogLevel,
+		CORSOrigins:                   append([]string(nil), c.CORSOrigins...),
+		MetricsEnabled:                c.MetricsEnabled,
+		UploadMaxBytes:                c.UploadMaxBytes,
+		StorageDefaultQuotaBytes:      c.StorageDefaultQuotaBytes,
+		PendingTurnTTL:                c.PendingTurnTTL.String(),
+		RuntimeGOGC:                   c.RuntimeGOGC,
+		RuntimeMemoryLimitBytes:       c.RuntimeMemoryLimitBytes,
+		RealtimeMaxConnections:        c.RealtimeMaxConnections,
+		RealtimeMaxConnectionsPerUser: c.RealtimeMaxConnectionsPerUser,
+		RealtimeWebUIReservedPerUser:  c.RealtimeWebUIReservedPerUser,
+		SMTPEnabled:                   c.SMTPEnabled,
+		SMTPHost:                      c.SMTPHost,
+		SMTPPort:                      c.SMTPPort,
+		SMTPUsername:                  c.SMTPUsername,
+		SMTPPassword:                  redactSecret(c.SMTPPassword),
+		SMTPFrom:                      c.SMTPFrom,
+		SMTPSecurity:                  c.SMTPSecurity,
+		SMTPTimeout:                   c.SMTPTimeout.String(),
+		OIDCEnabled:                   c.OIDCEnabled,
+		OIDCProviderName:              c.OIDCProviderName,
+		OIDCIssuerURL:                 c.OIDCIssuerURL,
+		OIDCClientID:                  c.OIDCClientID,
+		OIDCClientSecret:              redactSecret(c.OIDCClientSecret),
+		OIDCRedirectURL:               c.OIDCRedirectURL,
+		OIDCScopes:                    append([]string(nil), c.OIDCScopes...),
+		OIDCAllowedDomains:            append([]string(nil), c.OIDCAllowedDomains...),
+		OIDCAllowedEmails:             append([]string(nil), c.OIDCAllowedEmails...),
+		OIDCAdminEmails:               append([]string(nil), c.OIDCAdminEmails...),
+		OIDCAutoCreateUser:            c.OIDCAutoCreateUser,
 	}
 }
 

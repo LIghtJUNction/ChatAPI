@@ -21,28 +21,31 @@ const (
 )
 
 type Config struct {
-	Mode                     Mode
-	Host                     string
-	Port                     int
-	BaseURL                  string
-	WebDistDir               string
-	DataDir                  string
-	DatabaseDriver           string
-	DatabaseDSN              string
-	MasterKey                string
-	AllowRemoteLab           bool
-	OpenBrowser              bool
-	LabToken                 string
-	LabPassword              string
-	AdminPassword            string
-	LogLevel                 string
-	CORSOrigins              []string
-	MetricsEnabled           bool
-	UploadMaxBytes           int64
-	StorageDefaultQuotaBytes int64
-	PendingTurnTTL           time.Duration
-	RuntimeGOGC              int
-	RuntimeMemoryLimitBytes  int64
+	Mode                          Mode
+	Host                          string
+	Port                          int
+	BaseURL                       string
+	WebDistDir                    string
+	DataDir                       string
+	DatabaseDriver                string
+	DatabaseDSN                   string
+	MasterKey                     string
+	AllowRemoteLab                bool
+	OpenBrowser                   bool
+	LabToken                      string
+	LabPassword                   string
+	AdminPassword                 string
+	LogLevel                      string
+	CORSOrigins                   []string
+	MetricsEnabled                bool
+	UploadMaxBytes                int64
+	StorageDefaultQuotaBytes      int64
+	PendingTurnTTL                time.Duration
+	RuntimeGOGC                   int
+	RuntimeMemoryLimitBytes       int64
+	RealtimeMaxConnections        int
+	RealtimeMaxConnectionsPerUser int
+	RealtimeWebUIReservedPerUser  int
 
 	SMTPEnabled  bool
 	SMTPHost     string
@@ -93,36 +96,39 @@ func Default(mode Mode, backendRoot string) Config {
 		masterKey = "chatapi-lab-insecure-master-key"
 	}
 	return Config{
-		Mode:                     mode,
-		Host:                     host,
-		Port:                     5000,
-		BaseURL:                  "",
-		WebDistDir:               filepath.Join(projectRoot, "frontend", "dist"),
-		DataDir:                  dataDir,
-		DatabaseDriver:           "sqlite",
-		DatabaseDSN:              filepath.Join(dataDir, "chatapi.sqlite3"),
-		MasterKey:                masterKey,
-		AllowRemoteLab:           false,
-		OpenBrowser:              openBrowser,
-		LabToken:                 "",
-		LabPassword:              "",
-		AdminPassword:            "",
-		LogLevel:                 "info",
-		CORSOrigins:              []string{"http://localhost:5173", "http://127.0.0.1:5173"},
-		MetricsEnabled:           false,
-		UploadMaxBytes:           10 << 20,
-		StorageDefaultQuotaBytes: 0,
-		PendingTurnTTL:           0,
-		RuntimeGOGC:              0,
-		RuntimeMemoryLimitBytes:  0,
-		SMTPEnabled:              false,
-		SMTPHost:                 "",
-		SMTPPort:                 587,
-		SMTPUsername:             "",
-		SMTPPassword:             "",
-		SMTPFrom:                 "",
-		SMTPSecurity:             "starttls",
-		SMTPTimeout:              10 * time.Second,
+		Mode:                          mode,
+		Host:                          host,
+		Port:                          5000,
+		BaseURL:                       "",
+		WebDistDir:                    filepath.Join(projectRoot, "frontend", "dist"),
+		DataDir:                       dataDir,
+		DatabaseDriver:                "sqlite",
+		DatabaseDSN:                   filepath.Join(dataDir, "chatapi.sqlite3"),
+		MasterKey:                     masterKey,
+		AllowRemoteLab:                false,
+		OpenBrowser:                   openBrowser,
+		LabToken:                      "",
+		LabPassword:                   "",
+		AdminPassword:                 "",
+		LogLevel:                      "info",
+		CORSOrigins:                   []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		MetricsEnabled:                false,
+		UploadMaxBytes:                10 << 20,
+		StorageDefaultQuotaBytes:      0,
+		PendingTurnTTL:                0,
+		RuntimeGOGC:                   0,
+		RuntimeMemoryLimitBytes:       0,
+		RealtimeMaxConnections:        0,
+		RealtimeMaxConnectionsPerUser: 0,
+		RealtimeWebUIReservedPerUser:  1,
+		SMTPEnabled:                   false,
+		SMTPHost:                      "",
+		SMTPPort:                      587,
+		SMTPUsername:                  "",
+		SMTPPassword:                  "",
+		SMTPFrom:                      "",
+		SMTPSecurity:                  "starttls",
+		SMTPTimeout:                   10 * time.Second,
 
 		OIDCEnabled:        false,
 		OIDCProviderName:   "",
@@ -197,6 +203,27 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES: %w", err)
 		}
 		cfg.RuntimeMemoryLimitBytes = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_REALTIME_MAX_CONNECTIONS")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_REALTIME_MAX_CONNECTIONS: %w", err)
+		}
+		cfg.RealtimeMaxConnections = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_REALTIME_MAX_CONNECTIONS_PER_USER")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_REALTIME_MAX_CONNECTIONS_PER_USER: %w", err)
+		}
+		cfg.RealtimeMaxConnectionsPerUser = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER: %w", err)
+		}
+		cfg.RealtimeWebUIReservedPerUser = value
 	}
 	cfg.SMTPEnabled = parseBool(os.Getenv("CHATAPI_SMTP_ENABLED"), cfg.SMTPEnabled)
 	cfg.SMTPHost = strings.TrimSpace(os.Getenv("CHATAPI_SMTP_HOST"))
@@ -294,6 +321,15 @@ func (c Config) Validate() error {
 	}
 	if c.RuntimeMemoryLimitBytes < 0 {
 		return errors.New("runtime memory limit bytes must be non-negative")
+	}
+	if c.RealtimeMaxConnections < 0 {
+		return errors.New("realtime max connections must be non-negative")
+	}
+	if c.RealtimeMaxConnectionsPerUser < 0 {
+		return errors.New("realtime max connections per user must be non-negative")
+	}
+	if c.RealtimeWebUIReservedPerUser < 0 {
+		return errors.New("realtime webui reserved per user must be non-negative")
 	}
 	if c.SMTPEnabled {
 		if strings.TrimSpace(c.SMTPHost) == "" {

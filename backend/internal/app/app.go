@@ -79,7 +79,11 @@ func Run(ctx context.Context, args []string) error {
 		return err
 	}
 	pendingRegistry := service.NewPendingRegistry()
-	realtimeHub := service.NewRealtimeHub(dataStore)
+	realtimeHub := service.NewRealtimeHub(dataStore, service.NewRealtimeLimits(
+		cfg.RealtimeMaxConnections,
+		cfg.RealtimeMaxConnectionsPerUser,
+		cfg.RealtimeWebUIReservedPerUser,
+	))
 	chatService := service.NewChatAPIService(dataStore, pendingRegistry, realtimeHub)
 	startPendingExpirationWorker(ctx, cfg, chatService, logger)
 

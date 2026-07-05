@@ -905,10 +905,29 @@ func TestUploadsImageCreate(t *testing.T) {
 	if !strings.HasSuffix(filename, ".png") || nestedString(upload, "content_type") != "image/png" {
 		t.Fatalf("unexpected upload response: %#v", resp)
 	}
+	if nestedString(upload, "id") == "" || nestedString(upload, "owner_id") != "lab-user" || nestedString(upload, "original_filename") != "tiny.png" {
+		t.Fatalf("unexpected upload metadata response: %#v", resp)
+	}
 
 	status, body := env.getText(t, nestedString(upload, "url"))
 	if status != http.StatusOK || len(body) != len(tinyPNG()) {
 		t.Fatalf("unexpected uploaded image read: status=%d len=%d", status, len(body))
+	}
+
+	var ownerID string
+	var originalFilename string
+	var contentType string
+	var bytes int
+	var url string
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT owner_id, original_filename, content_type, bytes, url
+		FROM uploaded_images
+		WHERE filename = ?
+	`, filename).Scan(&ownerID, &originalFilename, &contentType, &bytes, &url); err != nil {
+		t.Fatalf("read uploaded image metadata: %v", err)
+	}
+	if ownerID != "lab-user" || originalFilename != "tiny.png" || contentType != "image/png" || bytes != len(tinyPNG()) || url != nestedString(upload, "url") {
+		t.Fatalf("unexpected uploaded image metadata: owner=%q original=%q type=%q bytes=%d url=%q", ownerID, originalFilename, contentType, bytes, url)
 	}
 }
 
@@ -1027,10 +1046,11 @@ func TestAdminStorageEndpoints(t *testing.T) {
 		"mode": "assistant_message",
 	}, http.StatusOK)
 	<-resultCh
+	env.postMultipart(t, "/api/uploads/imgs", "file", "storage.png", tinyPNG(), http.StatusOK)
 
 	summaryResp := env.getJSON(t, "/api/admin/storage/summary", http.StatusOK)
 	summary := summaryResp["summary"].(map[string]any)
-	if numericValue(summary["conversation_count"]) < 1 || numericValue(summary["message_count"]) < 2 {
+	if numericValue(summary["conversation_count"]) < 1 || numericValue(summary["message_count"]) < 2 || numericValue(summary["estimated_bytes"]) < len(tinyPNG()) {
 		t.Fatalf("unexpected storage summary response: %#v", summaryResp)
 	}
 	database := summary["database"].(map[string]any)
@@ -1043,7 +1063,7 @@ func TestAdminStorageEndpoints(t *testing.T) {
 	foundLabUser := false
 	for _, item := range items {
 		record := item.(map[string]any)
-		if nestedString(record, "user_id") == "lab-user" && numericValue(record["message_count"]) >= 2 {
+		if nestedString(record, "user_id") == "lab-user" && numericValue(record["message_count"]) >= 2 && numericValue(record["image_count"]) == 1 && numericValue(record["image_bytes"]) == len(tinyPNG()) {
 			foundLabUser = true
 			break
 		}

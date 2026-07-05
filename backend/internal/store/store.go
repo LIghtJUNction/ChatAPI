@@ -93,6 +93,17 @@ type AutomationRule struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
+type UploadedImage struct {
+	ID               string    `json:"id"`
+	OwnerID          string    `json:"owner_id"`
+	Filename         string    `json:"filename"`
+	OriginalFilename string    `json:"original_filename,omitempty"`
+	ContentType      string    `json:"content_type"`
+	Bytes            int64     `json:"bytes"`
+	URL              string    `json:"url"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 type MigrationStatus struct {
 	SchemaVersion  string             `json:"schema_version"`
 	AppVersion     string             `json:"app_version,omitempty"`
@@ -136,6 +147,16 @@ type UpsertAutomationRuleInput struct {
 	UserID  string
 	Enabled bool
 	Payload map[string]any
+}
+
+type CreateUploadedImageInput struct {
+	ID               string
+	OwnerID          string
+	Filename         string
+	OriginalFilename string
+	ContentType      string
+	Bytes            int64
+	URL              string
 }
 
 type CreatePendingInput struct {
@@ -192,6 +213,9 @@ type Store interface {
 	RevokeModelAPIKey(context.Context, string, string) error
 	ListAutomationRulesByUser(context.Context, string) ([]AutomationRule, error)
 	ReplaceAutomationRulesForUser(context.Context, string, map[string]struct{}, []UpsertAutomationRuleInput) ([]AutomationRule, error)
+	CreateUploadedImage(context.Context, CreateUploadedImageInput) (UploadedImage, error)
+	ListUploadedImages(context.Context) ([]UploadedImage, error)
+	ListUploadedImagesByOwner(context.Context, string) ([]UploadedImage, error)
 	ListMessages(context.Context, string) ([]Message, error)
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)
 	UpdateDraft(context.Context, UpdateDraftInput) (Conversation, error)

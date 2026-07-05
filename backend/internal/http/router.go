@@ -40,7 +40,7 @@ func NewRouter(
 	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
 	authHandler := handlers.AuthHandler{Config: cfg}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
-	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg)}
+	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore)}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
 	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)
 	automationRuleService := service.NewAutomationRuleService(dataStore)

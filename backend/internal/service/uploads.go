@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/store"
 )
 
 var ErrUploadNotFound = errors.New("upload not found")
@@ -24,6 +25,7 @@ var ErrUploadTooLarge = errors.New("upload too large")
 type UploadService struct {
 	root     string
 	maxBytes int64
+	store    store.Store
 }
 
 type UploadUsage struct {
@@ -33,16 +35,20 @@ type UploadUsage struct {
 }
 
 type UploadResult struct {
-	Filename    string `json:"filename"`
-	URL         string `json:"url"`
-	Bytes       int64  `json:"bytes"`
-	ContentType string `json:"content_type"`
+	ID               string `json:"id,omitempty"`
+	OwnerID          string `json:"owner_id,omitempty"`
+	Filename         string `json:"filename"`
+	OriginalFilename string `json:"original_filename,omitempty"`
+	URL              string `json:"url"`
+	Bytes            int64  `json:"bytes"`
+	ContentType      string `json:"content_type"`
 }
 
-func NewUploadService(cfg config.Config) *UploadService {
+func NewUploadService(cfg config.Config, dataStore store.Store) *UploadService {
 	return &UploadService{
 		root:     filepath.Join(cfg.DataDir, "uploads", "imgs"),
 		maxBytes: cfg.UploadMaxBytes,
+		store:    dataStore,
 	}
 }
 
@@ -97,7 +103,7 @@ func (s *UploadService) ResolveImagePath(filename string) (string, error) {
 	return path, nil
 }
 
-func (s *UploadService) SaveImage(ctx context.Context, file multipart.File) (UploadResult, error) {
+func (s *UploadService) SaveImage(ctx context.Context, file multipart.File, originalFilename string) (UploadResult, error) {
 	if file == nil {
 		return UploadResult{}, ErrInvalidUploadPath
 	}
@@ -145,12 +151,48 @@ func (s *UploadService) SaveImage(ctx context.Context, file multipart.File) (Upl
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return UploadResult{}, fmt.Errorf("write upload: %w", err)
 	}
-	return UploadResult{
-		Filename:    filename,
-		URL:         "/api/uploads/imgs/" + filename,
-		Bytes:       int64(len(data)),
-		ContentType: contentType,
-	}, nil
+	result := UploadResult{
+		Filename:         filename,
+		OriginalFilename: cleanOriginalUploadFilename(originalFilename),
+		URL:              "/api/uploads/imgs/" + filename,
+		Bytes:            int64(len(data)),
+		ContentType:      contentType,
+	}
+	if s.store == nil {
+		return result, nil
+	}
+	ownerID := OwnerIDFromContext(ctx)
+	if ownerID == "" {
+		ownerID = "anonymous"
+	}
+	record, err := s.store.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+		ID:               "upload_" + uuid.NewString(),
+		OwnerID:          ownerID,
+		Filename:         result.Filename,
+		OriginalFilename: result.OriginalFilename,
+		ContentType:      result.ContentType,
+		Bytes:            result.Bytes,
+		URL:              result.URL,
+	})
+	if err != nil {
+		_ = os.Remove(path)
+		return UploadResult{}, fmt.Errorf("record upload metadata: %w", err)
+	}
+	result.ID = record.ID
+	result.OwnerID = record.OwnerID
+	return result, nil
+}
+
+func cleanOriginalUploadFilename(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return ""
+	}
+	filename = filepath.Base(filename)
+	if filename == "." || filename == string(filepath.Separator) {
+		return ""
+	}
+	return filename
 }
 
 func (s *UploadService) Usage(ctx context.Context) (UploadUsage, error) {

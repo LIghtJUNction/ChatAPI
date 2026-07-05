@@ -38,6 +38,8 @@ type UserStorageUsage struct {
 	EstimatedBytes    int64  `json:"estimated_bytes"`
 	ConversationCount int    `json:"conversation_count"`
 	MessageCount      int    `json:"message_count"`
+	ImageCount        int    `json:"image_count"`
+	ImageBytes        int64  `json:"image_bytes"`
 }
 
 type StorageCleanupPreviewInput struct {
@@ -119,6 +121,21 @@ func (s *StorageMonitorService) Users(ctx context.Context) ([]UserStorageUsage, 
 			usage.EstimatedBytes += int64(len(message.Content) + len(message.Role) + len(message.Status))
 			usage.EstimatedBytes += estimatedJSONBytes(message.Metadata)
 		}
+	}
+	images, err := s.store.ListUploadedImages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, image := range images {
+		ownerID := stringValue(image.OwnerID, "unknown")
+		usage := byUser[ownerID]
+		if usage == nil {
+			usage = &UserStorageUsage{UserID: ownerID}
+			byUser[ownerID] = usage
+		}
+		usage.ImageCount++
+		usage.ImageBytes += image.Bytes
+		usage.EstimatedBytes += image.Bytes
 	}
 	items := make([]UserStorageUsage, 0, len(byUser))
 	for _, item := range byUser {

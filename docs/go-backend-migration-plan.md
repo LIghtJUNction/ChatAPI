@@ -42,13 +42,14 @@
 - 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、按模型和状态聚合、最老 pending 等待秒数。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及 dry-run 清理候选预览；当前 cleanup 只允许 `dry_run: true`，不执行删除、文件清理或 SQLite vacuum。
+- 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count` 和 `image_bytes`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope 等风险。
 - 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
 - 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
-- Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；图片归属、用户配额和数据库元数据仍待补齐。
+- Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；用户配额、孤儿图片清理和上传审计仍待补齐。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -915,9 +916,10 @@ type Hub struct {
 当前 Go 重构分支已先落地最小兼容面：
 
 - `POST /api/uploads/imgs`：接受 multipart 文件字段 `file` / `image` / `upload`，使用 `http.DetectContentType` 嗅探 PNG/JPEG/GIF/WebP，服务端生成 UUID 文件名，写入 `data/uploads/imgs`；默认 `CHATAPI_UPLOAD_MAX_BYTES=10485760`。
+- `uploaded_images`：记录上传文件的 `owner_id`、服务端文件名、原始文件名、MIME、字节数、访问 URL 和创建时间。Lab 模式当前归属到 `lab-user`；生产模式后续接入 session/OIDC 后从统一 `RequestActor` 注入真实用户。
 - `GET /api/uploads/imgs/{filename}`：只接受单段文件名，拒绝空文件名、路径分隔符和 `..`，并在服务端解析后验证仍位于 `data/uploads/imgs` 根目录。
 - `GET /api/uploads/imgs/usage`：统计 uploads/imgs 目录的文件数和总字节数，目录不存在时返回 0。
-- 图片归属、用户配额、数据库元数据、孤儿图片清理和上传审计仍是后续工作。
+- 用户配额、孤儿图片清理和上传审计仍是后续工作。
 
 ### 6.6 资源治理与运维监控
 
@@ -955,10 +957,10 @@ type Hub struct {
 - `POST /api/admin/runtime/gc`：触发一次 `runtime.GC()` 和 `debug.FreeOSMemory()`，返回 GC 后内存快照。
 - 当前还没有引入系统级探针，因此 CPU 使用率、系统可用内存、磁盘总容量、进程 RSS/FD 数、慢客户端断开计数仍属于后续运维监控扩展。
 - `GET /api/admin/storage/summary`：返回 SQLite 主库/WAL、uploads 目录大小、估算用户数、估算总字节数、会话数和消息数。
-- `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数和消息数。当前估算范围为 conversation/message 文本与 metadata JSON；uploads 文件已计入 summary，但图片归属需要后续上传元数据表支持后才能精确拆分到用户。
+- `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数、消息数、图片数和图片字节数。当前估算范围包含 conversation/message 文本、metadata JSON，以及已写入 `uploaded_images` 的图片字节数；孤儿文件仍只体现在 uploads 目录总量中。
 - `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
 - `POST /api/admin/storage/cleanup`：当前只支持 dry-run 预览，必须传 `dry_run: true`；请求参数为 `owner_id`、`keep_recent_conversations`、`keep_recent_days`，返回候选会话数、候选消息数、估算可回收字节数和按 owner 聚合的计划。当前不会删除 conversations/messages、不会删除 uploads 文件、不会执行 SQLite vacuum。
-- 真正清理执行仍属于后续工作，必须补齐用户配额策略、保护最近会话、dry-run 审核、审计日志、上传文件归属、SQLite incremental vacuum / full vacuum 策略和失败恢复后再开放。
+- 真正清理执行仍属于后续工作，必须补齐用户配额策略、保护最近会话、dry-run 审核、审计日志、上传文件删除、SQLite incremental vacuum / full vacuum 策略和失败恢复后再开放。
 
 GC 设置：
 

@@ -106,6 +106,23 @@ CREATE TABLE IF NOT EXISTS app_api_key_audit_logs (
 	error_code TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS uploaded_images (
+	id TEXT PRIMARY KEY,
+	owner_id TEXT NOT NULL,
+	filename TEXT NOT NULL,
+	original_filename TEXT NOT NULL DEFAULT '',
+	content_type TEXT NOT NULL,
+	bytes INTEGER NOT NULL,
+	url TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_uploaded_images_filename
+ON uploaded_images(filename);
+
+CREATE INDEX IF NOT EXISTS idx_uploaded_images_owner_created
+ON uploaded_images(owner_id, created_at DESC, id DESC);
 `
 
 type Status struct {

@@ -32,13 +32,13 @@ func (h UploadsHandler) Image(w http.ResponseWriter, r *http.Request) {
 
 func (h UploadsHandler) CreateImage(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, h.Service.MaxRequestBytes())
-	file, _, err := firstUploadFile(r)
+	file, originalFilename, err := firstUploadFile(r)
 	if err != nil {
 		http.Error(w, "upload file is required", http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
-	result, err := h.Service.SaveImage(r.Context(), file)
+	result, err := h.Service.SaveImage(r.Context(), file, originalFilename)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUnsupportedUploadType):

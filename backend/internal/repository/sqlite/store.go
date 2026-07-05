@@ -512,6 +512,81 @@ func (s *Store) ReplaceAutomationRulesForUser(ctx context.Context, userID string
 	return s.ListAutomationRulesByUser(ctx, userID)
 }
 
+func (s *Store) CreateUploadedImage(ctx context.Context, input store.CreateUploadedImageInput) (store.UploadedImage, error) {
+	createdAt := time.Now().UTC()
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO uploaded_images(
+			id, owner_id, filename, original_filename, content_type, bytes, url, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		input.ID,
+		input.OwnerID,
+		input.Filename,
+		input.OriginalFilename,
+		input.ContentType,
+		input.Bytes,
+		input.URL,
+		formatTime(createdAt),
+	); err != nil {
+		return store.UploadedImage{}, err
+	}
+	return store.UploadedImage{
+		ID:               input.ID,
+		OwnerID:          input.OwnerID,
+		Filename:         input.Filename,
+		OriginalFilename: input.OriginalFilename,
+		ContentType:      input.ContentType,
+		Bytes:            input.Bytes,
+		URL:              input.URL,
+		CreatedAt:        createdAt,
+	}, nil
+}
+
+func (s *Store) ListUploadedImagesByOwner(ctx context.Context, ownerID string) ([]store.UploadedImage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, owner_id, filename, original_filename, content_type, bytes, url, created_at
+		FROM uploaded_images
+		WHERE owner_id = ?
+		ORDER BY created_at DESC, id DESC
+	`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.UploadedImage, 0)
+	for rows.Next() {
+		item, err := scanUploadedImage(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) ListUploadedImages(ctx context.Context) ([]store.UploadedImage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, owner_id, filename, original_filename, content_type, bytes, url, created_at
+		FROM uploaded_images
+		ORDER BY created_at DESC, id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.UploadedImage, 0)
+	for rows.Next() {
+		item, err := scanUploadedImage(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json
@@ -915,6 +990,10 @@ type automationRuleScanner interface {
 	Scan(dest ...any) error
 }
 
+type uploadedImageScanner interface {
+	Scan(dest ...any) error
+}
+
 func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	var item store.Request
 	var createdAt string
@@ -1043,6 +1122,25 @@ func scanAutomationRule(scanner automationRuleScanner) (store.AutomationRule, er
 	item.Payload = parseJSONMap(payloadJSON)
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
+	return item, nil
+}
+
+func scanUploadedImage(scanner uploadedImageScanner) (store.UploadedImage, error) {
+	var item store.UploadedImage
+	var createdAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.OwnerID,
+		&item.Filename,
+		&item.OriginalFilename,
+		&item.ContentType,
+		&item.Bytes,
+		&item.URL,
+		&createdAt,
+	); err != nil {
+		return store.UploadedImage{}, err
+	}
+	item.CreatedAt = parseTime(createdAt)
 	return item, nil
 }
 

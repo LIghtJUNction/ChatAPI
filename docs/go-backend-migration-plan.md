@@ -38,6 +38,7 @@
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
 - 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 可在当前 lab 用户语境下工作；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
 - 应用 API 当前已开始覆盖 `model_keys:read` / `model_keys:write` / `model_keys:delete`：`/api/app/model-keys` 可按 scope 和 `allowed_virtual_models` / `allowed_model_key_ids` 管理当前用户自己的虚拟模型 API Key。
+- 应用 API 当前已开始覆盖 `automation:read` / `automation:write`：`GET/PUT /api/app/automation-rules` 可读写当前用户自己的自动化规则，并支持 `allowed_automation_rule_ids` 限制外部程序只能管理指定规则。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -1274,10 +1275,13 @@ user_app_api_keys
 
 当前 Go 重构分支已落地的最小接口形状：
 
+- `GET /api/app/automation-rules`：需要 `automation:read`，返回当前用户自己的规则数组；如果配置了 `allowed_automation_rule_ids`，只返回允许的规则。
+- `PUT /api/app/automation-rules`：需要 `automation:write`，请求体为 `{ "rules": [...] }`。未配置 `allowed_automation_rule_ids` 时替换当前用户全部规则；配置后只允许替换指定规则，提交未授权规则 id 返回 `403`。
 - `GET /api/app/model-keys`：需要 `model_keys:read`，返回当前用户自己的虚拟模型 API Key；如果配置了 `allowed_model_key_ids`，只返回允许的 key。
 - `POST /api/app/model-keys`：需要 `model_keys:write`，请求体包含 `name`、`model`；如果配置了 `allowed_virtual_models`，只能为允许的虚拟模型创建 key。
 - `DELETE /api/app/model-keys/{key_id}`：需要 `model_keys:delete`，只能删除当前用户自己的 key；如果配置了 `allowed_model_key_ids`，只能删除允许的 key。
 - 虚拟模型 key 使用 `sk-` 前缀和可解密密文保存；应用 API Key 使用 `ak-` 前缀和 hash 保存。两套鉴权中间件完全分离，`ak-` 不能访问模型兼容入口，`sk-` 不能访问 `/api/app/*`。
+- 自动化规则当前以 `automation_rules.rule_json` 保存完整规则 JSON，同时单独保存 `user_id`、`id`、`enabled`、`created_at`、`updated_at`；后续自动执行引擎、WebUI 配置接口和应用 API 都应复用同一张表与 service，避免规则格式分叉。
 - 所有应用 API 响应都使用稳定 JSON，方便脚本调用。
 - `complete` 和 `abort` 与 Web 控制台操作共享同一个 Turn Manager 状态机，避免双写和竞态。
 
@@ -1910,6 +1914,7 @@ make release-snapshot
 - Go `httptest` 集成测试至少覆盖三套协议的非流式闭环，并覆盖 Responses / Chat Completions / Anthropic Messages 的 `stream=true` 基础 SSE 行为，以及 `tool_call` 的基础流式返回。
 - Go `httptest` 集成测试应覆盖 `waiting -> streaming -> closed/aborted` 的最小状态流转，以及终态后的 `delta` / `complete` / `abort` 返回 `409`。
 - Go `httptest` 集成测试应覆盖虚拟模型 API Key 的创建、可解密回看、撤销后拒绝访问、模型兼容入口 owner 归属，以及应用 API Key 通过 `model_keys:*` scope 和 resource limits 管理虚拟模型 API Key。
+- Go `httptest` 集成测试应覆盖应用 API Key 通过 `automation:read/write` 读写自动化规则，并覆盖缺少 scope 与 `allowed_automation_rule_ids` 拒绝。
 - Lab 模式下 OpenAI/Anthropic SDK 请求可进入等待态，浏览器完成输出后 SDK 收到兼容响应。
 - Tool Call 辅助不会自动发送，只能由用户审核后手动提交。
 - KirariNetwork token 过期时可自动 refresh；refresh 失败时提示用户重新连接，不泄露 token。

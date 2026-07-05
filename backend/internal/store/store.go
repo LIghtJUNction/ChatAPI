@@ -84,6 +84,15 @@ type ModelAPIKey struct {
 	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
 }
 
+type AutomationRule struct {
+	ID        string         `json:"id"`
+	UserID    string         `json:"user_id"`
+	Enabled   bool           `json:"enabled"`
+	Payload   map[string]any `json:"payload"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
 type CreateAppAPIKeyInput struct {
 	ID             string
 	UserID         string
@@ -102,6 +111,13 @@ type CreateModelAPIKeyInput struct {
 	KeyCiphertext string
 	KeyPrefix     string
 	Model         string
+}
+
+type UpsertAutomationRuleInput struct {
+	ID      string
+	UserID  string
+	Enabled bool
+	Payload map[string]any
 }
 
 type CreatePendingInput struct {
@@ -155,6 +171,8 @@ type Store interface {
 	GetModelAPIKeyByID(context.Context, string) (ModelAPIKey, error)
 	UpdateModelAPIKeyLastUsedAt(context.Context, string, time.Time) error
 	RevokeModelAPIKey(context.Context, string, string) error
+	ListAutomationRulesByUser(context.Context, string) ([]AutomationRule, error)
+	ReplaceAutomationRulesForUser(context.Context, string, map[string]struct{}, []UpsertAutomationRuleInput) ([]AutomationRule, error)
 	ListMessages(context.Context, string) ([]Message, error)
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)
 	UpdateDraft(context.Context, UpdateDraftInput) (Conversation, error)

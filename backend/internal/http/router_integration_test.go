@@ -678,6 +678,77 @@ func TestAppAPIModelKeysManagement(t *testing.T) {
 	}
 }
 
+func TestAppAPIAutomationRulesReadWrite(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"automation:read", "automation:write"}, nil)
+
+	rule := map[string]any{
+		"id":      "rule_app_api",
+		"enabled": true,
+		"conditions": map[string]any{
+			"contains": []map[string]any{{"match_type": "substring", "pattern": "hello"}},
+			"excludes": []map[string]any{},
+		},
+		"timing": map[string]any{
+			"delay_seconds":           0,
+			"repeat_interval_seconds": 0,
+			"max_output_count":        120,
+		},
+		"action": map[string]any{
+			"type": "output_text",
+			"text": "自动化回复",
+		},
+	}
+
+	putResp := env.appPutJSON(t, "/api/app/automation-rules", appKey, map[string]any{
+		"rules": []map[string]any{rule},
+	}, http.StatusOK)
+	rules := putResp["rules"].([]any)
+	if len(rules) != 1 || nestedString(rules[0].(map[string]any), "id") != "rule_app_api" {
+		t.Fatalf("unexpected automation rules put response: %#v", putResp)
+	}
+
+	listResp := env.appGetJSON(t, "/api/app/automation-rules", appKey, http.StatusOK)
+	listRules := listResp["rules"].([]any)
+	if len(listRules) != 1 || nestedPathString(listRules[0].(map[string]any), "action", "text") != "自动化回复" {
+		t.Fatalf("unexpected automation rules list response: %#v", listResp)
+	}
+}
+
+func TestAppAPIAutomationRulesRejectsMissingScope(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"automation:read"}, nil)
+
+	status, body := env.appPutText(t, "/api/app/automation-rules", appKey, map[string]any{
+		"rules": []map[string]any{{"id": "rule_forbidden", "enabled": true}},
+	})
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("expected automation write scope rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestAppAPIAutomationRulesResourceLimit(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"automation:read", "automation:write"}, map[string]any{
+		"allowed_automation_rule_ids": []string{"rule_allowed"},
+	})
+
+	status, body := env.appPutText(t, "/api/app/automation-rules", appKey, map[string]any{
+		"rules": []map[string]any{{"id": "rule_blocked", "enabled": true}},
+	})
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("expected automation resource rejection: status=%d body=%q", status, body)
+	}
+
+	putResp := env.appPutJSON(t, "/api/app/automation-rules", appKey, map[string]any{
+		"rules": []map[string]any{{"id": "rule_allowed", "enabled": false}},
+	}, http.StatusOK)
+	rules := putResp["rules"].([]any)
+	if len(rules) != 1 || nestedString(rules[0].(map[string]any), "id") != "rule_allowed" {
+		t.Fatalf("unexpected resource-limited automation response: %#v", putResp)
+	}
+}
+
 func TestAppAPIAuditLogWritten(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
@@ -1414,6 +1485,57 @@ func (e *testEnv) appPostText(t *testing.T, path string, appKey string, body map
 	resp, err := e.client.Do(req)
 	if err != nil {
 		t.Fatalf("do app post %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) appPutJSON(t *testing.T, path string, appKey string, body map[string]any, wantStatus int) map[string]any {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+appKey)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do app put %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response %s: %v", path, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
+	}
+	return payload
+}
+
+func (e *testEnv) appPutText(t *testing.T, path string, appKey string, body map[string]any) (int, string) {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+appKey)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do app put %s: %v", path, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)

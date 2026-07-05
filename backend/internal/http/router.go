@@ -39,7 +39,8 @@ func NewRouter(
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
 	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)
-	appAPIHandler := handlers.AppAPIHandler{Service: chatService, ModelAPIKeys: modelAPIKeyService}
+	automationRuleService := service.NewAutomationRuleService(dataStore)
+	appAPIHandler := handlers.AppAPIHandler{Service: chatService, ModelAPIKeys: modelAPIKeyService, AutomationRules: automationRuleService}
 	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService}
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
@@ -84,6 +85,14 @@ func NewRouter(
 		middleware.RequireAppAPIKey(appAPIKeyService, "conversations:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/conversations/{conversationID}/messages", appAPIHandler.ListConversationMessages)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "automation:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/automation-rules", appAPIHandler.ListAutomationRules)
+	appRouter.With(
+		middleware.RequireAppAPIKey(appAPIKeyService, "automation:write"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Put("/automation-rules", appAPIHandler.PutAutomationRules)
 	appRouter.With(
 		middleware.RequireAppAPIKey(appAPIKeyService, "model_keys:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),

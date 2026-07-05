@@ -61,6 +61,19 @@ ON user_api_keys(key_prefix);
 CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_id
 ON user_api_keys(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS automation_rules (
+	id TEXT NOT NULL,
+	user_id TEXT NOT NULL,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	rule_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY(user_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_rules_user_updated
+ON automation_rules(user_id, updated_at DESC, id);
+
 CREATE TABLE IF NOT EXISTS user_app_api_keys (
 	id TEXT PRIMARY KEY,
 	user_id TEXT NOT NULL,

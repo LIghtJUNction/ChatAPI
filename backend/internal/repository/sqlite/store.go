@@ -414,6 +414,77 @@ func (s *Store) RevokeModelAPIKey(ctx context.Context, id string, userID string)
 	return nil
 }
 
+func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]store.AutomationRule, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, enabled, rule_json, created_at, updated_at
+		FROM automation_rules
+		WHERE user_id = ?
+		ORDER BY updated_at DESC, id ASC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.AutomationRule, 0)
+	for rows.Next() {
+		item, err := scanAutomationRule(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) ReplaceAutomationRulesForUser(ctx context.Context, userID string, replaceIDs map[string]struct{}, inputs []store.UpsertAutomationRuleInput) ([]store.AutomationRule, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if len(replaceIDs) == 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM automation_rules WHERE user_id = ?`, userID); err != nil {
+			return nil, err
+		}
+	} else {
+		for ruleID := range replaceIDs {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM automation_rules WHERE user_id = ? AND id = ?`, userID, ruleID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	now := formatTime(time.Now().UTC())
+	for _, input := range inputs {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO automation_rules(id, user_id, enabled, rule_json, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(user_id, id) DO UPDATE SET
+				enabled = excluded.enabled,
+				rule_json = excluded.rule_json,
+				updated_at = excluded.updated_at
+		`,
+			input.ID,
+			userID,
+			boolInt(input.Enabled),
+			mustJSON(ensureMap(input.Payload)),
+			now,
+			now,
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.ListAutomationRulesByUser(ctx, userID)
+}
+
 func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json
@@ -766,6 +837,13 @@ func formatNullableTime(value *time.Time) any {
 	return formatTime(*value)
 }
 
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 func keysOf(value map[string]any) []string {
 	keys := make([]string, 0, len(value))
 	for key := range value {
@@ -803,6 +881,10 @@ type appAPIKeyScanner interface {
 }
 
 type modelAPIKeyScanner interface {
+	Scan(dest ...any) error
+}
+
+type automationRuleScanner interface {
 	Scan(dest ...any) error
 }
 
@@ -911,6 +993,29 @@ func scanModelAPIKey(scanner modelAPIKeyScanner) (store.ModelAPIKey, error) {
 		value := parseTime(revokedAt.String)
 		item.RevokedAt = &value
 	}
+	return item, nil
+}
+
+func scanAutomationRule(scanner automationRuleScanner) (store.AutomationRule, error) {
+	var item store.AutomationRule
+	var enabled int
+	var payloadJSON string
+	var createdAt string
+	var updatedAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.UserID,
+		&enabled,
+		&payloadJSON,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return store.AutomationRule{}, err
+	}
+	item.Enabled = enabled != 0
+	item.Payload = parseJSONMap(payloadJSON)
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
 	return item, nil
 }
 

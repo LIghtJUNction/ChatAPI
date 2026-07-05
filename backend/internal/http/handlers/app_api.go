@@ -14,8 +14,9 @@ import (
 )
 
 type AppAPIHandler struct {
-	Service      *service.ChatAPIService
-	ModelAPIKeys *service.ModelAPIKeyService
+	Service         *service.ChatAPIService
+	ModelAPIKeys    *service.ModelAPIKeyService
+	AutomationRules *service.AutomationRuleService
 }
 
 func (h AppAPIHandler) Me(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +180,52 @@ func (h AppAPIHandler) DeleteModelAPIKey(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h AppAPIHandler) ListAutomationRules(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	rules, err := h.AutomationRules.ListRules(r.Context(), principal.UserID, stringSetFromAny(principal.ResourceLimits["allowed_automation_rule_ids"]))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": rules})
+}
+
+func (h AppAPIHandler) PutAutomationRules(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	rules, err := mapSlice(body["rules"])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	nextRules, err := h.AutomationRules.ReplaceRules(r.Context(), principal.UserID, stringSetFromAny(principal.ResourceLimits["allowed_automation_rule_ids"]), rules)
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) {
+			http.Error(w, "app api key forbidden", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, service.ErrInvalidAutomationRule) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": nextRules})
+}
+
 func (h AppAPIHandler) RequestDelta(w http.ResponseWriter, r *http.Request) {
 	h.executeRequestTurnControl(w, r, "delta", service.TurnControlStreamDelta)
 }
@@ -267,4 +314,20 @@ func stringSetFromAny(value any) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+func mapSlice(value any) ([]map[string]any, error) {
+	rawItems, ok := value.([]any)
+	if !ok {
+		return nil, errors.New("rules must be an array")
+	}
+	items := make([]map[string]any, 0, len(rawItems))
+	for _, raw := range rawItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			return nil, errors.New("rule must be an object")
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }

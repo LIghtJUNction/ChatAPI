@@ -929,6 +929,22 @@ func TestUploadsImageCreate(t *testing.T) {
 	if ownerID != "lab-user" || originalFilename != "tiny.png" || contentType != "image/png" || bytes != len(tinyPNG()) || url != nestedString(upload, "url") {
 		t.Fatalf("unexpected uploaded image metadata: owner=%q original=%q type=%q bytes=%d url=%q", ownerID, originalFilename, contentType, bytes, url)
 	}
+
+	var auditCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'upload'
+			AND resource_type = 'image'
+			AND action = 'create'
+			AND outcome = 'success'
+	`).Scan(&auditCount); err != nil {
+		t.Fatalf("count upload audit logs: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("expected upload audit log entry, got %d", auditCount)
+	}
 }
 
 func TestUploadsRejectsUnsupportedType(t *testing.T) {
@@ -982,6 +998,21 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	gcResp := env.postJSON(t, "/api/admin/runtime/gc", map[string]any{}, http.StatusOK)
 	if gcResp["memory"] == nil {
 		t.Fatalf("unexpected runtime gc response: %#v", gcResp)
+	}
+	var gcAuditCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'admin.runtime'
+			AND resource_type = 'runtime'
+			AND action = 'gc'
+			AND outcome = 'success'
+	`).Scan(&gcAuditCount); err != nil {
+		t.Fatalf("count runtime gc audit logs: %v", err)
+	}
+	if gcAuditCount != 1 {
+		t.Fatalf("expected runtime gc audit log entry, got %d", gcAuditCount)
 	}
 
 	connectionsResp := env.getJSON(t, "/api/admin/runtime/connections", http.StatusOK)
@@ -1117,6 +1148,22 @@ func TestAdminStorageCleanupPreview(t *testing.T) {
 	byOwner := plan["by_owner"].([]any)
 	if len(byOwner) != 1 || nestedString(byOwner[0].(map[string]any), "owner_id") != "lab-user" {
 		t.Fatalf("unexpected cleanup owner plan: %#v", previewResp)
+	}
+	var cleanupAuditCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'admin.storage'
+			AND resource_type = 'storage'
+			AND resource_id = 'lab-user'
+			AND action = 'cleanup_preview'
+			AND outcome = 'success'
+	`).Scan(&cleanupAuditCount); err != nil {
+		t.Fatalf("count storage cleanup audit logs: %v", err)
+	}
+	if cleanupAuditCount != 1 {
+		t.Fatalf("expected storage cleanup audit log entry, got %d", cleanupAuditCount)
 	}
 }
 

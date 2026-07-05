@@ -10,6 +10,7 @@ import (
 
 type AdminStorageHandler struct {
 	Monitor *service.StorageMonitorService
+	Audit   *service.AuditService
 }
 
 func (h AdminStorageHandler) Summary(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +63,23 @@ func (h AdminStorageHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "admin.storage",
+		ResourceType: "storage",
+		ResourceID:   strings.TrimSpace(input.OwnerID),
+		Action:       "cleanup_preview",
+		Outcome:      "success",
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata: map[string]any{
+			"dry_run":                     true,
+			"keep_recent_conversations":   input.KeepRecentConversations,
+			"keep_recent_days":            input.KeepRecentDays,
+			"candidate_conversations":     preview.CandidateConversations,
+			"candidate_messages":          preview.CandidateMessages,
+			"estimated_reclaimable_bytes": preview.EstimatedReclaimableBytes,
+		},
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"dry_run": true,

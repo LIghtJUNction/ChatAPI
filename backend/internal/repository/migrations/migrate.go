@@ -107,6 +107,31 @@ CREATE TABLE IF NOT EXISTS app_api_key_audit_logs (
 	created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+	id TEXT PRIMARY KEY,
+	actor_user_id TEXT NOT NULL DEFAULT '',
+	actor_role TEXT NOT NULL DEFAULT '',
+	actor_source TEXT NOT NULL DEFAULT '',
+	event_type TEXT NOT NULL,
+	resource_type TEXT NOT NULL DEFAULT '',
+	resource_id TEXT NOT NULL DEFAULT '',
+	action TEXT NOT NULL,
+	outcome TEXT NOT NULL,
+	ip_address TEXT NOT NULL DEFAULT '',
+	user_agent TEXT NOT NULL DEFAULT '',
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created
+ON audit_logs(created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_created
+ON audit_logs(actor_user_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_event_created
+ON audit_logs(event_type, created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS uploaded_images (
 	id TEXT PRIMARY KEY,
 	owner_id TEXT NOT NULL,

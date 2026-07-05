@@ -8,6 +8,7 @@ import (
 
 type AdminRuntimeHandler struct {
 	Monitor *service.RuntimeMonitorService
+	Audit   *service.AuditService
 }
 
 func (h AdminRuntimeHandler) Summary(w http.ResponseWriter, r *http.Request) {
@@ -39,8 +40,22 @@ func (h AdminRuntimeHandler) Queue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AdminRuntimeHandler) GC(w http.ResponseWriter, r *http.Request) {
+	memory := h.Monitor.ForceGC()
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "admin.runtime",
+		ResourceType: "runtime",
+		Action:       "gc",
+		Outcome:      "success",
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata: map[string]any{
+			"heap_alloc_bytes": memory.HeapAllocBytes,
+			"sys_bytes":        memory.SysBytes,
+			"num_gc":           memory.NumGC,
+		},
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
-		"memory": h.Monitor.ForceGC(),
+		"memory": memory,
 	})
 }

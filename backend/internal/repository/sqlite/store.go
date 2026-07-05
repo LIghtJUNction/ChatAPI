@@ -326,6 +326,47 @@ func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKe
 	return err
 }
 
+func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogInput) (store.AuditLog, error) {
+	createdAt := time.Now().UTC()
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO audit_logs(
+			id, actor_user_id, actor_role, actor_source, event_type, resource_type,
+			resource_id, action, outcome, ip_address, user_agent, metadata_json, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		input.ID,
+		input.ActorUserID,
+		input.ActorRole,
+		input.ActorSource,
+		input.EventType,
+		input.ResourceType,
+		input.ResourceID,
+		input.Action,
+		input.Outcome,
+		input.IPAddress,
+		input.UserAgent,
+		mustJSON(ensureMap(input.Metadata)),
+		formatTime(createdAt),
+	); err != nil {
+		return store.AuditLog{}, err
+	}
+	return store.AuditLog{
+		ID:           input.ID,
+		ActorUserID:  input.ActorUserID,
+		ActorRole:    input.ActorRole,
+		ActorSource:  input.ActorSource,
+		EventType:    input.EventType,
+		ResourceType: input.ResourceType,
+		ResourceID:   input.ResourceID,
+		Action:       input.Action,
+		Outcome:      input.Outcome,
+		IPAddress:    input.IPAddress,
+		UserAgent:    input.UserAgent,
+		Metadata:     ensureMap(input.Metadata),
+		CreatedAt:    createdAt,
+	}, nil
+}
+
 func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAPIKeyInput) (store.ModelAPIKey, error) {
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `

@@ -12,6 +12,7 @@ import (
 
 type UploadsHandler struct {
 	Service *service.UploadService
+	Audit   *service.AuditService
 }
 
 func (h UploadsHandler) Image(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +35,17 @@ func (h UploadsHandler) CreateImage(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, h.Service.MaxRequestBytes())
 	file, originalFilename, err := firstUploadFile(r)
 	if err != nil {
+		h.Audit.Record(r.Context(), service.AuditEventInput{
+			EventType:    "upload",
+			ResourceType: "image",
+			Action:       "create",
+			Outcome:      "failure",
+			IPAddress:    clientIP(r),
+			UserAgent:    r.UserAgent(),
+			Metadata: map[string]any{
+				"error": "missing_file",
+			},
+		})
 		http.Error(w, "upload file is required", http.StatusBadRequest)
 		return
 	}
@@ -50,8 +62,35 @@ func (h UploadsHandler) CreateImage(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
+		h.Audit.Record(r.Context(), service.AuditEventInput{
+			EventType:    "upload",
+			ResourceType: "image",
+			Action:       "create",
+			Outcome:      "failure",
+			IPAddress:    clientIP(r),
+			UserAgent:    r.UserAgent(),
+			Metadata: map[string]any{
+				"original_filename": originalFilename,
+				"error":             err.Error(),
+			},
+		})
 		return
 	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "upload",
+		ResourceType: "image",
+		ResourceID:   result.ID,
+		Action:       "create",
+		Outcome:      "success",
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata: map[string]any{
+			"filename":          result.Filename,
+			"original_filename": result.OriginalFilename,
+			"content_type":      result.ContentType,
+			"bytes":             result.Bytes,
+		},
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"upload": result,

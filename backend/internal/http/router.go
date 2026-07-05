@@ -40,7 +40,8 @@ func NewRouter(
 	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
 	authHandler := handlers.AuthHandler{Config: cfg}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
-	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore)}
+	auditService := service.NewAuditService(dataStore)
+	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore), Audit: auditService}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
 	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)
 	automationRuleService := service.NewAutomationRuleService(dataStore)
@@ -48,10 +49,10 @@ func NewRouter(
 	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService}
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, realtimeHub, pending)
-	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor}
+	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
 	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
 	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)
-	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor}
+	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor, Audit: auditService}
 	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}

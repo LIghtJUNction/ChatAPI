@@ -1198,6 +1198,51 @@ func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	}
 }
 
+func TestAdminAuditLogsEndpoint(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.postMultipart(t, "/api/uploads/imgs", "file", "audit.png", tinyPNG(), http.StatusOK)
+	env.postJSON(t, "/api/admin/runtime/gc", map[string]any{}, http.StatusOK)
+
+	allResp := env.getJSON(t, "/api/admin/audit/logs?limit=10", http.StatusOK)
+	items := allResp["items"].([]any)
+	if numericValue(allResp["count"]) != len(items) || len(items) < 2 {
+		t.Fatalf("unexpected audit logs response: %#v", allResp)
+	}
+
+	uploadResp := env.getJSON(t, "/api/admin/audit/logs?event_type=upload&actor_user_id=lab-user", http.StatusOK)
+	uploadItems := uploadResp["items"].([]any)
+	if len(uploadItems) != 1 {
+		t.Fatalf("expected one upload audit log: %#v", uploadResp)
+	}
+	upload := uploadItems[0].(map[string]any)
+	if nestedString(upload, "event_type") != "upload" || nestedString(upload, "action") != "create" || nestedString(upload, "outcome") != "success" {
+		t.Fatalf("unexpected upload audit log: %#v", upload)
+	}
+	metadata := upload["metadata"].(map[string]any)
+	if nestedString(metadata, "content_type") != "image/png" || numericValue(metadata["bytes"]) != len(tinyPNG()) {
+		t.Fatalf("unexpected upload audit metadata: %#v", upload)
+	}
+
+	runtimeResp := env.getJSON(t, "/api/admin/audit/logs?event_type=admin.runtime&limit=1", http.StatusOK)
+	runtimeItems := runtimeResp["items"].([]any)
+	if len(runtimeItems) != 1 || nestedString(runtimeItems[0].(map[string]any), "action") != "gc" {
+		t.Fatalf("expected runtime gc audit log: %#v", runtimeResp)
+	}
+}
+
+func TestAdminAuditLogsRejectsAPIKeys(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
+
+	status, body := env.getTextWithHeaders(t, "/api/admin/audit/logs", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key audit admin rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAdminRequestsOverview(t *testing.T) {
 	env := newTestEnv(t)
 	modelKey := env.seedModelAPIKey(t, "model-owner", "overview-model-key", "overview-model-b")

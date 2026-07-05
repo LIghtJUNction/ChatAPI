@@ -367,6 +367,52 @@ func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogIn
 	}, nil
 }
 
+func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInput) ([]store.AuditLog, error) {
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	query := `
+		SELECT id, actor_user_id, actor_role, actor_source, event_type, resource_type,
+			resource_id, action, outcome, ip_address, user_agent, metadata_json, created_at
+		FROM audit_logs
+	`
+	args := make([]any, 0, 3)
+	conditions := make([]string, 0, 2)
+	if strings.TrimSpace(input.EventType) != "" {
+		conditions = append(conditions, "event_type = ?")
+		args = append(args, strings.TrimSpace(input.EventType))
+	}
+	if strings.TrimSpace(input.ActorUserID) != "" {
+		conditions = append(conditions, "actor_user_id = ?")
+		args = append(args, strings.TrimSpace(input.ActorUserID))
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.AuditLog, 0)
+	for rows.Next() {
+		item, err := scanAuditLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAPIKeyInput) (store.ModelAPIKey, error) {
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
@@ -1035,6 +1081,10 @@ type uploadedImageScanner interface {
 	Scan(dest ...any) error
 }
 
+type auditLogScanner interface {
+	Scan(dest ...any) error
+}
+
 func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	var item store.Request
 	var createdAt string
@@ -1181,6 +1231,32 @@ func scanUploadedImage(scanner uploadedImageScanner) (store.UploadedImage, error
 	); err != nil {
 		return store.UploadedImage{}, err
 	}
+	item.CreatedAt = parseTime(createdAt)
+	return item, nil
+}
+
+func scanAuditLog(scanner auditLogScanner) (store.AuditLog, error) {
+	var item store.AuditLog
+	var metadataJSON string
+	var createdAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.ActorUserID,
+		&item.ActorRole,
+		&item.ActorSource,
+		&item.EventType,
+		&item.ResourceType,
+		&item.ResourceID,
+		&item.Action,
+		&item.Outcome,
+		&item.IPAddress,
+		&item.UserAgent,
+		&metadataJSON,
+		&createdAt,
+	); err != nil {
+		return store.AuditLog{}, err
+	}
+	item.Metadata = parseJSONMap(metadataJSON)
 	item.CreatedAt = parseTime(createdAt)
 	return item, nil
 }

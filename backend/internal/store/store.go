@@ -180,6 +180,12 @@ type CreateAuditLogInput struct {
 	Metadata     map[string]any
 }
 
+type ListAuditLogsInput struct {
+	Limit       int
+	EventType   string
+	ActorUserID string
+}
+
 type CreateUploadedImageInput struct {
 	ID               string
 	OwnerID          string
@@ -237,6 +243,7 @@ type Store interface {
 	RevokeAppAPIKey(context.Context, string, string) error
 	CreateAppAPIKeyAuditLog(context.Context, AppAPIKeyAuditLog) error
 	CreateAuditLog(context.Context, CreateAuditLogInput) (AuditLog, error)
+	ListAuditLogs(context.Context, ListAuditLogsInput) ([]AuditLog, error)
 	CreateModelAPIKey(context.Context, CreateModelAPIKeyInput) (ModelAPIKey, error)
 	ListModelAPIKeysByUser(context.Context, string) ([]ModelAPIKey, error)
 	GetModelAPIKeyByPrefix(context.Context, string) (ModelAPIKey, error)

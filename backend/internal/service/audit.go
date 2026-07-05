@@ -24,6 +24,12 @@ type AuditEventInput struct {
 	Metadata     map[string]any
 }
 
+type ListAuditLogsInput struct {
+	Limit       int
+	EventType   string
+	ActorUserID string
+}
+
 func NewAuditService(dataStore store.Store) *AuditService {
 	return &AuditService{store: dataStore}
 }
@@ -55,6 +61,24 @@ func (s *AuditService) Record(ctx context.Context, input AuditEventInput) {
 		IPAddress:    strings.TrimSpace(input.IPAddress),
 		UserAgent:    strings.TrimSpace(input.UserAgent),
 		Metadata:     sanitizeAuditMetadata(input.Metadata),
+	})
+}
+
+func (s *AuditService) List(ctx context.Context, input ListAuditLogsInput) ([]store.AuditLog, error) {
+	if s == nil || s.store == nil {
+		return nil, nil
+	}
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	return s.store.ListAuditLogs(ctx, store.ListAuditLogsInput{
+		Limit:       limit,
+		EventType:   strings.TrimSpace(input.EventType),
+		ActorUserID: strings.TrimSpace(input.ActorUserID),
 	})
 }
 

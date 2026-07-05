@@ -858,6 +858,57 @@ func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 	}
 }
 
+func TestAdminStorageEndpoints(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-model",
+		"input": "storage usage 测试",
+	})
+	conversation := env.waitForWaitingConversation(t, "storage usage 测试")
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "storage response",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+
+	summaryResp := env.getJSON(t, "/api/admin/storage/summary", http.StatusOK)
+	summary := summaryResp["summary"].(map[string]any)
+	if numericValue(summary["conversation_count"]) < 1 || numericValue(summary["message_count"]) < 2 {
+		t.Fatalf("unexpected storage summary response: %#v", summaryResp)
+	}
+	database := summary["database"].(map[string]any)
+	if nestedString(database, "driver") != "sqlite" {
+		t.Fatalf("unexpected storage database info: %#v", summaryResp)
+	}
+
+	usersResp := env.getJSON(t, "/api/admin/storage/users", http.StatusOK)
+	items := usersResp["items"].([]any)
+	foundLabUser := false
+	for _, item := range items {
+		record := item.(map[string]any)
+		if nestedString(record, "user_id") == "lab-user" && numericValue(record["message_count"]) >= 2 {
+			foundLabUser = true
+			break
+		}
+	}
+	if !foundLabUser {
+		t.Fatalf("expected lab-user storage usage: %#v", usersResp)
+	}
+}
+
+func TestAdminStorageRejectsAPIKeys(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
+
+	status, body := env.getTextWithHeaders(t, "/api/admin/storage/summary", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key storage admin rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAppAPIAuditLogWritten(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)

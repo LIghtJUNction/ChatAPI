@@ -45,6 +45,8 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, realtimeHub, pending)
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor}
+	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)
+	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -129,6 +131,8 @@ func NewRouter(
 	adminRouter.Get("/runtime/summary", adminRuntimeHandler.Summary)
 	adminRouter.Get("/runtime/memory", adminRuntimeHandler.Memory)
 	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
+	adminRouter.Get("/storage/summary", adminStorageHandler.Summary)
+	adminRouter.Get("/storage/users", adminStorageHandler.Users)
 	router.Mount("/api/admin", adminRouter)
 	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
 	router.Post("/api/conversations/{conversationID}/abort", chatHandler.AbortConversation)

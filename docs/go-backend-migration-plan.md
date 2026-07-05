@@ -22,6 +22,7 @@
 - 请求会写入 SQLite `conversations` / `messages` 表，并携带前端当前需要的 `request_debug`、`realtime_status` 元数据。
 - Web 控制台可通过 `/api/conversations/{id}/messages` 读取消息。
 - 工作台核心交互 `/api/chat/output/delta`、`/api/chat/output/complete`、`/api/conversations/{id}/abort` 已有最小实现。
+- 已新增更适合后续前端重构的 path-based 控制接口：`/api/conversations/{id}/respond`、`/api/conversations/{id}/stream/delta`、`/api/conversations/{id}/stream/complete`；旧 `/api/chat/output/*` 先作为兼容别名保留。
 - `/api/chat/output/complete` 可结束等待中的 pending turn，并把完成结果回传给原始 `/v1/responses` 请求。
 - `/api/ws` 已切到真实 WebSocket 广播骨架，可发送 snapshot / conversation_upsert / connection_count 事件。
 - 已新增 Go `httptest` 集成测试，覆盖 `responses`、`chat/completions`、`messages` 三套协议的 pending/complete/abort 基础链路。
@@ -1307,8 +1308,16 @@ Go 版首个可替换版本必须覆盖：
 - `POST /api/conversations/prune`
 - `POST /api/conversations/{conversation_id}/abort`
 - `POST /api/conversations/{conversation_id}/rename`
+- `POST /api/conversations/{conversation_id}/respond`
+- `POST /api/conversations/{conversation_id}/stream/delta`
+- `POST /api/conversations/{conversation_id}/stream/complete`
 - `POST /api/chat/output/complete`
 - `POST /api/chat/output/delta`
+- 后续前端改造建议优先改接 path-based 接口，而不是继续围绕 `/api/chat/output/*` 做扩展：
+  - 非流式人工回复：`POST /api/conversations/{conversation_id}/respond`
+  - 流式人工回复：`POST /api/conversations/{conversation_id}/stream/delta` + `POST /api/conversations/{conversation_id}/stream/complete`
+  - 终止请求：`POST /api/conversations/{conversation_id}/abort`
+- 这样可以把“非流式一次完成”和“流式逐段输出”拆成两条明确语义路径，避免后续前端把所有手工回复都硬塞进流式草稿模型。
 - `GET /api/config/models`
 - `POST /api/config/models`
 - `DELETE /api/config/models/{model_id}`

@@ -64,14 +64,22 @@ func (h ChatAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.
 	})
 }
 
+func (h ChatAPIHandler) RespondConversation(w http.ResponseWriter, r *http.Request) {
+	h.completeOutput(w, r, conversationIDFromPath(r))
+}
+
 func (h ChatAPIHandler) CompleteOutput(w http.ResponseWriter, r *http.Request) {
+	h.completeOutput(w, r, "")
+}
+
+func (h ChatAPIHandler) completeOutput(w http.ResponseWriter, r *http.Request, conversationIDFromRoute string) {
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
 
-	conversationID, err := service.MustConversationID(body)
+	conversationID, err := mustConversationID(body, conversationIDFromRoute)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -104,13 +112,21 @@ func (h ChatAPIHandler) CompleteOutput(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h ChatAPIHandler) StreamDeltaConversation(w http.ResponseWriter, r *http.Request) {
+	h.deltaOutput(w, r, conversationIDFromPath(r))
+}
+
 func (h ChatAPIHandler) DeltaOutput(w http.ResponseWriter, r *http.Request) {
+	h.deltaOutput(w, r, "")
+}
+
+func (h ChatAPIHandler) deltaOutput(w http.ResponseWriter, r *http.Request, conversationIDFromRoute string) {
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	conversationID, err := service.MustConversationID(body)
+	conversationID, err := mustConversationID(body, conversationIDFromRoute)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -169,6 +185,17 @@ func stringValue(value any, fallback string) string {
 		return strings.TrimSpace(raw)
 	}
 	return fallback
+}
+
+func conversationIDFromPath(r *http.Request) string {
+	return strings.TrimSpace(chi.URLParam(r, "conversationID"))
+}
+
+func mustConversationID(input map[string]any, fromRoute string) (string, error) {
+	if strings.TrimSpace(fromRoute) != "" {
+		return strings.TrimSpace(fromRoute), nil
+	}
+	return service.MustConversationID(input)
 }
 
 func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, requestFormat string, body map[string]any) {

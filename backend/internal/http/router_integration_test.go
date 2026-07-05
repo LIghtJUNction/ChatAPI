@@ -129,6 +129,70 @@ func TestDraftMarksConversationStreaming(t *testing.T) {
 	<-resultCh
 }
 
+func TestRespondConversationPathEndpoint(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-respond-path",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "respond path 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "respond path 测试")
+	response := env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "一次性完成回复",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	if got := nestedString(response, "output_text"); got != "一次性完成回复" {
+		t.Fatalf("unexpected respond output_text: %#v", response)
+	}
+
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "output_text"); got != "一次性完成回复" {
+		t.Fatalf("unexpected final responses output_text: %#v", finalResp)
+	}
+}
+
+func TestStreamDeltaPathEndpoint(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-stream-path",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "stream path 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "stream path 测试")
+	deltaResp := env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/stream/delta", map[string]any{
+		"text": "路径流式片段",
+	}, http.StatusOK)
+	if got := nestedString(deltaResp, "draft_text"); got != "路径流式片段" {
+		t.Fatalf("unexpected stream delta response: %#v", deltaResp)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/stream/complete", map[string]any{
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "output_text"); got != "路径流式片段" {
+		t.Fatalf("unexpected final stream path output_text: %#v", finalResp)
+	}
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 

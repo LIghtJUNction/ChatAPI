@@ -254,6 +254,7 @@ type ExpirePendingTurnsResult struct {
 type Store interface {
 	Ping(context.Context) error
 	MigrationStatus(context.Context) (MigrationStatus, error)
+	Vacuum(context.Context) error
 	ListConversations(context.Context) ([]Conversation, error)
 	GetConversation(context.Context, string) (Conversation, error)
 	ListRequests(context.Context) ([]Request, error)

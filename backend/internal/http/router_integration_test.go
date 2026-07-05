@@ -1553,6 +1553,33 @@ func TestAdminStorageCleanupRejectsMissingDryRun(t *testing.T) {
 	}
 }
 
+func TestAdminStorageVacuum(t *testing.T) {
+	env := newTestEnv(t)
+
+	dryRunResp := env.postJSON(t, "/api/admin/storage/vacuum", map[string]any{
+		"dry_run": true,
+	}, http.StatusOK)
+	dryRunResult := dryRunResp["result"].(map[string]any)
+	if dryRunResp["dry_run"] != true || dryRunResult["after"] != nil {
+		t.Fatalf("unexpected vacuum dry-run response: %#v", dryRunResp)
+	}
+
+	status, body := env.postText(t, "/api/admin/storage/vacuum", map[string]any{})
+	if status != http.StatusBadRequest || !strings.Contains(body, "requires explicit dry_run") {
+		t.Fatalf("expected missing dry_run vacuum rejection: status=%d body=%q", status, body)
+	}
+
+	resultResp := env.postJSON(t, "/api/admin/storage/vacuum", map[string]any{
+		"dry_run": false,
+	}, http.StatusOK)
+	result := resultResp["result"].(map[string]any)
+	if resultResp["dry_run"] != false || result["before"] == nil || result["after"] == nil {
+		t.Fatalf("unexpected vacuum response: %#v", resultResp)
+	}
+	assertAuditCount(t, env, "admin.storage", "storage", "", "vacuum_preview", "success", 1)
+	assertAuditCount(t, env, "admin.storage", "storage", "", "vacuum", "success", 1)
+}
+
 func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
@@ -1583,6 +1610,13 @@ func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key storage cleanup rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appPostText(t, "/api/admin/storage/vacuum", appKey, map[string]any{
+		"dry_run": true,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key storage vacuum rejection: status=%d body=%q", status, body)
 	}
 
 	status, body = env.appPutText(t, "/api/admin/storage/users/lab-user/quota", appKey, map[string]any{

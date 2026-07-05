@@ -82,6 +82,16 @@ func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, err
 	}, nil
 }
 
+func (s *Store) Vacuum(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE);`); err != nil {
+		return fmt.Errorf("sqlite wal checkpoint: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `VACUUM;`); err != nil {
+		return fmt.Errorf("sqlite vacuum: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(json_extract(metadata_json, '$.response_id'), '')

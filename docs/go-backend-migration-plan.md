@@ -46,7 +46,7 @@
 - 应用 API Key 创建已开始支持 `expires_at`：用户创建应用 API Key 时可传 RFC3339 过期时间，必须晚于当前时间；过期 key 鉴权返回 `401`。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
 - Realtime 事件广播已补上最小背压策略：每个订阅者使用固定队列，队列满时记录 recoverable drop，连续满队列会断开慢订阅者并累计 `slow_disconnects`；`/api/admin/runtime/queue` 和 `/metrics` 都会暴露相关计数。
-- 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志。SQLite vacuum、上传文件引用清理和失败恢复策略仍待继续补齐。
+- 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`、`POST /api/admin/storage/vacuum`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志；SQLite vacuum 需要显式 `dry_run:false` 才会执行 WAL checkpoint 和 `VACUUM`。上传文件引用清理和失败恢复策略仍待继续补齐。
 - 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、默认配额、单用户 override、最终 `storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
@@ -987,7 +987,8 @@ type Hub struct {
 - `POST /api/admin/storage/orphans/cleanup`：要求显式传入 `{"dry_run": false}`，重新扫描当前 orphan 列表后只删除 uploads/imgs 根目录下的单层孤儿文件，返回候选文件数、候选字节数、实际删除文件数和实际删除字节数，并写入 `audit_logs`。
 - `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
 - `POST /api/admin/storage/cleanup`：必须显式传 `dry_run`；请求参数为 `owner_id`、`keep_recent_conversations`、`keep_recent_days`，返回候选会话数、候选消息数、估算可回收字节数和按 owner 聚合的计划。`dry_run:false` 会删除候选 conversations，并通过数据库外键级联删除 messages；候选算法会跳过 `waiting` / `streaming` 活跃请求，避免清理正在等待人工/自动化回复的 turn。
-- 当前会话/消息清理执行仍不删除 uploads 文件，不执行 SQLite incremental vacuum / full vacuum，也未提供失败后恢复队列；后续必须补齐上传引用清理、vacuum 策略、定时任务、用户配额自动触发和失败恢复。
+- `POST /api/admin/storage/vacuum`：必须显式传 `dry_run`；`dry_run:true` 只返回当前 SQLite 主库/WAL 大小，`dry_run:false` 会执行 WAL checkpoint 和 SQLite `VACUUM`，返回执行前后数据库信息并写入审计日志。
+- 当前会话/消息清理执行仍不删除 uploads 文件，也未提供失败后恢复队列；后续必须补齐上传引用清理、自动 vacuum 策略、定时任务、用户配额自动触发和失败恢复。
 
 GC 设置：
 
@@ -1596,7 +1597,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 
 - 已记录图片上传成功/失败，包括 actor、来源、文件元数据、结果和错误类别。
 - 已记录管理员手动 GC，包括 GC 后内存摘要。
-- 已记录管理员存储 cleanup dry-run 预览和实际执行，包括保留策略、候选会话数、候选消息数、估算可回收字节数，以及执行时的实际删除会话/消息数；已记录管理员设置/删除单用户存储配额覆盖。
+- 已记录管理员存储 cleanup dry-run 预览和实际执行，包括保留策略、候选会话数、候选消息数、估算可回收字节数，以及执行时的实际删除会话/消息数；已记录管理员设置/删除单用户存储配额覆盖和手动 SQLite vacuum。
 - `GET /api/admin/audit/logs` 已提供通用审计日志查询，支持 `limit`、`event_type`、`actor_user_id` 基础过滤，仅允许 admin session actor 访问；默认查询范围是 `audit_logs`，传 `include_app_api=1` 时会把 `app_api_key_audit_logs` 映射为 `event_type=app_api.request` 的统一审计条目并合并返回。
 - 审计 metadata 会过滤包含 password、secret、token、authorization、key 的字段，避免误写敏感值。
 - 应用 API Key 请求当前仍写入 `app_api_key_audit_logs`，用于保留 key id、scope 拒绝和状态码等细节；管理员审计查询可通过 `include_app_api=1` 聚合查看这些请求，后续再扩展更细的分页游标和 source 过滤。

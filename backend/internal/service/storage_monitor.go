@@ -75,6 +75,13 @@ type StorageCleanupOwnerPlan struct {
 	EstimatedReclaimableBytes int64  `json:"estimated_reclaimable_bytes"`
 }
 
+type StorageVacuumResult struct {
+	GeneratedAt time.Time     `json:"generated_at"`
+	DryRun      bool          `json:"dry_run"`
+	Before      DatabaseInfo  `json:"before"`
+	After       *DatabaseInfo `json:"after,omitempty"`
+}
+
 type storageCleanupCandidate struct {
 	ConversationID string
 	OwnerID        string
@@ -241,6 +248,26 @@ func (s *StorageMonitorService) DeleteCleanupCandidates(ctx context.Context, inp
 	preview.DeletedConversations = result.DeletedConversations
 	preview.DeletedMessages = result.DeletedMessages
 	return preview, nil
+}
+
+func (s *StorageMonitorService) Vacuum(ctx context.Context, dryRun bool) (StorageVacuumResult, error) {
+	result := StorageVacuumResult{
+		GeneratedAt: time.Now().UTC(),
+		DryRun:      dryRun,
+		Before:      storageDatabaseInfo(s.cfg),
+	}
+	if dryRun {
+		return result, nil
+	}
+	if s.cfg.DatabaseDriver != "sqlite" {
+		return StorageVacuumResult{}, errors.New("storage vacuum currently supports sqlite only")
+	}
+	if err := s.store.Vacuum(ctx); err != nil {
+		return StorageVacuumResult{}, err
+	}
+	after := storageDatabaseInfo(s.cfg)
+	result.After = &after
+	return result, nil
 }
 
 func (s *StorageMonitorService) cleanupPlan(ctx context.Context, input StorageCleanupPreviewInput) (StorageCleanupPreview, []storageCleanupCandidate, error) {

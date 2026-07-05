@@ -157,6 +157,10 @@ type storageCleanupRequest struct {
 	KeepRecentDays          int    `json:"keep_recent_days"`
 }
 
+type storageVacuumRequest struct {
+	DryRun *bool `json:"dry_run"`
+}
+
 func (h AdminStorageHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
 	var input storageCleanupRequest
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -229,6 +233,45 @@ func (h AdminStorageHandler) Cleanup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"dry_run": false,
+		"result":  result,
+	})
+}
+
+func (h AdminStorageHandler) Vacuum(w http.ResponseWriter, r *http.Request) {
+	var input storageVacuumRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid vacuum request", http.StatusBadRequest)
+		return
+	}
+	if input.DryRun == nil {
+		http.Error(w, "storage vacuum requires explicit dry_run", http.StatusBadRequest)
+		return
+	}
+	result, err := h.Monitor.Vacuum(r.Context(), *input.DryRun)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	action := "vacuum_preview"
+	if !*input.DryRun {
+		action = "vacuum"
+	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "admin.storage",
+		ResourceType: "storage",
+		Action:       action,
+		Outcome:      "success",
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata: map[string]any{
+			"dry_run":          result.DryRun,
+			"sqlite_bytes":     result.Before.SQLiteBytes,
+			"sqlite_wal_bytes": result.Before.SQLiteWALBytes,
+		},
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"dry_run": result.DryRun,
 		"result":  result,
 	})
 }

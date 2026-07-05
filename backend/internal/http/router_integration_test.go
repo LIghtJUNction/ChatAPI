@@ -290,6 +290,152 @@ func TestLabRequestsList(t *testing.T) {
 	<-secondCh
 }
 
+func TestAppAPIRequestsReadAndRespond(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read", "requests:respond"}, map[string]any{
+		"allowed_request_actions": []string{"complete"},
+	})
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-app-api",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "app api 测试"}},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "app api 测试")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+
+	meResp := env.appGetJSON(t, "/api/app/me", appKey, http.StatusOK)
+	if nestedPathString(meResp, "user", "id") != "lab-user" {
+		t.Fatalf("unexpected app api me response: %#v", meResp)
+	}
+
+	listResp := env.appGetJSON(t, "/api/app/requests", appKey, http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("unexpected empty app api requests list: %#v", listResp)
+	}
+
+	detailResp := env.appGetJSON(t, "/api/app/requests/"+requestID, appKey, http.StatusOK)
+	if nestedPathString(detailResp, "request", "request_id") != requestID {
+		t.Fatalf("unexpected app api request detail: %#v", detailResp)
+	}
+
+	env.appPostJSON(t, "/api/app/requests/"+requestID+"/complete", appKey, map[string]any{
+		"text": "应用 API 完成",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "output_text"); got != "应用 API 完成" {
+		t.Fatalf("unexpected app api final response: %#v", finalResp)
+	}
+}
+
+func TestAppAPIRejectsMissingRespondScope(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-app-api-scope",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "app api scope 测试"}},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "app api scope 测试")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+	status, body := env.appPostText(t, "/api/app/requests/"+requestID+"/delta", appKey, map[string]any{
+		"text": "不应该成功",
+	})
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("unexpected app api scope rejection: status=%d body=%q", status, body)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
+func TestAppAPIRejectsDisallowedRequestAction(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read", "requests:respond"}, map[string]any{
+		"allowed_request_actions": []string{"complete"},
+	})
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-app-api-action",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "app api action 测试"}},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "app api action 测试")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+	status, body := env.appPostText(t, "/api/app/requests/"+requestID+"/delta", appKey, map[string]any{
+		"text": "不允许的 delta",
+	})
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("unexpected app api action rejection: status=%d body=%q", status, body)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
+func TestAppAPIOwnerIsolation(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "other-user", []string{"requests:read"}, nil)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-app-api-owner",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "app api owner 测试"}},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "app api owner 测试")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+
+	listResp := env.appGetJSON(t, "/api/app/requests", appKey, http.StatusOK)
+	if items := listResp["items"].([]any); len(items) != 0 {
+		t.Fatalf("unexpected requests visible for foreign owner: %#v", listResp)
+	}
+
+	status, body := env.appGetText(t, "/api/app/requests/"+requestID, appKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "forbidden") {
+		t.Fatalf("unexpected owner isolation response: status=%d body=%q", status, body)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -754,8 +900,10 @@ func TestAnthropicMessagesToolCallSSEStream(t *testing.T) {
 }
 
 type testEnv struct {
-	server *httptest.Server
-	client *http.Client
+	server        *httptest.Server
+	client        *http.Client
+	store         *sqlitestore.Store
+	appKeyService *service.AppAPIKeyService
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -787,13 +935,16 @@ func newTestEnv(t *testing.T) *testEnv {
 	pendingRegistry := service.NewPendingRegistry()
 	realtimeHub := service.NewRealtimeHub(store)
 	chatService := service.NewChatAPIService(store, pendingRegistry, realtimeHub)
+	appKeyService := service.NewAppAPIKeyService(store)
 
 	server := httptest.NewServer(httpapi.NewRouter(cfg, store, chatService, realtimeHub, pendingRegistry))
 	t.Cleanup(server.Close)
 
 	return &testEnv{
-		server: server,
-		client: server.Client(),
+		server:        server,
+		client:        server.Client(),
+		store:         store,
+		appKeyService: appKeyService,
 	}
 }
 
@@ -851,6 +1002,123 @@ func (e *testEnv) postText(t *testing.T, path string, body map[string]any) (int,
 		t.Fatalf("read response %s: %v", path, err)
 	}
 	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) appGetJSON(t *testing.T, path string, appKey string, wantStatus int) map[string]any {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+appKey)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do app get %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response %s: %v", path, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
+	}
+	return payload
+}
+
+func (e *testEnv) appGetText(t *testing.T, path string, appKey string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+appKey)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do app get %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) appPostJSON(t *testing.T, path string, appKey string, body map[string]any, wantStatus int) map[string]any {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+appKey)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do app post %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response %s: %v", path, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
+	}
+	return payload
+}
+
+func (e *testEnv) appPostText(t *testing.T, path string, appKey string, body map[string]any) (int, string) {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+appKey)
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do app post %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) seedAppAPIKey(t *testing.T, userID string, scopes []string, resourceLimits map[string]any) string {
+	t.Helper()
+	_, raw, err := e.appKeyService.CreateKey(context.Background(), userID, "test-key", scopes, resourceLimits)
+	if err != nil {
+		t.Fatalf("create app api key: %v", err)
+	}
+	return raw
+}
+
+func (e *testEnv) requestIDForConversation(t *testing.T, conversationID string) string {
+	t.Helper()
+	messagesResp := e.getJSON(t, "/api/conversations/"+conversationID+"/messages", http.StatusOK)
+	items := messagesResp["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("no messages for conversation %s", conversationID)
+	}
+	requestDebug := items[0].(map[string]any)["metadata"].(map[string]any)["request_debug"].(map[string]any)
+	requestID, _ := requestDebug["request_id"].(string)
+	if strings.TrimSpace(requestID) == "" {
+		t.Fatalf("missing request_id for conversation %s", conversationID)
+	}
+	return requestID
 }
 
 func (e *testEnv) getJSON(t *testing.T, path string, wantStatus int) map[string]any {

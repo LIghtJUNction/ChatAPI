@@ -36,6 +36,8 @@ func NewRouter(
 	healthHandler := handlers.HealthHandler{Config: cfg, Store: dataStore}
 	authHandler := handlers.AuthHandler{Config: cfg}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
+	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
+	appAPIHandler := handlers.AppAPIHandler{Service: chatService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -51,6 +53,12 @@ func NewRouter(
 	router.Post("/lab/requests/{requestID}/complete", labHandler.RequestComplete)
 	router.Post("/lab/requests/{requestID}/abort", labHandler.RequestAbort)
 	router.Get("/api/ws", realtimeHandler.WebSocket)
+	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:read")).Get("/api/app/me", appAPIHandler.Me)
+	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:read")).Get("/api/app/requests", appAPIHandler.ListRequests)
+	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:read")).Get("/api/app/requests/{requestID}", appAPIHandler.GetRequest)
+	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond")).Post("/api/app/requests/{requestID}/delta", appAPIHandler.RequestDelta)
+	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond")).Post("/api/app/requests/{requestID}/complete", appAPIHandler.RequestComplete)
+	router.With(middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond")).Post("/api/app/requests/{requestID}/abort", appAPIHandler.RequestAbort)
 	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
 	router.Post("/api/conversations/{conversationID}/abort", chatHandler.AbortConversation)
 	router.Post("/api/conversations/{conversationID}/respond", chatHandler.RespondConversation)

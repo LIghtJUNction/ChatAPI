@@ -187,6 +187,100 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request
 	return item, nil
 }
 
+func (s *Store) CreateAppAPIKey(ctx context.Context, input store.CreateAppAPIKeyInput) (store.AppAPIKey, error) {
+	createdAt := time.Now().UTC()
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO user_app_api_keys(
+			id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		input.ID,
+		input.UserID,
+		input.Name,
+		input.KeyHash,
+		input.KeyPrefix,
+		mustJSON(input.Scopes),
+		mustJSON(input.ResourceLimits),
+		formatNullableTime(input.ExpiresAt),
+		nil,
+		formatTime(createdAt),
+		nil,
+	); err != nil {
+		return store.AppAPIKey{}, err
+	}
+	return store.AppAPIKey{
+		ID:             input.ID,
+		UserID:         input.UserID,
+		Name:           input.Name,
+		KeyHash:        input.KeyHash,
+		KeyPrefix:      input.KeyPrefix,
+		Scopes:         input.Scopes,
+		ResourceLimits: input.ResourceLimits,
+		ExpiresAt:      input.ExpiresAt,
+		CreatedAt:      createdAt,
+	}, nil
+}
+
+func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (store.AppAPIKey, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		FROM user_app_api_keys
+		WHERE key_prefix = ?
+		LIMIT 1
+	`, prefix)
+
+	var item store.AppAPIKey
+	var scopesJSON string
+	var resourceLimitsJSON string
+	var expiresAt sql.NullString
+	var lastUsedAt sql.NullString
+	var createdAt string
+	var revokedAt sql.NullString
+	if err := row.Scan(
+		&item.ID,
+		&item.UserID,
+		&item.Name,
+		&item.KeyHash,
+		&item.KeyPrefix,
+		&scopesJSON,
+		&resourceLimitsJSON,
+		&expiresAt,
+		&lastUsedAt,
+		&createdAt,
+		&revokedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.AppAPIKey{}, errNotFound
+		}
+		return store.AppAPIKey{}, err
+	}
+	item.Scopes = parseJSONStringArray(scopesJSON)
+	item.ResourceLimits = parseJSONMap(resourceLimitsJSON)
+	if expiresAt.Valid {
+		value := parseTime(expiresAt.String)
+		item.ExpiresAt = &value
+	}
+	if lastUsedAt.Valid {
+		value := parseTime(lastUsedAt.String)
+		item.LastUsedAt = &value
+	}
+	item.CreatedAt = parseTime(createdAt)
+	if revokedAt.Valid {
+		value := parseTime(revokedAt.String)
+		item.RevokedAt = &value
+	}
+	return item, nil
+}
+
+func (s *Store) UpdateAppAPIKeyLastUsedAt(ctx context.Context, id string, usedAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE user_app_api_keys
+		SET last_used_at = ?
+		WHERE id = ?
+	`, formatTime(usedAt), id)
+	return err
+}
+
 func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json
@@ -223,6 +317,7 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePendingInput) (store.Conversation, store.Message, error) {
 	now := time.Now().UTC()
 	metadata := map[string]any{
+		"owner_id":            input.OwnerID,
 		"request_format":      input.RequestFormat,
 		"realtime_status":     "waiting",
 		"realtime_draft_text": "",
@@ -501,6 +596,17 @@ func parseJSONMap(raw string) map[string]any {
 	return value
 }
 
+func parseJSONStringArray(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var value []string
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return nil
+	}
+	return value
+}
+
 func ensureMap(value map[string]any) map[string]any {
 	if value == nil {
 		return map[string]any{}
@@ -518,6 +624,13 @@ func mustJSON(value any) string {
 
 func formatTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func formatNullableTime(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return formatTime(*value)
 }
 
 func keysOf(value map[string]any) []string {
@@ -573,6 +686,7 @@ func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	conversationMetadata := parseJSONMap(conversationMetadataJSON)
 
 	item.RequestID = metadataString(requestDebug, "request_id", "")
+	item.OwnerID = metadataString(conversationMetadata, "owner_id", "")
 	item.ResponseID = metadataString(requestDebug, "response_id", "")
 	item.RequestFormat = metadataString(requestDebug, "request_format", "")
 	item.Model = metadataString(requestDebug, "model", "")

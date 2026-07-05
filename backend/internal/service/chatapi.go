@@ -57,6 +57,7 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 		ConversationID: conversationID,
 		RequestID:      requestID,
 		ResponseID:     responseID,
+		OwnerID:        "lab-user",
 		RequestFormat:  parsed.RequestFormat,
 		Model:          parsed.Model,
 		UserContent:    parsed.UserContent,
@@ -89,8 +90,33 @@ func (s *ChatAPIService) ListRequests(ctx context.Context) ([]store.Request, err
 	return s.store.ListRequests(ctx)
 }
 
+func (s *ChatAPIService) ListRequestsForOwner(ctx context.Context, ownerID string) ([]store.Request, error) {
+	items, err := s.store.ListRequests(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]store.Request, 0, len(items))
+	for _, item := range items {
+		if ownerID == "" || item.OwnerID == ownerID {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
+}
+
 func (s *ChatAPIService) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
 	return s.store.GetRequest(ctx, requestID)
+}
+
+func (s *ChatAPIService) GetRequestForOwner(ctx context.Context, requestID string, ownerID string) (store.Request, error) {
+	item, err := s.store.GetRequest(ctx, requestID)
+	if err != nil {
+		return store.Request{}, err
+	}
+	if ownerID != "" && item.OwnerID != ownerID {
+		return store.Request{}, ErrForbidden
+	}
+	return item, nil
 }
 
 func (s *ChatAPIService) UpdateDraft(ctx context.Context, conversationID string, chunk string) (map[string]any, error) {

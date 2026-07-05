@@ -33,6 +33,7 @@ type Message struct {
 
 type Request struct {
 	RequestID      string         `json:"request_id"`
+	OwnerID        string         `json:"owner_id,omitempty"`
 	ConversationID string         `json:"conversation_id"`
 	ResponseID     string         `json:"response_id,omitempty"`
 	RequestFormat  string         `json:"request_format,omitempty"`
@@ -46,10 +47,36 @@ type Request struct {
 	Metadata       map[string]any `json:"metadata,omitempty"`
 }
 
+type AppAPIKey struct {
+	ID             string         `json:"id"`
+	UserID         string         `json:"user_id"`
+	Name           string         `json:"name"`
+	KeyHash        string         `json:"-"`
+	KeyPrefix      string         `json:"key_prefix"`
+	Scopes         []string       `json:"scopes,omitempty"`
+	ResourceLimits map[string]any `json:"resource_limits,omitempty"`
+	ExpiresAt      *time.Time     `json:"expires_at,omitempty"`
+	LastUsedAt     *time.Time     `json:"last_used_at,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	RevokedAt      *time.Time     `json:"revoked_at,omitempty"`
+}
+
+type CreateAppAPIKeyInput struct {
+	ID             string
+	UserID         string
+	Name           string
+	KeyHash        string
+	KeyPrefix      string
+	Scopes         []string
+	ResourceLimits map[string]any
+	ExpiresAt      *time.Time
+}
+
 type CreatePendingInput struct {
 	ConversationID string
 	RequestID      string
 	ResponseID     string
+	OwnerID        string
 	RequestFormat  string
 	Model          string
 	UserContent    string
@@ -84,6 +111,9 @@ type Store interface {
 	GetConversation(context.Context, string) (Conversation, error)
 	ListRequests(context.Context) ([]Request, error)
 	GetRequest(context.Context, string) (Request, error)
+	CreateAppAPIKey(context.Context, CreateAppAPIKeyInput) (AppAPIKey, error)
+	GetAppAPIKeyByPrefix(context.Context, string) (AppAPIKey, error)
+	UpdateAppAPIKeyLastUsedAt(context.Context, string, time.Time) error
 	ListMessages(context.Context, string) ([]Message, error)
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)
 	UpdateDraft(context.Context, UpdateDraftInput) (Conversation, error)

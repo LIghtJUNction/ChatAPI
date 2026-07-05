@@ -6,10 +6,10 @@
 
 ### 1.0 当前落地状态
 
-截至当前重构分支的第一阶段实现，仓库已允许直接删除旧 Python `backend/`，并开始以 Go 目录结构替换：
+截至当前重构分支的第一阶段实现，仓库已允许直接删除旧 Python `backend/` 内部实现，并开始在 `backend/` 目录内以 Go 结构替换：
 
-- 仓库根目录启用新的 Go 工程布局：`cmd/`、`internal/`、`web/`。
-- 旧 Flask `backend/` 在重构分支中可以直接移除，不再做双后端长期并存。
+- `backend/` 作为 Go 后端工程根目录，内部采用 `cmd/`、`internal/`、`web/` 结构。
+- 旧 Flask `backend/` 实现可以直接移除，不再做双后端长期并存。
 - 第一批实现优先目标不是一次性补齐所有业务，而是先建立可长期演进的 Go 基础骨架：
   - 统一配置加载和命令入口；
   - SQLite 启动与 bootstrap migration；
@@ -144,62 +144,59 @@ Go 迁移必须先复刻这些边界，再逐步提高内部质量。
 ### 3.1 推荐分层
 
 ```text
-cmd/chatapi/
-  main.go
+backend/
+  cmd/chatapi/
+    main.go
 
-internal/app/
-  app.go                 # 组装配置、日志、数据库、路由、中间件、后台任务
+  internal/app/
+    app.go               # 组装配置、日志、数据库、路由、中间件、后台任务
 
-internal/config/
-  config.go              # env/.env 加载、默认值、校验、敏感配置脱敏
+  internal/config/
+    config.go            # env/.env 加载、默认值、校验、敏感配置脱敏
 
-internal/http/
-  router.go              # 路由注册
-  middleware/            # auth、csrf、cors、request id、recover、logging、rate limit
-  handlers/              # 只处理 HTTP 输入输出，不放复杂业务
+  internal/http/
+    router.go            # 路由注册
+    middleware/          # auth、csrf、cors、request id、recover、logging、rate limit
+    handlers/            # 只处理 HTTP 输入输出，不放复杂业务
 
-internal/domain/
-  auth/
-  conversation/
-  turn/
-  realtime/
-  automation/
-  config/
-  upload/
-  notification/
-  statistics/
+  internal/domain/
+    auth/
+    conversation/
+    turn/
+    realtime/
+    automation/
+    config/
+    upload/
+    notification/
+    statistics/
 
-internal/repository/
-  sqlite/
-  postgresql/
-  migrations/
+  internal/repository/
+    sqlite/
+    postgresql/
+    migrations/
 
-internal/protocol/
-  openairesponses/
-  chatcompletions/
-  anthropicmessages/
-  sse/
+  internal/protocol/
+    openairesponses/
+    chatcompletions/
+    anthropicmessages/
+    sse/
 
-internal/platform/
-  email/
-  ntfy/
-  storage/
-  clock/
-  idgen/
-  password/
-  session/
+  internal/platform/
+    email/
+    ntfy/
+    storage/
+    clock/
+    idgen/
+    password/
+    session/
 
-internal/observability/
-  log.go
-  metrics.go
-  health.go
+  internal/observability/
+    log.go
+    metrics.go
+    health.go
 
-web/
-  dist/                  # 可选，发布包内嵌或外置
-
-docs/
-scripts/
-deploy/
+  web/
+    dist/                # 可选，发布包内嵌或外置
 ```
 
 ### 3.2 依赖方向

@@ -36,10 +36,11 @@ type Config struct {
 	CORSOrigins    []string
 }
 
-func LoadEnv(repoRoot string) error {
+func LoadEnv(backendRoot string) error {
 	candidates := []string{
-		filepath.Join(repoRoot, ".env"),
-		filepath.Join(repoRoot, ".env.local"),
+		filepath.Join(backendRoot, ".env"),
+		filepath.Join(backendRoot, ".env.local"),
+		filepath.Join(filepath.Dir(backendRoot), ".env"),
 	}
 	if external := strings.TrimSpace(os.Getenv("CHATAPI_ENV_FILE")); external != "" {
 		candidates = append(candidates, external)
@@ -50,8 +51,9 @@ func LoadEnv(repoRoot string) error {
 	return nil
 }
 
-func Default(mode Mode, repoRoot string) Config {
-	dataDir := filepath.Join(repoRoot, "data")
+func Default(mode Mode, backendRoot string) Config {
+	projectRoot := filepath.Dir(backendRoot)
+	dataDir := filepath.Join(backendRoot, "data")
 	host := "0.0.0.0"
 	openBrowser := false
 	if mode == ModeLab {
@@ -63,7 +65,7 @@ func Default(mode Mode, repoRoot string) Config {
 		Host:           host,
 		Port:           5000,
 		BaseURL:        "",
-		WebDistDir:     filepath.Join(repoRoot, "frontend", "dist"),
+		WebDistDir:     filepath.Join(projectRoot, "frontend", "dist"),
 		DataDir:        dataDir,
 		DatabaseDriver: "sqlite",
 		DatabaseDSN:    filepath.Join(dataDir, "chatapi.sqlite3"),
@@ -76,8 +78,8 @@ func Default(mode Mode, repoRoot string) Config {
 	}
 }
 
-func FromEnv(mode Mode, repoRoot string) (Config, error) {
-	cfg := Default(mode, repoRoot)
+func FromEnv(mode Mode, backendRoot string) (Config, error) {
+	cfg := Default(mode, backendRoot)
 	cfg.Host = firstNonEmpty(os.Getenv("CHATAPI_HOST"), cfg.Host)
 	cfg.BaseURL = strings.TrimSpace(os.Getenv("CHATAPI_BASE_URL"))
 	cfg.WebDistDir = firstNonEmpty(os.Getenv("CHATAPI_WEB_DIST_DIR"), cfg.WebDistDir)
@@ -104,13 +106,13 @@ func FromEnv(mode Mode, repoRoot string) (Config, error) {
 	cfg.OpenBrowser = parseBool(os.Getenv("CHATAPI_OPEN_BROWSER"), cfg.OpenBrowser)
 
 	if !filepath.IsAbs(cfg.WebDistDir) {
-		cfg.WebDistDir = filepath.Join(repoRoot, cfg.WebDistDir)
+		cfg.WebDistDir = filepath.Join(backendRoot, cfg.WebDistDir)
 	}
 	if !filepath.IsAbs(cfg.DataDir) {
-		cfg.DataDir = filepath.Join(repoRoot, cfg.DataDir)
+		cfg.DataDir = filepath.Join(backendRoot, cfg.DataDir)
 	}
 	if cfg.DatabaseDriver == "sqlite" && !filepath.IsAbs(cfg.DatabaseDSN) {
-		cfg.DatabaseDSN = filepath.Join(repoRoot, cfg.DatabaseDSN)
+		cfg.DatabaseDSN = filepath.Join(backendRoot, cfg.DatabaseDSN)
 	}
 
 	if err := cfg.Validate(); err != nil {

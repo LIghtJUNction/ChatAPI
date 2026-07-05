@@ -18,11 +18,11 @@ import (
 )
 
 func Run(ctx context.Context, args []string) error {
-	repoRoot, err := os.Getwd()
+	backendRoot, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("resolve repo root: %w", err)
+		return fmt.Errorf("resolve backend root: %w", err)
 	}
-	if err := config.LoadEnv(repoRoot); err != nil {
+	if err := config.LoadEnv(backendRoot); err != nil {
 		return err
 	}
 
@@ -30,7 +30,7 @@ func Run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.FromEnv(mode, repoRoot)
+	cfg, err := config.FromEnv(mode, backendRoot)
 	if err != nil {
 		return err
 	}

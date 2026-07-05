@@ -21,9 +21,9 @@
 
 已经完成：
 
-- 删除旧 Python `backend/`，改为 Go 工程骨架
+- 删除旧 Python 后端实现，改为 `backend/` 目录内的 Go 工程骨架
 - 配置加载、日志、SQLite bootstrap migration
-- `cmd/chatapi` 启动入口
+- `backend/cmd/chatapi` 启动入口
 - `/api/health`
 - `/api/auth/session`、`/api/auth/login`、`/api/auth/logout` 的 Lab 占位实现
 - `/models`、`/v1/models`
@@ -57,13 +57,14 @@ CHATAPI_DB_DRIVER=sqlite
 CHATAPI_DB_DSN=./data/chatapi.sqlite3
 CHATAPI_HOST=0.0.0.0
 CHATAPI_PORT=5000
-CHATAPI_WEB_DIST_DIR=./frontend/dist
+CHATAPI_WEB_DIST_DIR=../frontend/dist
 CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
 #### 启动 Go 后端
 
 ```bash
+cd ./backend
 go run ./cmd/chatapi serve
 ```
 ### dev部署
@@ -71,6 +72,7 @@ go run ./cmd/chatapi serve
 #### 启动后端
 
 ```bash
+cd ./backend
 go run ./cmd/chatapi serve
 ```
 
@@ -87,7 +89,7 @@ npm run dev
 先复制配置模板：
 
 ```bash
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
 建议至少确认以下配置：
@@ -118,7 +120,7 @@ CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
 ```env
 # 直接让 Go 后端对外托管前端静态文件
-# CHATAPI_WEB_DIST_DIR=./frontend/dist
+# CHATAPI_WEB_DIST_DIR=../frontend/dist
 
 # Lab 模式可选
 # CHATAPI_OPEN_BROWSER=1
@@ -132,6 +134,7 @@ CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 本地调试可直接启动：
 
 ```bash
+cd ./backend
 go run ./cmd/chatapi lab
 ```
 
@@ -145,7 +148,7 @@ go run ./cmd/chatapi lab
 如果要远程暴露 Lab，必须显式允许并配置一次性 token 或密码：
 
 ```bash
-CHATAPI_HOST=0.0.0.0 CHATAPI_ALLOW_REMOTE_LAB=1 CHATAPI_LAB_TOKEN=xxx go run ./cmd/chatapi lab
+cd ./backend && CHATAPI_HOST=0.0.0.0 CHATAPI_ALLOW_REMOTE_LAB=1 CHATAPI_LAB_TOKEN=xxx go run ./cmd/chatapi lab
 ```
 
 ## 消息推送地址安全设置
@@ -209,7 +212,7 @@ server {
 如果不想额外部署 Nginx，也可以直接让 Go 后端对外同时提供 API 和前端静态文件：
 
 ```env
-CHATAPI_WEB_DIST_DIR=./frontend/dist
+CHATAPI_WEB_DIST_DIR=../frontend/dist
 ```
 
 设置后：

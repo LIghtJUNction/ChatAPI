@@ -909,6 +909,62 @@ func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	}
 }
 
+func TestAdminRequestsOverview(t *testing.T) {
+	env := newTestEnv(t)
+	modelKey := env.seedModelAPIKey(t, "model-owner", "overview-model-key", "overview-model-b")
+
+	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "overview-model-a",
+		"input": "overview 请求 A",
+	})
+	secondCh := startJSONRequestWithHeaders(t, env.server.URL+"/v1/responses", map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	}, map[string]any{
+		"model": "overview-model-b",
+		"input": "overview 请求 B",
+	})
+
+	firstConversation := env.waitForWaitingConversation(t, "overview 请求 A")
+	secondConversation := env.waitForWaitingConversation(t, "overview 请求 B")
+	env.postJSON(t, "/api/conversations/"+firstConversation["id"].(string)+"/respond", map[string]any{
+		"text": "overview done",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-firstCh
+
+	overviewResp := env.getJSON(t, "/api/admin/requests/overview", http.StatusOK)
+	overview := overviewResp["overview"].(map[string]any)
+	if numericValue(overview["total_requests"]) != 2 || numericValue(overview["closed_requests"]) != 1 || numericValue(overview["pending_requests"]) != 1 {
+		t.Fatalf("unexpected admin requests overview: %#v", overviewResp)
+	}
+	byOwner := overview["by_owner"].(map[string]any)
+	if numericValue(byOwner["lab-user"]) != 1 || numericValue(byOwner["model-owner"]) != 1 {
+		t.Fatalf("unexpected admin requests owner buckets: %#v", overviewResp)
+	}
+	byModel := overview["by_model"].(map[string]any)
+	if numericValue(byModel["overview-model-a"]) != 1 || numericValue(byModel["overview-model-b"]) != 1 {
+		t.Fatalf("unexpected admin requests model buckets: %#v", overviewResp)
+	}
+
+	env.postJSON(t, "/api/conversations/"+secondConversation["id"].(string)+"/respond", map[string]any{
+		"text": "overview cleanup",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-secondCh
+}
+
+func TestAdminRequestsOverviewRejectsAPIKeys(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
+
+	status, body := env.getTextWithHeaders(t, "/api/admin/requests/overview", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key requests overview admin rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAppAPIAuditLogWritten(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)

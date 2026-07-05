@@ -42,6 +42,7 @@
 - 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、按模型和状态聚合、最老 pending 等待秒数。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、pending turn、realtime subscriber 和 SQLite 文件大小等服务内可直接观测指标。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`，返回 SQLite 主库/WAL、uploads 目录大小，以及按 owner 估算的 conversations/messages 文本与 metadata 占用；当前只做估算与展示，不执行自动清理。
+- 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -920,6 +921,7 @@ type Hub struct {
 - 当前还没有引入系统级探针，因此 CPU 使用率、系统可用内存、磁盘总容量、进程 RSS/FD 数、慢客户端断开计数仍属于后续运维监控扩展。
 - `GET /api/admin/storage/summary`：返回 SQLite 主库/WAL、uploads 目录大小、估算用户数、估算总字节数、会话数和消息数。
 - `GET /api/admin/storage/users`：返回每个 owner 的估算字节数、会话数和消息数。当前估算范围为 conversation/message 文本与 metadata JSON；uploads 文件已计入 summary，但图片归属需要后续上传元数据表支持后才能精确拆分到用户。
+- `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
 - `POST /api/admin/storage/cleanup` 暂未落地；需要先完成配额、保留最近会话/天数、dry-run、审计日志和 SQLite vacuum 策略，避免误删用户数据。
 
 GC 设置：
@@ -1932,6 +1934,7 @@ make release-snapshot
 - Go `httptest` 集成测试应覆盖应用 API Key 通过 `statistics:read` 读取自己的请求统计摘要，验证 owner 隔离和缺少 scope 拒绝。
 - Go `httptest` 集成测试应覆盖管理员运行时监控接口、GC 触发接口、serve 模式无 admin session 拒绝，以及 `ak-` / `sk-` key 不能访问管理员接口。
 - Go `httptest` 集成测试应覆盖管理员存储监控 summary/users 接口，验证会话/消息估算结果和 API Key 不能访问管理员存储接口。
+- Go `httptest` 集成测试应覆盖管理员请求态势 overview 接口，验证全局状态/model/owner 聚合和 API Key 不能访问管理员请求接口。
 - Lab 模式下 OpenAI/Anthropic SDK 请求可进入等待态，浏览器完成输出后 SDK 收到兼容响应。
 - Tool Call 辅助不会自动发送，只能由用户审核后手动提交。
 - KirariNetwork token 过期时可自动 refresh；refresh 失败时提示用户重新连接，不泄露 token。

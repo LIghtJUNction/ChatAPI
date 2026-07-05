@@ -47,6 +47,7 @@ func NewRouter(
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor}
 	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)
 	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor}
+	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -133,6 +134,7 @@ func NewRouter(
 	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
 	adminRouter.Get("/storage/summary", adminStorageHandler.Summary)
 	adminRouter.Get("/storage/users", adminStorageHandler.Users)
+	adminRouter.Get("/requests/overview", adminRequestsHandler.Overview)
 	router.Mount("/api/admin", adminRouter)
 	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
 	router.Post("/api/conversations/{conversationID}/abort", chatHandler.AbortConversation)

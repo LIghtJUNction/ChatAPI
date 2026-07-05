@@ -1,20 +1,42 @@
 # ChatAPI
 [[Telegram](https://t.me/hutao_space)] |  [[LinuxDO](https://linux.do/u/hutao)] | [[BiliBili](https://www.bilibili.com/video/BV11PLg6LEbB)]  
-本项目是一个让 各类 AI 客户端用 OpenAI Responses 风格接口调用人类的项目，并带有一个 Web 控制台界面，可以帮你组装 Tool Calling 请求，或设置自动回复规则。  
+本项目是一个让各类 AI 客户端用 OpenAI Responses 风格接口调用人类的项目，并带有一个 Web 控制台界面，可以帮你组装 Tool Calling 请求，或设置自动回复规则。  
 通过这个项目，你可以让别人把你配置到 Agent 或 聊天机器人中，然后自己扮演 AI 助手被调用。
 也可以在自己开发 Agent 的时候作为 Mock LLM 使用。
 
-- 后端：Flask
+- 后端：Go
 - 前端：React + Vite + Ant Design
-- 数据存储：SQLite
+- 数据存储：SQLite / PostgreSQL（规划中，当前首批已落 SQLite）
 
 默认提供：
 
-- 基于 `.env` 的用户名密码登录，支持可选 TOTP
+- Go 后端重构进行中，当前分支已切换到新的 Go 工程骨架
 - 支持 `/v1/chat/completions`、`/v1/responses`、`/messages` 三套接口
-- 会话列表与消息持久化能力，便于调试和查看上下文
-- 自动化回复输出能力，支持定时流式发送、循环输出，条件判断自动回复等场景
-- 可选 ntfy 消息推送
+- `serve` / `lab` 双模式入口
+- Lab 模式默认 SQLite、本地自动开浏览器、可作为 Mock LLM 调试入口
+
+## 当前状态
+
+`refactor/migrate-to-go` 当前不是功能完备版本。
+
+已经完成：
+
+- 删除旧 Python `backend/`，改为 Go 工程骨架
+- 配置加载、日志、SQLite bootstrap migration
+- `cmd/chatapi` 启动入口
+- `/api/health`
+- `/api/auth/session`、`/api/auth/login`、`/api/auth/logout` 的 Lab 占位实现
+- `/models`、`/v1/models`
+- `/responses`、`/v1/responses`、`/chat/completions`、`/messages` 的占位入口
+- 前端静态文件托管和 SPA fallback
+
+尚未完成：
+
+- 正式登录鉴权、OIDC、TOTP
+- pending turn 状态机
+- WebSocket/SSE 实时通道
+- 自动化规则、上传、统计、管理员后台
+- PostgreSQL 仓储
 
 ## 1. 部署
 ### 无需 Nginx 一键部署
@@ -28,38 +50,28 @@ npm run build
 
 首页默认显示当前访问来源作为 API 基址；如需在构建时指定其他基址，可在构建前设置 `VITE_HOMEPAGE_API_BASE_URL`。
 
-#### 设置.env
+#### 设置 `.env`
 ```env
-CHATAPI_USERNAME=用户名
-CHATAPI_PASSWORD=密码
-# 可选；如果不填，后端会在首次启动时自动生成并写入数据库配置表
-# CHATAPI_SESSION_SECRET=随机字符串
-
-CHATAPI_DB_PATH=./data/chatapi.sqlite3
 CHATAPI_DATA_DIR=./data
-
+CHATAPI_DB_DRIVER=sqlite
+CHATAPI_DB_DSN=./data/chatapi.sqlite3
 CHATAPI_HOST=0.0.0.0
-CHATAPI_PORT=443
-CHATAPI_WEB_DIST_DIR=../frontend/dist
-CHATAPI_TLS_CERT_FILE=../certs/server.crt
-CHATAPI_TLS_KEY_FILE=../certs/server.key
+CHATAPI_PORT=5000
+CHATAPI_WEB_DIST_DIR=./frontend/dist
+CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-#### 启动Flask
+#### 启动 Go 后端
 
 ```bash
-cd ./backend
-uv sync
-uv run main.py
+go run ./cmd/chatapi serve
 ```
 ### dev部署
 
-#### 后动后端
+#### 启动后端
 
 ```bash
-cd ./backend
-uv sync
-uv run main.py
+go run ./cmd/chatapi serve
 ```
 
 #### 启动前端
@@ -78,13 +90,14 @@ npm run dev
 cp .env.example .env
 ```
 
-至少需要修改以下配置：
+建议至少确认以下配置：
 
 ```env
-CHATAPI_USERNAME=admin
-CHATAPI_PASSWORD=change-me
-# 可选；如果不填，后端会在首次启动时自动生成并写入数据库配置表
-# CHATAPI_SESSION_SECRET=change-this-session-secret
+CHATAPI_DATA_DIR=./data
+CHATAPI_DB_DRIVER=sqlite
+CHATAPI_DB_DSN=./data/chatapi.sqlite3
+CHATAPI_HOST=0.0.0.0
+CHATAPI_PORT=5000
 ```
 
 如果部署配置保存在项目目录之外，可以设置外部 env 文件路径：
@@ -98,35 +111,41 @@ CHATAPI_ENV_FILE=/path/to/chatapi.env
 建议同时确认以下配置：
 
 ```env
-CHATAPI_DB_PATH=./data/chatapi.sqlite3
-CHATAPI_DATA_DIR=./data
-CHATAPI_HOST=0.0.0.0
-CHATAPI_PORT=5000
 CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
-
-登录后可以在「系统设置」里启用并保存 `API Key`、站点标题、ntfy 地址、消息限流和 TOTP，这些不再需要放在 `.env` 里。
 
 可选配置：
 
 ```env
-# 直接让 Flask 对外托管前端静态文件（例如 Vite build 后的 dist）
+# 直接让 Go 后端对外托管前端静态文件
 # CHATAPI_WEB_DIST_DIR=./frontend/dist
 
-# 直接由 Flask 提供 HTTPS 时使用
-# CHATAPI_TLS_CERT_FILE=./certs/server.crt
-# CHATAPI_TLS_KEY_FILE=./certs/server.key
+# Lab 模式可选
+# CHATAPI_OPEN_BROWSER=1
+# CHATAPI_LAB_TOKEN=
+# CHATAPI_LAB_PASSWORD=
+# CHATAPI_ALLOW_REMOTE_LAB=0
+```
 
-# 邮件发送可选配置：
-# CHATAPI_EMAIL_FROM=noreply@kirari.fun
-# CHATAPI_SMTP_HOST=smtp.example.com
-# CHATAPI_RESEND_API_KEY=re_xxxxxxxxx
-# CHATAPI_BREVO_API_KEY=YOUR_BREVO_API_KEY
-# CHATAPI_TENCENTCLOUD_SECRET_ID=AKIDxxxxxxxxxxxxxxxx
-# CHATAPI_TENCENTCLOUD_SECRET_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-# CHATAPI_TENCENTCLOUD_SES_REGION=ap-guangzhou
-# 普通 SES 账号还需要模板 ID；模板数据会由程序动态生成。
-# CHATAPI_TENCENTCLOUD_TEMPLATE_ID=100091
+## Lab 模式
+
+本地调试可直接启动：
+
+```bash
+go run ./cmd/chatapi lab
+```
+
+默认行为：
+
+- 绑定 `127.0.0.1:5000`
+- 使用 SQLite
+- 自动打开浏览器
+- `/api/auth/session` 直接返回已登录 Lab 用户
+
+如果要远程暴露 Lab，必须显式允许并配置一次性 token 或密码：
+
+```bash
+CHATAPI_HOST=0.0.0.0 CHATAPI_ALLOW_REMOTE_LAB=1 CHATAPI_LAB_TOKEN=xxx go run ./cmd/chatapi lab
 ```
 
 ## 消息推送地址安全设置
@@ -185,9 +204,9 @@ server {
 }
 ```
 
-如果要启用 HTTPS，建议由 Nginx 处理证书，而不是直接使用 Flask 内置服务。
+如果要启用 HTTPS，建议由 Nginx 处理证书，而不是直接在应用里自管证书。
 
-如果不想额外部署 Nginx，也可以直接让 Flask 对外同时提供 API 和前端静态文件：
+如果不想额外部署 Nginx，也可以直接让 Go 后端对外同时提供 API 和前端静态文件：
 
 ```env
 CHATAPI_WEB_DIST_DIR=./frontend/dist

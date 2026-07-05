@@ -852,6 +852,7 @@ func TestMetricsEndpointWhenEnabled(t *testing.T) {
 		cfg.MetricsEnabled = true
 	})
 
+	env.getJSON(t, "/api/health", http.StatusOK)
 	status, body := env.getText(t, "/metrics")
 	if status != http.StatusOK {
 		t.Fatalf("expected metrics ok: status=%d body=%q", status, body)
@@ -861,6 +862,8 @@ func TestMetricsEndpointWhenEnabled(t *testing.T) {
 		"chatapi_pending_turns",
 		"chatapi_realtime_subscribers",
 		"chatapi_sqlite_database_bytes",
+		`chatapi_http_requests_total{method="GET",route="/api/health",status="200"} 1`,
+		`chatapi_http_request_duration_seconds_count{method="GET",route="/api/health",status="200"} 1`,
 	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("metrics missing %q in body:\n%s", expected, body)

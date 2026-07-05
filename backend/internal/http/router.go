@@ -24,6 +24,7 @@ func NewRouter(
 	pending *service.PendingRegistry,
 ) http.Handler {
 	router := chi.NewRouter()
+	httpMetrics := service.NewHTTPMetricsRegistry()
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -31,6 +32,7 @@ func NewRouter(
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+	router.Use(middleware.RecordHTTPMetrics(httpMetrics))
 	router.Use(middleware.InjectLabRequestActor(cfg))
 	router.Use(middleware.RequireLabAccess(cfg))
 
@@ -46,7 +48,7 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, realtimeHub, pending)
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor}
-	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor)}
+	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
 	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)
 	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor}
 	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}

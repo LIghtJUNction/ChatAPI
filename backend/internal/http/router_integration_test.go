@@ -967,6 +967,45 @@ func TestUploadsRejectsTooLargeFile(t *testing.T) {
 	}
 }
 
+func TestUploadsRejectsStorageQuotaExceeded(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.StorageDefaultQuotaBytes = int64(len(tinyPNG()) + 1)
+	})
+
+	env.postMultipart(t, "/api/uploads/imgs", "file", "first.png", tinyPNG(), http.StatusOK)
+	status, body := env.postMultipartText(t, "/api/uploads/imgs", "file", "second.png", tinyPNG())
+	if status != http.StatusInsufficientStorage || !strings.Contains(body, "storage quota exceeded") {
+		t.Fatalf("expected storage quota rejection: status=%d body=%q", status, body)
+	}
+
+	var uploadCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM uploaded_images
+		WHERE owner_id = 'lab-user'
+	`).Scan(&uploadCount); err != nil {
+		t.Fatalf("count uploaded images: %v", err)
+	}
+	if uploadCount != 1 {
+		t.Fatalf("expected only first upload metadata to be saved, got %d", uploadCount)
+	}
+
+	var failureAuditCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'upload'
+			AND action = 'create'
+			AND outcome = 'failure'
+	`).Scan(&failureAuditCount); err != nil {
+		t.Fatalf("count failed upload audit logs: %v", err)
+	}
+	if failureAuditCount != 1 {
+		t.Fatalf("expected failed upload audit log, got %d", failureAuditCount)
+	}
+}
+
 func TestUploadsRejectsUnsafePath(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1065,7 +1104,9 @@ func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 }
 
 func TestAdminStorageEndpoints(t *testing.T) {
-	env := newTestEnv(t)
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.StorageDefaultQuotaBytes = 1 << 20
+	})
 
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
 		"model": "storage-model",
@@ -1094,7 +1135,12 @@ func TestAdminStorageEndpoints(t *testing.T) {
 	foundLabUser := false
 	for _, item := range items {
 		record := item.(map[string]any)
-		if nestedString(record, "user_id") == "lab-user" && numericValue(record["message_count"]) >= 2 && numericValue(record["image_count"]) == 1 && numericValue(record["image_bytes"]) == len(tinyPNG()) {
+		if nestedString(record, "user_id") == "lab-user" &&
+			numericValue(record["message_count"]) >= 2 &&
+			numericValue(record["image_count"]) == 1 &&
+			numericValue(record["image_bytes"]) == len(tinyPNG()) &&
+			numericValue(record["storage_quota_bytes"]) == 1<<20 &&
+			record["storage_over_quota"] == false {
 			foundLabUser = true
 			break
 		}

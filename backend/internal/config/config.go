@@ -21,24 +21,25 @@ const (
 )
 
 type Config struct {
-	Mode           Mode
-	Host           string
-	Port           int
-	BaseURL        string
-	WebDistDir     string
-	DataDir        string
-	DatabaseDriver string
-	DatabaseDSN    string
-	MasterKey      string
-	AllowRemoteLab bool
-	OpenBrowser    bool
-	LabToken       string
-	LabPassword    string
-	AdminPassword  string
-	LogLevel       string
-	CORSOrigins    []string
-	MetricsEnabled bool
-	UploadMaxBytes int64
+	Mode                     Mode
+	Host                     string
+	Port                     int
+	BaseURL                  string
+	WebDistDir               string
+	DataDir                  string
+	DatabaseDriver           string
+	DatabaseDSN              string
+	MasterKey                string
+	AllowRemoteLab           bool
+	OpenBrowser              bool
+	LabToken                 string
+	LabPassword              string
+	AdminPassword            string
+	LogLevel                 string
+	CORSOrigins              []string
+	MetricsEnabled           bool
+	UploadMaxBytes           int64
+	StorageDefaultQuotaBytes int64
 
 	SMTPEnabled  bool
 	SMTPHost     string
@@ -89,32 +90,33 @@ func Default(mode Mode, backendRoot string) Config {
 		masterKey = "chatapi-lab-insecure-master-key"
 	}
 	return Config{
-		Mode:           mode,
-		Host:           host,
-		Port:           5000,
-		BaseURL:        "",
-		WebDistDir:     filepath.Join(projectRoot, "frontend", "dist"),
-		DataDir:        dataDir,
-		DatabaseDriver: "sqlite",
-		DatabaseDSN:    filepath.Join(dataDir, "chatapi.sqlite3"),
-		MasterKey:      masterKey,
-		AllowRemoteLab: false,
-		OpenBrowser:    openBrowser,
-		LabToken:       "",
-		LabPassword:    "",
-		AdminPassword:  "",
-		LogLevel:       "info",
-		CORSOrigins:    []string{"http://localhost:5173", "http://127.0.0.1:5173"},
-		MetricsEnabled: false,
-		UploadMaxBytes: 10 << 20,
-		SMTPEnabled:    false,
-		SMTPHost:       "",
-		SMTPPort:       587,
-		SMTPUsername:   "",
-		SMTPPassword:   "",
-		SMTPFrom:       "",
-		SMTPSecurity:   "starttls",
-		SMTPTimeout:    10 * time.Second,
+		Mode:                     mode,
+		Host:                     host,
+		Port:                     5000,
+		BaseURL:                  "",
+		WebDistDir:               filepath.Join(projectRoot, "frontend", "dist"),
+		DataDir:                  dataDir,
+		DatabaseDriver:           "sqlite",
+		DatabaseDSN:              filepath.Join(dataDir, "chatapi.sqlite3"),
+		MasterKey:                masterKey,
+		AllowRemoteLab:           false,
+		OpenBrowser:              openBrowser,
+		LabToken:                 "",
+		LabPassword:              "",
+		AdminPassword:            "",
+		LogLevel:                 "info",
+		CORSOrigins:              []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		MetricsEnabled:           false,
+		UploadMaxBytes:           10 << 20,
+		StorageDefaultQuotaBytes: 0,
+		SMTPEnabled:              false,
+		SMTPHost:                 "",
+		SMTPPort:                 587,
+		SMTPUsername:             "",
+		SMTPPassword:             "",
+		SMTPFrom:                 "",
+		SMTPSecurity:             "starttls",
+		SMTPTimeout:              10 * time.Second,
 
 		OIDCEnabled:        false,
 		OIDCProviderName:   "",
@@ -161,6 +163,13 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid CHATAPI_UPLOAD_MAX_BYTES: %w", err)
 		}
 		cfg.UploadMaxBytes = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES: %w", err)
+		}
+		cfg.StorageDefaultQuotaBytes = value
 	}
 	cfg.SMTPEnabled = parseBool(os.Getenv("CHATAPI_SMTP_ENABLED"), cfg.SMTPEnabled)
 	cfg.SMTPHost = strings.TrimSpace(os.Getenv("CHATAPI_SMTP_HOST"))
@@ -246,6 +255,9 @@ func (c Config) Validate() error {
 	}
 	if c.UploadMaxBytes <= 0 {
 		return errors.New("upload max bytes must be positive")
+	}
+	if c.StorageDefaultQuotaBytes < 0 {
+		return errors.New("storage default quota bytes must be non-negative")
 	}
 	if c.SMTPEnabled {
 		if strings.TrimSpace(c.SMTPHost) == "" {

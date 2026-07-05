@@ -36,6 +36,8 @@ type DirectoryInfo struct {
 type UserStorageUsage struct {
 	UserID            string `json:"user_id"`
 	EstimatedBytes    int64  `json:"estimated_bytes"`
+	StorageQuotaBytes int64  `json:"storage_quota_bytes"`
+	StorageOverQuota  bool   `json:"storage_over_quota"`
 	ConversationCount int    `json:"conversation_count"`
 	MessageCount      int    `json:"message_count"`
 	ImageCount        int    `json:"image_count"`
@@ -139,6 +141,8 @@ func (s *StorageMonitorService) Users(ctx context.Context) ([]UserStorageUsage, 
 	}
 	items := make([]UserStorageUsage, 0, len(byUser))
 	for _, item := range byUser {
+		item.StorageQuotaBytes = s.cfg.StorageDefaultQuotaBytes
+		item.StorageOverQuota = item.StorageQuotaBytes > 0 && item.EstimatedBytes > item.StorageQuotaBytes
 		items = append(items, *item)
 	}
 	return items, nil

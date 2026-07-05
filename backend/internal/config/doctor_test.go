@@ -100,6 +100,33 @@ func TestFromEnvLoadsSMTPConfig(t *testing.T) {
 	}
 }
 
+func TestFromEnvLoadsStorageQuota(t *testing.T) {
+	t.Setenv("CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES", "12345")
+
+	cfg, err := FromEnvUnchecked(ModeLab, t.TempDir())
+	if err != nil {
+		t.Fatalf("load storage quota config: %v", err)
+	}
+	if cfg.StorageDefaultQuotaBytes != 12345 {
+		t.Fatalf("unexpected storage quota: %d", cfg.StorageDefaultQuotaBytes)
+	}
+}
+
+func TestDiagnoseStorageQuota(t *testing.T) {
+	cfg := Default(ModeLab, t.TempDir())
+
+	report := Diagnose(cfg, cfg.Validate())
+	if !hasDiagnostic(report, DiagnosticInfo, "storage.quota_disabled") {
+		t.Fatalf("missing storage quota disabled diagnostic: %#v", report)
+	}
+
+	cfg.StorageDefaultQuotaBytes = 1024
+	report = Diagnose(cfg, cfg.Validate())
+	if !hasDiagnostic(report, DiagnosticWarn, "storage.quota_low") {
+		t.Fatalf("missing low storage quota diagnostic: %#v", report)
+	}
+}
+
 func TestDiagnoseSMTPRequirements(t *testing.T) {
 	cfg := Default(ModeLab, t.TempDir())
 	cfg.SMTPEnabled = true

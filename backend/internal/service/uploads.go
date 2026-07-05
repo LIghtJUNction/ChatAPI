@@ -21,11 +21,13 @@ var ErrUploadNotFound = errors.New("upload not found")
 var ErrInvalidUploadPath = errors.New("invalid upload path")
 var ErrUnsupportedUploadType = errors.New("unsupported upload type")
 var ErrUploadTooLarge = errors.New("upload too large")
+var ErrStorageQuotaExceeded = errors.New("storage quota exceeded")
 
 type UploadService struct {
-	root     string
-	maxBytes int64
-	store    store.Store
+	root       string
+	maxBytes   int64
+	quotaBytes int64
+	store      store.Store
 }
 
 type UploadUsage struct {
@@ -46,9 +48,10 @@ type UploadResult struct {
 
 func NewUploadService(cfg config.Config, dataStore store.Store) *UploadService {
 	return &UploadService{
-		root:     filepath.Join(cfg.DataDir, "uploads", "imgs"),
-		maxBytes: cfg.UploadMaxBytes,
-		store:    dataStore,
+		root:       filepath.Join(cfg.DataDir, "uploads", "imgs"),
+		maxBytes:   cfg.UploadMaxBytes,
+		quotaBytes: cfg.StorageDefaultQuotaBytes,
+		store:      dataStore,
 	}
 }
 
@@ -124,6 +127,13 @@ func (s *UploadService) SaveImage(ctx context.Context, file multipart.File, orig
 	if !ok {
 		return UploadResult{}, ErrUnsupportedUploadType
 	}
+	ownerID := OwnerIDFromContext(ctx)
+	if ownerID == "" {
+		ownerID = "anonymous"
+	}
+	if err := s.checkOwnerImageQuota(ctx, ownerID, int64(len(data))); err != nil {
+		return UploadResult{}, err
+	}
 	root, err := filepath.Abs(s.root)
 	if err != nil {
 		return UploadResult{}, err
@@ -161,10 +171,6 @@ func (s *UploadService) SaveImage(ctx context.Context, file multipart.File, orig
 	if s.store == nil {
 		return result, nil
 	}
-	ownerID := OwnerIDFromContext(ctx)
-	if ownerID == "" {
-		ownerID = "anonymous"
-	}
 	record, err := s.store.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
 		ID:               "upload_" + uuid.NewString(),
 		OwnerID:          ownerID,
@@ -181,6 +187,24 @@ func (s *UploadService) SaveImage(ctx context.Context, file multipart.File, orig
 	result.ID = record.ID
 	result.OwnerID = record.OwnerID
 	return result, nil
+}
+
+func (s *UploadService) checkOwnerImageQuota(ctx context.Context, ownerID string, nextBytes int64) error {
+	if s.quotaBytes <= 0 || s.store == nil {
+		return nil
+	}
+	images, err := s.store.ListUploadedImagesByOwner(ctx, ownerID)
+	if err != nil {
+		return err
+	}
+	var used int64
+	for _, image := range images {
+		used += image.Bytes
+	}
+	if used+nextBytes > s.quotaBytes {
+		return ErrStorageQuotaExceeded
+	}
+	return nil
 }
 
 func cleanOriginalUploadFilename(filename string) string {

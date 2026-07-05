@@ -66,6 +66,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 	report.checkSecrets(cfg)
 	report.checkPaths(cfg)
 	report.checkCORS(cfg)
+	report.checkStorage(cfg)
 	report.checkSMTP(cfg)
 	report.checkOIDC(cfg)
 	report.checkLogLevel(cfg)
@@ -228,6 +229,20 @@ func (r *DiagnosticReport) checkSMTP(cfg Config) {
 	}
 	if cfg.SMTPPassword != "" && cfg.SMTPUsername == "" {
 		r.add(DiagnosticWarn, "smtp.password_without_username", "配置了 SMTP password 但 username 为空，确认服务器是否支持该认证方式。")
+	}
+}
+
+func (r *DiagnosticReport) checkStorage(cfg Config) {
+	if cfg.StorageDefaultQuotaBytes == 0 {
+		r.add(DiagnosticInfo, "storage.quota_disabled", "未配置默认用户存储配额；用户图片上传不会按总量阻断。")
+		return
+	}
+	if cfg.StorageDefaultQuotaBytes < 0 {
+		r.add(DiagnosticError, "storage.quota_invalid", "CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES 不能为负数。")
+		return
+	}
+	if cfg.StorageDefaultQuotaBytes < 10<<20 {
+		r.add(DiagnosticWarn, "storage.quota_low", "默认用户存储配额低于 10MiB，可能影响正常图片上传。")
 	}
 }
 

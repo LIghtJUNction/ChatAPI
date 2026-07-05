@@ -57,6 +57,8 @@ func (h UploadsHandler) CreateImage(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusUnsupportedMediaType)
 		case errors.Is(err, service.ErrUploadTooLarge):
 			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+		case errors.Is(err, service.ErrStorageQuotaExceeded):
+			http.Error(w, err.Error(), http.StatusInsufficientStorage)
 		case errors.Is(err, service.ErrInvalidUploadPath):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:

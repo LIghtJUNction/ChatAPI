@@ -48,6 +48,7 @@
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志。SQLite vacuum、上传文件引用清理和失败恢复策略仍待继续补齐。
 - 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、`storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
+- pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
 - 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope 等风险。
 - 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
@@ -1018,7 +1019,7 @@ GC 设置：
 
 - 支持配置每日定时清理时间，例如 `03:00`。
 - 定时任务应执行：
-  - 过期 pending turn 清理。
+  - 过期 pending turn 清理。当前 Go 重构分支已先提供 `CHATAPI_PENDING_TURN_TTL`，按固定 ticker 清理超时的 `waiting` / `streaming` turn；后续再接每日定时任务和管理员可视化配置。
   - 孤儿图片清理。
   - 超配额用户旧会话清理。
   - SQLite WAL checkpoint。
@@ -1035,11 +1036,12 @@ GC 设置：
 - `value.storage_cleanup_keep_recent_conversations`
 - `value.storage_cleanup_keep_recent_days`
 - `value.storage_vacuum_enabled`
+- `value.pending_turn_ttl`
 - `value.realtime_webui_reserved_connections_per_user`
 - `value.realtime_max_webui_connections_per_user`
 - `value.realtime_max_api_connections_per_user`
 
-当前 Go 重构分支已先提供环境变量 `CHATAPI_RUNTIME_GOGC` 和 `CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES`。两者默认都是 `0`，表示启动时不由 ChatAPI 显式覆盖 Go runtime；后续接入系统配置表后，再把管理员后台修改持久化到 `value.runtime_*`。
+当前 Go 重构分支已先提供环境变量 `CHATAPI_RUNTIME_GOGC`、`CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES` 和 `CHATAPI_PENDING_TURN_TTL`。前三者默认都是 `0` / `0s`，表示启动时不由 ChatAPI 显式覆盖 Go runtime 或 pending turn 生命周期；后续接入系统配置表后，再把管理员后台修改持久化到 `value.runtime_*` 和 `value.pending_turn_ttl`。
 
 ### 6.7 上游模型辅助
 

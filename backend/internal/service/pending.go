@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
 
 var ErrPendingNotFound = errors.New("pending turn not found")
@@ -31,6 +32,7 @@ type PendingTurn struct {
 	ResponseID     string
 	RequestFormat  string
 	Model          string
+	CreatedAt      time.Time
 	State          string
 	Events         chan PendingEvent
 	done           chan PendingResult
@@ -57,6 +59,9 @@ func NewPendingRegistry() *PendingRegistry {
 func (r *PendingRegistry) Add(turn *PendingTurn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if turn.CreatedAt.IsZero() {
+		turn.CreatedAt = time.Now().UTC()
+	}
 	if turn.State == "" {
 		turn.State = "pending"
 	}
@@ -125,6 +130,34 @@ func (r *PendingRegistry) Abort(conversationID string, body map[string]any) erro
 	return r.Resolve(conversationID, PendingResult{ResponseBody: body})
 }
 
+func (r *PendingRegistry) ExpireOlderThan(cutoff time.Time, body map[string]any) int {
+	r.mu.Lock()
+	expired := make([]*PendingTurn, 0)
+	for conversationID, turn := range r.byConversationID {
+		if turn.CreatedAt.IsZero() || !turn.CreatedAt.Before(cutoff) {
+			continue
+		}
+		switch turn.State {
+		case "pending", "streaming":
+			turn.State = "expired"
+			delete(r.byConversationID, conversationID)
+			expired = append(expired, turn)
+		}
+	}
+	r.mu.Unlock()
+
+	for _, turn := range expired {
+		_ = publishPendingEvent(turn, PendingEvent{
+			Type:      "abort",
+			ErrorBody: body,
+		})
+		close(turn.Events)
+		turn.done <- PendingResult{ResponseBody: body}
+		close(turn.done)
+	}
+	return len(expired)
+}
+
 func (r *PendingRegistry) Wait(ctx context.Context, conversationID string) (PendingResult, error) {
 	turn, ok := r.GetByConversationID(conversationID)
 	if !ok {
@@ -145,11 +178,7 @@ func (r *PendingRegistry) Publish(conversationID string, event PendingEvent) err
 	if !ok {
 		return ErrPendingNotFound
 	}
-	select {
-	case turn.Events <- event:
-	default:
-	}
-	return nil
+	return publishPendingEvent(turn, event)
 }
 
 func (r *PendingRegistry) StartDelta(conversationID string) (string, error) {
@@ -167,6 +196,14 @@ func (r *PendingRegistry) StartDelta(conversationID string) (string, error) {
 	default:
 		return "", ErrPendingConflict
 	}
+}
+
+func publishPendingEvent(turn *PendingTurn, event PendingEvent) error {
+	select {
+	case turn.Events <- event:
+	default:
+	}
+	return nil
 }
 
 func (r *PendingRegistry) StartComplete(conversationID string) (string, error) {

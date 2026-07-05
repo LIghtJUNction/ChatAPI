@@ -239,6 +239,10 @@ type DeleteConversationsResult struct {
 	DeletedMessages      int `json:"deleted_messages"`
 }
 
+type ExpirePendingTurnsResult struct {
+	ExpiredConversations int `json:"expired_conversations"`
+}
+
 type Store interface {
 	Ping(context.Context) error
 	MigrationStatus(context.Context) (MigrationStatus, error)
@@ -268,6 +272,7 @@ type Store interface {
 	ListUploadedImagesByOwner(context.Context, string) ([]UploadedImage, error)
 	ListMessages(context.Context, string) ([]Message, error)
 	DeleteConversations(context.Context, []string) (DeleteConversationsResult, error)
+	ExpirePendingTurns(context.Context, time.Time) (ExpirePendingTurnsResult, error)
 	CreatePendingTurn(context.Context, CreatePendingInput) (Conversation, Message, error)
 	UpdateDraft(context.Context, UpdateDraftInput) (Conversation, error)
 	CompletePendingTurn(context.Context, CompletePendingInput) (Conversation, Message, error)

@@ -134,6 +134,44 @@ func TestDraftMarksConversationStreaming(t *testing.T) {
 	<-resultCh
 }
 
+func TestPendingTurnExpiration(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-expire",
+		"input": "pending expiration 测试",
+	})
+	conversation := env.waitForWaitingConversation(t, "pending expiration 测试")
+
+	result, err := env.chatService.ExpirePendingTurns(context.Background(), time.Nanosecond, time.Now().UTC().Add(time.Second))
+	if err != nil {
+		t.Fatalf("expire pending turns: %v", err)
+	}
+	if result.ExpiredConversations != 1 || result.ExpiredActiveTurns != 1 {
+		t.Fatalf("unexpected expiration result: %#v", result)
+	}
+
+	finalResp := <-resultCh
+	if nestedPathString(finalResp, "error", "code") != "request_timeout" {
+		t.Fatalf("expected timeout response: %#v", finalResp)
+	}
+	updated, err := env.store.GetConversation(context.Background(), conversation["id"].(string))
+	if err != nil {
+		t.Fatalf("get expired conversation: %v", err)
+	}
+	if nestedString(updated.Metadata, "realtime_status") != "expired" {
+		t.Fatalf("expected expired conversation status: %#v", updated.Metadata)
+	}
+
+	status, body := env.postText(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "too late",
+		"mode": "assistant_message",
+	})
+	if status != http.StatusConflict || !strings.Contains(body, "pending turn already finalized") {
+		t.Fatalf("expected expired turn conflict: status=%d body=%q", status, body)
+	}
+}
+
 func TestRespondConversationPathEndpoint(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -2249,6 +2287,8 @@ type testEnv struct {
 	server          *httptest.Server
 	client          *http.Client
 	store           *sqlitestore.Store
+	chatService     *service.ChatAPIService
+	pendingRegistry *service.PendingRegistry
 	appKeyService   *service.AppAPIKeyService
 	modelKeyService *service.ModelAPIKeyService
 	dataDir         string
@@ -2307,6 +2347,8 @@ func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Co
 		server:          server,
 		client:          server.Client(),
 		store:           store,
+		chatService:     chatService,
+		pendingRegistry: pendingRegistry,
 		appKeyService:   appKeyService,
 		modelKeyService: modelKeyService,
 		dataDir:         cfg.DataDir,

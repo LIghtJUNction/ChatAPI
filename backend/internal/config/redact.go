@@ -21,6 +21,7 @@ type RedactedConfig struct {
 	MetricsEnabled           bool     `json:"metrics_enabled"`
 	UploadMaxBytes           int64    `json:"upload_max_bytes"`
 	StorageDefaultQuotaBytes int64    `json:"storage_default_quota_bytes"`
+	PendingTurnTTL           string   `json:"pending_turn_ttl"`
 	RuntimeGOGC              int      `json:"runtime_gogc"`
 	RuntimeMemoryLimitBytes  int64    `json:"runtime_memory_limit_bytes"`
 
@@ -68,6 +69,7 @@ func (c Config) Redacted() RedactedConfig {
 		MetricsEnabled:           c.MetricsEnabled,
 		UploadMaxBytes:           c.UploadMaxBytes,
 		StorageDefaultQuotaBytes: c.StorageDefaultQuotaBytes,
+		PendingTurnTTL:           c.PendingTurnTTL.String(),
 		RuntimeGOGC:              c.RuntimeGOGC,
 		RuntimeMemoryLimitBytes:  c.RuntimeMemoryLimitBytes,
 		SMTPEnabled:              c.SMTPEnabled,

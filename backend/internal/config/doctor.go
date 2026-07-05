@@ -67,6 +67,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 	report.checkPaths(cfg)
 	report.checkCORS(cfg)
 	report.checkStorage(cfg)
+	report.checkPending(cfg)
 	report.checkRuntime(cfg)
 	report.checkSMTP(cfg)
 	report.checkOIDC(cfg)
@@ -257,6 +258,20 @@ func (r *DiagnosticReport) checkRuntime(cfg Config) {
 		r.add(DiagnosticError, "runtime.memory_limit_invalid", "CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES 不能为负数。")
 	} else if cfg.RuntimeMemoryLimitBytes > 0 && cfg.RuntimeMemoryLimitBytes < 64<<20 {
 		r.add(DiagnosticWarn, "runtime.memory_limit_low", "CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES 低于 64MiB，可能导致频繁 GC 或内存压力。")
+	}
+}
+
+func (r *DiagnosticReport) checkPending(cfg Config) {
+	if cfg.PendingTurnTTL == 0 {
+		r.add(DiagnosticInfo, "pending.ttl_disabled", "未配置 pending turn TTL；等待中的模型请求不会由后台自动过期。")
+		return
+	}
+	if cfg.PendingTurnTTL < 0 {
+		r.add(DiagnosticError, "pending.ttl_invalid", "CHATAPI_PENDING_TURN_TTL 不能为负数。")
+		return
+	}
+	if cfg.PendingTurnTTL < time.Minute {
+		r.add(DiagnosticWarn, "pending.ttl_low", "CHATAPI_PENDING_TURN_TTL 低于 1 分钟，可能导致人工回复来不及完成。")
 	}
 }
 

@@ -81,6 +81,7 @@ func Run(ctx context.Context, args []string) error {
 	pendingRegistry := service.NewPendingRegistry()
 	realtimeHub := service.NewRealtimeHub(dataStore)
 	chatService := service.NewChatAPIService(dataStore, pendingRegistry, realtimeHub)
+	startPendingExpirationWorker(ctx, cfg, chatService, logger)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr(),
@@ -116,6 +117,42 @@ func Run(ctx context.Context, args []string) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func startPendingExpirationWorker(ctx context.Context, cfg config.Config, chatService *service.ChatAPIService, logger *slog.Logger) {
+	if cfg.PendingTurnTTL <= 0 {
+		return
+	}
+	interval := cfg.PendingTurnTTL / 2
+	if interval < 5*time.Second {
+		interval = 5 * time.Second
+	}
+	if interval > 15*time.Minute {
+		interval = 15 * time.Minute
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				result, err := chatService.ExpirePendingTurns(ctx, cfg.PendingTurnTTL, time.Now().UTC())
+				if err != nil {
+					logger.Warn("expire pending turns failed", slog.String("error", err.Error()))
+					continue
+				}
+				if result.ExpiredConversations > 0 || result.ExpiredActiveTurns > 0 {
+					logger.Info(
+						"expired pending turns",
+						slog.Int("expired_conversations", result.ExpiredConversations),
+						slog.Int("expired_active_turns", result.ExpiredActiveTurns),
+					)
+				}
+			}
+		}
+	}()
 }
 
 type versionReport struct {

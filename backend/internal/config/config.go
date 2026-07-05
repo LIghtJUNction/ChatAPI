@@ -40,6 +40,7 @@ type Config struct {
 	MetricsEnabled           bool
 	UploadMaxBytes           int64
 	StorageDefaultQuotaBytes int64
+	PendingTurnTTL           time.Duration
 	RuntimeGOGC              int
 	RuntimeMemoryLimitBytes  int64
 
@@ -111,6 +112,7 @@ func Default(mode Mode, backendRoot string) Config {
 		MetricsEnabled:           false,
 		UploadMaxBytes:           10 << 20,
 		StorageDefaultQuotaBytes: 0,
+		PendingTurnTTL:           0,
 		RuntimeGOGC:              0,
 		RuntimeMemoryLimitBytes:  0,
 		SMTPEnabled:              false,
@@ -174,6 +176,13 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES: %w", err)
 		}
 		cfg.StorageDefaultQuotaBytes = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_PENDING_TURN_TTL")); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_PENDING_TURN_TTL: %w", err)
+		}
+		cfg.PendingTurnTTL = value
 	}
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_RUNTIME_GOGC")); raw != "" {
 		value, err := strconv.Atoi(raw)
@@ -276,6 +285,9 @@ func (c Config) Validate() error {
 	}
 	if c.StorageDefaultQuotaBytes < 0 {
 		return errors.New("storage default quota bytes must be non-negative")
+	}
+	if c.PendingTurnTTL < 0 {
+		return errors.New("pending turn ttl must be non-negative")
 	}
 	if c.RuntimeGOGC < 0 {
 		return errors.New("runtime gogc must be non-negative")

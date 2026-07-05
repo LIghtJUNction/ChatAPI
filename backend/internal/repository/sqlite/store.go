@@ -782,6 +782,73 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 	return result, nil
 }
 
+func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store.ExpirePendingTurnsResult, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, metadata_json
+		FROM conversations
+		WHERE last_message_at < ?
+			AND COALESCE(json_extract(metadata_json, '$.realtime_status'), '') IN ('waiting', 'streaming')
+	`, formatTime(cutoff))
+	if err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	type candidate struct {
+		id       string
+		metadata map[string]any
+	}
+	candidates := make([]candidate, 0)
+	for rows.Next() {
+		var item candidate
+		var metadataJSON string
+		if err := rows.Scan(&item.id, &metadataJSON); err != nil {
+			_ = rows.Close()
+			return store.ExpirePendingTurnsResult{}, err
+		}
+		item.metadata = ensureMap(parseJSONMap(metadataJSON))
+		item.metadata["realtime_status"] = "expired"
+		item.metadata["realtime_draft_text"] = ""
+		candidates = append(candidates, item)
+	}
+	if err := rows.Close(); err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	if len(candidates) == 0 {
+		return store.ExpirePendingTurnsResult{}, nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC()
+	var result store.ExpirePendingTurnsResult
+	for _, item := range candidates {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE conversations
+			SET updated_at = ?, metadata_json = ?
+			WHERE id = ?
+				AND COALESCE(json_extract(metadata_json, '$.realtime_status'), '') IN ('waiting', 'streaming')
+		`, formatTime(now), mustJSON(item.metadata), item.id)
+		if err != nil {
+			return store.ExpirePendingTurnsResult{}, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return store.ExpirePendingTurnsResult{}, err
+		}
+		result.ExpiredConversations += int(affected)
+	}
+	if err := tx.Commit(); err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePendingInput) (store.Conversation, store.Message, error) {
 	now := time.Now().UTC()
 	metadata := map[string]any{

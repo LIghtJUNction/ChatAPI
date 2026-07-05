@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -16,6 +17,11 @@ type ChatAPIService struct {
 	store    store.Store
 	pending  *PendingRegistry
 	realtime *RealtimeHub
+}
+
+type ExpirePendingTurnsResult struct {
+	ExpiredConversations int `json:"expired_conversations"`
+	ExpiredActiveTurns   int `json:"expired_active_turns"`
 }
 
 func NewChatAPIService(dataStore store.Store, pending *PendingRegistry, realtime *RealtimeHub) *ChatAPIService {
@@ -74,6 +80,7 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 		ResponseID:     responseID,
 		RequestFormat:  parsed.RequestFormat,
 		Model:          parsed.Model,
+		CreatedAt:      time.Now().UTC(),
 		Events:         make(chan PendingEvent, 32),
 		done:           make(chan PendingResult, 1),
 	}
@@ -256,6 +263,26 @@ func (s *ChatAPIService) AbortConversation(ctx context.Context, conversationID s
 	return s.pending.Abort(conversationID, body)
 }
 
+func (s *ChatAPIService) ExpirePendingTurns(ctx context.Context, ttl time.Duration, now time.Time) (ExpirePendingTurnsResult, error) {
+	if ttl <= 0 {
+		return ExpirePendingTurnsResult{}, nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	cutoff := now.UTC().Add(-ttl)
+	body := pendingExpiredBody(ttl)
+	activeExpired := s.pending.ExpireOlderThan(cutoff, body)
+	dbResult, err := s.store.ExpirePendingTurns(ctx, cutoff)
+	if err != nil {
+		return ExpirePendingTurnsResult{}, err
+	}
+	return ExpirePendingTurnsResult{
+		ExpiredConversations: dbResult.ExpiredConversations,
+		ExpiredActiveTurns:   activeExpired,
+	}, nil
+}
+
 func (s *ChatAPIService) resolveTurnMutationError(ctx context.Context, conversationID string, err error) error {
 	if !errors.Is(err, ErrPendingNotFound) {
 		return err
@@ -269,6 +296,16 @@ func (s *ChatAPIService) resolveTurnMutationError(ctx context.Context, conversat
 		return ErrPendingConflict
 	}
 	return err
+}
+
+func pendingExpiredBody(ttl time.Duration) map[string]any {
+	return map[string]any{
+		"error": map[string]any{
+			"message": "pending turn expired after " + ttl.String(),
+			"type":    "request_timeout",
+			"code":    "request_timeout",
+		},
+	}
 }
 
 func stringValue(value any, fallback string) string {

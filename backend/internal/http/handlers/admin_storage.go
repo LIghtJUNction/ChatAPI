@@ -37,6 +37,19 @@ func (h AdminStorageHandler) Users(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h AdminStorageHandler) Orphans(w http.ResponseWriter, r *http.Request) {
+	preview, err := h.Monitor.OrphanImagesPreview(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"dry_run": true,
+		"preview": preview,
+	})
+}
+
 type storageCleanupRequest struct {
 	DryRun                  bool   `json:"dry_run"`
 	OwnerID                 string `json:"owner_id"`

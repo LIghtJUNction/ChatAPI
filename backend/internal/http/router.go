@@ -150,6 +150,7 @@ func NewRouter(
 	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
 	adminRouter.Get("/storage/summary", adminStorageHandler.Summary)
 	adminRouter.Get("/storage/users", adminStorageHandler.Users)
+	adminRouter.Get("/storage/orphans", adminStorageHandler.Orphans)
 	adminRouter.Post("/storage/cleanup", adminStorageHandler.Cleanup)
 	adminRouter.Get("/requests/overview", adminRequestsHandler.Overview)
 	adminRouter.Get("/audit/logs", adminAuditHandler.List)

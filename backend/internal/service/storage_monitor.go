@@ -69,6 +69,22 @@ type StorageCleanupOwnerPlan struct {
 	EstimatedReclaimableBytes int64  `json:"estimated_reclaimable_bytes"`
 }
 
+type StorageOrphanImagesPreview struct {
+	GeneratedAt time.Time            `json:"generated_at"`
+	DryRun      bool                 `json:"dry_run"`
+	Root        string               `json:"root"`
+	FileCount   int                  `json:"file_count"`
+	Bytes       int64                `json:"bytes"`
+	Items       []StorageOrphanImage `json:"items"`
+}
+
+type StorageOrphanImage struct {
+	Filename string    `json:"filename"`
+	Path     string    `json:"path"`
+	Bytes    int64     `json:"bytes"`
+	ModTime  time.Time `json:"mod_time"`
+}
+
 func NewStorageMonitorService(cfg config.Config, dataStore store.Store) *StorageMonitorService {
 	return &StorageMonitorService{cfg: cfg, store: dataStore}
 }
@@ -218,6 +234,80 @@ func (s *StorageMonitorService) CleanupPreview(ctx context.Context, input Storag
 		}
 		preview.ByOwner = append(preview.ByOwner, ownerPlan)
 	}
+	return preview, nil
+}
+
+func (s *StorageMonitorService) OrphanImagesPreview(ctx context.Context) (StorageOrphanImagesPreview, error) {
+	root := filepath.Join(s.cfg.DataDir, "uploads", "imgs")
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return StorageOrphanImagesPreview{}, err
+	}
+	preview := StorageOrphanImagesPreview{
+		GeneratedAt: time.Now().UTC(),
+		DryRun:      true,
+		Root:        absRoot,
+		Items:       []StorageOrphanImage{},
+	}
+
+	knownImages, err := s.store.ListUploadedImages(ctx)
+	if err != nil {
+		return StorageOrphanImagesPreview{}, err
+	}
+	knownFilenames := make(map[string]struct{}, len(knownImages))
+	for _, image := range knownImages {
+		knownFilenames[image.Filename] = struct{}{}
+	}
+
+	if _, err := os.Stat(absRoot); err != nil {
+		if os.IsNotExist(err) {
+			return preview, nil
+		}
+		return StorageOrphanImagesPreview{}, err
+	}
+	err = filepath.WalkDir(absRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if entry == nil || entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(absRoot, path)
+		if err != nil {
+			return err
+		}
+		if relative == "." || relative == ".." || filepath.Dir(relative) != "." {
+			return nil
+		}
+		filename := filepath.Base(relative)
+		if _, ok := knownFilenames[filename]; ok {
+			return nil
+		}
+		stat, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		preview.FileCount++
+		preview.Bytes += stat.Size()
+		preview.Items = append(preview.Items, StorageOrphanImage{
+			Filename: filename,
+			Path:     path,
+			Bytes:    stat.Size(),
+			ModTime:  stat.ModTime().UTC(),
+		})
+		return nil
+	})
+	if err != nil {
+		return StorageOrphanImagesPreview{}, err
+	}
+	sort.SliceStable(preview.Items, func(i, j int) bool {
+		return preview.Items[i].Filename < preview.Items[j].Filename
+	})
 	return preview, nil
 }
 

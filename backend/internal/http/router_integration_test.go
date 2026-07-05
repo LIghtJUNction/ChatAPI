@@ -1150,6 +1150,33 @@ func TestAdminStorageEndpoints(t *testing.T) {
 	}
 }
 
+func TestAdminStorageOrphanImagesPreview(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.postMultipart(t, "/api/uploads/imgs", "file", "known.png", tinyPNG(), http.StatusOK)
+	uploadDir := filepath.Join(env.dataDir, "uploads", "imgs")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("create upload dir: %v", err)
+	}
+	orphanContent := []byte("orphan image bytes")
+	if err := os.WriteFile(filepath.Join(uploadDir, "orphan.png"), orphanContent, 0o644); err != nil {
+		t.Fatalf("write orphan upload: %v", err)
+	}
+
+	resp := env.getJSON(t, "/api/admin/storage/orphans", http.StatusOK)
+	if resp["dry_run"] != true {
+		t.Fatalf("expected orphan preview dry-run: %#v", resp)
+	}
+	preview := resp["preview"].(map[string]any)
+	if numericValue(preview["file_count"]) != 1 || numericValue(preview["bytes"]) != len(orphanContent) {
+		t.Fatalf("unexpected orphan preview totals: %#v", resp)
+	}
+	items := preview["items"].([]any)
+	if len(items) != 1 || nestedString(items[0].(map[string]any), "filename") != "orphan.png" {
+		t.Fatalf("unexpected orphan preview items: %#v", resp)
+	}
+}
+
 func TestAdminStorageCleanupPreview(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1234,6 +1261,13 @@ func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key storage admin rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/storage/orphans", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key storage orphan rejection: status=%d body=%q", status, body)
 	}
 
 	status, body = env.appPostText(t, "/api/admin/storage/cleanup", appKey, map[string]any{

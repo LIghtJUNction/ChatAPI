@@ -744,6 +744,44 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 	return items, rows.Err()
 }
 
+func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (store.DeleteConversationsResult, error) {
+	conversationIDs = uniqueNonEmptyStrings(conversationIDs)
+	if len(conversationIDs) == 0 {
+		return store.DeleteConversationsResult{}, nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(conversationIDs)), ",")
+	args := make([]any, 0, len(conversationIDs))
+	for _, id := range conversationIDs {
+		args = append(args, id)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var result store.DeleteConversationsResult
+	countMessagesQuery := fmt.Sprintf(`SELECT COUNT(*) FROM messages WHERE conversation_id IN (%s)`, placeholders)
+	if err := tx.QueryRowContext(ctx, countMessagesQuery, args...).Scan(&result.DeletedMessages); err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	deleteQuery := fmt.Sprintf(`DELETE FROM conversations WHERE id IN (%s)`, placeholders)
+	res, err := tx.ExecContext(ctx, deleteQuery, args...)
+	if err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	result.DeletedConversations = int(rowsAffected)
+	if err := tx.Commit(); err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePendingInput) (store.Conversation, store.Message, error) {
 	now := time.Now().UTC()
 	metadata := map[string]any{
@@ -1077,6 +1115,23 @@ func keysOf(value map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func buildConversationTitle(userContent string) string {

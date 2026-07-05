@@ -59,6 +59,8 @@ type StorageCleanupPreview struct {
 	CandidateConversations    int                       `json:"candidate_conversations"`
 	CandidateMessages         int                       `json:"candidate_messages"`
 	EstimatedReclaimableBytes int64                     `json:"estimated_reclaimable_bytes"`
+	DeletedConversations      int                       `json:"deleted_conversations,omitempty"`
+	DeletedMessages           int                       `json:"deleted_messages,omitempty"`
 	ByOwner                   []StorageCleanupOwnerPlan `json:"by_owner"`
 }
 
@@ -67,6 +69,13 @@ type StorageCleanupOwnerPlan struct {
 	CandidateConversations    int    `json:"candidate_conversations"`
 	CandidateMessages         int    `json:"candidate_messages"`
 	EstimatedReclaimableBytes int64  `json:"estimated_reclaimable_bytes"`
+}
+
+type storageCleanupCandidate struct {
+	ConversationID string
+	OwnerID        string
+	MessageCount   int
+	EstimatedBytes int64
 }
 
 type StorageOrphanImagesPreview struct {
@@ -167,9 +176,33 @@ func (s *StorageMonitorService) Users(ctx context.Context) ([]UserStorageUsage, 
 }
 
 func (s *StorageMonitorService) CleanupPreview(ctx context.Context, input StorageCleanupPreviewInput) (StorageCleanupPreview, error) {
-	conversations, err := s.store.ListConversations(ctx)
+	preview, _, err := s.cleanupPlan(ctx, input)
+	return preview, err
+}
+
+func (s *StorageMonitorService) DeleteCleanupCandidates(ctx context.Context, input StorageCleanupPreviewInput) (StorageCleanupPreview, error) {
+	preview, candidates, err := s.cleanupPlan(ctx, input)
 	if err != nil {
 		return StorageCleanupPreview{}, err
+	}
+	preview.DryRun = false
+	ids := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.ConversationID)
+	}
+	result, err := s.store.DeleteConversations(ctx, ids)
+	if err != nil {
+		return StorageCleanupPreview{}, err
+	}
+	preview.DeletedConversations = result.DeletedConversations
+	preview.DeletedMessages = result.DeletedMessages
+	return preview, nil
+}
+
+func (s *StorageMonitorService) cleanupPlan(ctx context.Context, input StorageCleanupPreviewInput) (StorageCleanupPreview, []storageCleanupCandidate, error) {
+	conversations, err := s.store.ListConversations(ctx)
+	if err != nil {
+		return StorageCleanupPreview{}, nil, err
 	}
 	if input.KeepRecentConversations < 0 {
 		input.KeepRecentConversations = 0
@@ -182,6 +215,9 @@ func (s *StorageMonitorService) CleanupPreview(ctx context.Context, input Storag
 	for _, conversation := range conversations {
 		ownerID := stringValue(conversation.Metadata["owner_id"], "unknown")
 		if input.OwnerID != "" && ownerID != input.OwnerID {
+			continue
+		}
+		if isActiveStorageConversation(conversation) {
 			continue
 		}
 		byOwnerConversations[ownerID] = append(byOwnerConversations[ownerID], conversation)
@@ -207,6 +243,7 @@ func (s *StorageMonitorService) CleanupPreview(ctx context.Context, input Storag
 		KeepRecentDays:          input.KeepRecentDays,
 		ByOwner:                 make([]StorageCleanupOwnerPlan, 0, len(ownerIDs)),
 	}
+	candidates := make([]storageCleanupCandidate, 0)
 	for _, ownerID := range ownerIDs {
 		items := byOwnerConversations[ownerID]
 		sort.SliceStable(items, func(i, j int) bool {
@@ -224,9 +261,15 @@ func (s *StorageMonitorService) CleanupPreview(ctx context.Context, input Storag
 
 			messages, err := s.store.ListMessages(ctx, conversation.ID)
 			if err != nil {
-				return StorageCleanupPreview{}, err
+				return StorageCleanupPreview{}, nil, err
 			}
 			bytes := storageConversationEstimatedBytes(conversation, messages)
+			candidates = append(candidates, storageCleanupCandidate{
+				ConversationID: conversation.ID,
+				OwnerID:        ownerID,
+				MessageCount:   len(messages),
+				EstimatedBytes: bytes,
+			})
 			ownerPlan.CandidateConversations++
 			ownerPlan.CandidateMessages += len(messages)
 			ownerPlan.EstimatedReclaimableBytes += bytes
@@ -236,7 +279,7 @@ func (s *StorageMonitorService) CleanupPreview(ctx context.Context, input Storag
 		}
 		preview.ByOwner = append(preview.ByOwner, ownerPlan)
 	}
-	return preview, nil
+	return preview, candidates, nil
 }
 
 func (s *StorageMonitorService) OrphanImagesPreview(ctx context.Context) (StorageOrphanImagesPreview, error) {
@@ -406,6 +449,11 @@ func storageConversationTime(conversation store.Conversation) time.Time {
 		return conversation.UpdatedAt
 	}
 	return conversation.CreatedAt
+}
+
+func isActiveStorageConversation(conversation store.Conversation) bool {
+	status := stringValue(conversation.Metadata["realtime_status"], "")
+	return status == "waiting" || status == "streaming"
 }
 
 func storageConversationEstimatedBytes(conversation store.Conversation, messages []store.Message) int64 {

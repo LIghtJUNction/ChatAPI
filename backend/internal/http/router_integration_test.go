@@ -1399,15 +1399,74 @@ func TestAdminStorageCleanupPreview(t *testing.T) {
 	}
 }
 
-func TestAdminStorageCleanupRejectsNonDryRun(t *testing.T) {
+func TestAdminStorageCleanupExecuteDeletesClosedConversations(t *testing.T) {
+	env := newTestEnv(t)
+
+	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-cleanup-delete-a",
+		"input": "storage cleanup delete A",
+	})
+	firstConversation := env.waitForWaitingConversation(t, "storage cleanup delete A")
+	env.postJSON(t, "/api/conversations/"+firstConversation["id"].(string)+"/respond", map[string]any{
+		"text": "delete response A",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-firstCh
+
+	secondCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-cleanup-delete-b",
+		"input": "storage cleanup delete B",
+	})
+	secondConversation := env.waitForWaitingConversation(t, "storage cleanup delete B")
+	env.postJSON(t, "/api/conversations/"+secondConversation["id"].(string)+"/respond", map[string]any{
+		"text": "delete response B",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-secondCh
+
+	activeCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-cleanup-active",
+		"input": "storage cleanup active",
+	})
+	activeConversation := env.waitForWaitingConversation(t, "storage cleanup active")
+
+	cleanupResp := env.postJSON(t, "/api/admin/storage/cleanup", map[string]any{
+		"dry_run":                   false,
+		"owner_id":                  "lab-user",
+		"keep_recent_conversations": 0,
+		"keep_recent_days":          0,
+	}, http.StatusOK)
+	result := cleanupResp["result"].(map[string]any)
+	if cleanupResp["dry_run"] != false || result["dry_run"] != false {
+		t.Fatalf("cleanup execution should not be dry-run: %#v", cleanupResp)
+	}
+	if numericValue(result["candidate_conversations"]) != 2 || numericValue(result["deleted_conversations"]) != 2 || numericValue(result["deleted_messages"]) < 4 {
+		t.Fatalf("unexpected cleanup execution result: %#v", cleanupResp)
+	}
+	if _, err := env.store.GetConversation(context.Background(), firstConversation["id"].(string)); err == nil {
+		t.Fatalf("expected first closed conversation to be deleted")
+	}
+	if _, err := env.store.GetConversation(context.Background(), secondConversation["id"].(string)); err == nil {
+		t.Fatalf("expected second closed conversation to be deleted")
+	}
+	if _, err := env.store.GetConversation(context.Background(), activeConversation["id"].(string)); err != nil {
+		t.Fatalf("active waiting conversation should remain: %v", err)
+	}
+	env.postJSON(t, "/api/conversations/"+activeConversation["id"].(string)+"/abort", map[string]any{
+		"error": "cleanup test done",
+	}, http.StatusOK)
+	<-activeCh
+	assertAuditCount(t, env, "admin.storage", "storage", "lab-user", "cleanup", "success", 1)
+}
+
+func TestAdminStorageCleanupRejectsMissingDryRun(t *testing.T) {
 	env := newTestEnv(t)
 
 	status, body := env.postText(t, "/api/admin/storage/cleanup", map[string]any{
-		"dry_run":                   false,
 		"keep_recent_conversations": 1,
 	})
-	if status != http.StatusBadRequest || !strings.Contains(body, "only supports dry_run") {
-		t.Fatalf("expected non-dry-run rejection: status=%d body=%q", status, body)
+	if status != http.StatusBadRequest || !strings.Contains(body, "requires explicit dry_run") {
+		t.Fatalf("expected missing dry_run rejection: status=%d body=%q", status, body)
 	}
 }
 

@@ -47,6 +47,7 @@
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope 等风险。
 - 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
 - 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出。
+- SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；用户配额、孤儿图片清理和上传审计仍待补齐。
@@ -593,6 +594,14 @@ SMTP 发送必须支持：
 - 连接超时和发送超时。
 - 明确的错误日志，但不打印密码、验证码和完整收件人隐私信息。
 - 测试邮件接口。
+
+当前 Go 重构分支已先落地 SMTP-only 的基础实现：
+
+- 配置项为 `CHATAPI_SMTP_ENABLED`、`CHATAPI_SMTP_HOST`、`CHATAPI_SMTP_PORT`、`CHATAPI_SMTP_USERNAME`、`CHATAPI_SMTP_PASSWORD`、`CHATAPI_SMTP_FROM`、`CHATAPI_SMTP_SECURITY`、`CHATAPI_SMTP_TIMEOUT`。
+- `CHATAPI_SMTP_SECURITY` 支持 `none`、`starttls`、`tls`；生产建议使用 `starttls` 或 `tls`。
+- `chatapi smtp test --dry-run` 只做本地配置校验，输出 JSON 报告，不连接 SMTP 服务器。
+- `chatapi smtp test --to user@example.com [--subject ...]` 会发送一封测试邮件；不传 `--to` 时自动降级为 dry-run，避免误发。
+- `chatapi config print --redact` 会脱敏 SMTP password；`doctor` 只输出配置风险，不打印密钥。
 
 ntfy 外部请求必须统一使用带超时的 `http.Client`，并复用现有私网 URL 策略，防 SSRF。
 
@@ -1612,7 +1621,7 @@ chatapi smtp test
 chatapi version
 ```
 
-首版至少应包含 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`；migration 能力必须可由启动流程调用，独立 `migrate` 命令可以后续补齐。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`，`migrate` / `setup` 仍待补。
+首版至少应包含 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`；migration 能力必须可由启动流程调用，独立 `migrate` 命令可以后续补齐。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor`、`db check`、`config print --redact`、`smtp test` 和 `version`，`migrate` / `setup` 仍待补。
 
 首次启动向导：
 
@@ -1630,7 +1639,7 @@ chatapi version
 - `chatapi db check`：检查数据库连接、schema version、migration 历史、SQLite WAL 状态或 PostgreSQL 连接池配置。
 - 当前 Go 重构分支的 `chatapi db check` 支持 SQLite，输出 JSON，包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at` 和 `applied` migration 列表；如果 dirty 为 true 或数据库不可打开，命令以非零状态退出。PostgreSQL repository 尚未落地，因此 postgres DSN 会返回明确错误。
 - `chatapi oidc test`：拉取 discovery document，校验 issuer、redirect URL、client id 配置，不打印 client secret。
-- `chatapi smtp test`：发送测试邮件或只做 SMTP 握手，输出 TLS/auth 诊断。
+- `chatapi smtp test`：当前支持 `--dry-run` 配置校验和 `--to` 测试邮件发送，输出 TLS/auth 诊断；后续可以扩展为 SMTP 握手但不发信的 `--connect-only`。
 
 ### 9.3 Lab 模式
 

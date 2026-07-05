@@ -21,6 +21,15 @@ type RedactedConfig struct {
 	MetricsEnabled bool     `json:"metrics_enabled"`
 	UploadMaxBytes int64    `json:"upload_max_bytes"`
 
+	SMTPEnabled  bool   `json:"smtp_enabled"`
+	SMTPHost     string `json:"smtp_host,omitempty"`
+	SMTPPort     int    `json:"smtp_port,omitempty"`
+	SMTPUsername string `json:"smtp_username,omitempty"`
+	SMTPPassword string `json:"smtp_password"`
+	SMTPFrom     string `json:"smtp_from,omitempty"`
+	SMTPSecurity string `json:"smtp_security,omitempty"`
+	SMTPTimeout  string `json:"smtp_timeout,omitempty"`
+
 	OIDCEnabled        bool     `json:"oidc_enabled"`
 	OIDCProviderName   string   `json:"oidc_provider_name,omitempty"`
 	OIDCIssuerURL      string   `json:"oidc_issuer_url,omitempty"`
@@ -55,6 +64,14 @@ func (c Config) Redacted() RedactedConfig {
 		CORSOrigins:        append([]string(nil), c.CORSOrigins...),
 		MetricsEnabled:     c.MetricsEnabled,
 		UploadMaxBytes:     c.UploadMaxBytes,
+		SMTPEnabled:        c.SMTPEnabled,
+		SMTPHost:           c.SMTPHost,
+		SMTPPort:           c.SMTPPort,
+		SMTPUsername:       c.SMTPUsername,
+		SMTPPassword:       redactSecret(c.SMTPPassword),
+		SMTPFrom:           c.SMTPFrom,
+		SMTPSecurity:       c.SMTPSecurity,
+		SMTPTimeout:        c.SMTPTimeout.String(),
 		OIDCEnabled:        c.OIDCEnabled,
 		OIDCProviderName:   c.OIDCProviderName,
 		OIDCIssuerURL:      c.OIDCIssuerURL,

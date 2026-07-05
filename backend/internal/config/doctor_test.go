@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 func TestDiagnoseServeRequiresProductionSecrets(t *testing.T) {
@@ -74,6 +75,48 @@ func TestDiagnoseOIDCPrivateRPRequirements(t *testing.T) {
 	}
 	if !hasDiagnostic(report, DiagnosticError, "oidc.scope_openid_missing") {
 		t.Fatalf("missing openid scope diagnostic: %#v", report)
+	}
+}
+
+func TestFromEnvLoadsSMTPConfig(t *testing.T) {
+	t.Setenv("CHATAPI_SMTP_ENABLED", "1")
+	t.Setenv("CHATAPI_SMTP_HOST", "smtp.example.com")
+	t.Setenv("CHATAPI_SMTP_PORT", "465")
+	t.Setenv("CHATAPI_SMTP_USERNAME", "chatapi")
+	t.Setenv("CHATAPI_SMTP_PASSWORD", "smtp-secret")
+	t.Setenv("CHATAPI_SMTP_FROM", "ChatAPI <noreply@example.com>")
+	t.Setenv("CHATAPI_SMTP_SECURITY", "tls")
+	t.Setenv("CHATAPI_SMTP_TIMEOUT", "3s")
+
+	cfg, err := FromEnvUnchecked(ModeLab, t.TempDir())
+	if err != nil {
+		t.Fatalf("load smtp config: %v", err)
+	}
+	if !cfg.SMTPEnabled || cfg.SMTPHost != "smtp.example.com" || cfg.SMTPPort != 465 || cfg.SMTPUsername != "chatapi" || cfg.SMTPPassword != "smtp-secret" {
+		t.Fatalf("unexpected smtp config: %#v", cfg)
+	}
+	if cfg.SMTPFrom != "ChatAPI <noreply@example.com>" || cfg.SMTPSecurity != "tls" || cfg.SMTPTimeout != 3*time.Second {
+		t.Fatalf("unexpected smtp config details: %#v", cfg)
+	}
+}
+
+func TestDiagnoseSMTPRequirements(t *testing.T) {
+	cfg := Default(ModeLab, t.TempDir())
+	cfg.SMTPEnabled = true
+	cfg.SMTPSecurity = "bad"
+
+	report := Diagnose(cfg, cfg.Validate())
+	if report.OK {
+		t.Fatalf("expected SMTP diagnostics to fail: %#v", report)
+	}
+	if !hasDiagnostic(report, DiagnosticError, "smtp.host_missing") {
+		t.Fatalf("missing smtp host diagnostic: %#v", report)
+	}
+	if !hasDiagnostic(report, DiagnosticError, "smtp.from_missing") {
+		t.Fatalf("missing smtp from diagnostic: %#v", report)
+	}
+	if !hasDiagnostic(report, DiagnosticError, "smtp.security_invalid") {
+		t.Fatalf("missing smtp security diagnostic: %#v", report)
 	}
 }
 

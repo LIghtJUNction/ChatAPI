@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -38,6 +39,15 @@ type Config struct {
 	CORSOrigins    []string
 	MetricsEnabled bool
 	UploadMaxBytes int64
+
+	SMTPEnabled  bool
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	SMTPSecurity string
+	SMTPTimeout  time.Duration
 
 	OIDCEnabled        bool
 	OIDCProviderName   string
@@ -97,6 +107,14 @@ func Default(mode Mode, backendRoot string) Config {
 		CORSOrigins:    []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		MetricsEnabled: false,
 		UploadMaxBytes: 10 << 20,
+		SMTPEnabled:    false,
+		SMTPHost:       "",
+		SMTPPort:       587,
+		SMTPUsername:   "",
+		SMTPPassword:   "",
+		SMTPFrom:       "",
+		SMTPSecurity:   "starttls",
+		SMTPTimeout:    10 * time.Second,
 
 		OIDCEnabled:        false,
 		OIDCProviderName:   "",
@@ -143,6 +161,26 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid CHATAPI_UPLOAD_MAX_BYTES: %w", err)
 		}
 		cfg.UploadMaxBytes = value
+	}
+	cfg.SMTPEnabled = parseBool(os.Getenv("CHATAPI_SMTP_ENABLED"), cfg.SMTPEnabled)
+	cfg.SMTPHost = strings.TrimSpace(os.Getenv("CHATAPI_SMTP_HOST"))
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_SMTP_PORT")); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_SMTP_PORT: %w", err)
+		}
+		cfg.SMTPPort = port
+	}
+	cfg.SMTPUsername = strings.TrimSpace(os.Getenv("CHATAPI_SMTP_USERNAME"))
+	cfg.SMTPPassword = strings.TrimSpace(os.Getenv("CHATAPI_SMTP_PASSWORD"))
+	cfg.SMTPFrom = strings.TrimSpace(os.Getenv("CHATAPI_SMTP_FROM"))
+	cfg.SMTPSecurity = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_SMTP_SECURITY"), cfg.SMTPSecurity))
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_SMTP_TIMEOUT")); raw != "" {
+		timeout, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_SMTP_TIMEOUT: %w", err)
+		}
+		cfg.SMTPTimeout = timeout
 	}
 
 	cfg.OIDCEnabled = parseBool(os.Getenv("CHATAPI_OIDC_ENABLED"), cfg.OIDCEnabled)
@@ -208,6 +246,25 @@ func (c Config) Validate() error {
 	}
 	if c.UploadMaxBytes <= 0 {
 		return errors.New("upload max bytes must be positive")
+	}
+	if c.SMTPEnabled {
+		if strings.TrimSpace(c.SMTPHost) == "" {
+			return errors.New("smtp host is required when smtp is enabled")
+		}
+		if c.SMTPPort <= 0 || c.SMTPPort > 65535 {
+			return errors.New("smtp port must be within 1-65535")
+		}
+		if strings.TrimSpace(c.SMTPFrom) == "" {
+			return errors.New("smtp from is required when smtp is enabled")
+		}
+		switch c.SMTPSecurity {
+		case "none", "starttls", "tls":
+		default:
+			return errors.New("smtp security must be one of none, starttls, tls")
+		}
+		if c.SMTPTimeout <= 0 {
+			return errors.New("smtp timeout must be positive")
+		}
 	}
 	return nil
 }

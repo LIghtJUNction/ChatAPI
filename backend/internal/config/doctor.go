@@ -66,6 +66,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 	report.checkSecrets(cfg)
 	report.checkPaths(cfg)
 	report.checkCORS(cfg)
+	report.checkSMTP(cfg)
 	report.checkOIDC(cfg)
 	report.checkLogLevel(cfg)
 	report.OK = !report.HasErrors()
@@ -201,6 +202,32 @@ func (r *DiagnosticReport) checkOIDC(cfg Config) {
 	}
 	if cfg.OIDCAutoCreateUser && len(cfg.OIDCAllowedDomains) == 0 && len(cfg.OIDCAllowedEmails) == 0 {
 		r.add(DiagnosticWarn, "oidc.auto_create_without_allowlist", "OIDC 自动创建用户已开启但没有邮箱 allowlist。")
+	}
+}
+
+func (r *DiagnosticReport) checkSMTP(cfg Config) {
+	if !cfg.SMTPEnabled {
+		r.add(DiagnosticInfo, "smtp.disabled", "SMTP 未启用；注册验证、密码重置和测试邮件功能不可用。")
+		return
+	}
+	if cfg.SMTPHost == "" {
+		r.add(DiagnosticError, "smtp.host_missing", "SMTP 已启用但 CHATAPI_SMTP_HOST 为空。")
+	}
+	if cfg.SMTPPort <= 0 || cfg.SMTPPort > 65535 {
+		r.add(DiagnosticError, "smtp.port_invalid", "CHATAPI_SMTP_PORT 必须在 1-65535 范围内。")
+	}
+	if cfg.SMTPFrom == "" {
+		r.add(DiagnosticError, "smtp.from_missing", "SMTP 已启用但 CHATAPI_SMTP_FROM 为空。")
+	}
+	switch cfg.SMTPSecurity {
+	case "none":
+		r.add(DiagnosticWarn, "smtp.security_none", "SMTP 未启用 TLS；仅应在可信内网或本地调试中使用。")
+	case "starttls", "tls":
+	default:
+		r.add(DiagnosticError, "smtp.security_invalid", "CHATAPI_SMTP_SECURITY 只支持 none、starttls 或 tls。")
+	}
+	if cfg.SMTPPassword != "" && cfg.SMTPUsername == "" {
+		r.add(DiagnosticWarn, "smtp.password_without_username", "配置了 SMTP password 但 username 为空，确认服务器是否支持该认证方式。")
 	}
 }
 

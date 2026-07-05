@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
 	"github.com/zyf/chatapi/internal/observability"
 	"github.com/zyf/chatapi/internal/platform/browser"
+	"github.com/zyf/chatapi/internal/platform/email"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service"
@@ -42,6 +44,9 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if len(args) > 0 && args[0] == "config" {
 		return runConfig(args[1:], backendRoot)
+	}
+	if len(args) > 0 && args[0] == "smtp" {
+		return runSMTP(ctx, args[1:], backendRoot)
 	}
 	if len(args) > 0 && args[0] == "version" {
 		return runVersion()
@@ -193,6 +198,93 @@ type dbCheckReport struct {
 	Error  string            `json:"error,omitempty"`
 }
 
+type smtpTestReport struct {
+	OK      bool                  `json:"ok"`
+	DryRun  bool                  `json:"dry_run"`
+	Sent    bool                  `json:"sent"`
+	To      string                `json:"to,omitempty"`
+	Check   email.SMTPCheckReport `json:"check"`
+	Error   string                `json:"error,omitempty"`
+	Warning string                `json:"warning,omitempty"`
+}
+
+func runSMTP(ctx context.Context, args []string, backendRoot string) error {
+	if len(args) == 0 || args[0] != "test" {
+		return fmt.Errorf("unknown smtp command, supported: test [--dry-run] [--to email]")
+	}
+	options, err := parseSMTPTestOptions(args[1:])
+	if err != nil {
+		return err
+	}
+	cfg, err := config.FromEnvUnchecked(config.ModeServe, backendRoot)
+	if err != nil {
+		return err
+	}
+	smtpConfig := email.SMTPConfigFromConfig(cfg)
+	check := email.CheckSMTPConfig(smtpConfig)
+	report := smtpTestReport{
+		OK:     check.OK,
+		DryRun: options.dryRun || options.to == "",
+		To:     options.to,
+		Check:  check,
+	}
+	if options.to == "" && !options.dryRun {
+		report.Warning = "no recipient provided; ran dry-run only"
+	}
+	if !check.OK {
+		report.Error = strings.Join(check.Errors, "; ")
+		_ = writeJSONReport(os.Stdout, report)
+		return errors.New(report.Error)
+	}
+	if report.DryRun {
+		return writeJSONReport(os.Stdout, report)
+	}
+	message := email.Message{
+		To:      []string{options.to},
+		Subject: firstNonEmptyString(options.subject, "ChatAPI SMTP test"),
+		Text:    "ChatAPI SMTP test email.",
+	}
+	if err := email.NewSMTPSender(smtpConfig).Send(ctx, message); err != nil {
+		report.OK = false
+		report.Error = err.Error()
+		_ = writeJSONReport(os.Stdout, report)
+		return err
+	}
+	report.Sent = true
+	return writeJSONReport(os.Stdout, report)
+}
+
+type smtpTestOptions struct {
+	dryRun  bool
+	to      string
+	subject string
+}
+
+func parseSMTPTestOptions(args []string) (smtpTestOptions, error) {
+	options := smtpTestOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dry-run":
+			options.dryRun = true
+		case "--to":
+			if i+1 >= len(args) {
+				return smtpTestOptions{}, errors.New("--to requires an email address")
+			}
+			i++
+			options.to = strings.TrimSpace(args[i])
+		case "--subject":
+			if i+1 >= len(args) {
+				return smtpTestOptions{}, errors.New("--subject requires a value")
+			}
+			i++
+			options.subject = strings.TrimSpace(args[i])
+		default:
+			return smtpTestOptions{}, fmt.Errorf("unknown smtp test option %q", args[i])
+		}
+	}
+	return options, nil
+}
+
 func runDB(args []string, backendRoot string) error {
 	if len(args) == 0 || args[0] != "check" {
 		return fmt.Errorf("unknown db command, supported: check")
@@ -241,6 +333,16 @@ func runDB(args []string, backendRoot string) error {
 		return errors.New(report.Error)
 	}
 	return writeJSONReport(os.Stdout, report)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func writeJSONReport(file *os.File, payload any) error {

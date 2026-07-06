@@ -940,6 +940,7 @@ func TestAutomationRuleAutoCompletesResponsesRequest(t *testing.T) {
 	if !foundClosed {
 		t.Fatalf("expected automation-completed request in list: %#v", requests)
 	}
+	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_complete", "auto_complete", "success", 1)
 }
 
 func TestUserPasswordRoute(t *testing.T) {
@@ -1683,6 +1684,23 @@ func TestAppAPIStatisticsSummary(t *testing.T) {
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
 	otherKey := env.seedAppAPIKey(t, "other-user", []string{"statistics:read"}, nil)
 
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_stats_auto",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "统计自动"}},
+					"excludes": []map[string]any{},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "统计自动回复",
+				},
+			},
+		},
+	}, http.StatusOK)
+
 	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
 		"model": "stats-model-a",
 		"input": "统计请求 A",
@@ -1691,6 +1709,13 @@ func TestAppAPIStatisticsSummary(t *testing.T) {
 		"model": "stats-model-b",
 		"input": "统计请求 B",
 	})
+	autoResp := postExternalJSON(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "stats-model-auto",
+		"input": "统计自动 请求",
+	})
+	if nestedString(autoResp, "output_text") != "统计自动回复" {
+		t.Fatalf("unexpected automation statistics response: %#v", autoResp)
+	}
 
 	firstConversation := env.waitForWaitingConversation(t, "统计请求 A")
 	secondConversation := env.waitForWaitingConversation(t, "统计请求 B")
@@ -1702,11 +1727,11 @@ func TestAppAPIStatisticsSummary(t *testing.T) {
 
 	resp := env.appGetJSON(t, "/api/app/statistics/summary", appKey, http.StatusOK)
 	summary := resp["summary"].(map[string]any)
-	if numericValue(summary["total_requests"]) != 2 || numericValue(summary["closed_requests"]) != 1 || numericValue(summary["pending_requests"]) != 1 {
+	if numericValue(summary["total_requests"]) != 3 || numericValue(summary["closed_requests"]) != 2 || numericValue(summary["pending_requests"]) != 1 || numericValue(summary["automation_hits"]) != 1 {
 		t.Fatalf("unexpected statistics summary: %#v", resp)
 	}
 	byModel := summary["by_model"].(map[string]any)
-	if numericValue(byModel["stats-model-a"]) != 1 || numericValue(byModel["stats-model-b"]) != 1 {
+	if numericValue(byModel["stats-model-a"]) != 1 || numericValue(byModel["stats-model-b"]) != 1 || numericValue(byModel["stats-model-auto"]) != 1 {
 		t.Fatalf("unexpected statistics by_model: %#v", resp)
 	}
 
@@ -3378,10 +3403,30 @@ func TestAdminRequestsOverview(t *testing.T) {
 	env := newTestEnv(t)
 	modelKey := env.seedModelAPIKey(t, "model-owner", "overview-model-key", "overview-model-b")
 
-	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_overview_auto",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "overview auto"}},
+					"excludes": []map[string]any{},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "overview auto done",
+				},
+			},
+		},
+	}, http.StatusOK)
+
+	firstResp := postExternalJSON(t, env.server.URL+"/v1/responses", nil, map[string]any{
 		"model": "overview-model-a",
-		"input": "overview 请求 A",
+		"input": "overview auto 请求 A",
 	})
+	if nestedString(firstResp, "output_text") != "overview auto done" {
+		t.Fatalf("unexpected overview automation response: %#v", firstResp)
+	}
 	secondCh := startJSONRequestWithHeaders(t, env.server.URL+"/v1/responses", map[string]string{
 		"Authorization": "Bearer " + modelKey,
 	}, map[string]any{
@@ -3389,17 +3434,11 @@ func TestAdminRequestsOverview(t *testing.T) {
 		"input": "overview 请求 B",
 	})
 
-	firstConversation := env.waitForWaitingConversation(t, "overview 请求 A")
 	secondConversation := env.waitForWaitingConversation(t, "overview 请求 B")
-	env.postJSON(t, "/api/conversations/"+firstConversation["id"].(string)+"/respond", map[string]any{
-		"text": "overview done",
-		"mode": "assistant_message",
-	}, http.StatusOK)
-	<-firstCh
 
 	overviewResp := env.getJSON(t, "/api/admin/requests/overview", http.StatusOK)
 	overview := overviewResp["overview"].(map[string]any)
-	if numericValue(overview["total_requests"]) != 2 || numericValue(overview["closed_requests"]) != 1 || numericValue(overview["pending_requests"]) != 1 {
+	if numericValue(overview["total_requests"]) != 2 || numericValue(overview["closed_requests"]) != 1 || numericValue(overview["pending_requests"]) != 1 || numericValue(overview["automation_hits"]) != 1 {
 		t.Fatalf("unexpected admin requests overview: %#v", overviewResp)
 	}
 	byOwner := overview["by_owner"].(map[string]any)

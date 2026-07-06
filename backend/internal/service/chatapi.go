@@ -106,7 +106,20 @@ func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request prot
 	if err != nil || match == nil {
 		return
 	}
-	_, _ = s.CompleteConversation(ctx, match.Input)
+	if _, err := s.CompleteConversation(ctx, match.Input); err == nil {
+		NewAuditService(s.store).Record(ctx, AuditEventInput{
+			EventType:    "automation.rule",
+			ResourceType: "automation_rule",
+			ResourceID:   match.RuleID,
+			Action:       "auto_complete",
+			Outcome:      "success",
+			Metadata: map[string]any{
+				"conversation_id": conversationID,
+				"request_format":  request.Protocol.String(),
+				"model":           request.Model,
+			},
+		})
+	}
 }
 
 func toStoreInputParts(parts []protocol.InputPart) []store.RequestInputPart {

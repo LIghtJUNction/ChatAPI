@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"os"
 	"runtime"
@@ -29,14 +30,19 @@ type RuntimeMonitorService struct {
 }
 
 type RuntimeSummary struct {
-	GeneratedAt time.Time      `json:"generated_at"`
-	Mode        config.Mode    `json:"mode"`
-	Go          GoRuntimeInfo  `json:"go"`
-	System      SystemSnapshot `json:"system"`
-	Memory      MemorySnapshot `json:"memory"`
-	Pending     PendingStats   `json:"pending"`
-	Realtime    RealtimeStats  `json:"realtime"`
-	Database    DatabaseInfo   `json:"database"`
+	GeneratedAt time.Time          `json:"generated_at"`
+	Mode        config.Mode        `json:"mode"`
+	Go          GoRuntimeInfo      `json:"go"`
+	System      SystemSnapshot     `json:"system"`
+	Memory      MemorySnapshot     `json:"memory"`
+	Automation  AutomationSnapshot `json:"automation"`
+	Pending     PendingStats       `json:"pending"`
+	Realtime    RealtimeStats      `json:"realtime"`
+	Database    DatabaseInfo       `json:"database"`
+}
+
+type AutomationSnapshot struct {
+	Hits int `json:"hits"`
 }
 
 type ConnectionSnapshot struct {
@@ -141,6 +147,7 @@ func (s *RuntimeMonitorService) Summary() RuntimeSummary {
 		Go:          goRuntimeInfo(),
 		System:      s.System(),
 		Memory:      ReadMemorySnapshot(),
+		Automation:  s.Automation(),
 		Pending:     s.pending.Stats(),
 		Realtime:    s.realtime.Stats(),
 		Database:    s.databaseInfo(),
@@ -165,6 +172,21 @@ func (s *RuntimeMonitorService) Connections() ConnectionSnapshot {
 		TotalConnections:    stats.TotalConnections,
 		RejectedConnections: stats.RejectedConnections,
 	}
+}
+
+func (s *RuntimeMonitorService) Automation() AutomationSnapshot {
+	if s == nil || s.store == nil {
+		return AutomationSnapshot{}
+	}
+	count, err := s.store.CountAuditLogs(context.Background(), store.CountAuditLogsInput{
+		EventType: "automation.rule",
+		Action:    "auto_complete",
+		Outcome:   "success",
+	})
+	if err != nil {
+		return AutomationSnapshot{}
+	}
+	return AutomationSnapshot{Hits: count}
 }
 
 func ReadSystemSnapshot(dataDir string) SystemSnapshot {

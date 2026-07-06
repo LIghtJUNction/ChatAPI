@@ -335,6 +335,14 @@ type ListAuditLogsInput struct {
 	ActorUserID string
 }
 
+type CountAuditLogsInput struct {
+	EventType    string
+	ActorUserID  string
+	ResourceType string
+	Action       string
+	Outcome      string
+}
+
 type CreateUploadedImageInput struct {
 	ID               string
 	OwnerID          string
@@ -420,6 +428,7 @@ type Store interface {
 	ListAppAPIKeyAuditLogs(context.Context, ListAppAPIKeyAuditLogsInput) ([]AppAPIKeyAuditLog, error)
 	CreateAuditLog(context.Context, CreateAuditLogInput) (AuditLog, error)
 	ListAuditLogs(context.Context, ListAuditLogsInput) ([]AuditLog, error)
+	CountAuditLogs(context.Context, CountAuditLogsInput) (int, error)
 	CreateModelAPIKey(context.Context, CreateModelAPIKeyInput) (ModelAPIKey, error)
 	ListModelAPIKeysByUser(context.Context, string) ([]ModelAPIKey, error)
 	GetModelAPIKeyByPrefix(context.Context, string) (ModelAPIKey, error)

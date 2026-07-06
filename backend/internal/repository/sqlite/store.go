@@ -474,6 +474,40 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 	return items, rows.Err()
 }
 
+func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsInput) (int, error) {
+	query := `SELECT COUNT(*) FROM audit_logs`
+	args := make([]any, 0, 5)
+	conditions := make([]string, 0, 5)
+	if strings.TrimSpace(input.EventType) != "" {
+		conditions = append(conditions, "event_type = ?")
+		args = append(args, strings.TrimSpace(input.EventType))
+	}
+	if strings.TrimSpace(input.ActorUserID) != "" {
+		conditions = append(conditions, "actor_user_id = ?")
+		args = append(args, strings.TrimSpace(input.ActorUserID))
+	}
+	if strings.TrimSpace(input.ResourceType) != "" {
+		conditions = append(conditions, "resource_type = ?")
+		args = append(args, strings.TrimSpace(input.ResourceType))
+	}
+	if strings.TrimSpace(input.Action) != "" {
+		conditions = append(conditions, "action = ?")
+		args = append(args, strings.TrimSpace(input.Action))
+	}
+	if strings.TrimSpace(input.Outcome) != "" {
+		conditions = append(conditions, "outcome = ?")
+		args = append(args, strings.TrimSpace(input.Outcome))
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAPIKeyInput) (store.ModelAPIKey, error) {
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `

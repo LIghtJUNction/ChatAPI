@@ -5,6 +5,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/zyf/chatapi/internal/store"
 )
 
 type StatisticsSummary struct {
@@ -13,6 +15,7 @@ type StatisticsSummary struct {
 	StreamingRequests        int            `json:"streaming_requests"`
 	ClosedRequests           int            `json:"closed_requests"`
 	AbortedRequests          int            `json:"aborted_requests"`
+	AutomationHits           int            `json:"automation_hits"`
 	OldestPendingWaitSeconds *int           `json:"oldest_pending_wait_seconds,omitempty"`
 	ByStatus                 map[string]int `json:"by_status"`
 	ByModel                  map[string]int `json:"by_model"`
@@ -25,6 +28,7 @@ type RequestsOverview struct {
 	StreamingRequests        int            `json:"streaming_requests"`
 	ClosedRequests           int            `json:"closed_requests"`
 	AbortedRequests          int            `json:"aborted_requests"`
+	AutomationHits           int            `json:"automation_hits"`
 	OldestPendingWaitSeconds *int           `json:"oldest_pending_wait_seconds,omitempty"`
 	ByStatus                 map[string]int `json:"by_status"`
 	ByModel                  map[string]int `json:"by_model"`
@@ -84,6 +88,12 @@ func (s *ChatAPIService) StatisticsSummaryForOwner(ctx context.Context, ownerID 
 	if oldestPendingSeconds != math.MaxInt {
 		summary.OldestPendingWaitSeconds = &oldestPendingSeconds
 	}
+	summary.AutomationHits, _ = s.store.CountAuditLogs(ctx, store.CountAuditLogsInput{
+		EventType:   "automation.rule",
+		ActorUserID: strings.TrimSpace(ownerID),
+		Action:      "auto_complete",
+		Outcome:     "success",
+	})
 	return summary, nil
 }
 
@@ -124,6 +134,11 @@ func (s *ChatAPIService) RequestsOverview(ctx context.Context) (RequestsOverview
 	if oldestPendingSeconds != math.MaxInt {
 		overview.OldestPendingWaitSeconds = &oldestPendingSeconds
 	}
+	overview.AutomationHits, _ = s.store.CountAuditLogs(ctx, store.CountAuditLogsInput{
+		EventType: "automation.rule",
+		Action:    "auto_complete",
+		Outcome:   "success",
+	})
 	return overview, nil
 }
 

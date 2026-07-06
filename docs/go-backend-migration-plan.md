@@ -44,24 +44,24 @@
 - 应用 API 当前已开始覆盖 `model_keys:read` / `model_keys:write` / `model_keys:delete`：`/api/app/model-keys` 可按 scope 和 `allowed_virtual_models` / `allowed_model_key_ids` 管理当前用户自己的虚拟模型 API Key。
 - 应用 API 创建虚拟模型 API Key 时已开始支持 `max_model_keys`：按当前用户未撤销虚拟模型 key 数量限制创建，达到上限返回 `403`。
 - 应用 API 当前已开始覆盖 `automation:read` / `automation:write`：`GET/PUT /api/app/automation-rules` 可读写当前用户自己的自动化规则，并支持 `allowed_automation_rule_ids` 限制外部程序只能管理指定规则。
-- 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、按模型和状态聚合、最老 pending 等待秒数。
+- 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、自动化规则命中数、按模型和状态聚合、最老 pending 等待秒数。
 - 应用 API 当前已开始覆盖 `max_requests_per_minute` 资源限制：在单进程内按应用 API Key 做 1 分钟窗口限流，超限返回 `429` 并写入 `app_api_key_audit_logs`，管理员审计聚合视图中显示为 `app_api.request` failure / `rate_limited`。
 - 应用 API 当前已开始覆盖 `allowed_source_ips` 资源限制：支持精确 IP 和 CIDR，默认按直连 `RemoteAddr` 判断；配置 `CHATAPI_TRUSTED_PROXIES` 后，仅当直连来源命中可信代理时才读取 `X-Forwarded-For` / `X-Real-IP`；拒绝时返回 `403` 并记录 `source_ip_forbidden`。
 - 应用 API Key 创建已开始支持 `expires_at`：用户创建应用 API Key 时可传 RFC3339 过期时间，必须晚于当前时间；过期 key 鉴权返回 `401`。
-- 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/system`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、Linux 系统内存/load/disk/RSS/FD、pending turn、realtime subscriber 和数据库观测信息。SQLite 部署会返回主库/WAL 文件大小；PostgreSQL 部署会返回连接池 `max/total/acquired/idle/constructing` 连接数以及 empty/canceled acquire 计数，并支持进程内调整 Go GC 百分比和内存限制。
+- 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/system`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、Linux 系统内存/load/disk/RSS/FD、自动化规则命中数、pending turn、realtime subscriber 和数据库观测信息。SQLite 部署会返回主库/WAL 文件大小；PostgreSQL 部署会返回连接池 `max/total/acquired/idle/constructing` 连接数以及 empty/canceled acquire 计数，并支持进程内调整 Go GC 百分比和内存限制。
 - Realtime 事件广播已补上最小背压策略：每个订阅者使用固定队列，队列满时记录 recoverable drop，连续满队列会断开慢订阅者并累计 `slow_disconnects`；`/api/admin/runtime/queue` 和 `/metrics` 都会暴露相关计数。
 - Realtime 连接限额已补上最小统一池：`CHATAPI_REALTIME_MAX_CONNECTIONS`、`CHATAPI_REALTIME_MAX_CONNECTIONS_PER_USER`、`CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER` 控制全局、单用户和浏览器控制台预留名额；当前 `/api/ws` 作为 `webui` 连接接入，service 层已提供 `api` / `sse` lease，后续 API/SSE 长连接必须复用同一套限额，避免同用户 API/SSE 连接占满后 WebUI 进不来。管理员连接监控和 `/metrics` 已输出分类连接数与拒绝计数。
 - 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`、`POST /api/admin/storage/vacuum`，返回数据库观测、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志；清理会识别候选会话正文和 metadata JSON 中的 `/api/uploads/imgs/{filename}` 引用，删除不再被保留会话引用的本地上传图片文件与 `uploaded_images` 元数据，并返回候选/已删除图片数量和字节数；如果文件系统删除失败，会写入 `storage_file_deletion_failures` 恢复队列并继续清理其他对象。`summary.database` 已与 runtime summary 统一：SQLite 返回主库/WAL 文件大小，PostgreSQL 返回连接池 `max/total/acquired/idle/constructing` 和 empty/canceled acquire 计数。SQLite vacuum 需要显式 `dry_run:false` 才会执行 WAL checkpoint 和 `VACUUM`；PostgreSQL 部署下 `dry_run:true` 仍可用于查看数据库观测，但 `dry_run:false` 会明确返回不支持，而不是伪装成服务端内部错误。每日存储维护 worker 已可通过 `CHATAPI_STORAGE_CLEANUP_ENABLED=1` 启用，按本地时区 `CHATAPI_STORAGE_CLEANUP_TIME=HH:MM` 执行旧会话清理、孤儿图片清理、上传删除失败重试；只有 SQLite 部署才会额外执行 WAL checkpoint 和可选 SQLite VACUUM，避免 PostgreSQL 部署每日产生无意义告警。
 - 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、默认配额、单用户 override、最终 `storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
-- 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
+- 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数、自动化规则命中数，以及按 owner、model、status 聚合。
 - pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
-- 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
+- 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、自动化规则自动完成命中、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、session secret、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope、realtime 连接预留配置等风险。
 - 数据库版本诊断已落地最小版本：SQLite 和 PostgreSQL bootstrap 都会维护 `db_meta` 和 `schema_migrations`；当前 `chatapi db check` 已能通过统一 store 打开两种数据库，输出 schema version、dirty 状态、创建来源、最近迁移时间、已应用迁移列表，以及 SQLite 主库/WAL/SHM 文件存在性和字节数。
 - 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、session secret、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出；`chatapi migrate up|status|down --force` 已开始同时支持 SQLite 和 PostgreSQL 的当前 schema 状态查询与本地重置，`chatapi migrate-db sqlite-to-postgres --sqlite <path> --postgres <dsn>` 已开始支持 SQLite 到 PostgreSQL 的最小全量搬迁。当前 SQLite 和 PostgreSQL 都已开始进入注册式增量 migration：SQLite 的首个 `0002_sqlite_app_api_indexes` 已补上应用 API Key 相关索引，PostgreSQL 的首个 `0002_postgresql_request_indexes` 已补上 `messages.response_id` 和 `request_debug.request_id` 读取相关索引。`chatapi oidc test` 可拉取 OIDC discovery document 并校验 issuer 与核心 endpoint。
 - SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --connect-only` 可执行 SMTP 连接/TLS/Auth 握手但不发信，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
-- `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列，以及 SQLite 文件大小或 PostgreSQL 连接池指标等基础指标。
+- `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、自动化命中计数、pending turn、realtime 队列，以及 SQLite 文件大小或 PostgreSQL 连接池指标等基础指标。
 - SQLite bootstrap schema 已补齐用户体系基础表：`users`、`user_identities`、`user_configs`、`config`，并已补上 `users` / `user_identities` / `config` / `user_configs` 的 SQLite 仓储基础方法和 repository 测试。当前业务仍使用 Lab actor 和 `.env` admin session；这些表和仓储先作为后续 OIDC、本地用户、管理员用户管理、用户配置和系统配置的稳定落点。
 - PostgreSQL repository 已补到第三批业务表：新增 `internal/repository/postgresql`，使用 `github.com/jackc/pgx/v5/pgxpool`，并为 `users`、`user_identities`、`config`、`user_configs`、`user_app_api_keys`、`app_api_key_audit_logs`、`user_api_keys`、`audit_logs`、`automation_rules`、`uploaded_images`、`storage_user_quotas`、`storage_file_deletion_failures`、`conversations`、`messages` 以及 pending turn 状态机相关方法提供真实实现和可选 contract tests；测试通过 `CHATAPI_PG_TEST_DSN` 启用，未配置时跳过。当前 `chatapi serve`、`/api/ready`、`chatapi db check`、`chatapi migrate up|status|down --force` 已开始通过统一 runtime store 接入 PostgreSQL；PostgreSQL 侧也已开始支持 bootstrap 后继续应用注册式增量 migration，首个 `0002_postgresql_request_indexes` 会补上请求读取相关索引。SQLite 和 PostgreSQL 的 migration 定义现已开始按数据库拆到包内 `sql/*.up.sql` 文件，并通过共享的 `internal/repository/migrationplan` 统一做文件名解析、顺序校验和 SQL 装载，避免两套后端继续手写重复的 Go 内联 SQL 切片。`chatapi migrate-db sqlite-to-postgres` 已落地首版：当前会先确认目标 PostgreSQL 业务表为空，再把 SQLite 中的 users、OIDC identities、system/user configs、虚拟模型 API Key、应用 API Key、应用 API Key 审计日志、通用审计日志、自动化规则、上传图片元数据、存储配额、上传删除失败队列、conversations 和 messages 一次性迁入 PostgreSQL。HTTP 集成测试已补到 `/metrics`、`/api/admin/runtime/*`、`/api/admin/storage/*` 的最小 PostgreSQL 路径，以及 `responses` / `chat/completions` / `messages` 三套协议在 PostgreSQL 下的非流闭环和基础 SSE 闭环。剩余缺口主要在更完整的 PostgreSQL 集成测试矩阵，以及后续把迁移工具从“全量快照装载”演进为更适合超大库的分批流式搬迁。
 - 密码哈希和本地 users 表登录基础已落地：新增 `internal/platform/password`，新密码使用 Argon2id PHC 风格格式，旧 `salt$sha256(salt+password)` 可验证并返回 `NeedsUpgrade`。serve 模式 `POST /api/auth/login` 会优先按 username/email 查询 `users` 表，验证本地密码，成功后建立同一类 session；旧 hash 登录成功后会自动升级为 Argon2id 并更新 `last_login_at`。`.env` 的 `CHATAPI_ADMIN_PASSWORD` 仍保留为 `admin` 用户恢复入口。
@@ -1016,7 +1016,7 @@ type Hub struct {
 
 当前 Go 重构分支已先落地运行时监控的服务内指标和 Linux 系统级探针：
 
-- `GET /api/admin/runtime/summary`：返回 Go runtime 基本信息、系统资源快照、Go 内存快照、pending turn 统计、realtime subscriber 队列统计、SQLite 主库/WAL 文件大小。
+- `GET /api/admin/runtime/summary`：返回 Go runtime 基本信息、系统资源快照、Go 内存快照、自动化规则命中摘要、pending turn 统计、realtime subscriber 队列统计、SQLite 主库/WAL 文件大小。
 - `GET /api/admin/runtime/memory`：返回当前 Go `runtime.MemStats` 的核心字段，包括 heap、sys、next GC、GC 次数和 pause 累计。
 - `GET /api/admin/runtime/system`：返回主机名、CPU 数、load average、系统总内存/可用内存、ChatAPI 进程 RSS、打开 FD 数，以及 `data_dir` 所在文件系统总容量/可用容量。当前实现使用 Linux `/proc` 和 `statfs`，非 Linux 部署后续按目标平台补齐。
 - `GET /api/admin/runtime/connections`：返回当前 realtime subscriber 数、WebUI subscriber 数、API/SSE lease 数、总连接数和被限额拒绝的连接数。当前 `/api/ws` 已按 `webui` 计数，后续 API/SSE 长连接接入时必须使用 realtime hub 的 `Acquire` / `Release`。
@@ -1031,7 +1031,7 @@ type Hub struct {
 - `DELETE /api/admin/storage/users/{owner_id}/quota`：删除单用户覆盖，恢复使用全局默认配额。
 - `GET /api/admin/storage/orphans`：扫描 `data/uploads/imgs` 下没有 `uploaded_images` 元数据的单层文件，返回 dry-run 预览、文件数、字节数和文件列表。
 - `POST /api/admin/storage/orphans/cleanup`：要求显式传入 `{"dry_run": false}`，重新扫描当前 orphan 列表后只删除 uploads/imgs 根目录下的单层孤儿文件，返回候选文件数、候选字节数、实际删除文件数和实际删除字节数，并写入 `audit_logs`。
-- `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
+- `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、自动化规则命中数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
 - `POST /api/admin/storage/cleanup`：必须显式传 `dry_run`；请求参数为 `owner_id`、`keep_recent_conversations`、`keep_recent_days`，返回候选会话数、候选消息数、估算可回收字节数和按 owner 聚合的计划。`dry_run:false` 会删除候选 conversations，并通过数据库外键级联删除 messages；候选算法会跳过 `waiting` / `streaming` 活跃请求，避免清理正在等待人工/自动化回复的 turn。
 - `POST /api/admin/storage/vacuum`：必须显式传 `dry_run`；`dry_run:true` 返回当前数据库观测快照，便于管理员先确认数据库类型和体量；`dry_run:false` 仅在 SQLite 下执行 WAL checkpoint 和 SQLite `VACUUM`，返回执行前后数据库信息并写入审计日志。PostgreSQL 下该接口会返回明确的 `400` 不支持错误，避免误判为服务端故障。
 - 当前会话/消息清理执行已支持删除候选会话独占引用的 `/api/uploads/imgs/{filename}` 本地上传图片文件和 `uploaded_images` 元数据；如果同一图片仍被保留会话引用则不会删除。文件删除失败会进入 `storage_file_deletion_failures` 队列，后续每日存储维护会重试。每日存储维护已能按用户有效配额识别超额用户，并复用同一候选算法清理旧会话；后续可再补上传后即时触发和更细的保留策略 UI。
@@ -1418,9 +1418,10 @@ user_app_api_keys
 - `GET /api/app/model-keys`：需要 `model_keys:read`，返回当前用户自己的虚拟模型 API Key；如果配置了 `allowed_model_key_ids`，只返回允许的 key。
 - `POST /api/app/model-keys`：需要 `model_keys:write`，请求体包含 `name`、`model`；如果配置了 `allowed_virtual_models`，只能为允许的虚拟模型创建 key；如果配置了 `max_model_keys`，当前用户未撤销虚拟模型 key 数量达到上限时返回 `403`。
 - `DELETE /api/app/model-keys/{key_id}`：需要 `model_keys:delete`，只能删除当前用户自己的 key；如果配置了 `allowed_model_key_ids`，只能删除允许的 key。
-- `GET /api/app/statistics/summary`：需要 `statistics:read`，当前返回请求态势摘要；首版不返回 token、价格、平均耗时等需要额外计量的数据，避免给外部自动化暴露误导性指标。
+- `GET /api/app/statistics/summary`：需要 `statistics:read`，当前返回请求态势摘要和自动化规则命中数；首版不返回 token、价格、平均耗时等需要额外计量的数据，避免给外部自动化暴露误导性指标。
 - 虚拟模型 key 使用 `sk-` 前缀和可解密密文保存；应用 API Key 使用 `ak-` 前缀和 hash 保存。两套鉴权中间件完全分离，`ak-` 不能访问模型兼容入口，`sk-` 不能访问 `/api/app/*`。
 - 自动化规则当前以 `automation_rules.rule_json` 保存完整规则 JSON，同时单独保存 `user_id`、`id`、`enabled`、`created_at`、`updated_at`；当前最小自动执行内核、WebUI 配置接口和应用 API 已开始复用同一张表与 `AutomationRuleService`，避免规则格式分叉。
+- 当前最小自动执行内核已开始支持 `conditions.contains`、`conditions.excludes`、`match_type=substring|exact` 和 `action.type=output_text`，命中后会直接复用统一 turn complete 路径结束 pending turn，而不是额外实现一套旁路写消息逻辑。
 - 所有应用 API 响应都使用稳定 JSON，方便脚本调用。
 - `complete` 和 `abort` 与 Web 控制台操作共享同一个 Turn Manager 状态机，避免双写和竞态。
 
@@ -1637,6 +1638,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 - 虚拟模型 API Key 创建/删除
 - 应用 API Key 创建/删除/撤销、scope/resource 拒绝、自动化接口调用、虚拟模型 API Key 管理
 - 应用 API Key 触发的 delta、complete、abort、自动化规则变更、虚拟模型 API Key 创建/删除
+- 自动化规则自动完成命中，包括命中规则 id、会话 id、协议类型和模型名
 - 上游模型辅助调用成功/失败、浏览器本地配置创建/删除、服务端代理 URL safety 拒绝
 - 管理员创建/删除用户、重置密码
 - 系统配置变更
@@ -1652,11 +1654,12 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 - 已记录管理员存储 cleanup dry-run 预览和实际执行，包括保留策略、候选会话数、候选消息数、估算可回收字节数，以及执行时的实际删除会话/消息数；已记录管理员设置/删除单用户存储配额覆盖和手动 SQLite vacuum。
 - 已记录用户普通配置更新，审计 metadata 只记录更新的配置 key，不记录完整配置值。
 - 已记录管理员系统配置更新，审计 metadata 只记录更新的配置 key，不记录完整配置值。
+- 已记录自动化规则自动完成命中，当前事件类型为 `automation.rule`，`action=auto_complete`，`outcome=success`，metadata 会附带 `conversation_id`、`request_format`、`model`。
 - `GET /api/admin/audit/logs` 已提供通用审计日志查询，支持 `limit`、`event_type`、`actor_user_id` 基础过滤，仅允许 admin session actor 访问；默认查询范围是 `audit_logs`，传 `include_app_api=1` 时会把 `app_api_key_audit_logs` 映射为 `event_type=app_api.request` 的统一审计条目并合并返回。
 - 审计 metadata 会过滤包含 password、secret、token、authorization、key 的字段，避免误写敏感值。
 - 应用 API Key 请求当前仍写入 `app_api_key_audit_logs`，用于保留 key id、scope 拒绝和状态码等细节；管理员审计查询可通过 `include_app_api=1` 聚合查看这些请求，后续再扩展更细的分页游标和 source 过滤。
 
-仍待补齐的审计事件包括 OIDC 角色变更/绑定发起细节、ntfy/email 发送失败和上游模型辅助调用；OIDC 登录成功/失败、用户 OIDC 身份解绑、本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、用户配置、上传和 API Key 管理已开始写入 `audit_logs`。
+仍待补齐的审计事件包括 OIDC 角色变更/绑定发起细节、ntfy/email 发送失败、上游模型辅助调用，以及自动化规则命中失败/跳过等更细事件；OIDC 登录成功/失败、用户 OIDC 身份解绑、本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、用户配置、上传、API Key 管理和自动化规则自动完成命中已开始写入 `audit_logs`。
 
 审计日志应独立于普通运行日志等级：即使 `CHATAPI_LOG_LEVEL=warn`，关键安全事件仍应写入 audit channel。审计日志只记录必要元数据和结果，不记录完整请求体、密钥、密码、OIDC token 或上游模型输出全文。
 

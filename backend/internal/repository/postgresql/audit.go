@@ -98,6 +98,40 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 	return items, rows.Err()
 }
 
+func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsInput) (int, error) {
+	args := make([]any, 0, 5)
+	conditions := make([]string, 0, 5)
+	if strings.TrimSpace(input.EventType) != "" {
+		args = append(args, strings.TrimSpace(input.EventType))
+		conditions = append(conditions, "event_type = $"+strconv.Itoa(len(args)))
+	}
+	if strings.TrimSpace(input.ActorUserID) != "" {
+		args = append(args, strings.TrimSpace(input.ActorUserID))
+		conditions = append(conditions, "actor_user_id = $"+strconv.Itoa(len(args)))
+	}
+	if strings.TrimSpace(input.ResourceType) != "" {
+		args = append(args, strings.TrimSpace(input.ResourceType))
+		conditions = append(conditions, "resource_type = $"+strconv.Itoa(len(args)))
+	}
+	if strings.TrimSpace(input.Action) != "" {
+		args = append(args, strings.TrimSpace(input.Action))
+		conditions = append(conditions, "action = $"+strconv.Itoa(len(args)))
+	}
+	if strings.TrimSpace(input.Outcome) != "" {
+		args = append(args, strings.TrimSpace(input.Outcome))
+		conditions = append(conditions, "outcome = $"+strconv.Itoa(len(args)))
+	}
+	query := `SELECT COUNT(*) FROM audit_logs`
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	var count int
+	if err := s.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func scanAuditLog(row rowScanner) (store.AuditLog, error) {
 	var item store.AuditLog
 	var metadataJSON []byte

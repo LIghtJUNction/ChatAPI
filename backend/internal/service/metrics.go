@@ -94,6 +94,7 @@ func (s *MetricsService) PrometheusText() string {
 	writeMetric(&builder, "chatapi_process_open_fds", "ChatAPI process open file descriptor count.", "gauge", float64(summary.System.ProcessOpenFDs))
 	writeMetric(&builder, "chatapi_data_dir_disk_total_bytes", "Data directory filesystem total bytes.", "gauge", float64(summary.System.DataDirDiskTotalBytes))
 	writeMetric(&builder, "chatapi_data_dir_disk_available_bytes", "Data directory filesystem available bytes.", "gauge", float64(summary.System.DataDirDiskAvailableBytes))
+	writeMetric(&builder, "chatapi_automation_hits_total", "Successful automation rule auto-completions.", "counter", float64(summary.Automation.Hits))
 	writeMetric(&builder, "chatapi_pending_turns", "Current pending turns.", "gauge", float64(summary.Pending.Active))
 	writeMetric(&builder, "chatapi_realtime_subscribers", "Current realtime subscribers.", "gauge", float64(summary.Realtime.Subscribers))
 	writeMetric(&builder, "chatapi_realtime_webui_subscribers", "Current WebUI realtime subscribers.", "gauge", float64(summary.Realtime.WebUISubscribers))

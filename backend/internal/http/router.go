@@ -111,6 +111,7 @@ func NewRouter(
 	userRouter := chi.NewRouter()
 	userRouter.Use(middleware.RequireUserActor())
 	userRouter.Get("/app-api-keys", userAppAPIKeysHandler.List)
+	userRouter.Get("/app-api-keys/schema", userAppAPIKeysHandler.Schema)
 	userRouter.Post("/app-api-keys", userAppAPIKeysHandler.Create)
 	userRouter.Delete("/app-api-keys/{keyID}", userAppAPIKeysHandler.Delete)
 	userRouter.Get("/model-api-keys", userModelAPIKeysHandler.List)

@@ -1073,6 +1073,40 @@ func TestUserAppAPIKeysRejectInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestUserAppAPIKeysSchema(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.getJSON(t, "/api/user/app-api-keys/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	scopes := schema["scopes"].([]any)
+	resourceLimits := schema["resource_limits"].([]any)
+	if len(scopes) == 0 || len(resourceLimits) == 0 {
+		t.Fatalf("unexpected app api key schema response: %#v", resp)
+	}
+	foundRespondScope := false
+	foundRequestActions := false
+	for _, raw := range scopes {
+		item := raw.(map[string]any)
+		if nestedString(item, "name") == "requests:respond" {
+			foundRespondScope = true
+			break
+		}
+	}
+	for _, raw := range resourceLimits {
+		item := raw.(map[string]any)
+		if nestedString(item, "name") != "allowed_request_actions" {
+			continue
+		}
+		foundRequestActions = true
+		if !containsStringValue(item["requires_any_scopes"], "requests:respond") || !containsStringValue(item["allowed_values"], "complete") {
+			t.Fatalf("unexpected request action schema item: %#v", item)
+		}
+	}
+	if !foundRespondScope || !foundRequestActions {
+		t.Fatalf("unexpected app api key schema response: %#v", resp)
+	}
+}
+
 func TestUserAppAPIKeysManagementUsesSessionActor(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("app-secret")
@@ -1119,6 +1153,37 @@ func TestUserAppAPIKeysManagementUsesSessionActor(t *testing.T) {
 	}
 	assertAuditCountForActor(t, env, "user_app_owner", "user.app_api_key", "app_api_key", keyID, "create", "success", 1)
 	assertAuditCountForActor(t, env, "user_app_owner", "user.app_api_key", "app_api_key", keyID, "delete", "success", 1)
+}
+
+func TestUserAppAPIKeysSchemaUsesSessionActor(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("schema-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_app_schema_owner",
+		Username:     "app-schema-owner",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed app schema owner: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "app-schema-owner",
+		"password": "schema-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing user session cookie: %#v", cookies)
+	}
+
+	resp := env.getJSONWithCookie(t, "/api/user/app-api-keys/schema", sessionCookie, http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if !containsMapItemWithStringField(schema["scopes"], "name", "requests:read") {
+		t.Fatalf("unexpected session app api key schema response: %#v", resp)
+	}
 }
 
 func TestUserConfigManagementInLab(t *testing.T) {
@@ -6163,6 +6228,23 @@ func containsStringValue(value any, want string) bool {
 			if item == want {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func containsMapItemWithStringField(value any, field string, want string) bool {
+	items, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, raw := range items {
+		record, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if nestedString(record, field) == want {
+			return true
 		}
 	}
 	return false

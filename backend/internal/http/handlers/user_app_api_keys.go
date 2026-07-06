@@ -33,6 +33,18 @@ func (h UserAppAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
+func (h UserAppAPIKeysHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	userID, err := currentActorUserID(r, h.Config)
+	if err != nil || userID == "" {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": h.AppAPIKeys.Schema(),
+	})
+}
+
 func (h UserAppAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {

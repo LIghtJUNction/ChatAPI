@@ -117,3 +117,34 @@ func TestAppAPIKeyValidateConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestAppAPIKeySchema(t *testing.T) {
+	schema := NewAppAPIKeyService(nil).Schema()
+	if len(schema.Scopes) == 0 || len(schema.ResourceLimits) == 0 {
+		t.Fatalf("unexpected empty app api key schema: %#v", schema)
+	}
+
+	foundRespondScope := false
+	foundRequestActions := false
+	for _, item := range schema.Scopes {
+		if item.Name == "requests:respond" {
+			foundRespondScope = true
+			break
+		}
+	}
+	for _, item := range schema.ResourceLimits {
+		if item.Name != "allowed_request_actions" {
+			continue
+		}
+		foundRequestActions = true
+		if len(item.RequiresAnyScopes) != 1 || item.RequiresAnyScopes[0] != "requests:respond" {
+			t.Fatalf("unexpected allowed_request_actions dependency: %#v", item)
+		}
+		if len(item.AllowedValues) != 3 {
+			t.Fatalf("unexpected allowed_request_actions values: %#v", item)
+		}
+	}
+	if !foundRespondScope || !foundRequestActions {
+		t.Fatalf("unexpected app api key schema: %#v", schema)
+	}
+}

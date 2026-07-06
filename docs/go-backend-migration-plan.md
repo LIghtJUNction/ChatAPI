@@ -37,6 +37,7 @@
 - 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
 - 应用 API Key 创建当前已开始做服务端白名单校验：scope 必须来自后端支持集合，且至少选择一个；`resource_limits` 只接受已知 key、已知类型和值域，未知 key/类型会返回 `400`；同时还会校验 resource limit 与 scopes 的语义匹配，例如 `allowed_request_actions` 必须伴随 `requests:respond`，`allowed_request_ids` 必须伴随 `requests:read|requests:respond`，`max_model_keys` 必须伴随 `model_keys:write`，避免生成永远不会生效或语义自相矛盾的 key 配置。
 - 当前旧前端 `ApiKeyManagementPanel` 仍请求 `/api/user/api-keys*` 并假设服务端可再次返回完整明文 key；这与 Go 重构版“应用 API Key 只存 hash、明文只在创建时返回一次”的安全边界冲突，因此不应继续为旧接口补明文兼容，后续前端应改接 `/api/user/app-api-keys` 并调整为“一次性展示 + 前缀/元数据列表”模型。
+- 应用 API Key 配置契约当前还已开始显式暴露：`GET /api/user/app-api-keys/schema` 会返回后端支持的 scopes、resource limit、依赖 scopes 和枚举值，避免前端或外部管理工具继续把这些规则硬编码在本地。
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
 - 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
 - 用户侧虚拟模型配置已补上最小接口：`GET/POST/DELETE /api/config/models` 当前按 actor 读写 `user_configs.virtual_models`，用于保存当前用户自己的虚拟模型列表；`GET /models` / `GET /v1/models` 也已开始优先返回当前 actor 的已启用虚拟模型，而不是硬编码单个 `chatapi-lab`。若当前用户没有配置模型，则回退到默认 `chatapi-lab`。
@@ -1409,6 +1410,7 @@ user_app_api_keys
 用户管理自己的应用 API Key 的 session 路由：
 
 - `GET /api/user/app-api-keys`
+- `GET /api/user/app-api-keys/schema`
 - `POST /api/user/app-api-keys`：当前支持 `name`、`scopes`、`resource_limits` 和可选 RFC3339 `expires_at`。
 - `DELETE /api/user/app-api-keys/{key_id}`
 
@@ -1431,6 +1433,7 @@ user_app_api_keys
 - scope 通过后仍要检查 resource limits，不能只靠 owner_id 粗粒度授权。
 - 创建应用 API Key 时也要校验 scope 和 resource limits 本身，不能把未知 key、错误类型或无意义组合原样存库，再把歧义留给运行时。
 - resource limit 还要校验与 scopes 的对应关系，不能允许“只给 statistics:read 却挂 allowed_request_ids”这类表面合法、实际无效的配置混入库中。
+- 最好提供可机器读取的 schema 接口，把 scopes、resource_limits、依赖 scopes 和枚举值都暴露出来，避免 WebUI/CLI 再重复维护一份权限矩阵。
 - 支持过期时间和撤销。当前 Go 重构分支的用户侧应用 API Key 创建接口已支持 `expires_at`，过期时间必须晚于当前时间。
 - 记录 `last_used_at`，但写入频率要节流，避免高频请求导致 SQLite 写放大。
 - 对 `requests:respond` 加限流，避免外部自动化错误循环刷屏。

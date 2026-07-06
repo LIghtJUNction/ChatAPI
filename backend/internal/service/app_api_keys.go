@@ -34,6 +34,24 @@ type AppAPIKeyService struct {
 	rateLimitHits map[string][]time.Time
 }
 
+type AppAPIKeySchema struct {
+	Scopes         []AppAPIKeyScopeSpec         `json:"scopes"`
+	ResourceLimits []AppAPIKeyResourceLimitSpec `json:"resource_limits"`
+}
+
+type AppAPIKeyScopeSpec struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type AppAPIKeyResourceLimitSpec struct {
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	ValueType         string   `json:"value_type"`
+	RequiresAnyScopes []string `json:"requires_any_scopes,omitempty"`
+	AllowedValues     []string `json:"allowed_values,omitempty"`
+}
+
 const appAPIKeyLastUsedMinInterval = 5 * time.Minute
 const maxIntValue = int(^uint(0) >> 1)
 
@@ -70,6 +88,10 @@ func (e *AppAPIKeyConfigError) Error() string {
 
 func NewAppAPIKeyService(dataStore store.Store) *AppAPIKeyService {
 	return &AppAPIKeyService{store: dataStore, rateLimitHits: map[string][]time.Time{}}
+}
+
+func (s *AppAPIKeyService) Schema() AppAPIKeySchema {
+	return BuildAppAPIKeySchema()
 }
 
 func (s *AppAPIKeyService) CreateKey(ctx context.Context, userID string, name string, scopes []string, resourceLimits map[string]any, expiresAt *time.Time) (store.AppAPIKey, string, error) {
@@ -270,6 +292,33 @@ func normalizeAppAPIKeyConfig(scopes []string, resourceLimits map[string]any) ([
 		return nil, nil, err
 	}
 	return normalizedScopes, normalizedLimits, nil
+}
+
+func BuildAppAPIKeySchema() AppAPIKeySchema {
+	return AppAPIKeySchema{
+		Scopes: []AppAPIKeyScopeSpec{
+			{Name: "requests:read", Description: "Read current user's pending and historical requests."},
+			{Name: "requests:respond", Description: "Append delta, complete, or abort a request."},
+			{Name: "conversations:read", Description: "Read current user's conversations and messages."},
+			{Name: "automation:read", Description: "Read current user's automation rules."},
+			{Name: "automation:write", Description: "Replace current user's automation rules."},
+			{Name: "model_keys:read", Description: "List current user's virtual model API keys."},
+			{Name: "model_keys:write", Description: "Create current user's virtual model API keys."},
+			{Name: "model_keys:delete", Description: "Delete current user's virtual model API keys."},
+			{Name: "statistics:read", Description: "Read current user's statistics summary."},
+		},
+		ResourceLimits: []AppAPIKeyResourceLimitSpec{
+			{Name: "allowed_model_key_ids", Description: "Restrict model key operations to specific virtual model key IDs.", ValueType: "string_array", RequiresAnyScopes: []string{"model_keys:read", "model_keys:delete"}},
+			{Name: "allowed_request_ids", Description: "Restrict request reads and responses to specific request IDs.", ValueType: "string_array", RequiresAnyScopes: []string{"requests:read", "requests:respond"}},
+			{Name: "allowed_conversation_ids", Description: "Restrict conversation reads to specific conversation IDs.", ValueType: "string_array", RequiresAnyScopes: []string{"conversations:read", "requests:read", "requests:respond"}},
+			{Name: "allowed_virtual_models", Description: "Restrict accessible requests, conversations, or model-key creation to specific virtual models.", ValueType: "string_array", RequiresAnyScopes: []string{"requests:read", "requests:respond", "conversations:read", "model_keys:write"}},
+			{Name: "allowed_automation_rule_ids", Description: "Restrict automation rule operations to specific rule IDs.", ValueType: "string_array", RequiresAnyScopes: []string{"automation:read", "automation:write"}},
+			{Name: "allowed_request_actions", Description: "Restrict request response actions to a subset of delta, complete, abort.", ValueType: "string_array", RequiresAnyScopes: []string{"requests:respond"}, AllowedValues: []string{"delta", "complete", "abort"}},
+			{Name: "max_requests_per_minute", Description: "Apply a per-key request rate limit in requests per minute.", ValueType: "positive_integer"},
+			{Name: "max_model_keys", Description: "Limit how many active virtual model keys the key holder may create.", ValueType: "positive_integer", RequiresAnyScopes: []string{"model_keys:write"}},
+			{Name: "allowed_source_ips", Description: "Restrict requests to exact IPs or CIDR blocks.", ValueType: "string_array"},
+		},
+	}
 }
 
 func normalizeAppAPIKeyScopes(scopes []string) ([]string, map[string]struct{}, error) {

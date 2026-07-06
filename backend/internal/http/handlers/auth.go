@@ -3,6 +3,7 @@ package handlers
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
 
@@ -11,8 +12,9 @@ import (
 )
 
 type AuthHandler struct {
-	Config config.Config
-	Audit  *service.AuditService
+	Config       config.Config
+	Audit        *service.AuditService
+	LoginLimiter *service.LoginRateLimiter
 }
 
 func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
@@ -76,10 +78,22 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if username == "" {
 		username = "admin"
 	}
+	limitKey := loginLimitKey(username, r)
+	if h.LoginLimiter != nil && !h.LoginLimiter.Allow(limitKey) {
+		h.recordAuthAudit(r, "login_rate_limited", "failure")
+		http.Error(w, "too many failed login attempts", http.StatusTooManyRequests)
+		return
+	}
 	if !h.validAdminPassword(username, input.Password) {
+		if h.LoginLimiter != nil {
+			h.LoginLimiter.RecordFailure(limitKey)
+		}
 		h.recordAuthAudit(r, "login", "failure")
 		http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		return
+	}
+	if h.LoginLimiter != nil {
+		h.LoginLimiter.Reset(limitKey)
 	}
 	actor := service.RequestActor{
 		UserID:   "admin",
@@ -101,6 +115,21 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		"ok":   true,
 		"user": userPayload,
 	})
+}
+
+func loginLimitKey(username string, r *http.Request) string {
+	return strings.TrimSpace(username) + "|" + directRemoteIP(r)
+}
+
+func directRemoteIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func (h AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {

@@ -1346,6 +1346,29 @@ func TestServeAdminSessionLoginAndLogout(t *testing.T) {
 	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "logout", "success", 1)
 }
 
+func TestServeAdminLoginRateLimit(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.AdminPassword = "admin-secret"
+	})
+
+	for i := 0; i < 5; i++ {
+		status, body := env.postText(t, "/api/auth/login", map[string]any{
+			"username": "admin",
+			"password": "wrong",
+		})
+		if status != http.StatusUnauthorized || !strings.Contains(body, "invalid username or password") {
+			t.Fatalf("expected invalid login rejection on attempt %d: status=%d body=%q", i+1, status, body)
+		}
+	}
+	status, body := env.postText(t, "/api/auth/login", map[string]any{
+		"username": "admin",
+		"password": "admin-secret",
+	})
+	if status != http.StatusTooManyRequests || !strings.Contains(body, "too many failed login attempts") {
+		t.Fatalf("expected login rate limit: status=%d body=%q", status, body)
+	}
+}
+
 func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)

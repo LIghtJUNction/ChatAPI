@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -42,7 +43,7 @@ func NewRouter(
 	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	auditService := service.NewAuditService(dataStore)
-	authHandler := handlers.AuthHandler{Config: cfg, Audit: auditService}
+	authHandler := handlers.AuthHandler{Config: cfg, Audit: auditService, LoginLimiter: service.NewLoginRateLimiter(5, time.Minute)}
 	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore), Audit: auditService}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
 	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)

@@ -20,6 +20,7 @@ func TestPostgreSQLRepositoryContracts(t *testing.T) {
 	storetest.RunAuditRepositoryTests(t, openTestStore(dsn))
 	storetest.RunAutomationRepositoryTests(t, openTestStore(dsn))
 	storetest.RunStorageRepositoryTests(t, openTestStore(dsn))
+	storetest.RunConversationRepositoryTests(t, openTestStore(dsn))
 }
 
 func openTestStore(dsn string) storetest.NewStoreFunc {
@@ -53,6 +54,8 @@ func resetTestSchema(ctx context.Context, st *Store) error {
 		DROP TABLE IF EXISTS uploaded_images;
 		DROP TABLE IF EXISTS storage_user_quotas;
 		DROP TABLE IF EXISTS storage_file_deletion_failures;
+		DROP TABLE IF EXISTS messages;
+		DROP TABLE IF EXISTS conversations;
 		DROP TABLE IF EXISTS user_identities;
 		DROP TABLE IF EXISTS users;
 	`)

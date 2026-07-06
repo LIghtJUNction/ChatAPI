@@ -1,0 +1,589 @@
+package postgresql
+
+import (
+	"context"
+	"errors"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/zyf/chatapi/internal/store"
+)
+
+func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(metadata_json->>'response_id', '')
+		FROM conversations
+		ORDER BY updated_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.Conversation, 0)
+	for rows.Next() {
+		item, err := scanConversation(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetConversation(ctx context.Context, conversationID string) (store.Conversation, error) {
+	return scanConversation(s.pool.QueryRow(ctx, `
+		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(metadata_json->>'response_id', '')
+		FROM conversations
+		WHERE id = $1
+	`, strings.TrimSpace(conversationID)))
+}
+
+func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			c.id,
+			m.created_at,
+			m.metadata_json,
+			c.updated_at,
+			c.metadata_json
+		FROM messages m
+		JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.role = 'user'
+			AND m.metadata_json->'request_debug'->>'request_id' IS NOT NULL
+		ORDER BY c.updated_at DESC, m.created_at DESC, m.id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.Request, 0)
+	for rows.Next() {
+		item, err := scanRequestRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
+	item, err := scanRequestRow(s.pool.QueryRow(ctx, `
+		SELECT
+			m.conversation_id,
+			m.created_at,
+			m.metadata_json,
+			c.updated_at,
+			c.metadata_json
+		FROM messages m
+		JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.role = 'user'
+			AND m.metadata_json->'request_debug'->>'request_id' = $1
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT 1
+	`, strings.TrimSpace(requestID)))
+	if err != nil {
+		return store.Request{}, err
+	}
+	if item.RequestID == "" {
+		item.RequestID = strings.TrimSpace(requestID)
+	}
+	return item, nil
+}
+
+func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, role, content, created_at, status, response_id, metadata_json
+		FROM messages
+		WHERE conversation_id = $1
+		ORDER BY created_at ASC, id ASC
+	`, strings.TrimSpace(conversationID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.Message, 0)
+	for rows.Next() {
+		item, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (store.DeleteConversationsResult, error) {
+	conversationIDs = uniqueNonEmptyStrings(conversationIDs)
+	if len(conversationIDs) == 0 {
+		return store.DeleteConversationsResult{}, nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var result store.DeleteConversationsResult
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE conversation_id = ANY($1)`, conversationIDs).Scan(&result.DeletedMessages); err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM conversations WHERE id = ANY($1)`, conversationIDs)
+	if err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	result.DeletedConversations = int(tag.RowsAffected())
+	if err := tx.Commit(ctx); err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
+	return result, nil
+}
+
+func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store.ExpirePendingTurnsResult, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, metadata_json
+		FROM conversations
+		WHERE last_message_at < $1
+			AND COALESCE(metadata_json->>'realtime_status', '') IN ('waiting', 'streaming')
+	`, cutoff)
+	if err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	type candidate struct {
+		id       string
+		metadata map[string]any
+	}
+	candidates := make([]candidate, 0)
+	for rows.Next() {
+		var item candidate
+		var metadataJSON []byte
+		if err := rows.Scan(&item.id, &metadataJSON); err != nil {
+			rows.Close()
+			return store.ExpirePendingTurnsResult{}, err
+		}
+		item.metadata = ensureMap(parseJSONMap(metadataJSON))
+		item.metadata["realtime_status"] = "expired"
+		item.metadata["realtime_draft_text"] = ""
+		candidates = append(candidates, item)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	if len(candidates) == 0 {
+		return store.ExpirePendingTurnsResult{}, nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	now := time.Now().UTC()
+	var result store.ExpirePendingTurnsResult
+	for _, item := range candidates {
+		tag, err := tx.Exec(ctx, `
+			UPDATE conversations
+			SET updated_at = $1, metadata_json = $2::jsonb
+			WHERE id = $3
+				AND COALESCE(metadata_json->>'realtime_status', '') IN ('waiting', 'streaming')
+		`, now, mustJSON(item.metadata), item.id)
+		if err != nil {
+			return store.ExpirePendingTurnsResult{}, err
+		}
+		result.ExpiredConversations += int(tag.RowsAffected())
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.ExpirePendingTurnsResult{}, err
+	}
+	return result, nil
+}
+
+func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePendingInput) (store.Conversation, store.Message, error) {
+	now := time.Now().UTC()
+	metadata := map[string]any{
+		"owner_id":            strings.TrimSpace(input.OwnerID),
+		"request_format":      strings.TrimSpace(input.RequestFormat),
+		"realtime_status":     "waiting",
+		"realtime_draft_text": "",
+		"response_id":         strings.TrimSpace(input.ResponseID),
+		"model":               strings.TrimSpace(input.Model),
+	}
+	userMessageMetadata := map[string]any{
+		"request_format": strings.TrimSpace(input.RequestFormat),
+		"model":          strings.TrimSpace(input.Model),
+		"request_debug": map[string]any{
+			"request_id":     strings.TrimSpace(input.RequestID),
+			"response_id":    strings.TrimSpace(input.ResponseID),
+			"model":          strings.TrimSpace(input.Model),
+			"request_format": strings.TrimSpace(input.RequestFormat),
+			"request_keys":   keysOf(input.RequestBody),
+			"input_text":     input.UserContent,
+			"request_body":   input.RequestBody,
+			"tool_schemas":   input.ToolSchemas,
+		},
+	}
+	conversation := store.Conversation{
+		ID:                 strings.TrimSpace(input.ConversationID),
+		Title:              buildConversationTitle(input.UserContent),
+		LastUserText:       input.UserContent,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		LastMessageAt:      now,
+		MessageCount:       1,
+		LastMessagePreview: input.UserContent,
+		Metadata:           metadata,
+		ResponseID:         strings.TrimSpace(input.ResponseID),
+	}
+	responseID := strings.TrimSpace(input.ResponseID)
+	message := store.Message{
+		ID:         "msg_" + uuid.NewString(),
+		Role:       "user",
+		Content:    input.UserContent,
+		CreatedAt:  now,
+		Status:     "pending",
+		ResponseID: &responseID,
+		Metadata:   userMessageMetadata,
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO conversations(
+			id, title, created_at, updated_at, last_message_at,
+			message_count, last_message_preview, last_user_text, metadata_json
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+	`,
+		conversation.ID,
+		conversation.Title,
+		now,
+		now,
+		now,
+		conversation.MessageCount,
+		conversation.LastMessagePreview,
+		conversation.LastUserText,
+		mustJSON(metadata),
+	); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO messages(
+			id, conversation_id, role, content, created_at, status, response_id, metadata_json
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+	`,
+		message.ID,
+		conversation.ID,
+		message.Role,
+		message.Content,
+		now,
+		message.Status,
+		responseID,
+		mustJSON(userMessageMetadata),
+	); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	return conversation, message, nil
+}
+
+func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (store.Conversation, error) {
+	conversation, err := s.GetConversation(ctx, input.ConversationID)
+	if err != nil {
+		return store.Conversation{}, err
+	}
+	metadata := ensureMap(conversation.Metadata)
+	if !isDraftWritable(metadata) {
+		return store.Conversation{}, store.ErrTurnConflict
+	}
+	metadata["realtime_draft_text"] = input.DraftText
+	metadata["realtime_status"] = "streaming"
+	conversation.Metadata = metadata
+	conversation.UpdatedAt = time.Now().UTC()
+
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE conversations
+		SET updated_at = $1, metadata_json = $2::jsonb
+		WHERE id = $3
+	`, conversation.UpdatedAt, mustJSON(metadata), conversation.ID); err != nil {
+		return store.Conversation{}, err
+	}
+	return conversation, nil
+}
+
+func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePendingInput) (store.Conversation, store.Message, error) {
+	conversation, err := s.GetConversation(ctx, input.ConversationID)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	metadata := ensureMap(conversation.Metadata)
+	if !isTurnCompletable(metadata) {
+		return store.Conversation{}, store.Message{}, store.ErrTurnConflict
+	}
+	draftText, _ := metadata["realtime_draft_text"].(string)
+	finalText := strings.TrimSpace(input.OutputText)
+	if finalText == "" {
+		finalText = draftText
+	}
+	messageContent := finalText
+	if input.Mode == "thinking" && finalText != "" {
+		messageContent = "<think>" + finalText + "</think>"
+	}
+	now := time.Now().UTC()
+	metadata["realtime_status"] = "closed"
+	metadata["realtime_draft_text"] = ""
+
+	messageMetadata := map[string]any{
+		"response_mode": input.Mode,
+	}
+	if input.ToolName != "" {
+		messageMetadata["tool_name"] = input.ToolName
+	}
+	if input.ToolCallID != "" {
+		messageMetadata["tool_call_id"] = input.ToolCallID
+	}
+	if input.Mode == "tool_call" {
+		messageMetadata["arguments"] = finalText
+	}
+	if input.Mode == "tool_result" {
+		messageMetadata["output"] = stringValue(input.ToolOutput, finalText)
+	}
+	if input.ReasoningStreamMode != "" {
+		messageMetadata["reasoning_stream_mode"] = input.ReasoningStreamMode
+	}
+	responseID := strings.TrimSpace(input.ResponseID)
+	message := store.Message{
+		ID:         "msg_" + uuid.NewString(),
+		Role:       "assistant",
+		Content:    messageContent,
+		CreatedAt:  now,
+		Status:     "completed",
+		ResponseID: &responseID,
+		Metadata:   messageMetadata,
+	}
+
+	conversation.Metadata = metadata
+	conversation.UpdatedAt = now
+	conversation.LastMessageAt = now
+	conversation.MessageCount += 1
+	conversation.LastMessagePreview = finalText
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO messages(
+			id, conversation_id, role, content, created_at, status, response_id, metadata_json
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+	`, message.ID, conversation.ID, message.Role, message.Content, now, message.Status, responseID, mustJSON(messageMetadata)); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE conversations
+		SET updated_at = $1, last_message_at = $2, message_count = $3, last_message_preview = $4, metadata_json = $5::jsonb
+		WHERE id = $6
+	`, now, now, conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	return conversation, message, nil
+}
+
+func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingInput) (store.Conversation, store.Message, error) {
+	conversation, err := s.GetConversation(ctx, input.ConversationID)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	metadata := ensureMap(conversation.Metadata)
+	if !isTurnCompletable(metadata) {
+		return store.Conversation{}, store.Message{}, store.ErrTurnConflict
+	}
+	metadata["realtime_status"] = "aborted"
+	metadata["realtime_draft_text"] = ""
+	now := time.Now().UTC()
+
+	message := store.Message{
+		ID:        "msg_" + uuid.NewString(),
+		Role:      "assistant",
+		Content:   input.Reason,
+		CreatedAt: now,
+		Status:    "aborted",
+		Metadata: map[string]any{
+			"response_mode": "assistant_message",
+		},
+	}
+	conversation.Metadata = metadata
+	conversation.UpdatedAt = now
+	conversation.LastMessageAt = now
+	conversation.MessageCount += 1
+	conversation.LastMessagePreview = input.Reason
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO messages(
+			id, conversation_id, role, content, created_at, status, response_id, metadata_json
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+	`, message.ID, conversation.ID, message.Role, message.Content, now, message.Status, nil, mustJSON(message.Metadata)); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE conversations
+		SET updated_at = $1, last_message_at = $2, message_count = $3, last_message_preview = $4, metadata_json = $5::jsonb
+		WHERE id = $6
+	`, now, now, conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.Conversation{}, store.Message{}, err
+	}
+	return conversation, message, nil
+}
+
+func scanConversation(row rowScanner) (store.Conversation, error) {
+	var item store.Conversation
+	var metadataJSON []byte
+	if err := row.Scan(
+		&item.ID,
+		&item.Title,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+		&item.LastMessageAt,
+		&item.MessageCount,
+		&item.LastMessagePreview,
+		&item.LastUserText,
+		&metadataJSON,
+		&item.ResponseID,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.Conversation{}, store.ErrNotFound
+		}
+		return store.Conversation{}, err
+	}
+	item.Metadata = parseJSONMap(metadataJSON)
+	return item, nil
+}
+
+func scanRequestRow(scanner rowScanner) (store.Request, error) {
+	var item store.Request
+	var messageMetadataJSON []byte
+	var conversationMetadataJSON []byte
+	if err := scanner.Scan(
+		&item.ConversationID,
+		&item.CreatedAt,
+		&messageMetadataJSON,
+		&item.UpdatedAt,
+		&conversationMetadataJSON,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.Request{}, store.ErrNotFound
+		}
+		return store.Request{}, err
+	}
+
+	messageMetadata := parseJSONMap(messageMetadataJSON)
+	requestDebug, _ := messageMetadata["request_debug"].(map[string]any)
+	conversationMetadata := parseJSONMap(conversationMetadataJSON)
+
+	item.RequestID = metadataString(requestDebug, "request_id", "")
+	item.OwnerID = metadataString(conversationMetadata, "owner_id", "")
+	item.ResponseID = metadataString(requestDebug, "response_id", "")
+	item.RequestFormat = metadataString(requestDebug, "request_format", "")
+	item.Model = metadataString(requestDebug, "model", "")
+	item.InputText = metadataString(requestDebug, "input_text", "")
+	item.Status = metadataString(conversationMetadata, "realtime_status", "")
+	item.Metadata = messageMetadata
+	item.RequestBody, _ = requestDebug["request_body"].(map[string]any)
+	item.ToolSchemas, _ = requestDebug["tool_schemas"].([]any)
+	return item, nil
+}
+
+func scanMessage(row rowScanner) (store.Message, error) {
+	var item store.Message
+	var status *string
+	var responseID *string
+	var metadataJSON []byte
+	if err := row.Scan(&item.ID, &item.Role, &item.Content, &item.CreatedAt, &status, &responseID, &metadataJSON); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.Message{}, store.ErrNotFound
+		}
+		return store.Message{}, err
+	}
+	if status != nil {
+		item.Status = *status
+	}
+	item.ResponseID = responseID
+	item.Metadata = parseJSONMap(metadataJSON)
+	return item, nil
+}
+
+func keysOf(value map[string]any) []string {
+	keys := make([]string, 0, len(value))
+	for key := range value {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func buildConversationTitle(userContent string) string {
+	text := strings.TrimSpace(userContent)
+	if text == "" {
+		return "新会话"
+	}
+	runes := []rune(text)
+	if len(runes) > 24 {
+		return string(runes[:24])
+	}
+	return text
+}
+
+func stringValue(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
+}
+
+func isDraftWritable(metadata map[string]any) bool {
+	status := metadataString(metadata, "realtime_status", "waiting")
+	return status == "waiting" || status == "streaming"
+}
+
+func isTurnCompletable(metadata map[string]any) bool {
+	status := metadataString(metadata, "realtime_status", "waiting")
+	return status == "waiting" || status == "streaming"
+}
+
+func metadataString(metadata map[string]any, key string, fallback string) string {
+	value, _ := metadata[key].(string)
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
+}

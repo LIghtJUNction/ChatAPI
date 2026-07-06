@@ -76,6 +76,13 @@ func RunStorageRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	})
 }
 
+func RunConversationRepositoryTests(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	t.Run("pending_turn_lifecycle", func(t *testing.T) {
+		testConversationRepositoryPendingTurnLifecycle(t, newStore)
+	})
+}
+
 func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewStoreFunc) {
 	t.Helper()
 	ctx := context.Background()
@@ -923,5 +930,215 @@ func testStorageRepositorySetsListsAndDeletesUserQuotas(t *testing.T, newStore N
 	}
 	if _, err := st.GetStorageUserQuota(ctx, "user_b"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after deleting storage quota, got %v", err)
+	}
+}
+
+func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+
+	firstConversation, firstUserMessage, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+		ConversationID: "conv_waiting",
+		RequestID:      "req_waiting",
+		ResponseID:     "resp_waiting",
+		OwnerID:        "user_a",
+		RequestFormat:  "responses",
+		Model:          "gpt-test",
+		UserContent:    "First question for waiting turn",
+		RequestBody: map[string]any{
+			"model": "gpt-test",
+			"input": "First question for waiting turn",
+		},
+		ToolSchemas: []any{
+			map[string]any{"name": "tool_a"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create first pending turn: %v", err)
+	}
+	if firstConversation.MessageCount != 1 || firstConversation.ResponseID != "resp_waiting" {
+		t.Fatalf("unexpected first conversation: %#v", firstConversation)
+	}
+	if firstUserMessage.Status != "pending" || firstUserMessage.ResponseID == nil || *firstUserMessage.ResponseID != "resp_waiting" {
+		t.Fatalf("unexpected first user message: %#v", firstUserMessage)
+	}
+
+	secondConversation, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+		ConversationID: "conv_abort",
+		RequestID:      "req_abort",
+		ResponseID:     "resp_abort",
+		OwnerID:        "user_b",
+		RequestFormat:  "chat.completions",
+		Model:          "claude-test",
+		UserContent:    "Second question for abort turn",
+		RequestBody: map[string]any{
+			"model":    "claude-test",
+			"messages": []any{map[string]any{"role": "user", "content": "Second question for abort turn"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create second pending turn: %v", err)
+	}
+
+	waitingConversation, err := st.GetConversation(ctx, firstConversation.ID)
+	if err != nil {
+		t.Fatalf("get waiting conversation: %v", err)
+	}
+	if waitingConversation.Metadata["owner_id"] != "user_a" || waitingConversation.Metadata["realtime_status"] != "waiting" {
+		t.Fatalf("unexpected waiting conversation metadata: %#v", waitingConversation)
+	}
+
+	allConversations, err := st.ListConversations(ctx)
+	if err != nil {
+		t.Fatalf("list conversations: %v", err)
+	}
+	if len(allConversations) != 2 {
+		t.Fatalf("expected two conversations, got %#v", allConversations)
+	}
+
+	firstRequest, err := st.GetRequest(ctx, "req_waiting")
+	if err != nil {
+		t.Fatalf("get first request: %v", err)
+	}
+	if firstRequest.ConversationID != firstConversation.ID || firstRequest.OwnerID != "user_a" || firstRequest.Status != "waiting" {
+		t.Fatalf("unexpected first request: %#v", firstRequest)
+	}
+	if firstRequest.RequestBody["model"] != "gpt-test" {
+		t.Fatalf("unexpected request body: %#v", firstRequest.RequestBody)
+	}
+	if len(firstRequest.ToolSchemas) != 1 {
+		t.Fatalf("unexpected tool schemas: %#v", firstRequest.ToolSchemas)
+	}
+
+	requests, err := st.ListRequests(ctx)
+	if err != nil {
+		t.Fatalf("list requests: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("expected two requests, got %#v", requests)
+	}
+
+	draftConversation, err := st.UpdateDraft(ctx, store.UpdateDraftInput{
+		ConversationID: firstConversation.ID,
+		DraftText:      "draft answer",
+	})
+	if err != nil {
+		t.Fatalf("update draft: %v", err)
+	}
+	if draftConversation.Metadata["realtime_status"] != "streaming" || draftConversation.Metadata["realtime_draft_text"] != "draft answer" {
+		t.Fatalf("unexpected draft conversation: %#v", draftConversation)
+	}
+
+	completedConversation, completedMessage, err := st.CompletePendingTurn(ctx, store.CompletePendingInput{
+		ConversationID:      firstConversation.ID,
+		ResponseID:          "resp_waiting",
+		OutputText:          "",
+		Mode:                "tool_call",
+		ToolName:            "tool_a",
+		ToolCallID:          "call_1",
+		ReasoningStreamMode: "summary",
+	})
+	if err != nil {
+		t.Fatalf("complete pending turn: %v", err)
+	}
+	if completedConversation.MessageCount != 2 || completedConversation.Metadata["realtime_status"] != "closed" {
+		t.Fatalf("unexpected completed conversation: %#v", completedConversation)
+	}
+	if completedMessage.Content != "draft answer" || completedMessage.Metadata["tool_name"] != "tool_a" || completedMessage.Metadata["arguments"] != "draft answer" {
+		t.Fatalf("unexpected completed message: %#v", completedMessage)
+	}
+
+	if _, err := st.UpdateDraft(ctx, store.UpdateDraftInput{
+		ConversationID: firstConversation.ID,
+		DraftText:      "should fail",
+	}); !errors.Is(err, store.ErrTurnConflict) {
+		t.Fatalf("expected ErrTurnConflict updating closed draft, got %v", err)
+	}
+	if _, _, err := st.CompletePendingTurn(ctx, store.CompletePendingInput{
+		ConversationID: firstConversation.ID,
+		ResponseID:     "resp_waiting",
+		OutputText:     "again",
+		Mode:           "assistant_message",
+	}); !errors.Is(err, store.ErrTurnConflict) {
+		t.Fatalf("expected ErrTurnConflict completing closed turn, got %v", err)
+	}
+
+	abortedConversation, abortedMessage, err := st.AbortPendingTurn(ctx, store.AbortPendingInput{
+		ConversationID: secondConversation.ID,
+		Reason:         "manual abort",
+	})
+	if err != nil {
+		t.Fatalf("abort pending turn: %v", err)
+	}
+	if abortedConversation.Metadata["realtime_status"] != "aborted" || abortedConversation.MessageCount != 2 {
+		t.Fatalf("unexpected aborted conversation: %#v", abortedConversation)
+	}
+	if abortedMessage.Status != "aborted" || abortedMessage.Content != "manual abort" {
+		t.Fatalf("unexpected aborted message: %#v", abortedMessage)
+	}
+
+	if _, _, err := st.AbortPendingTurn(ctx, store.AbortPendingInput{
+		ConversationID: secondConversation.ID,
+		Reason:         "again",
+	}); !errors.Is(err, store.ErrTurnConflict) {
+		t.Fatalf("expected ErrTurnConflict aborting closed turn, got %v", err)
+	}
+
+	expiringConversation, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+		ConversationID: "conv_expire",
+		RequestID:      "req_expire",
+		ResponseID:     "resp_expire",
+		OwnerID:        "user_c",
+		RequestFormat:  "messages",
+		Model:          "model-expire",
+		UserContent:    "Third question for expire",
+		RequestBody: map[string]any{
+			"model":    "model-expire",
+			"messages": []any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create expiring pending turn: %v", err)
+	}
+	if _, err := st.UpdateDraft(ctx, store.UpdateDraftInput{
+		ConversationID: expiringConversation.ID,
+		DraftText:      "stale draft",
+	}); err != nil {
+		t.Fatalf("update expiring draft: %v", err)
+	}
+
+	expired, err := st.ExpirePendingTurns(ctx, time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("expire pending turns: %v", err)
+	}
+	if expired.ExpiredConversations != 1 {
+		t.Fatalf("unexpected expired conversation count: %#v", expired)
+	}
+	expiredConversation, err := st.GetConversation(ctx, expiringConversation.ID)
+	if err != nil {
+		t.Fatalf("get expired conversation: %v", err)
+	}
+	if expiredConversation.Metadata["realtime_status"] != "expired" {
+		t.Fatalf("unexpected expired conversation metadata: %#v", expiredConversation)
+	}
+
+	messages, err := st.ListMessages(ctx, firstConversation.ID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 2 || messages[0].Role != "user" || messages[1].Role != "assistant" {
+		t.Fatalf("unexpected first conversation messages: %#v", messages)
+	}
+
+	deleted, err := st.DeleteConversations(ctx, []string{firstConversation.ID, firstConversation.ID, "", "missing"})
+	if err != nil {
+		t.Fatalf("delete conversations: %v", err)
+	}
+	if deleted.DeletedConversations != 1 || deleted.DeletedMessages != 2 {
+		t.Fatalf("unexpected delete conversations result: %#v", deleted)
+	}
+	if _, err := st.GetConversation(ctx, firstConversation.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected deleted conversation missing, got %v", err)
 	}
 }

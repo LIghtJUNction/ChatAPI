@@ -86,6 +86,30 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 			updated_at TIMESTAMPTZ NOT NULL
 		);
 
+		CREATE TABLE IF NOT EXISTS conversations (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			last_message_at TIMESTAMPTZ NOT NULL,
+			message_count INTEGER NOT NULL DEFAULT 0,
+			last_message_preview TEXT NOT NULL DEFAULT '',
+			last_user_text TEXT NOT NULL DEFAULT '',
+			metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+		);
+
+		CREATE TABLE IF NOT EXISTS messages (
+			id TEXT PRIMARY KEY,
+			conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+			role TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			status TEXT NULL,
+			response_id TEXT NULL,
+			metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+		);
+		CREATE INDEX IF NOT EXISTS idx_messages_conversation_created_at ON messages(conversation_id, created_at, id);
+
 		CREATE TABLE IF NOT EXISTS user_configs (
 			user_id TEXT NOT NULL,
 			key TEXT NOT NULL,

@@ -698,6 +698,54 @@ func TestUserConfigManagementUsesSessionActor(t *testing.T) {
 	assertAuditCountForActor(t, env, "user_config_owner", "user.config", "user_config", "user_config_owner", "update", "success", 1)
 }
 
+func TestConfigModelsRoutesAndModelsEndpoint(t *testing.T) {
+	env := newTestEnv(t)
+
+	initial := env.getJSON(t, "/api/config/models", http.StatusOK)
+	initialItems := initial["items"].([]any)
+	if len(initialItems) != 1 || nestedString(initialItems[0].(map[string]any), "id") != "chatapi-lab" {
+		t.Fatalf("unexpected default config models: %#v", initial)
+	}
+
+	updateResp := env.postJSON(t, "/api/config/models", map[string]any{
+		"id":       "chatapi-demo",
+		"name":     "ChatAPI Demo",
+		"owned_by": "chatapi",
+		"enabled":  true,
+	}, http.StatusOK)
+	items := updateResp["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("expected default + custom virtual model: %#v", updateResp)
+	}
+
+	modelsResp := env.getJSON(t, "/models", http.StatusOK)
+	modelData := modelsResp["data"].([]any)
+	foundDefault := false
+	foundCustom := false
+	for _, rawItem := range modelData {
+		item := rawItem.(map[string]any)
+		switch nestedString(item, "id") {
+		case "chatapi-lab":
+			foundDefault = true
+		case "chatapi-demo":
+			foundCustom = true
+		}
+	}
+	if !foundDefault || !foundCustom {
+		t.Fatalf("expected default and custom models in /models response: %#v", modelsResp)
+	}
+
+	env.deleteJSON(t, "/api/config/models/chatapi-demo", http.StatusOK)
+	afterDelete := env.getJSON(t, "/api/config/models", http.StatusOK)
+	afterDeleteItems := afterDelete["items"].([]any)
+	if len(afterDeleteItems) != 1 || nestedString(afterDeleteItems[0].(map[string]any), "id") != "chatapi-lab" {
+		t.Fatalf("unexpected config models after delete: %#v", afterDelete)
+	}
+
+	assertAuditCount(t, env, "user.config", "virtual_model", "chatapi-demo", "upsert", "success", 1)
+	assertAuditCount(t, env, "user.config", "virtual_model", "chatapi-demo", "delete", "success", 1)
+}
+
 func TestUserIdentitiesListAndUnlink(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("identity-secret")

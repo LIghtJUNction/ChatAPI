@@ -58,6 +58,7 @@ func NewRouter(
 	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService, Audit: auditService}
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
+	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
 	userIdentitiesHandler := handlers.UserIdentitiesHandler{Service: service.NewUserIdentityService(dataStore), Audit: auditService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, dataStore, realtimeHub, pending)
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
@@ -90,6 +91,9 @@ func NewRouter(
 	router.Delete("/api/user/model-api-keys/{keyID}", userModelAPIKeysHandler.Delete)
 	router.Get("/api/user/config", userConfigHandler.Get)
 	router.Post("/api/user/config", userConfigHandler.Set)
+	router.Get("/api/config/models", configModelsHandler.Get)
+	router.Post("/api/config/models", configModelsHandler.Post)
+	router.Delete("/api/config/models/{modelID}", configModelsHandler.Delete)
 	router.Get("/api/user/identities", userIdentitiesHandler.List)
 	router.Delete("/api/user/identities/{identityID}", userIdentitiesHandler.Delete)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
@@ -206,13 +210,18 @@ func NewRouter(
 	modelRouter.Post("/messages", chatHandler.AnthropicMessages)
 	modelRouter.Post("/v1/messages", chatHandler.AnthropicMessages)
 
+	virtualModelService := service.NewVirtualModelService(dataStore)
 	modelRouter.Get("/models", func(w http.ResponseWriter, r *http.Request) {
+		userID := service.OwnerIDFromContext(r.Context())
+		items, err := virtualModelService.OpenAIList(r.Context(), userID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"object": "list",
-			"data": []map[string]any{
-				{"id": "chatapi-lab", "object": "model", "created": 0, "owned_by": "chatapi"},
-			},
+			"data":   items,
 		})
 	})
 	modelRouter.Get("/v1/models", func(w http.ResponseWriter, r *http.Request) {

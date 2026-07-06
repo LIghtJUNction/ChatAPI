@@ -322,7 +322,7 @@ func TestMigrateCommandUpBootstrapsSQLite(t *testing.T) {
 	if !report.OK || report.Command != "up" || report.Driver != "sqlite" {
 		t.Fatalf("unexpected migrate report: %#v", report)
 	}
-	if report.Status.SchemaVersion != migrations.BootstrapVersion || report.Status.MigrationDirty {
+	if report.Status.SchemaVersion != migrations.LatestVersion || report.Status.MigrationDirty {
 		t.Fatalf("unexpected migration status: %#v", report.Status)
 	}
 
@@ -330,7 +330,7 @@ func TestMigrateCommandUpBootstrapsSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate status: %v", err)
 	}
-	if statusReport.Status.SchemaVersion != migrations.BootstrapVersion {
+	if statusReport.Status.SchemaVersion != migrations.LatestVersion {
 		t.Fatalf("status should see bootstrapped schema: %#v", statusReport)
 	}
 }
@@ -346,7 +346,7 @@ func TestDBCheckCommandReportsSQLiteFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("db check: %v report=%#v", err, report)
 	}
-	if !report.OK || report.Status.SchemaVersion != migrations.BootstrapVersion {
+	if !report.OK || report.Status.SchemaVersion != migrations.LatestVersion {
 		t.Fatalf("unexpected db check report: %#v", report)
 	}
 	if report.SQLite.Database.Path != dbPath || !report.SQLite.Database.Exists || report.SQLite.Database.Bytes <= 0 {
@@ -412,7 +412,7 @@ func TestMigrateCommandDownResetsSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migrate down: %v", err)
 	}
-	if !report.OK || report.Command != "down" || !report.Forced || report.Status.SchemaVersion != migrations.BootstrapVersion {
+	if !report.OK || report.Command != "down" || !report.Forced || report.Status.SchemaVersion != migrations.LatestVersion {
 		t.Fatalf("unexpected migrate down report: %#v", report)
 	}
 	statusReport, err := migrateCommand(context.Background(), migrateOptions{command: "status"}, backendRoot)

@@ -19,7 +19,7 @@ func TestBootstrapSeedsMigrationMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if status.SchemaVersion != BootstrapVersion {
+	if status.SchemaVersion != LatestVersion {
 		t.Fatalf("unexpected schema version: %#v", status)
 	}
 	if status.MigrationDirty {
@@ -28,7 +28,7 @@ func TestBootstrapSeedsMigrationMetadata(t *testing.T) {
 	if status.CreatedBy != "go" || status.LastMigratedAt == "" {
 		t.Fatalf("missing migration meta: %#v", status)
 	}
-	if len(status.Applied) != 1 || status.Applied[0].Version != BootstrapVersion || status.Applied[0].Name != "bootstrap" {
+	if len(status.Applied) != 2 || status.Applied[0].Version != BootstrapVersion || status.Applied[0].Name != "bootstrap" || status.Applied[1].Version != LatestVersion {
 		t.Fatalf("unexpected applied migrations: %#v", status.Applied)
 	}
 	for _, table := range []string{"users", "user_identities", "user_configs", "config"} {
@@ -36,7 +36,7 @@ func TestBootstrapSeedsMigrationMetadata(t *testing.T) {
 			t.Fatalf("expected bootstrap table %s", table)
 		}
 	}
-	for _, index := range []string{"idx_users_username", "idx_users_email", "idx_user_identities_user_provider"} {
+	for _, index := range []string{"idx_users_username", "idx_users_email", "idx_user_identities_user_provider", "idx_user_app_api_keys_user_id", "idx_app_api_key_audit_logs_user_created"} {
 		if !indexExists(t, db, index) {
 			t.Fatalf("expected bootstrap index %s", index)
 		}
@@ -66,11 +66,11 @@ func TestBootstrapUpgradesThinMetadataTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status legacy: %v", err)
 	}
-	if status.SchemaVersion != BootstrapVersion || status.Meta["migration_dirty"] != "0" {
+	if status.SchemaVersion != LatestVersion || status.Meta["migration_dirty"] != "0" {
 		t.Fatalf("unexpected upgraded meta: %#v", status)
 	}
-	if len(status.Applied) != 2 {
-		t.Fatalf("expected legacy and bootstrap migrations: %#v", status.Applied)
+	if len(status.Applied) != 3 {
+		t.Fatalf("expected legacy, bootstrap and latest migrations: %#v", status.Applied)
 	}
 }
 
@@ -118,6 +118,53 @@ func TestBootstrapDoesNotClearDirtyMetadata(t *testing.T) {
 	}
 	if status.SchemaVersion != "0002_next" || !status.MigrationDirty {
 		t.Fatalf("bootstrap should not downgrade version or clear dirty: %#v", status)
+	}
+}
+
+func TestBootstrapAppliesPendingRegisteredMigrations(t *testing.T) {
+	db := openTestDB(t)
+	if _, err := db.ExecContext(context.Background(), bootstrapSchema); err != nil {
+		t.Fatalf("seed bootstrap schema: %v", err)
+	}
+	if err := ensureMetaColumns(context.Background(), db); err != nil {
+		t.Fatalf("ensure meta columns: %v", err)
+	}
+	if err := ensureMigrationColumns(context.Background(), db); err != nil {
+		t.Fatalf("ensure migration columns: %v", err)
+	}
+	if err := insertMetaIfMissing(context.Background(), db, "schema_version", BootstrapVersion); err != nil {
+		t.Fatalf("seed schema version: %v", err)
+	}
+	if err := insertMetaIfMissing(context.Background(), db, "migration_dirty", "0"); err != nil {
+		t.Fatalf("seed dirty meta: %v", err)
+	}
+	if err := insertMetaIfMissing(context.Background(), db, "migration_lock", ""); err != nil {
+		t.Fatalf("seed lock meta: %v", err)
+	}
+	if err := insertMetaIfMissing(context.Background(), db, "created_by", "go"); err != nil {
+		t.Fatalf("seed created_by: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO schema_migrations(version, name, applied_at, checksum, dirty)
+		VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), '', 0)
+	`, BootstrapVersion, "bootstrap"); err != nil {
+		t.Fatalf("seed bootstrap migration: %v", err)
+	}
+
+	if err := Bootstrap(context.Background(), db); err != nil {
+		t.Fatalf("bootstrap pending migrations: %v", err)
+	}
+	status, err := StatusReport(context.Background(), db)
+	if err != nil {
+		t.Fatalf("status pending migrations: %v", err)
+	}
+	if status.SchemaVersion != LatestVersion {
+		t.Fatalf("expected latest schema version after pending migrations: %#v", status)
+	}
+	for _, index := range []string{"idx_user_app_api_keys_user_id", "idx_app_api_key_audit_logs_user_created"} {
+		if !indexExists(t, db, index) {
+			t.Fatalf("expected migrated index %s", index)
+		}
 	}
 }
 

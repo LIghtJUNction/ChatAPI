@@ -7,6 +7,31 @@ import (
 )
 
 const BootstrapVersion = "0001_bootstrap"
+const LatestVersion = "0002_sqlite_app_api_indexes"
+
+type Migration struct {
+	Version string
+	Name    string
+	UpSQL   string
+}
+
+var registeredMigrations = []Migration{
+	{
+		Version: BootstrapVersion,
+		Name:    "bootstrap",
+	},
+	{
+		Version: LatestVersion,
+		Name:    "sqlite_app_api_indexes",
+		UpSQL: `
+CREATE INDEX IF NOT EXISTS idx_user_app_api_keys_user_id
+ON user_app_api_keys(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_app_api_key_audit_logs_user_created
+ON app_api_key_audit_logs(user_id, created_at DESC);
+`,
+	},
+}
 
 var bootstrapTables = []string{
 	"storage_file_deletion_failures",
@@ -294,7 +319,14 @@ func Bootstrap(ctx context.Context, db *sql.DB) error {
 	if err := setLastMigratedAt(ctx, db); err != nil {
 		return err
 	}
-	return nil
+	status, err := StatusReport(ctx, db)
+	if err != nil {
+		return err
+	}
+	if status.MigrationDirty {
+		return nil
+	}
+	return applyPendingMigrations(ctx, db, status)
 }
 
 func Reset(ctx context.Context, db *sql.DB) error {
@@ -397,12 +429,85 @@ func setLastMigratedAt(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO db_meta(key, value, updated_at)
 		VALUES ('last_migrated_at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-		ON CONFLICT(key) DO NOTHING
+		ON CONFLICT(key) DO UPDATE SET
+			value = excluded.value,
+			updated_at = excluded.updated_at
 	`)
 	if err != nil {
 		return fmt.Errorf("seed db_meta last_migrated_at: %w", err)
 	}
 	return nil
+}
+
+func applyPendingMigrations(ctx context.Context, db *sql.DB, status Status) error {
+	applied := make(map[string]AppliedMigration, len(status.Applied))
+	for _, item := range status.Applied {
+		applied[item.Version] = item
+	}
+	for _, migration := range registeredMigrations {
+		if migration.Version == BootstrapVersion {
+			continue
+		}
+		if _, ok := applied[migration.Version]; ok {
+			continue
+		}
+		if err := applyMigration(ctx, db, migration); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyMigration(ctx context.Context, db *sql.DB, migration Migration) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, migration.UpSQL); err != nil {
+		return fmt.Errorf("apply migration %s: %w", migration.Version, err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO schema_migrations(version, name, applied_at, checksum, dirty)
+		VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), '', 0)
+	`, migration.Version, migration.Name); err != nil {
+		return fmt.Errorf("record migration %s: %w", migration.Version, err)
+	}
+	if err := upsertMetaValue(ctx, tx, "schema_version", migration.Version); err != nil {
+		return fmt.Errorf("update schema version %s: %w", migration.Version, err)
+	}
+	if err := upsertMetaValue(ctx, tx, "last_migrated_at", "now"); err != nil {
+		return fmt.Errorf("update last_migrated_at %s: %w", migration.Version, err)
+	}
+	return tx.Commit()
+}
+
+func upsertMetaValue(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, key string, value string) error {
+	var statement string
+	var args []any
+	if key == "last_migrated_at" && value == "now" {
+		statement = `
+			INSERT INTO db_meta(key, value, updated_at)
+			VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+			ON CONFLICT(key) DO UPDATE SET
+				value = excluded.value,
+				updated_at = excluded.updated_at
+		`
+		args = []any{key}
+	} else {
+		statement = `
+			INSERT INTO db_meta(key, value, updated_at)
+			VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+			ON CONFLICT(key) DO UPDATE SET
+				value = excluded.value,
+				updated_at = excluded.updated_at
+		`
+		args = []any{key, value}
+	}
+	_, err := db.ExecContext(ctx, statement, args...)
+	return err
 }
 
 func readMeta(ctx context.Context, db *sql.DB) (map[string]string, error) {

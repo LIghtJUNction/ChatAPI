@@ -2,6 +2,8 @@ package pgtest
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"net/url"
 	"os"
 	"strings"
@@ -64,9 +66,14 @@ func testSchemaName(testName string) string {
 			builder.WriteRune(ch)
 		}
 	}
-	builder.WriteString("_")
-	builder.WriteString(strings.ReplaceAll(uuid.NewString(), "-", ""))
-	return builder.String()
+	normalized := builder.String()
+	if len(normalized) > 28 {
+		normalized = normalized[:28]
+	}
+	sum := sha1.Sum([]byte(name))
+	hashPart := hex.EncodeToString(sum[:])[:12]
+	uuidPart := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	return normalized + "_" + hashPart + "_" + uuidPart
 }
 
 func quoteIdentifier(value string) string {

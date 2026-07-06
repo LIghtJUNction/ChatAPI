@@ -54,7 +54,7 @@
 - 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、session secret、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope、realtime 连接预留配置等风险。
 - 数据库版本诊断已落地最小版本：SQLite 和 PostgreSQL bootstrap 都会维护 `db_meta` 和 `schema_migrations`；当前 `chatapi db check` 已能通过统一 store 打开两种数据库，输出 schema version、dirty 状态、创建来源、最近迁移时间、已应用迁移列表，以及 SQLite 主库/WAL/SHM 文件存在性和字节数。
-- 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、session secret、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出；`chatapi migrate up|status|down --force` 已开始同时支持 SQLite 和 PostgreSQL 的当前 bootstrap schema 状态查询与本地重置；`chatapi oidc test` 可拉取 OIDC discovery document 并校验 issuer 与核心 endpoint。
+- 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、session secret、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出；`chatapi migrate up|status|down --force` 已开始同时支持 SQLite 和 PostgreSQL 的当前 schema 状态查询与本地重置。当前 SQLite 已开始进入正式多版本 migration：bootstrap 后会继续应用注册式增量迁移，首个 `0002_sqlite_app_api_indexes` 已补上应用 API Key 相关索引；PostgreSQL 仍是 bootstrap 级。`chatapi oidc test` 可拉取 OIDC discovery document 并校验 issuer 与核心 endpoint。
 - SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --connect-only` 可执行 SMTP 连接/TLS/Auth 握手但不发信，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列，以及 SQLite 文件大小或 PostgreSQL 连接池指标等基础指标。
@@ -721,7 +721,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 - `db_meta` 包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at`，并为每个键维护 `updated_at`。
 - `schema_migrations` 包含 `version`、`name`、`applied_at`、`checksum`、`dirty`。
-- 当前版本号使用可读字符串 `0001_bootstrap`；后续引入正式 migration 文件时可以继续使用 `0002_xxx` 这种单调递增文本版本，或迁移到 `golang-migrate` 的整数版本，同时保持 `db_meta.schema_version` 可诊断。
+- 当前版本号使用可读字符串 `0001_bootstrap`、`0002_xxx` 这种单调递增文本版本，同时保持 `db_meta.schema_version` 可诊断。当前 Go 重构分支已先落地 SQLite 侧的注册式 migration 序列，并用 `0002_sqlite_app_api_indexes` 验证从 bootstrap 到增量升级的流程。
 - bootstrap 会向前兼容旧的薄 `db_meta` / `schema_migrations` 表，自动补齐缺失列。
 
 启动升级流程：
@@ -1691,7 +1691,7 @@ chatapi smtp test
 chatapi version
 ```
 
-首版至少应包含 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`；migration 能力必须可由启动流程和独立 CLI 调用。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor`、`db check`、`config print --redact`、`oidc test`、`smtp test`、`setup`、`version`，以及 SQLite/PostgreSQL 的 `migrate up|status|down --force` bootstrap 级命令；后续引入正式多版本 migration 文件后再支持按版本回滚。
+首版至少应包含 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`；migration 能力必须可由启动流程和独立 CLI 调用。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor`、`db check`、`config print --redact`、`oidc test`、`smtp test`、`setup`、`version`，以及 SQLite/PostgreSQL 的 `migrate up|status|down --force` 命令；其中 SQLite 已开始支持 bootstrap 后继续应用注册式增量 migration，PostgreSQL 仍是 bootstrap 级，后续再支持按版本回滚。
 
 首次启动向导：
 
@@ -1708,7 +1708,7 @@ chatapi version
 - `chatapi config print --redact`：打印最终配置，敏感字段脱敏。当前 Go 重构分支已支持可选模式参数 `serve|lab`，默认按 `serve` 解析；敏感字段仅显示 `<redacted>` 或空字符串。
 - `chatapi db check`：检查数据库连接、schema version、migration 历史、SQLite WAL 状态或 PostgreSQL 连接池配置。
 - 当前 Go 重构分支的 `chatapi db check` 已支持 SQLite 和 PostgreSQL，输出 JSON，包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at`、`applied` migration 列表；SQLite 额外返回 `sqlite.database`、`sqlite.wal`、`sqlite.shm` 的 path / exists / bytes。命令会按 driver 走统一 runtime store 打开并在需要时执行幂等 bootstrap；如果 dirty 为 true、数据库不可打开或 PostgreSQL DSN 缺失，命令以非零状态退出。
-- `chatapi migrate up`：当前对 SQLite 和 PostgreSQL 执行幂等 bootstrap migration，创建/补齐当前 Go schema 和 `db_meta` / `schema_migrations` 元数据，并输出 JSON status。
+- `chatapi migrate up`：当前对 SQLite 和 PostgreSQL 执行幂等 schema 初始化并输出 JSON status；SQLite 在 bootstrap 后会继续按顺序执行已注册的增量 migration，PostgreSQL 当前仍停留在 bootstrap 级。
 - `chatapi migrate status`：当前读取 SQLite 或 PostgreSQL 的 migration status，不执行 bootstrap；如果 schema 尚未初始化或 dirty 为 true，以非零状态退出。
 - `chatapi migrate down --force`：当前 SQLite 和 PostgreSQL 版本都会删除 bootstrap 管理的所有表，属于测试/本地重置用危险操作；不带 `--force` 会拒绝执行。后续引入正式 migration 文件后再支持按版本回滚。
 - `chatapi oidc test`：当前已拉取 discovery document，校验 issuer、authorization/token/JWKS endpoint、client id、client secret 和 redirect URL 配置；输出 JSON，只返回 client secret 是否配置，不打印 secret。

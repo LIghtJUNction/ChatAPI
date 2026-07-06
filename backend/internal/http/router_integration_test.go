@@ -943,6 +943,60 @@ func TestAutomationRuleAutoCompletesResponsesRequest(t *testing.T) {
 	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_complete", "auto_complete", "success", 1)
 }
 
+func TestAutomationRuleAutoCompletesStructuredResponsesRequest(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_auto_structured",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{
+						{"field": "protocol", "match_type": "exact", "pattern": "responses"},
+						{"field": "model", "match_type": "exact", "pattern": "demo-auto-structured"},
+						{"field": "tool_choice.name", "match_type": "exact", "pattern": "lookup_weather"},
+						{"field": "response_format.name", "match_type": "exact", "pattern": "tool_draft"},
+						{"field": "input_part.type", "match_type": "exact", "pattern": "image"},
+					},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "结构化自动命中回复",
+				},
+			},
+		},
+	}, http.StatusOK)
+
+	resp := postExternalJSON(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "demo-auto-structured",
+		"input": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "请帮我准备 tool call"},
+					{"type": "input_image", "image_url": "https://example.com/demo.png", "media_type": "image/png"},
+				},
+			},
+		},
+		"tool_choice": map[string]any{
+			"type": "function",
+			"name": "lookup_weather",
+		},
+		"response_format": map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "tool_draft",
+				"schema": map[string]any{"type": "object"},
+			},
+		},
+	})
+	if nestedString(resp, "output_text") != "结构化自动命中回复" {
+		t.Fatalf("unexpected structured automation response payload: %#v", resp)
+	}
+	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_structured", "auto_complete", "success", 1)
+}
+
 func TestUserPasswordRoute(t *testing.T) {
 	env := newTestEnv(t)
 

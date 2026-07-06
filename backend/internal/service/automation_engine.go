@@ -85,22 +85,84 @@ func requestMatchesPattern(request protocol.TurnRequest, matcher map[string]any)
 	if matchType == "" {
 		matchType = "substring"
 	}
-
-	texts := make([]string, 0, 1+len(request.InputParts))
-	if strings.TrimSpace(request.UserContent) != "" {
-		texts = append(texts, request.UserContent)
-	}
-	for _, part := range request.InputParts {
-		if strings.TrimSpace(part.Text) != "" {
-			texts = append(texts, part.Text)
-		}
-	}
-	for _, text := range texts {
-		if matchText(matchType, text, pattern) {
+	for _, value := range requestMatchCandidates(request, stringFromMap(matcher, "field")) {
+		if matchText(matchType, value, pattern) {
 			return true
 		}
 	}
 	return false
+}
+
+func requestMatchCandidates(request protocol.TurnRequest, field string) []string {
+	switch normalizeAutomationField(field) {
+	case "", "text":
+		return appendRequestTextCandidates(request)
+	case "user_content", "input_text":
+		if strings.TrimSpace(request.UserContent) == "" {
+			return nil
+		}
+		return []string{request.UserContent}
+	case "input_part_text":
+		return appendInputPartTexts(request.InputParts)
+	case "input_part_type":
+		return appendInputPartField(request.InputParts, func(part protocol.InputPart) string { return part.Type })
+	case "input_part_media_type":
+		return appendInputPartField(request.InputParts, func(part protocol.InputPart) string { return part.MediaType })
+	case "input_part_url":
+		return appendInputPartField(request.InputParts, func(part protocol.InputPart) string { return part.URL })
+	case "tool_choice_type":
+		return singleCandidate(request.ToolChoice.Type)
+	case "tool_choice_name":
+		return singleCandidate(request.ToolChoice.Name)
+	case "response_format_type":
+		return singleCandidate(request.ResponseFormat.Type)
+	case "response_format_name":
+		return singleCandidate(request.ResponseFormat.Name)
+	case "model":
+		return singleCandidate(request.Model)
+	case "protocol":
+		return singleCandidate(request.Protocol.String())
+	default:
+		return nil
+	}
+}
+
+func normalizeAutomationField(field string) string {
+	field = strings.TrimSpace(strings.ToLower(field))
+	field = strings.ReplaceAll(field, ".", "_")
+	return field
+}
+
+func appendRequestTextCandidates(request protocol.TurnRequest) []string {
+	texts := make([]string, 0, 1+len(request.InputParts))
+	if strings.TrimSpace(request.UserContent) != "" {
+		texts = append(texts, request.UserContent)
+	}
+	texts = append(texts, appendInputPartTexts(request.InputParts)...)
+	return texts
+}
+
+func appendInputPartTexts(parts []protocol.InputPart) []string {
+	return appendInputPartField(parts, func(part protocol.InputPart) string { return part.Text })
+}
+
+func appendInputPartField(parts []protocol.InputPart, getter func(protocol.InputPart) string) []string {
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(getter(part))
+		if value != "" {
+			items = append(items, value)
+		}
+	}
+	return items
+}
+
+func singleCandidate(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return []string{value}
 }
 
 func matchText(matchType string, text string, pattern string) bool {

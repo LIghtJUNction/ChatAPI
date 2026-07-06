@@ -92,6 +92,66 @@ func TestAutomationRuleServiceMatchTurnTruncatesLongOutput(t *testing.T) {
 	}
 }
 
+func TestAutomationRuleServiceMatchTurnMatchesStructuredFields(t *testing.T) {
+	st := newAutomationTestStore(t)
+	svc := NewAutomationRuleService(st)
+	if _, err := st.ReplaceAutomationRulesForUser(context.Background(), "user_auto", nil, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_structured",
+			UserID:  "user_auto",
+			Enabled: true,
+			Payload: map[string]any{
+				"id":      "rule_structured",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{
+						{"field": "protocol", "match_type": "exact", "pattern": "responses"},
+						{"field": "model", "match_type": "exact", "pattern": "demo-structured"},
+						{"field": "tool_choice.name", "match_type": "exact", "pattern": "lookup_weather"},
+						{"field": "response_format.name", "match_type": "exact", "pattern": "tool_draft"},
+						{"field": "input_part.type", "match_type": "exact", "pattern": "image"},
+						{"field": "input_part.media_type", "match_type": "substring", "pattern": "png"},
+					},
+				},
+				"action": map[string]any{"type": "output_text", "text": "结构化命中"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed automation rule: %v", err)
+	}
+
+	match, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		Protocol: protocol.ProtocolResponses,
+		Model:    "demo-structured",
+		InputParts: []protocol.InputPart{
+			{Type: "text", Text: "show me the chart"},
+			{Type: "image", MediaType: "image/png", URL: "https://example.com/demo.png"},
+		},
+		ToolChoice:     protocol.ToolChoice{Type: "function", Name: "lookup_weather"},
+		ResponseFormat: protocol.ResponseFormat{Type: "json_schema", Name: "tool_draft"},
+	}, "conv_structured", "resp_structured")
+	if err != nil {
+		t.Fatalf("match structured turn: %v", err)
+	}
+	if match == nil || match.RuleID != "rule_structured" || match.Input.OutputText != "结构化命中" {
+		t.Fatalf("unexpected structured automation match: %#v", match)
+	}
+
+	miss, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		Protocol:       protocol.ProtocolResponses,
+		Model:          "demo-structured",
+		InputParts:     []protocol.InputPart{{Type: "image", MediaType: "image/jpeg", URL: "https://example.com/demo.jpg"}},
+		ToolChoice:     protocol.ToolChoice{Type: "function", Name: "lookup_weather"},
+		ResponseFormat: protocol.ResponseFormat{Type: "json_schema", Name: "tool_draft"},
+	}, "conv_structured_miss", "resp_structured_miss")
+	if err != nil {
+		t.Fatalf("match structured miss turn: %v", err)
+	}
+	if miss != nil {
+		t.Fatalf("expected structured matcher miss: %#v", miss)
+	}
+}
+
 func newAutomationTestStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))

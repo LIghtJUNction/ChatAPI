@@ -31,64 +31,12 @@ func (s *Store) GetRequest(context.Context, string) (store.Request, error) {
 	return store.Request{}, errNotImplemented
 }
 
-func (s *Store) CreateAppAPIKey(context.Context, store.CreateAppAPIKeyInput) (store.AppAPIKey, error) {
-	return store.AppAPIKey{}, errNotImplemented
-}
-
-func (s *Store) ListAppAPIKeysByUser(context.Context, string) ([]store.AppAPIKey, error) {
-	return nil, errNotImplemented
-}
-
-func (s *Store) GetAppAPIKeyByPrefix(context.Context, string) (store.AppAPIKey, error) {
-	return store.AppAPIKey{}, errNotImplemented
-}
-
-func (s *Store) UpdateAppAPIKeyLastUsedAt(context.Context, string, time.Time) error {
-	return errNotImplemented
-}
-
-func (s *Store) RevokeAppAPIKey(context.Context, string, string) error {
-	return errNotImplemented
-}
-
-func (s *Store) CreateAppAPIKeyAuditLog(context.Context, store.AppAPIKeyAuditLog) error {
-	return errNotImplemented
-}
-
-func (s *Store) ListAppAPIKeyAuditLogs(context.Context, store.ListAppAPIKeyAuditLogsInput) ([]store.AppAPIKeyAuditLog, error) {
-	return nil, errNotImplemented
-}
-
 func (s *Store) CreateAuditLog(context.Context, store.CreateAuditLogInput) (store.AuditLog, error) {
 	return store.AuditLog{}, errNotImplemented
 }
 
 func (s *Store) ListAuditLogs(context.Context, store.ListAuditLogsInput) ([]store.AuditLog, error) {
 	return nil, errNotImplemented
-}
-
-func (s *Store) CreateModelAPIKey(context.Context, store.CreateModelAPIKeyInput) (store.ModelAPIKey, error) {
-	return store.ModelAPIKey{}, errNotImplemented
-}
-
-func (s *Store) ListModelAPIKeysByUser(context.Context, string) ([]store.ModelAPIKey, error) {
-	return nil, errNotImplemented
-}
-
-func (s *Store) GetModelAPIKeyByPrefix(context.Context, string) (store.ModelAPIKey, error) {
-	return store.ModelAPIKey{}, errNotImplemented
-}
-
-func (s *Store) GetModelAPIKeyByID(context.Context, string) (store.ModelAPIKey, error) {
-	return store.ModelAPIKey{}, errNotImplemented
-}
-
-func (s *Store) UpdateModelAPIKeyLastUsedAt(context.Context, string, time.Time) error {
-	return errNotImplemented
-}
-
-func (s *Store) RevokeModelAPIKey(context.Context, string, string) error {
-	return errNotImplemented
 }
 
 func (s *Store) ListAutomationRulesByUser(context.Context, string) ([]store.AutomationRule, error) {

@@ -11,6 +11,11 @@ import (
 
 type NewStoreFunc func(t *testing.T) store.Store
 
+const (
+	httpStatusOK        = 200
+	httpStatusForbidden = 403
+)
+
 func RunUserRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Helper()
 	t.Run("users", func(t *testing.T) {
@@ -28,6 +33,19 @@ func RunConfigRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	})
 	t.Run("user_config", func(t *testing.T) {
 		testConfigRepositoryUpsertsListsAndDeletesUserConfig(t, newStore)
+	})
+}
+
+func RunAPIKeyRepositoryTests(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	t.Run("app_api_keys", func(t *testing.T) {
+		testAppAPIKeyRepositoryCreatesListsUsesAndRevokes(t, newStore)
+	})
+	t.Run("app_api_key_audit_logs", func(t *testing.T) {
+		testAppAPIKeyRepositoryAuditsRequests(t, newStore)
+	})
+	t.Run("model_api_keys", func(t *testing.T) {
+		testModelAPIKeyRepositoryCreatesListsUsesAndRevokes(t, newStore)
 	})
 }
 
@@ -115,6 +133,174 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 	}
 	if _, err := st.GetUserByUsername(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing username, got %v", err)
+	}
+}
+
+func testAppAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+	expiresAt := time.Date(2026, 7, 7, 1, 2, 3, 0, time.UTC)
+	created, err := st.CreateAppAPIKey(ctx, store.CreateAppAPIKeyInput{
+		ID:        "appkey_1",
+		UserID:    "user_keys",
+		Name:      "automation",
+		KeyHash:   "hash",
+		KeyPrefix: "ak-demo",
+		Scopes:    []string{"requests:read", "requests:respond"},
+		ResourceLimits: map[string]any{
+			"max_requests_per_minute": float64(10),
+			"allowed_source_ips":      []any{"127.0.0.1"},
+		},
+		ExpiresAt: &expiresAt,
+	})
+	if err != nil {
+		t.Fatalf("create app api key: %v", err)
+	}
+	if created.ID != "appkey_1" || created.UserID != "user_keys" || len(created.Scopes) != 2 || created.ExpiresAt == nil {
+		t.Fatalf("unexpected created app key: %#v", created)
+	}
+
+	byPrefix, err := st.GetAppAPIKeyByPrefix(ctx, "ak-demo")
+	if err != nil {
+		t.Fatalf("get app key by prefix: %v", err)
+	}
+	if byPrefix.ID != created.ID || byPrefix.ResourceLimits["max_requests_per_minute"].(float64) != 10 {
+		t.Fatalf("unexpected app key by prefix: %#v", byPrefix)
+	}
+
+	usedAt := time.Date(2026, 7, 8, 4, 5, 6, 0, time.UTC)
+	if err := st.UpdateAppAPIKeyLastUsedAt(ctx, created.ID, usedAt); err != nil {
+		t.Fatalf("update app key last used: %v", err)
+	}
+	items, err := st.ListAppAPIKeysByUser(ctx, "user_keys")
+	if err != nil {
+		t.Fatalf("list app keys: %v", err)
+	}
+	if len(items) != 1 || items[0].LastUsedAt == nil || !items[0].LastUsedAt.Equal(usedAt) {
+		t.Fatalf("unexpected app key list after last used: %#v", items)
+	}
+
+	if err := st.RevokeAppAPIKey(ctx, created.ID, "other_user"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound revoking other user key, got %v", err)
+	}
+	if err := st.RevokeAppAPIKey(ctx, created.ID, "user_keys"); err != nil {
+		t.Fatalf("revoke app key: %v", err)
+	}
+	revoked, err := st.GetAppAPIKeyByPrefix(ctx, "ak-demo")
+	if err != nil {
+		t.Fatalf("get revoked app key: %v", err)
+	}
+	if revoked.RevokedAt == nil {
+		t.Fatalf("expected revoked_at after revoke: %#v", revoked)
+	}
+	if err := st.RevokeAppAPIKey(ctx, created.ID, "user_keys"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound revoking already revoked key, got %v", err)
+	}
+}
+
+func testAppAPIKeyRepositoryAuditsRequests(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+	if err := st.CreateAppAPIKeyAuditLog(ctx, store.AppAPIKeyAuditLog{
+		ID:          "applog_1",
+		AppAPIKeyID: "appkey_1",
+		UserID:      "user_audit",
+		Route:       "/api/app/me",
+		StatusCode:  httpStatusOK,
+		ErrorCode:   "",
+		CreatedAt:   time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("create app audit log: %v", err)
+	}
+	if err := st.CreateAppAPIKeyAuditLog(ctx, store.AppAPIKeyAuditLog{
+		ID:          "applog_2",
+		AppAPIKeyID: "appkey_2",
+		UserID:      "other_user",
+		Route:       "/api/app/requests",
+		StatusCode:  httpStatusForbidden,
+		ErrorCode:   "forbidden",
+		CreatedAt:   time.Date(2026, 7, 9, 2, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("create second app audit log: %v", err)
+	}
+	items, err := st.ListAppAPIKeyAuditLogs(ctx, store.ListAppAPIKeyAuditLogsInput{UserID: "user_audit", Limit: 10})
+	if err != nil {
+		t.Fatalf("list filtered app audit logs: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "applog_1" || items[0].StatusCode != httpStatusOK {
+		t.Fatalf("unexpected filtered app audit logs: %#v", items)
+	}
+	all, err := st.ListAppAPIKeyAuditLogs(ctx, store.ListAppAPIKeyAuditLogsInput{Limit: 10})
+	if err != nil {
+		t.Fatalf("list app audit logs: %v", err)
+	}
+	if len(all) != 2 || all[0].ID != "applog_2" || all[1].ID != "applog_1" {
+		t.Fatalf("unexpected app audit log ordering: %#v", all)
+	}
+}
+
+func testModelAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+	created, err := st.CreateModelAPIKey(ctx, store.CreateModelAPIKeyInput{
+		ID:            "modelkey_1",
+		UserID:        "user_model_keys",
+		Name:          "default virtual model",
+		KeyCiphertext: "ciphertext",
+		KeyPrefix:     "sk-demo",
+		Model:         "chatapi-demo",
+	})
+	if err != nil {
+		t.Fatalf("create model api key: %v", err)
+	}
+	if created.ID != "modelkey_1" || created.Model != "chatapi-demo" {
+		t.Fatalf("unexpected created model key: %#v", created)
+	}
+	byPrefix, err := st.GetModelAPIKeyByPrefix(ctx, "sk-demo")
+	if err != nil {
+		t.Fatalf("get model key by prefix: %v", err)
+	}
+	if byPrefix.ID != created.ID || byPrefix.KeyCiphertext != "ciphertext" {
+		t.Fatalf("unexpected model key by prefix: %#v", byPrefix)
+	}
+	byID, err := st.GetModelAPIKeyByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get model key by id: %v", err)
+	}
+	if byID.KeyPrefix != "sk-demo" {
+		t.Fatalf("unexpected model key by id: %#v", byID)
+	}
+
+	usedAt := time.Date(2026, 7, 10, 4, 5, 6, 0, time.UTC)
+	if err := st.UpdateModelAPIKeyLastUsedAt(ctx, created.ID, usedAt); err != nil {
+		t.Fatalf("update model key last used: %v", err)
+	}
+	items, err := st.ListModelAPIKeysByUser(ctx, "user_model_keys")
+	if err != nil {
+		t.Fatalf("list model keys: %v", err)
+	}
+	if len(items) != 1 || items[0].LastUsedAt == nil || !items[0].LastUsedAt.Equal(usedAt) {
+		t.Fatalf("unexpected model key list after last used: %#v", items)
+	}
+
+	if err := st.RevokeModelAPIKey(ctx, created.ID, "other_user"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound revoking other user model key, got %v", err)
+	}
+	if err := st.RevokeModelAPIKey(ctx, created.ID, "user_model_keys"); err != nil {
+		t.Fatalf("revoke model key: %v", err)
+	}
+	revoked, err := st.GetModelAPIKeyByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get revoked model key: %v", err)
+	}
+	if revoked.RevokedAt == nil {
+		t.Fatalf("expected revoked_at after model revoke: %#v", revoked)
+	}
+	if _, err := st.GetModelAPIKeyByPrefix(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing model prefix, got %v", err)
 	}
 }
 

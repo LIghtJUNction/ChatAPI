@@ -93,6 +93,45 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 			updated_at TIMESTAMPTZ NOT NULL,
 			PRIMARY KEY(user_id, key)
 		);
+
+		CREATE TABLE IF NOT EXISTS user_app_api_keys (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			name TEXT NOT NULL DEFAULT '',
+			key_hash TEXT NOT NULL,
+			key_prefix TEXT NOT NULL UNIQUE,
+			scopes_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+			resource_limits_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			expires_at TIMESTAMPTZ NULL,
+			last_used_at TIMESTAMPTZ NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			revoked_at TIMESTAMPTZ NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_user_app_api_keys_user_id ON user_app_api_keys(user_id);
+
+		CREATE TABLE IF NOT EXISTS app_api_key_audit_logs (
+			id TEXT PRIMARY KEY,
+			app_api_key_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			route TEXT NOT NULL DEFAULT '',
+			status_code INTEGER NOT NULL,
+			error_code TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_app_api_key_audit_logs_user_created ON app_api_key_audit_logs(user_id, created_at DESC);
+
+		CREATE TABLE IF NOT EXISTS user_api_keys (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			name TEXT NOT NULL DEFAULT '',
+			key_ciphertext TEXT NOT NULL,
+			key_prefix TEXT NOT NULL UNIQUE,
+			model TEXT NOT NULL DEFAULT '',
+			last_used_at TIMESTAMPTZ NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			revoked_at TIMESTAMPTZ NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_id ON user_api_keys(user_id);
 	`)
 	if err != nil {
 		return fmt.Errorf("bootstrap postgresql schema: %w", err)

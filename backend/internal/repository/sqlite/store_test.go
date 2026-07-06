@@ -13,6 +13,7 @@ import (
 func TestSQLiteRepositoryContracts(t *testing.T) {
 	storetest.RunUserRepositoryTests(t, openTestStore)
 	storetest.RunConfigRepositoryTests(t, openTestStore)
+	storetest.RunAPIKeyRepositoryTests(t, openTestStore)
 }
 
 func openTestStore(t *testing.T) store.Store {

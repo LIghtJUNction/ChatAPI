@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,9 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if len(args) > 0 && args[0] == "smtp" {
 		return runSMTP(ctx, args[1:], backendRoot)
+	}
+	if len(args) > 0 && args[0] == "oidc" {
+		return runOIDC(ctx, args[1:], backendRoot)
 	}
 	if len(args) > 0 && args[0] == "setup" {
 		return runSetup(args[1:], backendRoot)
@@ -395,6 +399,22 @@ type smtpTestReport struct {
 	Warning     string                `json:"warning,omitempty"`
 }
 
+type oidcTestReport struct {
+	OK                     bool     `json:"ok"`
+	IssuerURL              string   `json:"issuer_url"`
+	DiscoveryURL           string   `json:"discovery_url"`
+	ProviderIssuer         string   `json:"provider_issuer,omitempty"`
+	ClientIDConfigured     bool     `json:"client_id_configured"`
+	ClientSecretConfigured bool     `json:"client_secret_configured"`
+	RedirectURLConfigured  bool     `json:"redirect_url_configured"`
+	Scopes                 []string `json:"scopes,omitempty"`
+	AuthorizationEndpoint  string   `json:"authorization_endpoint,omitempty"`
+	TokenEndpoint          string   `json:"token_endpoint,omitempty"`
+	JWKSURI                string   `json:"jwks_uri,omitempty"`
+	UserInfoEndpoint       string   `json:"userinfo_endpoint,omitempty"`
+	Errors                 []string `json:"errors,omitempty"`
+}
+
 type setupReport struct {
 	OK            bool     `json:"ok"`
 	EnvPath       string   `json:"env_path"`
@@ -410,6 +430,127 @@ type setupReport struct {
 type setupOptions struct {
 	writeEnv bool
 	force    bool
+}
+
+func runOIDC(ctx context.Context, args []string, backendRoot string) error {
+	if len(args) == 0 || args[0] != "test" {
+		return fmt.Errorf("unknown oidc command, supported: test")
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("unknown oidc test option %q", args[1])
+	}
+	cfg, err := config.FromEnvUnchecked(config.ModeServe, backendRoot)
+	if err != nil {
+		return err
+	}
+	report, err := oidcTestCommand(ctx, cfg, &http.Client{Timeout: 10 * time.Second})
+	if writeErr := writeJSONReport(os.Stdout, report); writeErr != nil {
+		return writeErr
+	}
+	return err
+}
+
+func oidcTestCommand(ctx context.Context, cfg config.Config, client *http.Client) (oidcTestReport, error) {
+	report := oidcTestReport{
+		OK:                     true,
+		IssuerURL:              strings.TrimRight(strings.TrimSpace(cfg.OIDCIssuerURL), "/"),
+		ClientIDConfigured:     strings.TrimSpace(cfg.OIDCClientID) != "",
+		ClientSecretConfigured: strings.TrimSpace(cfg.OIDCClientSecret) != "",
+		RedirectURLConfigured:  strings.TrimSpace(cfg.OIDCRedirectURL) != "",
+		Scopes:                 append([]string(nil), cfg.OIDCScopes...),
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	if report.IssuerURL == "" {
+		report.addError("CHATAPI_OIDC_ISSUER_URL is required")
+		return report, errors.New(strings.Join(report.Errors, "; "))
+	}
+	discoveryURL, err := oidcDiscoveryURL(report.IssuerURL)
+	if err != nil {
+		report.addError(err.Error())
+		return report, err
+	}
+	report.DiscoveryURL = discoveryURL
+	if !report.ClientIDConfigured {
+		report.addError("CHATAPI_OIDC_CLIENT_ID is required")
+	}
+	if !report.ClientSecretConfigured {
+		report.addError("CHATAPI_OIDC_CLIENT_SECRET is required for private RP")
+	}
+	if !report.RedirectURLConfigured {
+		report.addError("CHATAPI_OIDC_REDIRECT_URL is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryURL, nil)
+	if err != nil {
+		report.addError(err.Error())
+		return report, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		report.addError(err.Error())
+		return report, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		err := fmt.Errorf("discovery endpoint returned HTTP %d", resp.StatusCode)
+		report.addError(err.Error())
+		return report, err
+	}
+	var discovery struct {
+		Issuer                string `json:"issuer"`
+		AuthorizationEndpoint string `json:"authorization_endpoint"`
+		TokenEndpoint         string `json:"token_endpoint"`
+		JWKSURI               string `json:"jwks_uri"`
+		UserInfoEndpoint      string `json:"userinfo_endpoint"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil {
+		report.addError(err.Error())
+		return report, err
+	}
+	report.ProviderIssuer = strings.TrimRight(strings.TrimSpace(discovery.Issuer), "/")
+	report.AuthorizationEndpoint = strings.TrimSpace(discovery.AuthorizationEndpoint)
+	report.TokenEndpoint = strings.TrimSpace(discovery.TokenEndpoint)
+	report.JWKSURI = strings.TrimSpace(discovery.JWKSURI)
+	report.UserInfoEndpoint = strings.TrimSpace(discovery.UserInfoEndpoint)
+	if report.ProviderIssuer != report.IssuerURL {
+		report.addError("discovery issuer does not match CHATAPI_OIDC_ISSUER_URL")
+	}
+	if report.AuthorizationEndpoint == "" {
+		report.addError("discovery authorization_endpoint is missing")
+	}
+	if report.TokenEndpoint == "" {
+		report.addError("discovery token_endpoint is missing")
+	}
+	if report.JWKSURI == "" {
+		report.addError("discovery jwks_uri is missing")
+	}
+	if len(report.Errors) > 0 {
+		return report, errors.New(strings.Join(report.Errors, "; "))
+	}
+	return report, nil
+}
+
+func (r *oidcTestReport) addError(message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	r.OK = false
+	r.Errors = append(r.Errors, strings.TrimSpace(message))
+}
+
+func oidcDiscoveryURL(issuer string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(issuer))
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("CHATAPI_OIDC_ISSUER_URL must be an absolute URL")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/.well-known/openid-configuration"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
 }
 
 func runSetup(args []string, backendRoot string) error {
@@ -793,7 +934,7 @@ func parseMode(args []string) (config.Mode, error) {
 	case "lab":
 		return config.ModeLab, nil
 	default:
-		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check, migrate, config print --redact, smtp, setup, version", args[0])
+		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check, migrate, config print --redact, oidc test, smtp, setup, version", args[0])
 	}
 }
 

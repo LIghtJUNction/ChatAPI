@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 )
 
@@ -51,6 +54,78 @@ func TestParseSMTPTestOptionsRejectsDryRunWithConnectOnly(t *testing.T) {
 	_, err := parseSMTPTestOptions([]string{"--dry-run", "--connect-only"})
 	if err == nil {
 		t.Fatal("expected incompatible smtp options error")
+	}
+}
+
+func TestOIDCTestCommandDiscoverySuccess(t *testing.T) {
+	var issuer string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/openid-configuration" {
+			t.Fatalf("unexpected discovery path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"issuer": "` + issuer + `",
+			"authorization_endpoint": "` + issuer + `/authorize",
+			"token_endpoint": "` + issuer + `/token",
+			"jwks_uri": "` + issuer + `/jwks",
+			"userinfo_endpoint": "` + issuer + `/userinfo"
+		}`))
+	}))
+	defer server.Close()
+	issuer = server.URL
+
+	report, err := oidcTestCommand(context.Background(), config.Config{
+		OIDCIssuerURL:    issuer,
+		OIDCClientID:     "chatapi",
+		OIDCClientSecret: "secret",
+		OIDCRedirectURL:  "http://localhost/callback",
+		OIDCScopes:       []string{"openid", "email"},
+	}, server.Client())
+	if err != nil {
+		t.Fatalf("oidc test: %v report=%#v", err, report)
+	}
+	if !report.OK || report.ProviderIssuer != issuer || report.AuthorizationEndpoint == "" || report.TokenEndpoint == "" || report.JWKSURI == "" {
+		t.Fatalf("unexpected oidc report: %#v", report)
+	}
+	if report.ClientSecretConfigured != true {
+		t.Fatalf("client secret should only be reported as configured: %#v", report)
+	}
+}
+
+func TestOIDCTestCommandDetectsIssuerMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"issuer": "https://idp.example.com",
+			"authorization_endpoint": "https://idp.example.com/authorize",
+			"token_endpoint": "https://idp.example.com/token",
+			"jwks_uri": "https://idp.example.com/jwks"
+		}`))
+	}))
+	defer server.Close()
+
+	report, err := oidcTestCommand(context.Background(), config.Config{
+		OIDCIssuerURL:    server.URL,
+		OIDCClientID:     "chatapi",
+		OIDCClientSecret: "secret",
+		OIDCRedirectURL:  "http://localhost/callback",
+	}, server.Client())
+	if err == nil {
+		t.Fatal("expected issuer mismatch")
+	}
+	if report.OK || !strings.Contains(strings.Join(report.Errors, "; "), "issuer") {
+		t.Fatalf("unexpected mismatch report: %#v", report)
+	}
+}
+
+func TestOIDCTestCommandRequiresPrivateRPConfig(t *testing.T) {
+	report, err := oidcTestCommand(context.Background(), config.Config{}, http.DefaultClient)
+	if err == nil {
+		t.Fatal("expected missing oidc config error")
+	}
+	if report.OK || !strings.Contains(strings.Join(report.Errors, "; "), "CHATAPI_OIDC_ISSUER_URL") {
+		t.Fatalf("unexpected missing config report: %#v", report)
 	}
 }
 

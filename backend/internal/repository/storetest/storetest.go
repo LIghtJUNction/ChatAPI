@@ -24,6 +24,9 @@ func RunUserRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Run("user_delete_preview_and_purge", func(t *testing.T) {
 		testUserRepositoryPreviewsAndDeletesUserAccount(t, newStore)
 	})
+	t.Run("user_ownership_transfer", func(t *testing.T) {
+		testUserRepositoryTransfersOwnership(t, newStore)
+	})
 	t.Run("user_identities", func(t *testing.T) {
 		testUserIdentityRepositoryUpsertsByProviderSubject(t, newStore)
 	})
@@ -374,6 +377,140 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}
 	if auditCount != 1 {
 		t.Fatalf("expected actor audit logs to be preserved, got %d", auditCount)
+	}
+}
+
+func testUserRepositoryTransfersOwnership(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+
+	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+		ID:           "user_transfer_source",
+		Username:     "source",
+		Email:        "source@example.com",
+		PasswordHash: "hash-source",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("create source user: %v", err)
+	}
+	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+		ID:           "user_transfer_target",
+		Username:     "target",
+		Email:        "target@example.com",
+		PasswordHash: "hash-target",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("create target user: %v", err)
+	}
+	if _, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+		ConversationID: "conv_transfer_source",
+		RequestID:      "req_transfer_source",
+		ResponseID:     "resp_transfer_source",
+		OwnerID:        "user_transfer_source",
+		RequestFormat:  "responses",
+		Model:          "transfer-test",
+		UserContent:    "hello transfer",
+		RequestBody:    map[string]any{"model": "transfer-test"},
+	}); err != nil {
+		t.Fatalf("create source conversation: %v", err)
+	}
+	if _, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+		ID:               "img_transfer_source",
+		OwnerID:          "user_transfer_source",
+		Filename:         "transfer-source.png",
+		OriginalFilename: "transfer-source.png",
+		ContentType:      "image/png",
+		Bytes:            128,
+		URL:              "/api/uploads/imgs/transfer-source.png",
+	}); err != nil {
+		t.Fatalf("create source image: %v", err)
+	}
+	if _, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+		Path:      "/tmp/transfer-source.png",
+		Filename:  "transfer-source.png",
+		OwnerID:   "user_transfer_source",
+		Bytes:     128,
+		LastError: "busy",
+	}); err != nil {
+		t.Fatalf("create source deletion failure: %v", err)
+	}
+	if _, err := st.SetStorageUserQuota(ctx, "user_transfer_source", 2048); err != nil {
+		t.Fatalf("create source quota: %v", err)
+	}
+
+	beforePreview, err := st.PreviewUserDeletion(ctx, "user_transfer_source")
+	if err != nil {
+		t.Fatalf("preview source before transfer: %v", err)
+	}
+	if beforePreview.CanDelete || beforePreview.Counts.OwnedConversations != 1 || beforePreview.Counts.OwnedUploadedImages != 1 {
+		t.Fatalf("expected ownership blockers before transfer: %#v", beforePreview)
+	}
+
+	result, err := st.TransferUserOwnership(ctx, "user_transfer_source", "user_transfer_target")
+	if err != nil {
+		t.Fatalf("transfer ownership: %v", err)
+	}
+	if result.TransferredConversations != 1 || result.TransferredUploadedImages != 1 || result.TransferredDeletionFailures != 1 {
+		t.Fatalf("unexpected ownership transfer counts: %#v", result)
+	}
+	if !result.SourceQuotaDeleted || !result.TargetQuotaCreatedFromSource || result.TargetQuotaPreserved {
+		t.Fatalf("unexpected quota move result: %#v", result)
+	}
+
+	afterPreview, err := st.PreviewUserDeletion(ctx, "user_transfer_source")
+	if err != nil {
+		t.Fatalf("preview source after transfer: %v", err)
+	}
+	if !afterPreview.CanDelete || afterPreview.Counts.OwnedConversations != 0 || afterPreview.Counts.OwnedUploadedImages != 0 {
+		t.Fatalf("expected source purge blockers to be cleared: %#v", afterPreview)
+	}
+
+	conversation, err := st.GetConversation(ctx, "conv_transfer_source")
+	if err != nil {
+		t.Fatalf("get transferred conversation: %v", err)
+	}
+	if conversation.Metadata["owner_id"] != "user_transfer_target" {
+		t.Fatalf("expected conversation owner to move: %#v", conversation)
+	}
+	targetImages, err := st.ListUploadedImagesByOwner(ctx, "user_transfer_target")
+	if err != nil {
+		t.Fatalf("list target uploaded images: %v", err)
+	}
+	if len(targetImages) != 1 || targetImages[0].ID != "img_transfer_source" {
+		t.Fatalf("expected image to move to target owner: %#v", targetImages)
+	}
+	failures, err := st.ListStorageFileDeletionFailures(ctx, 10)
+	if err != nil {
+		t.Fatalf("list deletion failures: %v", err)
+	}
+	if len(failures) != 1 || failures[0].OwnerID != "user_transfer_target" {
+		t.Fatalf("expected deletion failure owner to move: %#v", failures)
+	}
+	if _, err := st.GetStorageUserQuota(ctx, "user_transfer_source"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected source quota to be removed, got %v", err)
+	}
+	targetQuota, err := st.GetStorageUserQuota(ctx, "user_transfer_target")
+	if err != nil || targetQuota.QuotaBytes != 2048 {
+		t.Fatalf("expected target quota to be created from source, quota=%#v err=%v", targetQuota, err)
+	}
+
+	if _, err := st.SetStorageUserQuota(ctx, "user_transfer_source", 1024); err != nil {
+		t.Fatalf("reset source quota: %v", err)
+	}
+	if _, err := st.SetStorageUserQuota(ctx, "user_transfer_target", 4096); err != nil {
+		t.Fatalf("override target quota: %v", err)
+	}
+	result, err = st.TransferUserOwnership(ctx, "user_transfer_source", "user_transfer_target")
+	if err != nil {
+		t.Fatalf("transfer ownership with existing target quota: %v", err)
+	}
+	if !result.SourceQuotaDeleted || result.TargetQuotaCreatedFromSource || !result.TargetQuotaPreserved {
+		t.Fatalf("expected target quota preservation semantics: %#v", result)
+	}
+	targetQuota, err = st.GetStorageUserQuota(ctx, "user_transfer_target")
+	if err != nil || targetQuota.QuotaBytes != 4096 {
+		t.Fatalf("expected target quota preserved, quota=%#v err=%v", targetQuota, err)
 	}
 }
 

@@ -4637,7 +4637,7 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	schemaResp := env.getJSONWithCookie(t, "/api/admin/users/schema", adminCookie, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 9 {
+	if len(operations) != 10 {
 		t.Fatalf("unexpected admin users schema response: %#v", schemaResp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "list_users" || nestedString(operations[1].(map[string]any), "name") != "create_user" {
@@ -4812,6 +4812,101 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "reset_password", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "deactivate", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "admin.user_identity", "user_identity", identity.ID, "unlink", "success", 1)
+
+	transferSourceResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
+		"username": "transfer-source",
+		"email":    "transfer-source@example.com",
+		"password": "transfer-secret",
+		"role":     "user",
+	}, adminCookie, headers, http.StatusCreated)
+	transferSourceUserID := nestedPathString(transferSourceResp, "user", "id")
+	transferTargetResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
+		"username": "transfer-target",
+		"email":    "transfer-target@example.com",
+		"password": "transfer-secret",
+		"role":     "user",
+	}, adminCookie, headers, http.StatusCreated)
+	transferTargetUserID := nestedPathString(transferTargetResp, "user", "id")
+	if transferSourceUserID == "" || transferTargetUserID == "" {
+		t.Fatalf("missing transfer users: source=%#v target=%#v", transferSourceResp, transferTargetResp)
+	}
+	if _, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
+		ConversationID: "conv_transfer_http",
+		RequestID:      "req_transfer_http",
+		ResponseID:     "resp_transfer_http",
+		OwnerID:        transferSourceUserID,
+		RequestFormat:  "responses",
+		Model:          "transfer-model",
+		UserContent:    "transfer request",
+		RequestBody:    map[string]any{"model": "transfer-model"},
+	}); err != nil {
+		t.Fatalf("seed transfer source conversation: %v", err)
+	}
+	if _, err := env.store.CreateUploadedImage(context.Background(), store.CreateUploadedImageInput{
+		ID:               "img_transfer_http",
+		OwnerID:          transferSourceUserID,
+		Filename:         "transfer-http.png",
+		OriginalFilename: "transfer-http.png",
+		ContentType:      "image/png",
+		Bytes:            42,
+		URL:              "/api/uploads/imgs/transfer-http.png",
+	}); err != nil {
+		t.Fatalf("seed transfer source image: %v", err)
+	}
+	if _, err := env.store.UpsertStorageFileDeletionFailure(context.Background(), store.UpsertStorageFileDeletionFailureInput{
+		Path:      "/tmp/transfer-http.png",
+		Filename:  "transfer-http.png",
+		OwnerID:   transferSourceUserID,
+		Bytes:     42,
+		LastError: "busy",
+	}); err != nil {
+		t.Fatalf("seed transfer source deletion failure: %v", err)
+	}
+	if _, err := env.store.SetStorageUserQuota(context.Background(), transferSourceUserID, 1234); err != nil {
+		t.Fatalf("seed transfer source quota: %v", err)
+	}
+
+	transferPreviewResp := env.getJSONWithCookie(t, "/api/admin/users/"+transferSourceUserID+"/delete-preview", adminCookie, http.StatusOK)
+	if nestedPathBool(transferPreviewResp, "preview", "can_delete") {
+		t.Fatalf("expected transfer source to be blocked before ownership transfer: %#v", transferPreviewResp)
+	}
+
+	transferResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+transferSourceUserID+"/transfer-ownership", map[string]any{
+		"target_user_id": transferTargetUserID,
+	}, adminCookie, headers, http.StatusOK)
+	if nestedPathString(transferResp, "result", "target_user_id") != transferTargetUserID {
+		t.Fatalf("unexpected ownership transfer response: %#v", transferResp)
+	}
+	if numericNestedPathValue(transferResp, "result", "transferred_conversations") != 1 ||
+		numericNestedPathValue(transferResp, "result", "transferred_uploaded_images") != 1 ||
+		numericNestedPathValue(transferResp, "result", "transferred_deletion_failures") != 1 ||
+		!nestedPathBool(transferResp, "preview", "can_delete") {
+		t.Fatalf("unexpected ownership transfer result: %#v", transferResp)
+	}
+	transferConversation, err := env.store.GetConversation(context.Background(), "conv_transfer_http")
+	if err != nil {
+		t.Fatalf("load transferred conversation: %v", err)
+	}
+	if nestedString(transferConversation.Metadata, "owner_id") != transferTargetUserID {
+		t.Fatalf("expected transferred conversation owner: %#v", transferConversation)
+	}
+	targetTransferImages, err := env.store.ListUploadedImagesByOwner(context.Background(), transferTargetUserID)
+	if err != nil {
+		t.Fatalf("load target transferred images: %v", err)
+	}
+	if len(targetTransferImages) != 1 || targetTransferImages[0].ID != "img_transfer_http" {
+		t.Fatalf("expected transferred image on target: %#v", targetTransferImages)
+	}
+
+	transferPurgeResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+transferSourceUserID+"/purge", map[string]any{}, adminCookie, headers, http.StatusOK)
+	if transferPurgeResp["ok"] != true || transferPurgeResp["deleted"] != true {
+		t.Fatalf("unexpected transferred source purge response: %#v", transferPurgeResp)
+	}
+	if _, err := env.store.GetUser(context.Background(), transferSourceUserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected transferred source user to be deleted, got %v", err)
+	}
+	assertAuditCountForActor(t, env, "admin", "admin.user", "user", transferSourceUserID, "transfer_ownership", "success", 1)
+	assertAuditCountForActor(t, env, "admin", "admin.user", "user", transferSourceUserID, "purge", "success", 1)
 
 	purgeableResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
 		"username": "purgeable",

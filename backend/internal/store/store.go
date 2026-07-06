@@ -155,6 +155,17 @@ type UserDeletionPreview struct {
 	PreserveRef UserDeletionPreserveRef   `json:"preserve_refs"`
 }
 
+type UserOwnershipTransferResult struct {
+	SourceUserID                 string `json:"source_user_id"`
+	TargetUserID                 string `json:"target_user_id"`
+	TransferredConversations     int    `json:"transferred_conversations"`
+	TransferredUploadedImages    int    `json:"transferred_uploaded_images"`
+	TransferredDeletionFailures  int    `json:"transferred_deletion_failures"`
+	SourceQuotaDeleted           bool   `json:"source_quota_deleted"`
+	TargetQuotaPreserved         bool   `json:"target_quota_preserved"`
+	TargetQuotaCreatedFromSource bool   `json:"target_quota_created_from_source"`
+}
+
 type UserDeletionPreviewCounts struct {
 	Identities                  int `json:"identities"`
 	UserConfigs                 int `json:"user_configs"`
@@ -486,6 +497,7 @@ type Store interface {
 	ListUsers(context.Context) ([]User, error)
 	PreviewUserDeletion(context.Context, string) (UserDeletionPreview, error)
 	DeleteUserAccount(context.Context, string) error
+	TransferUserOwnership(context.Context, string, string) (UserOwnershipTransferResult, error)
 	UpsertUserIdentity(context.Context, UpsertUserIdentityInput) (UserIdentity, error)
 	GetUserIdentity(context.Context, string, string) (UserIdentity, error)
 	ListUserIdentities(context.Context, string) ([]UserIdentity, error)

@@ -75,6 +75,21 @@ func BuildAdminUsersSchema() AdminUsersSchema {
 				},
 			},
 			{
+				Name:          "transfer_user_ownership",
+				Method:        "POST",
+				Path:          "/api/admin/users/{user_id}/transfer-ownership",
+				Description:   "Transfer conversation and upload ownership blockers to another user before purging the source account.",
+				RequiresAdmin: true,
+				Fields: []ConfigFieldSchema{
+					{Key: "target_user_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Existing target user that will receive conversation/upload ownership."},
+				},
+				Notes: []string{
+					"This endpoint moves owned conversations, uploaded_images ownership and storage deletion failure ownership to the target user.",
+					"If the source user has a quota override and the target user does not, the quota override is moved; otherwise the target quota is preserved and the source override is deleted.",
+					"The response includes a fresh delete preview for the source user so the UI can immediately decide whether purge is now allowed.",
+				},
+			},
+			{
 				Name:          "reset_user_password",
 				Method:        "PUT",
 				Path:          "/api/admin/users/{user_id}/password",

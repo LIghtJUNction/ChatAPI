@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -17,6 +18,7 @@ type AdminUsersHandler struct {
 	History    *service.AdminUserHistoryService
 	Identities *service.AdminUserIdentityService
 	Deletion   *service.AdminUserDeletionService
+	Ownership  *service.AdminUserOwnershipService
 	Audit      *service.AuditService
 }
 
@@ -122,6 +124,32 @@ func (h AdminUsersHandler) Purge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"deleted": true,
+		"preview": preview,
+	})
+}
+
+func (h AdminUsersHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TargetUserID string `json:"target_user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid ownership transfer request", http.StatusBadRequest)
+		return
+	}
+	sourceUserID := chi.URLParam(r, "userID")
+	result, preview, err := h.Ownership.Transfer(r.Context(), sourceUserID, input.TargetUserID)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	h.recordWithMetadata(r, sourceUserID, "transfer_ownership", "success", map[string]any{
+		"target_user_id": strings.TrimSpace(input.TargetUserID),
+		"result":         result,
+		"preview":        preview,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"result":  result,
 		"preview": preview,
 	})
 }

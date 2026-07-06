@@ -216,6 +216,104 @@ func (s *Store) DeleteStorageUserQuota(ctx context.Context, ownerID string) erro
 	return err
 }
 
+func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, targetUserID string) (store.UserOwnershipTransferResult, error) {
+	sourceUserID = strings.TrimSpace(sourceUserID)
+	targetUserID = strings.TrimSpace(targetUserID)
+	if sourceUserID == "" || targetUserID == "" || sourceUserID == targetUserID {
+		return store.UserOwnershipTransferResult{}, errConflict
+	}
+	if _, err := s.GetUser(ctx, sourceUserID); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	if _, err := s.GetUser(ctx, targetUserID); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	result := store.UserOwnershipTransferResult{
+		SourceUserID: sourceUserID,
+		TargetUserID: targetUserID,
+	}
+
+	conversationsTag, err := tx.Exec(ctx, `
+		UPDATE conversations
+		SET metadata_json = jsonb_set(COALESCE(metadata_json, '{}'::jsonb), '{owner_id}', to_jsonb($1::text), true)
+		WHERE COALESCE(metadata_json->>'owner_id', '') = $2
+	`, targetUserID, sourceUserID)
+	if err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	result.TransferredConversations = int(conversationsTag.RowsAffected())
+
+	imagesTag, err := tx.Exec(ctx, `
+		UPDATE uploaded_images
+		SET owner_id = $1
+		WHERE owner_id = $2
+	`, targetUserID, sourceUserID)
+	if err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	result.TransferredUploadedImages = int(imagesTag.RowsAffected())
+
+	failuresTag, err := tx.Exec(ctx, `
+		UPDATE storage_file_deletion_failures
+		SET owner_id = $1
+		WHERE owner_id = $2
+	`, targetUserID, sourceUserID)
+	if err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	result.TransferredDeletionFailures = int(failuresTag.RowsAffected())
+
+	var sourceQuota int64
+	sourceQuotaErr := tx.QueryRow(ctx, `
+		SELECT quota_bytes
+		FROM storage_user_quotas
+		WHERE owner_id = $1
+	`, sourceUserID).Scan(&sourceQuota)
+	if sourceQuotaErr != nil && !errors.Is(sourceQuotaErr, pgx.ErrNoRows) {
+		return store.UserOwnershipTransferResult{}, sourceQuotaErr
+	}
+	if sourceQuotaErr == nil {
+		var targetQuota int64
+		targetQuotaErr := tx.QueryRow(ctx, `
+			SELECT quota_bytes
+			FROM storage_user_quotas
+			WHERE owner_id = $1
+		`, targetUserID).Scan(&targetQuota)
+		switch {
+		case errors.Is(targetQuotaErr, pgx.ErrNoRows):
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO storage_user_quotas(owner_id, quota_bytes, created_at, updated_at)
+				SELECT $1, quota_bytes, created_at, $2
+				FROM storage_user_quotas
+				WHERE owner_id = $3
+			`, targetUserID, time.Now().UTC(), sourceUserID); err != nil {
+				return store.UserOwnershipTransferResult{}, err
+			}
+			result.TargetQuotaCreatedFromSource = true
+		case targetQuotaErr == nil:
+			result.TargetQuotaPreserved = true
+		default:
+			return store.UserOwnershipTransferResult{}, targetQuotaErr
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM storage_user_quotas WHERE owner_id = $1`, sourceUserID); err != nil {
+			return store.UserOwnershipTransferResult{}, err
+		}
+		result.SourceQuotaDeleted = true
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) getStorageFileDeletionFailure(ctx context.Context, path string) (store.StorageFileDeletionFailure, error) {
 	return scanStorageFileDeletionFailure(s.pool.QueryRow(ctx, `
 		SELECT path, filename, owner_id, bytes, last_error, attempts, created_at, updated_at

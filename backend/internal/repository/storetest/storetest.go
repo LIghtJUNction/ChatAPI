@@ -939,13 +939,16 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	st := newStore(t)
 
 	firstConversation, firstUserMessage, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
-		ConversationID: "conv_waiting",
-		RequestID:      "req_waiting",
-		ResponseID:     "resp_waiting",
-		OwnerID:        "user_a",
-		RequestFormat:  "responses",
-		Model:          "gpt-test",
-		UserContent:    "First question for waiting turn",
+		ConversationID:   "conv_waiting",
+		RequestID:        "req_waiting",
+		ResponseID:       "resp_waiting",
+		OwnerID:          "user_a",
+		RequestFormat:    "responses",
+		Model:            "gpt-test",
+		SystemContent:    "system rule",
+		DeveloperContent: "developer hint",
+		AssistantContent: "previous assistant answer",
+		UserContent:      "First question for waiting turn",
 		InputParts: []store.RequestInputPart{
 			{Type: "text", Text: "First question for waiting turn"},
 			{Type: "image", URL: "https://example.com/tool.png", MediaType: "image/png"},
@@ -1027,6 +1030,9 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	}
 	if len(firstRequest.InputParts) != 2 || firstRequest.InputParts[1].Type != "image" {
 		t.Fatalf("unexpected input parts: %#v", firstRequest.InputParts)
+	}
+	if firstRequest.SystemText != "system rule" || firstRequest.DeveloperText != "developer hint" || firstRequest.AssistantText != "previous assistant answer" {
+		t.Fatalf("unexpected request context fields: %#v", firstRequest)
 	}
 	if firstRequest.ToolChoice.Type != "function" || firstRequest.ToolChoice.Name != "tool_a" {
 		t.Fatalf("unexpected tool choice: %#v", firstRequest.ToolChoice)

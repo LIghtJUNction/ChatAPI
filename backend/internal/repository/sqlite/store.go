@@ -1474,6 +1474,9 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			"model":           input.Model,
 			"request_format":  input.RequestFormat,
 			"request_keys":    keysOf(input.RequestBody),
+			"system_text":     input.SystemContent,
+			"developer_text":  input.DeveloperContent,
+			"assistant_text":  input.AssistantContent,
 			"input_text":      input.UserContent,
 			"input_parts":     input.InputParts,
 			"request_body":    input.RequestBody,
@@ -1916,6 +1919,9 @@ func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	item.InputParts = parseRequestInputParts(requestDebug["input_parts"])
 	item.ToolChoice = parseRequestToolChoice(requestDebug["tool_choice"])
 	item.ResponseFormat = parseRequestResponseFormat(requestDebug["response_format"])
+	item.SystemText = metadataString(requestDebug, "system_text", "")
+	item.DeveloperText = metadataString(requestDebug, "developer_text", "")
+	item.AssistantText = metadataString(requestDebug, "assistant_text", "")
 	return item, nil
 }
 

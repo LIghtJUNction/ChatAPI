@@ -39,6 +39,9 @@ type Request struct {
 	ResponseID     string                `json:"response_id,omitempty"`
 	RequestFormat  string                `json:"request_format,omitempty"`
 	Model          string                `json:"model,omitempty"`
+	SystemText     string                `json:"system_text,omitempty"`
+	DeveloperText  string                `json:"developer_text,omitempty"`
+	AssistantText  string                `json:"assistant_text,omitempty"`
 	InputText      string                `json:"input_text,omitempty"`
 	InputParts     []RequestInputPart    `json:"input_parts,omitempty"`
 	Status         string                `json:"status,omitempty"`
@@ -362,18 +365,21 @@ type UpsertStorageFileDeletionFailureInput struct {
 }
 
 type CreatePendingInput struct {
-	ConversationID string
-	RequestID      string
-	ResponseID     string
-	OwnerID        string
-	RequestFormat  string
-	Model          string
-	UserContent    string
-	InputParts     []RequestInputPart
-	RequestBody    map[string]any
-	ToolSchemas    []any
-	ToolChoice     RequestToolChoice
-	ResponseFormat RequestResponseFormat
+	ConversationID   string
+	RequestID        string
+	ResponseID       string
+	OwnerID          string
+	RequestFormat    string
+	Model            string
+	SystemContent    string
+	DeveloperContent string
+	AssistantContent string
+	UserContent      string
+	InputParts       []RequestInputPart
+	RequestBody      map[string]any
+	ToolSchemas      []any
+	ToolChoice       RequestToolChoice
+	ResponseFormat   RequestResponseFormat
 }
 
 type CompletePendingInput struct {

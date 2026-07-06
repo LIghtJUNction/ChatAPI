@@ -18,6 +18,13 @@ type ChatAPIHandler struct {
 	Pending *service.PendingRegistry
 }
 
+func (h ChatAPIHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildConversationControlSchema(),
+	})
+}
+
 func (h ChatAPIHandler) Responses(w http.ResponseWriter, r *http.Request) {
 	h.handleProtocolRequest(w, r, "responses")
 }

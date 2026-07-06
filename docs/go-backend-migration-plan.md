@@ -24,6 +24,7 @@
 - 工作台核心交互 `/api/chat/output/delta`、`/api/chat/output/complete`、`/api/conversations/{id}/abort` 已有最小实现。
 - 已新增更适合后续前端重构的 path-based 控制接口：`/api/conversations/{id}/respond`、`/api/conversations/{id}/stream/delta`、`/api/conversations/{id}/stream/complete`；旧 `/api/chat/output/*` 先作为兼容别名保留。
 - `/api/chat/output/complete` 可结束等待中的 pending turn，并把完成结果回传给原始 `/v1/responses` 请求。
+- 会话手工接管 schema 已开始显式暴露：`GET /api/conversations/schema` 和 `GET /api/chat/output/schema` 当前返回同一份契约，统一声明 path-based 会话接管接口与旧 `/api/chat/output/*` 兼容别名的字段、模式枚举和迁移说明，避免前端在重构过程中继续维护两套手写字段表。
 - `/api/ws` 已切到真实 WebSocket 广播骨架，可发送 snapshot / conversation_upsert / connection_count 事件。
 - 已新增 Go `httptest` 集成测试，覆盖 `responses`、`chat/completions`、`messages` 三套协议的 pending/complete/abort 基础链路。
 - `backend/internal/protocol` 已开始承接三套协议的请求提取与完成响应构造，当前已收敛出显式 `Protocol`、`TurnRequest`、`TurnResult`、`ConversationMeta` 和 `PendingStreamEvent`，handler 不再自己分支 Anthropic 流式特殊逻辑；当前 `TurnRequest` 已开始补齐多模态输入部件提取、`tool_choice` 和 `response_format` 解析，完成响应和 Responses/Anthropic SSE 终态事件也已补上统一 `usage` 外壳。这批结构现已继续下推到 store/repository：pending turn 创建时会把 `input_parts`、`tool_choice`、`response_format` 一并写入 `request_debug`，SQLite/PostgreSQL 的 request reader 也会按结构化字段回读。剩余缺口主要在更完整的 reasoning/tool choice 执行语义、chat completion 流式 usage 兼容细节，以及后续让自动化规则/上游辅助直接复用这套结构而不是回退到原始 JSON。
@@ -1588,6 +1589,7 @@ Go 版首个可替换版本必须覆盖：
 - `POST /api/conversations`
 - `GET /api/conversations/{conversation_id}`
 - `GET /api/conversations/{conversation_id}/messages`
+- `GET /api/conversations/schema`
 - `DELETE /api/conversations/{conversation_id}`
 - `POST /api/conversations/prune`
 - `POST /api/conversations/{conversation_id}/abort`
@@ -1595,6 +1597,7 @@ Go 版首个可替换版本必须覆盖：
 - `POST /api/conversations/{conversation_id}/respond`
 - `POST /api/conversations/{conversation_id}/stream/delta`
 - `POST /api/conversations/{conversation_id}/stream/complete`
+- `GET /api/chat/output/schema`
 - `POST /api/chat/output/complete`
 - `POST /api/chat/output/delta`
 - 后续前端改造建议优先改接 path-based 接口，而不是继续围绕 `/api/chat/output/*` 做扩展：

@@ -109,6 +109,31 @@ func TestResponsesAbort(t *testing.T) {
 	}
 }
 
+func TestConversationControlSchemaEndpoints(t *testing.T) {
+	env := newTestEnv(t)
+
+	conversationsResp := env.getJSON(t, "/api/conversations/schema", http.StatusOK)
+	conversationSchema := conversationsResp["schema"].(map[string]any)
+	conversationOperations := conversationSchema["operations"].([]any)
+	if len(conversationOperations) != 7 {
+		t.Fatalf("unexpected conversation schema response: %#v", conversationsResp)
+	}
+	if nestedString(conversationOperations[1].(map[string]any), "name") != "respond_conversation" ||
+		nestedString(conversationOperations[5].(map[string]any), "name") != "legacy_output_delta" {
+		t.Fatalf("unexpected conversation schema operations: %#v", conversationsResp)
+	}
+
+	legacyResp := env.getJSON(t, "/api/chat/output/schema", http.StatusOK)
+	legacySchema := legacyResp["schema"].(map[string]any)
+	legacyOperations := legacySchema["operations"].([]any)
+	if len(legacyOperations) != len(conversationOperations) {
+		t.Fatalf("unexpected legacy output schema response: %#v", legacyResp)
+	}
+	if nestedString(legacyOperations[6].(map[string]any), "name") != "legacy_output_complete" {
+		t.Fatalf("unexpected legacy output schema operations: %#v", legacyResp)
+	}
+}
+
 func TestProtocolRequestValidationReturnsProtocolSpecificErrors(t *testing.T) {
 	env := newTestEnv(t)
 

@@ -4155,6 +4155,68 @@ func TestAuthSchemaReflectsLabMode(t *testing.T) {
 	}
 }
 
+func TestWebSetupStatusAndCreate(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.AdminPassword = ""
+	})
+
+	statusResp := env.getJSON(t, "/api/setup/status", http.StatusOK)
+	statusPayload := statusResp["status"].(map[string]any)
+	if statusResp["ok"] != true || !nestedPathBool(map[string]any{"status": statusPayload}, "status", "available") {
+		t.Fatalf("unexpected setup status response: %#v", statusResp)
+	}
+	if nestedString(statusPayload, "env_path") == "" {
+		t.Fatalf("expected setup env path: %#v", statusResp)
+	}
+
+	htmlStatus, htmlBody := env.getText(t, "/setup")
+	if htmlStatus != http.StatusOK || !strings.Contains(htmlBody, "ChatAPI Setup") {
+		t.Fatalf("unexpected setup html response: status=%d body=%q", htmlStatus, htmlBody)
+	}
+
+	createResp := env.postJSON(t, "/setup", map[string]any{
+		"admin_password": "web-setup-secret",
+	}, http.StatusOK)
+	if createResp["ok"] != true || createResp["written"] != true {
+		t.Fatalf("unexpected setup create response: %#v", createResp)
+	}
+	envPath := nestedString(createResp, "env_path")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read setup env file: %v", err)
+	}
+	if !strings.Contains(string(data), "CHATAPI_ADMIN_PASSWORD=web-setup-secret") {
+		t.Fatalf("unexpected setup env content: %q", string(data))
+	}
+	assertAuditCountForActor(t, env, "", "setup.bootstrap", "setup", envPath, "apply", "success", 1)
+
+	statusResp = env.getJSON(t, "/api/setup/status", http.StatusOK)
+	statusPayload = statusResp["status"].(map[string]any)
+	if statusResp["ok"] != false || nestedPathBool(map[string]any{"status": statusPayload}, "status", "available") || nestedString(statusPayload, "reason") != "admin_already_configured" {
+		t.Fatalf("expected setup to become unavailable: %#v", statusResp)
+	}
+}
+
+func TestWebSetupUnavailableWhenAdminAlreadyConfigured(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.AdminPassword = "admin-secret"
+	})
+
+	statusResp := env.getJSON(t, "/api/setup/status", http.StatusOK)
+	statusPayload := statusResp["status"].(map[string]any)
+	if statusResp["ok"] != false || nestedString(statusPayload, "reason") != "admin_already_configured" {
+		t.Fatalf("unexpected unavailable setup status: %#v", statusResp)
+	}
+
+	status, body := env.postText(t, "/setup", map[string]any{
+		"admin_password": "other-secret",
+	})
+	if status != http.StatusConflict || !strings.Contains(body, "admin_already_configured") {
+		t.Fatalf("expected setup conflict when admin exists: status=%d body=%q", status, body)
+	}
+	assertAuditCountForActor(t, env, "", "setup.bootstrap", "setup", nestedString(statusPayload, "env_path"), "apply", "failure", 1)
+}
+
 func TestOIDCConfigEndpointReflectsServeSettings(t *testing.T) {
 	disabledEnv := newTestEnvWithMode(t, config.ModeServe)
 	disabled := disabledEnv.getJSON(t, "/api/auth/oidc/config", http.StatusOK)
@@ -6768,6 +6830,7 @@ func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Co
 		Mode:           mode,
 		Host:           "127.0.0.1",
 		Port:           0,
+		EnvFilePath:    filepath.Join(tempDir, ".env"),
 		WebDistDir:     tempDir,
 		DataDir:        tempDir,
 		DatabaseDriver: "sqlite",

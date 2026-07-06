@@ -26,6 +26,7 @@ type Config struct {
 	Host                                  string
 	Port                                  int
 	BaseURL                               string
+	EnvFilePath                           string
 	WebDistDir                            string
 	DataDir                               string
 	DatabaseDriver                        string
@@ -112,6 +113,7 @@ func Default(mode Mode, backendRoot string) Config {
 		Host:                                  host,
 		Port:                                  5000,
 		BaseURL:                               "",
+		EnvFilePath:                           filepath.Join(backendRoot, ".env"),
 		WebDistDir:                            filepath.Join(projectRoot, "frontend", "dist"),
 		DataDir:                               dataDir,
 		DatabaseDriver:                        "sqlite",
@@ -181,6 +183,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg := Default(mode, backendRoot)
 	cfg.Host = firstNonEmpty(os.Getenv("CHATAPI_HOST"), cfg.Host)
 	cfg.BaseURL = strings.TrimSpace(os.Getenv("CHATAPI_BASE_URL"))
+	cfg.EnvFilePath = firstNonEmpty(os.Getenv("CHATAPI_ENV_FILE"), cfg.EnvFilePath)
 	cfg.WebDistDir = firstNonEmpty(os.Getenv("CHATAPI_WEB_DIST_DIR"), cfg.WebDistDir)
 	cfg.DataDir = firstNonEmpty(os.Getenv("CHATAPI_DATA_DIR"), cfg.DataDir)
 	cfg.DatabaseDriver = firstNonEmpty(os.Getenv("CHATAPI_DB_DRIVER"), cfg.DatabaseDriver)
@@ -324,6 +327,9 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 
 	if !filepath.IsAbs(cfg.WebDistDir) {
 		cfg.WebDistDir = filepath.Join(backendRoot, cfg.WebDistDir)
+	}
+	if !filepath.IsAbs(cfg.EnvFilePath) {
+		cfg.EnvFilePath = filepath.Join(backendRoot, cfg.EnvFilePath)
 	}
 	if !filepath.IsAbs(cfg.DataDir) {
 		cfg.DataDir = filepath.Join(backendRoot, cfg.DataDir)

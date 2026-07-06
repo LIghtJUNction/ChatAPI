@@ -733,35 +733,12 @@ func setupCommand(backendRoot string, options setupOptions) (setupReport, error)
 			"start chatapi serve",
 		},
 	}
-	masterKey, err := randomURLToken(48)
+	template, err := service.BuildSetupEnvTemplate("")
 	if err != nil {
 		report.OK = false
 		report.Error = err.Error()
 		return report, err
 	}
-	adminPassword, err := randomURLToken(24)
-	if err != nil {
-		report.OK = false
-		report.Error = err.Error()
-		return report, err
-	}
-	sessionSecret, err := randomURLToken(32)
-	if err != nil {
-		report.OK = false
-		report.Error = err.Error()
-		return report, err
-	}
-	template := strings.Join([]string{
-		"CHATAPI_MASTER_KEY=" + masterKey,
-		"CHATAPI_SESSION_SECRET=" + sessionSecret,
-		"CHATAPI_ADMIN_PASSWORD=" + adminPassword,
-		"CHATAPI_DB_DRIVER=sqlite",
-		"CHATAPI_DB_DSN=./data/chatapi.sqlite3",
-		"CHATAPI_DATA_DIR=./data",
-		"CHATAPI_LOG_LEVEL=info",
-		"CHATAPI_METRICS_ENABLED=0",
-		"",
-	}, "\n")
 	if !options.writeEnv {
 		report.EnvTemplate = template
 		return report, nil

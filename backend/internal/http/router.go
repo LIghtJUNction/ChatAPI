@@ -77,6 +77,7 @@ func NewRouter(
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, dataStore, realtimeHub, pending)
 	runtimeMonitor.SetAutomationObserver(chatService.AutomationObserver())
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
+	setupHandler := handlers.SetupHandler{Service: service.NewSetupService(dataStore, cfg), Audit: auditService}
 	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
 	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)
 	adminStorageHandler := handlers.AdminStorageHandler{Config: cfg, Monitor: storageMonitor, Audit: auditService}
@@ -94,6 +95,9 @@ func NewRouter(
 
 	router.Get("/api/health", healthHandler.ServeHTTP)
 	router.Get("/api/ready", readinessHandler.ServeHTTP)
+	router.Get("/api/setup/status", setupHandler.Status)
+	router.Get("/setup", setupHandler.HTML)
+	router.Post("/setup", setupHandler.Create)
 	if cfg.MetricsEnabled {
 		router.Get("/metrics", metricsHandler.ServeHTTP)
 	}

@@ -6,6 +6,7 @@ type RedactedConfig struct {
 	Port                                  int      `json:"port"`
 	ListenAddr                            string   `json:"listen_addr"`
 	BaseURL                               string   `json:"base_url,omitempty"`
+	EnvFilePath                           string   `json:"env_file_path,omitempty"`
 	WebDistDir                            string   `json:"web_dist_dir"`
 	DataDir                               string   `json:"data_dir"`
 	DatabaseDriver                        string   `json:"database_driver"`
@@ -67,6 +68,7 @@ func (c Config) Redacted() RedactedConfig {
 		Port:                                  c.Port,
 		ListenAddr:                            c.ListenAddr(),
 		BaseURL:                               c.BaseURL,
+		EnvFilePath:                           c.EnvFilePath,
 		WebDistDir:                            c.WebDistDir,
 		DataDir:                               c.DataDir,
 		DatabaseDriver:                        c.DatabaseDriver,

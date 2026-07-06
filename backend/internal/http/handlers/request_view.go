@@ -8,33 +8,35 @@ import (
 
 func requestParsedSummary(item store.Request) map[string]any {
 	return map[string]any{
-		"request_id":        item.RequestID,
-		"request_format":    item.RequestFormat,
-		"model":             item.Model,
-		"system_text":       item.SystemText,
-		"developer_text":    item.DeveloperText,
-		"assistant_text":    item.AssistantText,
-		"user_text":         item.InputText,
-		"input_part_types":  inputPartTypes(item.InputParts),
-		"tool_choice":       item.ToolChoice,
-		"response_format":   item.ResponseFormat,
-		"request_body_keys": keysOf(item.RequestBody),
+		"request_id":              item.RequestID,
+		"request_format":          item.RequestFormat,
+		"model":                   item.Model,
+		"system_text":             item.SystemText,
+		"developer_text":          item.DeveloperText,
+		"assistant_text":          item.AssistantText,
+		"user_text":               item.InputText,
+		"input_part_types":        inputPartTypes(item.InputParts),
+		"tool_choice":             item.ToolChoice,
+		"response_format":         item.ResponseFormat,
+		"normalized_tool_schemas": normalizedToolSchemas(item.ToolSchemas),
+		"request_body_keys":       keysOf(item.RequestBody),
 	}
 }
 
 func requestParsedView(item store.Request) map[string]any {
 	return map[string]any{
-		"request_format":    item.RequestFormat,
-		"model":             item.Model,
-		"system_text":       item.SystemText,
-		"developer_text":    item.DeveloperText,
-		"assistant_text":    item.AssistantText,
-		"user_text":         item.InputText,
-		"input_parts":       item.InputParts,
-		"tool_choice":       item.ToolChoice,
-		"tool_schemas":      item.ToolSchemas,
-		"response_format":   item.ResponseFormat,
-		"request_body_keys": keysOf(item.RequestBody),
+		"request_format":          item.RequestFormat,
+		"model":                   item.Model,
+		"system_text":             item.SystemText,
+		"developer_text":          item.DeveloperText,
+		"assistant_text":          item.AssistantText,
+		"user_text":               item.InputText,
+		"input_parts":             item.InputParts,
+		"tool_choice":             item.ToolChoice,
+		"tool_schemas":            item.ToolSchemas,
+		"normalized_tool_schemas": normalizedToolSchemas(item.ToolSchemas),
+		"response_format":         item.ResponseFormat,
+		"request_body_keys":       keysOf(item.RequestBody),
 	}
 }
 
@@ -65,4 +67,65 @@ func keysOf(value map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func normalizedToolSchemas(items []any) []map[string]any {
+	if len(items) == 0 {
+		return nil
+	}
+	normalized := make([]map[string]any, 0, len(items))
+	for _, raw := range items {
+		record, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		toolType := stringValue(record["type"], "")
+		if function, ok := record["function"].(map[string]any); ok {
+			name := stringValue(function["name"], "")
+			if name == "" {
+				continue
+			}
+			normalized = append(normalized, map[string]any{
+				"name":        name,
+				"description": stringValue(function["description"], ""),
+				"parameters":  firstMap(function["parameters"], function["input_schema"]),
+				"type":        defaultString(toolType, "function"),
+			})
+			continue
+		}
+
+		name := stringValue(record["name"], "")
+		if name == "" {
+			continue
+		}
+		normalized = append(normalized, map[string]any{
+			"name":        name,
+			"description": stringValue(record["description"], ""),
+			"parameters":  firstMap(record["parameters"], record["input_schema"]),
+			"type":        defaultString(toolType, "function"),
+		})
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func firstMap(values ...any) map[string]any {
+	for _, value := range values {
+		record, ok := value.(map[string]any)
+		if ok {
+			return record
+		}
+	}
+	return nil
+}
+
+func defaultString(value string, fallback string) string {
+	value = stringValue(value, "")
+	if value == "" {
+		return fallback
+	}
+	return value
 }

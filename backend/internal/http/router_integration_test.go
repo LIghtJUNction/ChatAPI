@@ -1373,6 +1373,9 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	if !ok || len(toolSchemas) != 1 {
 		t.Fatalf("unexpected assist tool schemas: %#v", resp)
 	}
+	if !containsMapItemWithStringField(parsed["normalized_tool_schemas"], "name", "lookup_weather") {
+		t.Fatalf("unexpected assist normalized tool schemas: %#v", resp)
+	}
 	if nestedPathString(resp, "draft", "text") != "draft chunk" {
 		t.Fatalf("unexpected assist draft: %#v", resp)
 	}
@@ -1416,6 +1419,18 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 				},
 			},
 		},
+		"tools": []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name":        "assist_lookup",
+					"description": "Lookup from session assist test.",
+					"parameters": map[string]any{
+						"type": "object",
+					},
+				},
+			},
+		},
 	})
 	conversation := env.waitForWaitingConversation(t, "session assist 测试")
 	requestID := env.requestIDForConversation(t, conversation["id"].(string))
@@ -1440,6 +1455,9 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	}
 	if nestedPathString(resp, "conversation", "id") != conversation["id"].(string) {
 		t.Fatalf("unexpected session assist conversation: %#v", resp)
+	}
+	if !containsMapItemWithStringField(resp["parsed"].(map[string]any)["normalized_tool_schemas"], "name", "assist_lookup") {
+		t.Fatalf("unexpected session normalized tool schemas: %#v", resp)
 	}
 	if nestedPathString(resp, "draft", "text") != "session draft" {
 		t.Fatalf("unexpected session assist draft: %#v", resp)

@@ -142,6 +142,22 @@ func requestMatchesTypedCondition(request protocol.TurnRequest, matcher Automati
 		return matchesAutomationField(request, "user_content", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "user_content_is":
 		return matchesAutomationField(request, "user_content", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
+	case "system_content_contains":
+		return matchesAutomationField(request, "system_content", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
+	case "system_content_is":
+		return matchesAutomationField(request, "system_content", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
+	case "developer_content_contains":
+		return matchesAutomationField(request, "developer_content", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
+	case "developer_content_is":
+		return matchesAutomationField(request, "developer_content", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
+	case "assistant_content_contains":
+		return matchesAutomationField(request, "assistant_content", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
+	case "assistant_content_is":
+		return matchesAutomationField(request, "assistant_content", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
+	case "tool_result_contains":
+		return matchesAutomationField(request, "tool_result", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
+	case "tool_result_is":
+		return matchesAutomationField(request, "tool_result", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "model_is":
 		return matchesAutomationField(request, "model", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "protocol_is":
@@ -210,8 +226,21 @@ func requestMatchCandidates(request protocol.TurnRequest, field string) []string
 			return nil
 		}
 		return []string{request.UserContent}
+	case "system_content":
+		return singleCandidate(request.SystemContent)
+	case "developer_content":
+		return singleCandidate(request.DeveloperContent)
+	case "assistant_content":
+		return singleCandidate(request.AssistantContent)
 	case "input_part_text":
 		return appendInputPartTexts(request.InputParts)
+	case "tool_result":
+		return appendInputPartField(request.InputParts, func(part protocol.InputPart) string {
+			if part.Type != "tool_result" {
+				return ""
+			}
+			return part.Text
+		})
 	case "input_part_type":
 		return appendInputPartField(request.InputParts, func(part protocol.InputPart) string { return part.Type })
 	case "input_part_media_type":

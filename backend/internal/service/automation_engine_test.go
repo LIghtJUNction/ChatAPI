@@ -263,6 +263,93 @@ func TestAutomationRuleServiceMatchTurnSupportsTypedConditions(t *testing.T) {
 	}
 }
 
+func TestAutomationRuleServiceMatchesExtendedContextFields(t *testing.T) {
+	st := newAutomationTestStore(t)
+	svc := NewAutomationRuleService(st)
+	if _, err := st.ReplaceAutomationRulesForUser(context.Background(), "user_auto", nil, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_context",
+			UserID:  "user_auto",
+			Enabled: true,
+			Payload: map[string]any{
+				"id":      "rule_context",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{
+						{"field": "system_content", "match_type": "substring", "pattern": "policy"},
+						{"field": "developer_content", "match_type": "exact", "pattern": "developer hint"},
+						{"field": "assistant_content", "match_type": "substring", "pattern": "previous answer"},
+						{"field": "tool_result", "match_type": "substring", "pattern": "weather is sunny"},
+					},
+				},
+				"action": map[string]any{"type": "output_text", "text": "上下文命中"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed context automation rule: %v", err)
+	}
+
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		SystemContent:    "system policy",
+		DeveloperContent: "developer hint",
+		AssistantContent: "previous answer from assistant",
+		UserContent:      "current user input",
+		InputParts: []protocol.InputPart{
+			{Type: "text", Text: "current user input"},
+			{Type: "tool_result", Text: "weather is sunny and warm"},
+		},
+	}, "conv_context", "resp_context")
+	if err != nil {
+		t.Fatalf("match context turn: %v", err)
+	}
+	if decision.Status != automationStatusMatched || decision.Match == nil || decision.Match.Input.OutputText != "上下文命中" {
+		t.Fatalf("unexpected context field match: %#v", decision)
+	}
+}
+
+func TestAutomationRuleServiceSupportsExtendedTypedConditions(t *testing.T) {
+	st := newAutomationTestStore(t)
+	svc := NewAutomationRuleService(st)
+	if _, err := st.ReplaceAutomationRulesForUser(context.Background(), "user_auto", nil, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_context_typed",
+			UserID:  "user_auto",
+			Enabled: true,
+			Payload: map[string]any{
+				"id":      "rule_context_typed",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{
+						{"type": "system_content_contains", "value": "policy"},
+						{"type": "developer_content_is", "value": "developer hint"},
+						{"type": "assistant_content_contains", "value": "previous answer"},
+						{"type": "tool_result_contains", "value": "sunny"},
+					},
+				},
+				"action": map[string]any{"type": "output_text", "text": "类型上下文命中"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed typed context automation rule: %v", err)
+	}
+
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		SystemContent:    "system policy",
+		DeveloperContent: "developer hint",
+		AssistantContent: "previous answer from assistant",
+		UserContent:      "current user input",
+		InputParts: []protocol.InputPart{
+			{Type: "tool_result", Text: "sunny"},
+		},
+	}, "conv_context_typed", "resp_context_typed")
+	if err != nil {
+		t.Fatalf("match typed context turn: %v", err)
+	}
+	if decision.Status != automationStatusMatched || decision.Match == nil || decision.Match.Input.OutputText != "类型上下文命中" {
+		t.Fatalf("unexpected typed context field match: %#v", decision)
+	}
+}
+
 func newAutomationTestStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))

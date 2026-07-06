@@ -1314,6 +1314,161 @@ func TestUserConfigSchemaUsesSessionActor(t *testing.T) {
 	}
 }
 
+func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-tool-assist-lab",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "请帮我准备 tool call 草稿"},
+				},
+			},
+		},
+		"tools": []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name":        "lookup_weather",
+					"description": "Lookup the weather.",
+					"parameters": map[string]any{
+						"type":       "object",
+						"properties": map[string]any{"city": map[string]any{"type": "string"}},
+					},
+				},
+			},
+		},
+		"tool_choice": map[string]any{
+			"type": "function",
+			"name": "lookup_weather",
+		},
+		"response_format": map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "tool_draft",
+				"schema": map[string]any{"type": "object"},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "请帮我准备 tool call 草稿")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversation["id"],
+		"text":            "draft chunk",
+	}, http.StatusOK)
+
+	resp := env.getJSON(t, "/api/workspace/tool-call/assist-context?request_id="+requestID, http.StatusOK)
+	if nestedPathString(resp, "request", "request_id") != requestID {
+		t.Fatalf("unexpected assist request: %#v", resp)
+	}
+	if nestedPathString(resp, "parsed", "tool_choice", "name") != "lookup_weather" {
+		t.Fatalf("unexpected assist parsed tool choice: %#v", resp)
+	}
+	parsed := resp["parsed"].(map[string]any)
+	toolSchemas, ok := parsed["tool_schemas"].([]any)
+	if !ok || len(toolSchemas) != 1 {
+		t.Fatalf("unexpected assist tool schemas: %#v", resp)
+	}
+	if nestedPathString(resp, "draft", "text") != "draft chunk" {
+		t.Fatalf("unexpected assist draft: %#v", resp)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "done",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
+func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("assist-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "assist_owner",
+		Username:     "assist-owner",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed assist owner: %v", err)
+	}
+	modelKey := env.seedModelAPIKey(t, "assist_owner", "assist-owner-key", "assist-owner-model")
+	resultCh := startJSONRequestWithHeaders(t, env.server.URL+"/v1/responses", map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	}, map[string]any{
+		"model": "assist-owner-model",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "session assist 测试"},
+				},
+			},
+		},
+	})
+	conversation := env.waitForWaitingConversation(t, "session assist 测试")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "assist-owner",
+		"password": "assist-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing assist session cookie: %#v", cookies)
+	}
+
+	headers := map[string]string{"Origin": env.server.URL}
+	_, _ = env.postJSONWithCookieAndHeaders(t, "/api/conversations/"+conversation["id"].(string)+"/stream/delta", map[string]any{
+		"text": "session draft",
+	}, sessionCookie, headers, http.StatusOK)
+
+	resp := env.getJSONWithCookie(t, "/api/workspace/tool-call/assist-context?conversation_id="+conversation["id"].(string), sessionCookie, http.StatusOK)
+	if nestedPathString(resp, "request", "request_id") != requestID {
+		t.Fatalf("unexpected session assist request: %#v", resp)
+	}
+	if nestedPathString(resp, "conversation", "id") != conversation["id"].(string) {
+		t.Fatalf("unexpected session assist conversation: %#v", resp)
+	}
+	if nestedPathString(resp, "draft", "text") != "session draft" {
+		t.Fatalf("unexpected session assist draft: %#v", resp)
+	}
+
+	_, _ = env.postJSONWithCookieAndHeaders(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "session done",
+		"mode": "assistant_message",
+	}, sessionCookie, headers, http.StatusOK)
+	<-resultCh
+}
+
+func TestWorkspaceToolCallAssistContextRejectsProgrammaticActors(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	appKey := env.seedAppAPIKey(t, "assist-denied-user", []string{"requests:read"}, nil)
+	modelKey := env.seedModelAPIKey(t, "assist-denied-user", "assist-denied-model", "assist-denied")
+
+	status, body := env.getTextWithHeaders(t, "/api/workspace/tool-call/assist-context?request_id=req_demo", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected app key assist-context rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/workspace/tool-call/assist-context?request_id=req_demo", map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected model key assist-context rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestConfigModelsRoutesAndModelsEndpoint(t *testing.T) {
 	env := newTestEnv(t)
 

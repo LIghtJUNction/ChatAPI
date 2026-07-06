@@ -66,6 +66,7 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
 	userPasswordHandler := handlers.UserPasswordHandler{Config: cfg, Password: service.NewUserPasswordService(dataStore), Audit: auditService}
+	workspaceToolCallHandler := handlers.WorkspaceToolCallHandler{Service: service.NewWorkspaceToolCallService(dataStore)}
 	configAutomationRulesHandler := handlers.ConfigAutomationRulesHandler{Config: cfg, Service: automationRuleService, Audit: auditService}
 	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
 	configSystemHandler := handlers.ConfigSystemHandler{Config: cfg, Service: service.NewSystemSettingsService(dataStore, cfg), Audit: auditService}
@@ -125,6 +126,7 @@ func NewRouter(
 	userRouter.Get("/identities", userIdentitiesHandler.List)
 	userRouter.Delete("/identities/{identityID}", userIdentitiesHandler.Delete)
 	router.Mount("/api/user", userRouter)
+	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/assist-context", workspaceToolCallHandler.AssistContext)
 	router.Get("/api/config/automation-rules", configAutomationRulesHandler.Get)
 	router.Get("/api/config/automation-rules/schema", configAutomationRulesHandler.Schema)
 	router.Post("/api/config/automation-rules", configAutomationRulesHandler.Post)

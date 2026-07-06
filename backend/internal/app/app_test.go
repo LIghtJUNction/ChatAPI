@@ -13,6 +13,7 @@ import (
 
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/repository/migrations"
+	pgstore "github.com/zyf/chatapi/internal/repository/postgresql"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/store"
 )
@@ -376,6 +377,93 @@ func TestMigrateCommandDownResetsSQLite(t *testing.T) {
 	}
 	if statusReport.OK || !strings.Contains(statusReport.Error, "read db_meta") {
 		t.Fatalf("unexpected status after down: %#v", statusReport)
+	}
+}
+
+func TestRuntimeMigrationStatusBootstrapsPostgreSQL(t *testing.T) {
+	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
+	if dsn == "" {
+		t.Skip("CHATAPI_PG_TEST_DSN is not set")
+	}
+	backendRoot := t.TempDir()
+	cfg := config.Default(config.ModeServe, backendRoot)
+	cfg.DatabaseDriver = "postgresql"
+	cfg.DatabaseDSN = dsn
+
+	ctx := context.Background()
+	pgStore, err := pgstore.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open postgres store: %v", err)
+	}
+	t.Cleanup(pgStore.Close)
+	if _, err := pgStore.Pool().Exec(ctx, `
+		DROP TABLE IF EXISTS user_configs;
+		DROP TABLE IF EXISTS config;
+		DROP TABLE IF EXISTS audit_logs;
+		DROP TABLE IF EXISTS automation_rules;
+		DROP TABLE IF EXISTS app_api_key_audit_logs;
+		DROP TABLE IF EXISTS user_app_api_keys;
+		DROP TABLE IF EXISTS user_api_keys;
+		DROP TABLE IF EXISTS uploaded_images;
+		DROP TABLE IF EXISTS storage_user_quotas;
+		DROP TABLE IF EXISTS storage_file_deletion_failures;
+		DROP TABLE IF EXISTS messages;
+		DROP TABLE IF EXISTS conversations;
+		DROP TABLE IF EXISTS schema_migrations;
+		DROP TABLE IF EXISTS db_meta;
+		DROP TABLE IF EXISTS user_identities;
+		DROP TABLE IF EXISTS users;
+	`); err != nil {
+		t.Fatalf("reset postgres schema: %v", err)
+	}
+
+	statusStore, closeStatusStore, err := openRuntimeStore(ctx, cfg, true)
+	if err != nil {
+		t.Fatalf("open runtime store with bootstrap: %v", err)
+	}
+	defer closeStatusStore()
+	status, err := statusStore.MigrationStatus(ctx)
+	if err != nil {
+		t.Fatalf("postgres migration status: %v", err)
+	}
+	if status.SchemaVersion != migrations.BootstrapVersion || status.MigrationDirty {
+		t.Fatalf("unexpected postgres migration status: %#v", status)
+	}
+}
+
+func TestDBCheckCommandReportsPostgreSQLStatus(t *testing.T) {
+	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
+	if dsn == "" {
+		t.Skip("CHATAPI_PG_TEST_DSN is not set")
+	}
+	backendRoot := t.TempDir()
+	t.Setenv("CHATAPI_DB_DRIVER", "postgresql")
+	t.Setenv("CHATAPI_DB_DSN", dsn)
+	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
+
+	report, err := dbCheckCommand(backendRoot)
+	if err != nil {
+		t.Fatalf("postgres db check: %v report=%#v", err, report)
+	}
+	if !report.OK || report.Driver != "postgresql" || report.Status.SchemaVersion != migrations.BootstrapVersion {
+		t.Fatalf("unexpected postgres db check report: %#v", report)
+	}
+	if report.SQLite.Database.Path != "" || report.SQLite.WAL.Path != "" || report.SQLite.SHM.Path != "" {
+		t.Fatalf("postgres db check should not include sqlite file info: %#v", report.SQLite)
+	}
+}
+
+func TestMigrateCommandDownRejectsPostgreSQL(t *testing.T) {
+	backendRoot := t.TempDir()
+	t.Setenv("CHATAPI_DB_DRIVER", "postgresql")
+	t.Setenv("CHATAPI_DB_DSN", "postgres://chatapi:secret@localhost:5432/chatapi?sslmode=disable")
+
+	report, err := migrateCommand(context.Background(), migrateOptions{command: "down", force: true}, backendRoot)
+	if err == nil {
+		t.Fatal("expected postgres migrate down to fail")
+	}
+	if report.OK || !strings.Contains(report.Error, "migrate down is only implemented for sqlite") {
+		t.Fatalf("unexpected postgres migrate down report: %#v", report)
 	}
 }
 

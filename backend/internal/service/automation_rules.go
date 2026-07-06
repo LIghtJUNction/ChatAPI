@@ -39,10 +39,11 @@ func (s *AutomationRuleService) ReplaceRules(ctx context.Context, userID string,
 	inputs := make([]store.UpsertAutomationRuleInput, 0, len(payloads))
 	seen := make(map[string]struct{}, len(payloads))
 	for _, payload := range payloads {
-		id := stringFromMap(payload, "id")
-		if id == "" {
-			return nil, ErrInvalidAutomationRule
+		rule, err := ParseAutomationRulePayload(payload)
+		if err != nil {
+			return nil, err
 		}
+		id := rule.ID
 		if len(allowedIDs) > 0 {
 			if _, ok := allowedIDs[id]; !ok {
 				return nil, ErrForbidden
@@ -52,17 +53,11 @@ func (s *AutomationRuleService) ReplaceRules(ctx context.Context, userID string,
 			return nil, ErrInvalidAutomationRule
 		}
 		seen[id] = struct{}{}
-		enabled := true
-		if raw, ok := payload["enabled"].(bool); ok {
-			enabled = raw
-		}
-		payload["id"] = id
-		payload["enabled"] = enabled
 		inputs = append(inputs, store.UpsertAutomationRuleInput{
 			ID:      id,
 			UserID:  strings.TrimSpace(userID),
-			Enabled: enabled,
-			Payload: payload,
+			Enabled: rule.Enabled,
+			Payload: rule.ToMap(),
 		})
 	}
 	items, err := s.store.ReplaceAutomationRulesForUser(ctx, strings.TrimSpace(userID), allowedIDs, inputs)
@@ -82,13 +77,19 @@ func (s *AutomationRuleService) ReplaceRules(ctx context.Context, userID string,
 }
 
 func automationRulePayload(item store.AutomationRule) map[string]any {
-	payload := map[string]any{}
-	for key, value := range item.Payload {
-		payload[key] = value
+	rule, err := ParseAutomationRulePayload(item.Payload)
+	if err != nil {
+		payload := map[string]any{}
+		for key, value := range item.Payload {
+			payload[key] = value
+		}
+		payload["id"] = item.ID
+		payload["enabled"] = item.Enabled
+		return payload
 	}
-	payload["id"] = item.ID
-	payload["enabled"] = item.Enabled
-	return payload
+	rule.ID = item.ID
+	rule.Enabled = item.Enabled
+	return rule.ToMap()
 }
 
 func stringFromMap(value map[string]any, key string) string {

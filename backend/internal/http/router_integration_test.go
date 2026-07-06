@@ -896,6 +896,31 @@ func TestConfigAutomationRulesRoutes(t *testing.T) {
 	assertAuditCount(t, env, "user.config", "automation_rule", "", "replace", "success", 1)
 }
 
+func TestConfigAutomationRulesRejectInvalidTypedCondition(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := env.postText(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_invalid_typed",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{
+						{"type": "tool_choice_is"},
+					},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "bad",
+				},
+			},
+		},
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "invalid automation rule") {
+		t.Fatalf("expected invalid automation rule rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAutomationRuleAutoCompletesResponsesRequest(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1777,18 +1802,52 @@ func TestAppAPIAutomationRulesResourceLimit(t *testing.T) {
 	})
 
 	status, body := env.appPutText(t, "/api/app/automation-rules", appKey, map[string]any{
-		"rules": []map[string]any{{"id": "rule_blocked", "enabled": true}},
+		"rules": []map[string]any{{
+			"id":      "rule_blocked",
+			"enabled": true,
+			"action":  map[string]any{"type": "output_text", "text": "blocked"},
+		}},
 	})
 	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
 		t.Fatalf("expected automation resource rejection: status=%d body=%q", status, body)
 	}
 
 	putResp := env.appPutJSON(t, "/api/app/automation-rules", appKey, map[string]any{
-		"rules": []map[string]any{{"id": "rule_allowed", "enabled": false}},
+		"rules": []map[string]any{{
+			"id":      "rule_allowed",
+			"enabled": false,
+			"action":  map[string]any{"type": "output_text", "text": "allowed"},
+		}},
 	}, http.StatusOK)
 	rules := putResp["rules"].([]any)
 	if len(rules) != 1 || nestedString(rules[0].(map[string]any), "id") != "rule_allowed" {
 		t.Fatalf("unexpected resource-limited automation response: %#v", putResp)
+	}
+}
+
+func TestAppAPIAutomationRulesRejectInvalidTypedCondition(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"automation:write"}, nil)
+
+	status, body := env.appPutText(t, "/api/app/automation-rules", appKey, map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_invalid_typed_app",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{
+						{"type": "response_format_is"},
+					},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "bad",
+				},
+			},
+		},
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "invalid automation rule") {
+		t.Fatalf("expected invalid typed automation rule rejection: status=%d body=%q", status, body)
 	}
 }
 

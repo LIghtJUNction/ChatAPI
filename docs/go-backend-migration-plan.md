@@ -965,6 +965,7 @@ type Hub struct {
   - typed condition block：`{ "type": "...", ... }`
 - legacy matcher 当前支持显式 `field` 选择，已落地字段包括：默认 `text`、`user_content`、`input_part.text`、`input_part.type`、`input_part.media_type`、`input_part.url`、`tool_choice.type`、`tool_choice.name`、`response_format.type`、`response_format.name`、`model`、`protocol`。未传 `field` 时保持兼容，默认仍匹配文本内容。
 - typed condition block 当前已落地：`text_contains`、`text_is`、`user_content_contains`、`user_content_is`、`model_is`、`protocol_is`、`tool_choice_is`、`response_format_is`、`input_part_type_is`、`input_media_type_contains`、`input_media_type_is`、`input_url_contains`。这样后续扩展条件能力时，可以新增显式类型，而不是继续堆散乱的 `field + pattern` 组合。
+- 后端当前已新增规则结构化 parser/validator：`ReplaceRules` 不再直接接受任意裸 `map[string]any` 入库，而是先解析成内部规则对象、校验 action 和 matcher、再输出规范化 payload。这样 WebUI、应用 API、未来导入导出以及规则执行共享同一套校验逻辑；对外 JSON 形状暂时保持不变，前端本轮不需要同步改协议。
 - 规则命中后，`ChatAPIService` 会在 pending turn 落库并进入 realtime 广播后，复用同一套 `CompleteConversation` 状态机直接自动完成请求；因此非流请求会直接返回自动结果，流式请求会在 SSE 起始事件后收到同样的完成事件，而不会走另一条旁路逻辑。
 - 当前自动执行是 best-effort：规则读取或匹配异常不会阻断主请求链路，只会退化为普通 pending turn。
 - 当前输出会受服务内最大长度限制截断；自动化规则自动完成命中已写入 `audit_logs`，并汇总到 `/api/app/statistics/summary`、`/api/admin/requests/overview`、`/api/admin/runtime/summary` 和 `/metrics`。当前还会把 `ListAutomationRules` 失败、自动完成失败写入 `audit_logs` 的 `outcome=failure`，并把运行期 `no_rules` / `no_match` 跳过计数暴露到 `/api/admin/runtime/summary` 和 `/metrics`；更细的规则执行超时和逐条规则级跳过审计仍待继续补齐。

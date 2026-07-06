@@ -56,15 +56,18 @@ func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest
 	if !item.Enabled {
 		return nil, false
 	}
-	action, ok := item.Payload["action"].(map[string]any)
-	if !ok || stringFromMap(action, "type") != "output_text" {
+	rule, err := ParseAutomationRulePayload(item.Payload)
+	if err != nil {
 		return nil, false
 	}
-	outputText := strings.TrimSpace(stringFromMap(action, "text"))
+	if rule.Action.Type != "output_text" {
+		return nil, false
+	}
+	outputText := strings.TrimSpace(rule.Action.Text)
 	if outputText == "" {
 		return nil, false
 	}
-	if !matchesRuleConditions(item.Payload, request) {
+	if !matchesRuleConditions(rule.Conditions, request) {
 		return nil, false
 	}
 	return &AutomationMatch{
@@ -78,37 +81,36 @@ func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest
 	}, true
 }
 
-func matchesRuleConditions(payload map[string]any, request protocol.TurnRequest) bool {
-	conditions, _ := payload["conditions"].(map[string]any)
-	if len(conditions) == 0 {
+func matchesRuleConditions(conditions AutomationConditions, request protocol.TurnRequest) bool {
+	if len(conditions.Contains) == 0 && len(conditions.Excludes) == 0 {
 		return true
 	}
-	for _, matcher := range mapSliceFromAny(conditions["contains"]) {
-		if !requestMatchesPattern(request, matcher) {
+	for _, matcher := range conditions.Contains {
+		if !requestMatchesCondition(request, matcher) {
 			return false
 		}
 	}
-	for _, matcher := range mapSliceFromAny(conditions["excludes"]) {
-		if requestMatchesPattern(request, matcher) {
+	for _, matcher := range conditions.Excludes {
+		if requestMatchesCondition(request, matcher) {
 			return false
 		}
 	}
 	return true
 }
 
-func requestMatchesPattern(request protocol.TurnRequest, matcher map[string]any) bool {
-	if conditionType := stringFromMap(matcher, "type"); conditionType != "" {
-		return requestMatchesTypedCondition(request, conditionType, matcher)
+func requestMatchesCondition(request protocol.TurnRequest, matcher AutomationCondition) bool {
+	if matcher.Type != "" {
+		return requestMatchesTypedCondition(request, matcher)
 	}
-	pattern := strings.TrimSpace(stringFromMap(matcher, "pattern"))
+	pattern := strings.TrimSpace(matcher.Pattern)
 	if pattern == "" {
 		return false
 	}
-	matchType := stringFromMap(matcher, "match_type")
+	matchType := matcher.MatchType
 	if matchType == "" {
 		matchType = "substring"
 	}
-	for _, value := range requestMatchCandidates(request, stringFromMap(matcher, "field")) {
+	for _, value := range requestMatchCandidates(request, matcher.Field) {
 		if matchText(matchType, value, pattern) {
 			return true
 		}
@@ -116,23 +118,23 @@ func requestMatchesPattern(request protocol.TurnRequest, matcher map[string]any)
 	return false
 }
 
-func requestMatchesTypedCondition(request protocol.TurnRequest, conditionType string, matcher map[string]any) bool {
-	switch strings.TrimSpace(strings.ToLower(conditionType)) {
+func requestMatchesTypedCondition(request protocol.TurnRequest, matcher AutomationCondition) bool {
+	switch matcher.Type {
 	case "text_contains":
-		return matchesAutomationField(request, "text", "substring", firstNonEmptyAutomationValue(matcher, "value", "pattern"))
+		return matchesAutomationField(request, "text", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "text_is":
-		return matchesAutomationField(request, "text", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern"))
+		return matchesAutomationField(request, "text", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "user_content_contains":
-		return matchesAutomationField(request, "user_content", "substring", firstNonEmptyAutomationValue(matcher, "value", "pattern"))
+		return matchesAutomationField(request, "user_content", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "user_content_is":
-		return matchesAutomationField(request, "user_content", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern"))
+		return matchesAutomationField(request, "user_content", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "model_is":
-		return matchesAutomationField(request, "model", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern", "model"))
+		return matchesAutomationField(request, "model", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "protocol_is":
-		return matchesAutomationField(request, "protocol", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern", "protocol"))
+		return matchesAutomationField(request, "protocol", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern))
 	case "tool_choice_is":
-		name := firstNonEmptyAutomationValue(matcher, "name", "value", "pattern")
-		choiceType := firstNonEmptyAutomationValue(matcher, "choice_type", "tool_type")
+		name := firstNonEmptyStrings(matcher.Name, matcher.Value, matcher.Pattern)
+		choiceType := matcher.ChoiceType
 		if name != "" && !matchesAutomationField(request, "tool_choice_name", "exact", name) {
 			return false
 		}
@@ -141,8 +143,8 @@ func requestMatchesTypedCondition(request protocol.TurnRequest, conditionType st
 		}
 		return name != "" || choiceType != ""
 	case "response_format_is":
-		name := firstNonEmptyAutomationValue(matcher, "name", "value", "pattern")
-		formatType := firstNonEmptyAutomationValue(matcher, "format_type", "response_type")
+		name := firstNonEmptyStrings(matcher.Name, matcher.Value, matcher.Pattern)
+		formatType := matcher.FormatType
 		if name != "" && !matchesAutomationField(request, "response_format_name", "exact", name) {
 			return false
 		}
@@ -151,22 +153,22 @@ func requestMatchesTypedCondition(request protocol.TurnRequest, conditionType st
 		}
 		return name != "" || formatType != ""
 	case "input_part_type_is":
-		return matchesAutomationField(request, "input_part_type", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern", "part_type"))
+		return matchesAutomationField(request, "input_part_type", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern, matcher.PartType))
 	case "input_media_type_contains":
-		return matchesAutomationField(request, "input_part_media_type", "substring", firstNonEmptyAutomationValue(matcher, "value", "pattern", "media_type"))
+		return matchesAutomationField(request, "input_part_media_type", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern, matcher.MediaType))
 	case "input_media_type_is":
-		return matchesAutomationField(request, "input_part_media_type", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern", "media_type"))
+		return matchesAutomationField(request, "input_part_media_type", "exact", firstNonEmptyStrings(matcher.Value, matcher.Pattern, matcher.MediaType))
 	case "input_url_contains":
-		return matchesAutomationField(request, "input_part_url", "substring", firstNonEmptyAutomationValue(matcher, "value", "pattern", "url"))
+		return matchesAutomationField(request, "input_part_url", "substring", firstNonEmptyStrings(matcher.Value, matcher.Pattern, matcher.URL))
 	default:
 		return false
 	}
 }
 
-func firstNonEmptyAutomationValue(matcher map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value := stringFromMap(matcher, key); value != "" {
-			return value
+func firstNonEmptyStrings(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
 		}
 	}
 	return ""
@@ -269,6 +271,13 @@ func matchText(matchType string, text string, pattern string) bool {
 }
 
 func mapSliceFromAny(value any) []map[string]any {
+	if typed, ok := value.([]map[string]any); ok {
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	}
 	items, ok := value.([]any)
 	if !ok {
 		return nil

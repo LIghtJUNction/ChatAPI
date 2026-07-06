@@ -18,6 +18,7 @@ type AdminUsersHandler struct {
 	History    *service.AdminUserHistoryService
 	Identities *service.AdminUserIdentityService
 	Deletion   *service.AdminUserDeletionService
+	Overview   *service.AdminUserDeleteOverviewService
 	Ownership  *service.AdminUserOwnershipService
 	Storage    *service.StorageMonitorService
 	Audit      *service.AuditService
@@ -97,6 +98,20 @@ func (h AdminUsersHandler) DeletePreview(w http.ResponseWriter, r *http.Request)
 		"ok":      true,
 		"user":    preview.User,
 		"preview": preview,
+	})
+}
+
+func (h AdminUsersHandler) DeleteOverview(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	overview, err := h.Overview.Get(r.Context(), userID)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"user":     overview.User,
+		"overview": overview,
 	})
 }
 

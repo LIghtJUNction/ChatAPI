@@ -88,6 +88,7 @@ func NewRouter(
 		History:    service.NewAdminUserHistoryService(dataStore),
 		Identities: service.NewAdminUserIdentityService(dataStore),
 		Deletion:   service.NewAdminUserDeletionService(dataStore),
+		Overview:   service.NewAdminUserDeleteOverviewService(dataStore),
 		Ownership:  service.NewAdminUserOwnershipService(dataStore),
 		Storage:    storageMonitor,
 		Audit:      auditService,
@@ -287,6 +288,7 @@ func NewRouter(
 	adminRouter.Get("/users/{userID}/history", adminUsersHandler.HistoryList)
 	adminRouter.Get("/users/{userID}/identities", adminUsersHandler.IdentityList)
 	adminRouter.Get("/users/{userID}/delete-preview", adminUsersHandler.DeletePreview)
+	adminRouter.Get("/users/{userID}/delete-overview", adminUsersHandler.DeleteOverview)
 	adminRouter.Get("/users/{userID}/ownership-items", adminUsersHandler.OwnershipItems)
 	adminRouter.Post("/users/{userID}/transfer-ownership", adminUsersHandler.TransferOwnership)
 	adminRouter.Post("/users/{userID}/transfer-ownership-selection", adminUsersHandler.TransferOwnershipSelection)

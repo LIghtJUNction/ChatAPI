@@ -4659,7 +4659,7 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	schemaResp := env.getJSONWithCookie(t, "/api/admin/users/schema", adminCookie, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 13 {
+	if len(operations) != 14 {
 		t.Fatalf("unexpected admin users schema response: %#v", schemaResp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "list_users" || nestedString(operations[1].(map[string]any), "name") != "create_user" {
@@ -4785,6 +4785,29 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	blockers, _ := nestedPath(previewResp, "preview", "blockers").([]any)
 	if len(blockers) != 1 || blockers[0] != "owned_conversations" {
 		t.Fatalf("unexpected delete preview blockers: %#v", previewResp)
+	}
+	overviewResp := env.getJSONWithCookie(t, "/api/admin/users/"+userID+"/delete-overview", adminCookie, http.StatusOK)
+	if nestedPathString(overviewResp, "user", "id") != userID ||
+		nestedPathString(overviewResp, "overview", "user", "id") != userID {
+		t.Fatalf("unexpected delete overview user response: %#v", overviewResp)
+	}
+	if !reflect.DeepEqual(
+		nestedPath(overviewResp, "overview", "preview"),
+		nestedPath(previewResp, "preview"),
+	) {
+		t.Fatalf("expected delete overview preview to match preview endpoint: overview=%#v preview=%#v", overviewResp, previewResp)
+	}
+	if numericNestedPathValue(overviewResp, "overview", "ownership_conversation_count") != 2 ||
+		numericNestedPathValue(overviewResp, "overview", "ownership_upload_count") != 0 {
+		t.Fatalf("unexpected delete overview ownership counts: %#v", overviewResp)
+	}
+	overviewItems, _ := nestedPath(overviewResp, "overview", "ownership_items", "conversations").([]any)
+	if len(overviewItems) != 2 {
+		t.Fatalf("expected delete overview conversation items: %#v", overviewResp)
+	}
+	recommendedActions, _ := nestedPath(overviewResp, "overview", "recommended_next_actions").([]any)
+	if len(recommendedActions) < 2 || recommendedActions[0] != "review_ownership_items" || recommendedActions[1] != "transfer_or_cleanup_conversations" {
+		t.Fatalf("unexpected delete overview recommended actions: %#v", overviewResp)
 	}
 
 	purgeBlockedResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+userID+"/purge", map[string]any{}, adminCookie, headers, http.StatusConflict)
@@ -5193,6 +5216,18 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 		numericNestedPathValue(purgePreviewResp, "preview", "counts", "app_api_keys") != 1 ||
 		numericNestedPathValue(purgePreviewResp, "preview", "counts", "model_api_keys") != 1 {
 		t.Fatalf("unexpected purgeable delete preview counts: %#v", purgePreviewResp)
+	}
+	purgeOverviewResp := env.getJSONWithCookie(t, "/api/admin/users/"+purgeableUserID+"/delete-overview", adminCookie, http.StatusOK)
+	if !nestedPathBool(purgeOverviewResp, "overview", "preview", "can_delete") {
+		t.Fatalf("expected purgeable delete overview to allow purge: %#v", purgeOverviewResp)
+	}
+	if numericNestedPathValue(purgeOverviewResp, "overview", "ownership_conversation_count") != 0 ||
+		numericNestedPathValue(purgeOverviewResp, "overview", "ownership_upload_count") != 0 {
+		t.Fatalf("expected purgeable delete overview to have no ownership blockers: %#v", purgeOverviewResp)
+	}
+	purgeRecommendedActions, _ := nestedPath(purgeOverviewResp, "overview", "recommended_next_actions").([]any)
+	if len(purgeRecommendedActions) != 1 || purgeRecommendedActions[0] != "purge_user" {
+		t.Fatalf("unexpected purgeable delete overview actions: %#v", purgeOverviewResp)
 	}
 
 	purgeResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+purgeableUserID+"/purge", map[string]any{}, adminCookie, headers, http.StatusOK)

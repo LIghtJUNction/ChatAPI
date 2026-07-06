@@ -75,6 +75,17 @@ func BuildAdminUsersSchema() AdminUsersSchema {
 				},
 			},
 			{
+				Name:          "overview_user_purge",
+				Method:        "GET",
+				Path:          "/api/admin/users/{user_id}/delete-overview",
+				Description:   "Return the aggregated user purge overview, including blockers, owned history items and recommended next actions.",
+				RequiresAdmin: true,
+				Notes: []string{
+					"The response shape is {ok, user, overview}.",
+					"overview combines delete-preview and ownership-items so the admin UI does not need to stitch them manually.",
+				},
+			},
+			{
 				Name:          "transfer_user_ownership",
 				Method:        "POST",
 				Path:          "/api/admin/users/{user_id}/transfer-ownership",

@@ -695,6 +695,106 @@ func TestUserConfigManagementUsesSessionActor(t *testing.T) {
 	assertAuditCountForActor(t, env, "user_config_owner", "user.config", "user_config", "user_config_owner", "update", "success", 1)
 }
 
+func TestUserIdentitiesListAndUnlink(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("identity-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_identity_owner",
+		Username:     "identity-owner",
+		Email:        "identity@example.com",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed identity user: %v", err)
+	}
+	identity, err := env.store.UpsertUserIdentity(context.Background(), store.UpsertUserIdentityInput{
+		ID:            "identity_unlink",
+		UserID:        "user_identity_owner",
+		Provider:      "oidc",
+		Subject:       "sub-unlink",
+		Email:         "identity@example.com",
+		EmailVerified: true,
+		Profile: map[string]any{
+			"name": "Identity Owner",
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed identity: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "identity-owner",
+		"password": "identity-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing session cookie: %#v", cookies)
+	}
+
+	listResp := env.getJSONWithCookie(t, "/api/user/identities", sessionCookie, http.StatusOK)
+	if numericValue(listResp["count"]) != 1 || nestedPathString(listResp["items"].([]any)[0].(map[string]any), "id") != identity.ID {
+		t.Fatalf("unexpected identities list: %#v", listResp)
+	}
+
+	status, body := env.deleteTextWithCookieAndHeaders(t, "/api/user/identities/"+identity.ID, sessionCookie, nil)
+	if status != http.StatusForbidden || !strings.Contains(body, "csrf origin check failed") {
+		t.Fatalf("expected csrf rejection, status=%d body=%q", status, body)
+	}
+	deleteResp := env.deleteJSONWithCookieAndHeaders(t, "/api/user/identities/"+identity.ID, sessionCookie, map[string]string{
+		"Origin": env.server.URL,
+	}, http.StatusOK)
+	if deleteResp["ok"] != true {
+		t.Fatalf("unexpected identity delete response: %#v", deleteResp)
+	}
+	if _, err := env.store.GetUserIdentity(context.Background(), "oidc", "sub-unlink"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected identity to be deleted, got %v", err)
+	}
+	assertAuditCountForActor(t, env, "user_identity_owner", "user.identity", "user_identity", identity.ID, "unlink", "success", 1)
+}
+
+func TestUserIdentityUnlinkRejectsLastLoginMethod(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:       "oidc_only",
+		Email:    "oidc-only@example.com",
+		Role:     "user",
+		IsActive: true,
+	}); err != nil {
+		t.Fatalf("seed oidc-only user: %v", err)
+	}
+	identity, err := env.store.UpsertUserIdentity(context.Background(), store.UpsertUserIdentityInput{
+		ID:       "identity_last",
+		UserID:   "oidc_only",
+		Provider: "oidc",
+		Subject:  "sub-last",
+		Email:    "oidc-only@example.com",
+	})
+	if err != nil {
+		t.Fatalf("seed identity: %v", err)
+	}
+
+	codec := service.NewSessionCodec("test-session-secret")
+	sessionValue, err := codec.Encode(service.RequestActor{
+		UserID:   "oidc_only",
+		Username: "oidc-only@example.com",
+		Role:     "user",
+		Source:   "oidc",
+	}, service.DefaultSessionTTL)
+	if err != nil {
+		t.Fatalf("encode session: %v", err)
+	}
+	sessionCookie := &http.Cookie{Name: service.SessionCookieName, Value: sessionValue}
+	status, body := env.deleteTextWithCookieAndHeaders(t, "/api/user/identities/"+identity.ID, sessionCookie, map[string]string{
+		"Origin": env.server.URL,
+	})
+	if status != http.StatusConflict || !strings.Contains(body, "cannot unlink the last login method") {
+		t.Fatalf("expected last login method conflict, status=%d body=%q", status, body)
+	}
+}
+
 func TestExpiredAppAPIKeyRejected(t *testing.T) {
 	env := newTestEnv(t)
 	expiredAt := time.Now().UTC().Add(-time.Hour)
@@ -3398,6 +3498,30 @@ func (e *testEnv) deleteText(t *testing.T, path string) (int, string) {
 	req, err := http.NewRequest(http.MethodDelete, e.server.URL+path, nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do delete %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) deleteTextWithCookieAndHeaders(t *testing.T, path string, cookie *http.Cookie, headers map[string]string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 	resp, err := e.client.Do(req)
 	if err != nil {

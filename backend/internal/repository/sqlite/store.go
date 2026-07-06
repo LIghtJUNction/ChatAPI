@@ -789,6 +789,24 @@ func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]store.
 	return items, rows.Err()
 }
 
+func (s *Store) DeleteUserIdentity(ctx context.Context, id string, userID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM user_identities
+		WHERE id = ? AND user_id = ?
+	`, strings.TrimSpace(id), strings.TrimSpace(userID))
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errNotFound
+	}
+	return nil
+}
+
 func (s *Store) GetSystemConfig(ctx context.Context, key string) (store.SystemConfig, error) {
 	item, err := scanSystemConfig(s.db.QueryRowContext(ctx, `
 		SELECT key, value_json, created_at, updated_at

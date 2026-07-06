@@ -391,6 +391,7 @@ type Store interface {
 	UpsertUserIdentity(context.Context, UpsertUserIdentityInput) (UserIdentity, error)
 	GetUserIdentity(context.Context, string, string) (UserIdentity, error)
 	ListUserIdentities(context.Context, string) ([]UserIdentity, error)
+	DeleteUserIdentity(context.Context, string, string) error
 	GetSystemConfig(context.Context, string) (SystemConfig, error)
 	SetSystemConfig(context.Context, SetSystemConfigInput) (SystemConfig, error)
 	DeleteSystemConfig(context.Context, string) error

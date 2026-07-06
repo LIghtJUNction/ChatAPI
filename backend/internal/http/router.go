@@ -58,6 +58,7 @@ func NewRouter(
 	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService, Audit: auditService}
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
+	userIdentitiesHandler := handlers.UserIdentitiesHandler{Service: service.NewUserIdentityService(dataStore), Audit: auditService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, realtimeHub, pending)
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
 	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
@@ -89,6 +90,8 @@ func NewRouter(
 	router.Delete("/api/user/model-api-keys/{keyID}", userModelAPIKeysHandler.Delete)
 	router.Get("/api/user/config", userConfigHandler.Get)
 	router.Post("/api/user/config", userConfigHandler.Set)
+	router.Get("/api/user/identities", userIdentitiesHandler.List)
+	router.Delete("/api/user/identities/{identityID}", userIdentitiesHandler.Delete)
 	router.Get("/api/lab/workspace", labHandler.Workspace)
 	router.Get("/api/ws-info", labHandler.PingInfo)
 	router.Post("/api/uploads/imgs", uploadsHandler.CreateImage)

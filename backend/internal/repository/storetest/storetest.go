@@ -194,6 +194,15 @@ func testUserIdentityRepositoryUpsertsByProviderSubject(t *testing.T, newStore N
 	if _, err := st.GetUserIdentity(ctx, "kirari", "missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing identity, got %v", err)
 	}
+	if err := st.DeleteUserIdentity(ctx, updated.ID, "other_user"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound deleting identity for wrong user, got %v", err)
+	}
+	if err := st.DeleteUserIdentity(ctx, updated.ID, "user_oidc"); err != nil {
+		t.Fatalf("delete identity: %v", err)
+	}
+	if _, err := st.GetUserIdentity(ctx, "kirari", "sub-123"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected deleted identity to be missing, got %v", err)
+	}
 }
 
 func testConfigRepositoryUpsertsListsAndDeletesSystemConfig(t *testing.T, newStore NewStoreFunc) {

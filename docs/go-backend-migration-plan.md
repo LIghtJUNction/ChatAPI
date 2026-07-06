@@ -64,8 +64,8 @@
 - 用户配置已落地最小接口：`GET /api/user/config` 返回当前 actor 的 `user_configs` 列表和聚合 config map，`POST /api/user/config` 按 key upsert JSON object 配置并写入 `user.config` 审计事件；Lab actor 和 serve session actor 都复用同一套 owner 隔离。
 - 系统配置已落地最小管理接口：`GET /api/admin/config` 返回 `config` 表列表和聚合 config map，`POST /api/admin/config` 按 key upsert JSON object 配置并写入 `admin.config` 审计事件；当前只负责持久化和管理，不会自动覆盖 `.env` 派生的运行时配置，后续各服务再逐步读取对应 key。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
-- 本地 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 优先验证 `users` 表本地账号，失败后允许 `admin` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 作为恢复入口，成功后用独立 `CHATAPI_SESSION_SECRET` 写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。`chatapi setup` 已生成 `CHATAPI_SESSION_SECRET`；如果老部署未配置，serve 启动会生成随机 session secret 并持久化到 `config` 表的 `security.session_secret`，Lab 使用进程内不安全默认值且不持久化。本地管理员登录已补上最小进程内失败限流，连续失败后返回 `429` 并写审计事件；后续多实例部署应迁移到 Redis 或数据库限流器。注册、密码重置、TOTP 和 OIDC RP 登录仍是后续工作。
-- OIDC RP 登录已落地最小闭环：新增 `GET /api/auth/oidc/config`、`GET /api/auth/oidc/login`、`GET /api/auth/oidc/callback`，使用 `golang.org/x/oauth2` 和 `github.com/coreos/go-oidc/v3/oidc` 走 Authorization Code Flow + PKCE，校验 state、nonce、ID Token issuer/audience/expiry/signature；callback 会在有 access token 时拉取 UserInfo 补充缺失 claims，并要求 UserInfo `sub` 与 ID Token `sub` 一致；登录成功后创建同一类 ChatAPI session。当前按 `CHATAPI_OIDC_ALLOWED_DOMAINS` / `CHATAPI_OIDC_ALLOWED_EMAILS` 做 allowlist，allowlist 命中和自动关联已有本地邮箱都要求 `email_verified=true`；`CHATAPI_OIDC_AUTO_CREATE_USER=1` 时可自动创建本地用户并 upsert `user_identities`，命中 `CHATAPI_OIDC_ADMIN_EMAILS` 且 `email_verified=true` 时同步为 admin；管理员邮箱列表变化后，下次 OIDC 登录会降级非本地显式管理员。后续仍需补绑定/解绑管理、完整 token callback 集成测试和更细审计 metadata。
+- 本地 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 优先验证 `users` 表本地账号，失败后允许 `admin` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 作为恢复入口，成功后用独立 `CHATAPI_SESSION_SECRET` 写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。`chatapi setup` 已生成 `CHATAPI_SESSION_SECRET`；如果老部署未配置，serve 启动会生成随机 session secret 并持久化到 `config` 表的 `security.session_secret`，Lab 使用进程内不安全默认值且不持久化。本地管理员登录已补上最小进程内失败限流，连续失败后返回 `429` 并写审计事件；后续多实例部署应迁移到 Redis 或数据库限流器。注册、密码重置和 TOTP 仍是后续工作。
+- OIDC RP 登录已落地最小闭环：新增 `GET /api/auth/oidc/config`、`GET /api/auth/oidc/login`、`GET /api/auth/oidc/callback`，使用 `golang.org/x/oauth2` 和 `github.com/coreos/go-oidc/v3/oidc` 走 Authorization Code Flow + PKCE，校验 state、nonce、ID Token issuer/audience/expiry/signature；callback 会在有 access token 时拉取 UserInfo 补充缺失 claims，并要求 UserInfo `sub` 与 ID Token `sub` 一致；登录成功后创建同一类 ChatAPI session。当前按 `CHATAPI_OIDC_ALLOWED_DOMAINS` / `CHATAPI_OIDC_ALLOWED_EMAILS` 做 allowlist，allowlist 命中和自动关联已有本地邮箱都要求 `email_verified=true`；`CHATAPI_OIDC_AUTO_CREATE_USER=1` 时可自动创建本地用户并 upsert `user_identities`，命中 `CHATAPI_OIDC_ADMIN_EMAILS` 且 `email_verified=true` 时同步为 admin；管理员邮箱列表变化后，下次 OIDC 登录会降级非本地显式管理员。用户侧 OIDC 身份查看/解绑已落地：`GET /api/user/identities` 列出当前用户身份，`DELETE /api/user/identities/{identity_id}` 只能解绑当前用户自己的身份，并阻止无本地密码用户删除最后一个登录方式。后续仍需补绑定发起流程、完整 token callback 集成测试和更细审计 metadata。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -499,7 +499,8 @@ Go 重构版支持可选 OAuth 2.0 / OpenID Connect 登录，定位是 ChatAPI �
 - `GET /api/auth/oidc/config`：返回是否启用、登录按钮文案、provider 名称，不返回 secret。
 - `GET /api/auth/oidc/login`：创建 state/nonce/PKCE，写入短期临时 cookie 或服务端临时存储，重定向到 IdP。
 - `GET /api/auth/oidc/callback`：校验 state/nonce/code，换 token，校验 ID Token，绑定或创建本地用户，建立 ChatAPI session。
-- `POST /api/auth/oidc/unlink`：可选，仅解除当前用户的 OIDC 绑定，不删除本地用户。
+- `GET /api/user/identities`：列出当前用户已绑定的外部身份。
+- `DELETE /api/user/identities/{identity_id}`：解除当前用户的外部身份绑定，不删除本地用户；如果这是无本地密码账号的最后一个登录方式，必须拒绝。
 
 用户绑定策略：
 
@@ -1630,7 +1631,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 - 审计 metadata 会过滤包含 password、secret、token、authorization、key 的字段，避免误写敏感值。
 - 应用 API Key 请求当前仍写入 `app_api_key_audit_logs`，用于保留 key id、scope 拒绝和状态码等细节；管理员审计查询可通过 `include_app_api=1` 聚合查看这些请求，后续再扩展更细的分页游标和 source 过滤。
 
-仍待补齐的审计事件包括 OIDC 角色变更/绑定细节、ntfy/email 发送失败和上游模型辅助调用；OIDC 登录成功/失败、本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、用户配置、上传和 API Key 管理已开始写入 `audit_logs`。
+仍待补齐的审计事件包括 OIDC 角色变更/绑定发起细节、ntfy/email 发送失败和上游模型辅助调用；OIDC 登录成功/失败、用户 OIDC 身份解绑、本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、用户配置、上传和 API Key 管理已开始写入 `audit_logs`。
 
 审计日志应独立于普通运行日志等级：即使 `CHATAPI_LOG_LEVEL=warn`，关键安全事件仍应写入 audit channel。审计日志只记录必要元数据和结果，不记录完整请求体、密钥、密码、OIDC token 或上游模型输出全文。
 
@@ -2004,8 +2005,8 @@ make release-snapshot
 
 工作：
 
-- 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出、session 和 OIDC RP 最小登录闭环；注册、密码重置、TOTP、OIDC 绑定/解绑管理仍待补齐。
-- 用户配置、系统配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前用户配置已先支持 `GET/POST /api/user/config` 按当前 actor 读写普通 JSON object 偏好；系统配置已先支持 `GET/POST /api/admin/config` 做表驱动持久化；管理员用户管理已先支持列表、创建、重置密码和停用用户；用户详情历史、物理删除策略和 OIDC 绑定管理仍待补齐。
+- 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出、session、OIDC RP 最小登录闭环和用户侧 OIDC 身份查看/解绑；注册、密码重置、TOTP、OIDC 绑定发起流程仍待补齐。
+- 用户配置、系统配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前用户配置已先支持 `GET/POST /api/user/config` 按当前 actor 读写普通 JSON object 偏好；系统配置已先支持 `GET/POST /api/admin/config` 做表驱动持久化；管理员用户管理已先支持列表、创建、重置密码和停用用户；用户详情历史、物理删除策略和 OIDC 身份管理后台仍待补齐。
 - CSRF、CORS、Cookie 策略。当前已先落地 session mutation Origin/Referer 校验和 HttpOnly SameSite cookie。
 
 验收：

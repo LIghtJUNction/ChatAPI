@@ -17,6 +17,7 @@ func TestPostgreSQLRepositoryContracts(t *testing.T) {
 	storetest.RunUserRepositoryTests(t, openTestStore(dsn))
 	storetest.RunConfigRepositoryTests(t, openTestStore(dsn))
 	storetest.RunAPIKeyRepositoryTests(t, openTestStore(dsn))
+	storetest.RunAuditRepositoryTests(t, openTestStore(dsn))
 }
 
 func openTestStore(dsn string) storetest.NewStoreFunc {
@@ -42,6 +43,7 @@ func resetTestSchema(ctx context.Context, st *Store) error {
 	_, err := st.Pool().Exec(ctx, `
 		DROP TABLE IF EXISTS user_configs;
 		DROP TABLE IF EXISTS config;
+		DROP TABLE IF EXISTS audit_logs;
 		DROP TABLE IF EXISTS app_api_key_audit_logs;
 		DROP TABLE IF EXISTS user_app_api_keys;
 		DROP TABLE IF EXISTS user_api_keys;

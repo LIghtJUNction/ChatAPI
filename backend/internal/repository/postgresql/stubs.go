@@ -31,14 +31,6 @@ func (s *Store) GetRequest(context.Context, string) (store.Request, error) {
 	return store.Request{}, errNotImplemented
 }
 
-func (s *Store) CreateAuditLog(context.Context, store.CreateAuditLogInput) (store.AuditLog, error) {
-	return store.AuditLog{}, errNotImplemented
-}
-
-func (s *Store) ListAuditLogs(context.Context, store.ListAuditLogsInput) ([]store.AuditLog, error) {
-	return nil, errNotImplemented
-}
-
 func (s *Store) ListAutomationRulesByUser(context.Context, string) ([]store.AutomationRule, error) {
 	return nil, errNotImplemented
 }

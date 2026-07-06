@@ -49,6 +49,13 @@ func RunAPIKeyRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	})
 }
 
+func RunAuditRepositoryTests(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	t.Run("audit_logs", func(t *testing.T) {
+		testAuditRepositoryCreatesFiltersAndLimitsLogs(t, newStore)
+	})
+}
+
 func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewStoreFunc) {
 	t.Helper()
 	ctx := context.Background()
@@ -133,6 +140,87 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 	}
 	if _, err := st.GetUserByUsername(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing username, got %v", err)
+	}
+}
+
+func testAuditRepositoryCreatesFiltersAndLimitsLogs(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+	first, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+		ID:           "audit_1",
+		ActorUserID:  "user_audit",
+		ActorRole:    "user",
+		ActorSource:  "session",
+		EventType:    "user.identity",
+		ResourceType: "user_identity",
+		ResourceID:   "identity_1",
+		Action:       "unlink",
+		Outcome:      "success",
+		IPAddress:    "127.0.0.1",
+		UserAgent:    "contract-test",
+		Metadata: map[string]any{
+			"safe":        "value",
+			"status_code": float64(200),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create first audit log: %v", err)
+	}
+	if first.ID != "audit_1" || first.CreatedAt.IsZero() || first.Metadata["safe"] != "value" {
+		t.Fatalf("unexpected created audit log: %#v", first)
+	}
+	if _, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+		ID:           "audit_2",
+		ActorUserID:  "other_user",
+		ActorRole:    "admin",
+		ActorSource:  "session",
+		EventType:    "admin.runtime",
+		ResourceType: "runtime",
+		ResourceID:   "runtime",
+		Action:       "gc",
+		Outcome:      "success",
+		Metadata: map[string]any{
+			"freed": float64(123),
+		},
+	}); err != nil {
+		t.Fatalf("create second audit log: %v", err)
+	}
+	if _, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+		ID:           "audit_3",
+		ActorUserID:  "user_audit",
+		ActorRole:    "user",
+		ActorSource:  "session",
+		EventType:    "user.identity",
+		ResourceType: "user_identity",
+		ResourceID:   "identity_2",
+		Action:       "unlink",
+		Outcome:      "failure",
+	}); err != nil {
+		t.Fatalf("create third audit log: %v", err)
+	}
+
+	filtered, err := st.ListAuditLogs(ctx, store.ListAuditLogsInput{
+		Limit:       10,
+		EventType:   "user.identity",
+		ActorUserID: "user_audit",
+	})
+	if err != nil {
+		t.Fatalf("list filtered audit logs: %v", err)
+	}
+	if len(filtered) != 2 || filtered[0].ID != "audit_3" || filtered[1].ID != "audit_1" {
+		t.Fatalf("unexpected filtered audit logs: %#v", filtered)
+	}
+	if filtered[1].Metadata["safe"] != "value" {
+		t.Fatalf("unexpected filtered metadata: %#v", filtered[1])
+	}
+
+	limited, err := st.ListAuditLogs(ctx, store.ListAuditLogsInput{Limit: 1})
+	if err != nil {
+		t.Fatalf("list limited audit logs: %v", err)
+	}
+	if len(limited) != 1 || limited[0].ID != "audit_3" {
+		t.Fatalf("unexpected limited audit logs: %#v", limited)
 	}
 }
 

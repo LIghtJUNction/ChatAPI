@@ -3427,6 +3427,117 @@ func TestAnthropicMessagesToolCallSSEStream(t *testing.T) {
 	}
 }
 
+func TestResponsesSSEStreamWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	streamCh := startTextRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model":  "demo-pg-stream",
+		"stream": true,
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "pg responses sse 测试"},
+				},
+			},
+		},
+	})
+
+	conversationView := env.waitForWaitingConversation(t, "pg responses sse 测试")
+	conversationID := conversationView["id"].(string)
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversationID,
+		"text":            "PG 第一段",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversationID,
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	streamBody := <-streamCh
+	if !strings.Contains(streamBody, "event: response.created") {
+		t.Fatalf("missing response.created event: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"delta\":\"PG 第一段\"") {
+		t.Fatalf("missing postgres delta payload: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "event: response.completed") || !strings.Contains(streamBody, "\"output_text\":\"PG 第一段\"") {
+		t.Fatalf("missing postgres completed payload: %s", streamBody)
+	}
+}
+
+func TestChatCompletionsSSEStreamWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	streamCh := startTextRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
+		"model":  "demo-pg-chat-stream",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "pg chat stream 测试"},
+		},
+	})
+
+	conversationView := env.waitForWaitingConversation(t, "pg chat stream 测试")
+	conversationID := conversationView["id"].(string)
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversationID,
+		"text":            "PG 流式回复",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversationID,
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	streamBody := <-streamCh
+	if !strings.Contains(streamBody, "\"object\":\"chat.completion.chunk\"") {
+		t.Fatalf("missing postgres chat completion chunk: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"content\":\"PG 流式回复\"") {
+		t.Fatalf("missing postgres chat completion delta content: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "data: [DONE]") {
+		t.Fatalf("missing postgres done marker: %s", streamBody)
+	}
+}
+
+func TestAnthropicMessagesSSEStreamWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	streamCh := startTextRequest(t, env.server.URL+"/messages", map[string]any{
+		"model":  "claude-pg-stream-demo",
+		"stream": true,
+		"messages": []map[string]any{
+			{"role": "user", "content": "pg anthropic stream 测试"},
+		},
+	})
+
+	conversationView := env.waitForWaitingConversation(t, "pg anthropic stream 测试")
+	conversationID := conversationView["id"].(string)
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversationID,
+		"text":            "PG Anthropic 流式回复",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversationID,
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	streamBody := <-streamCh
+	if !strings.Contains(streamBody, "event: message_start") {
+		t.Fatalf("missing postgres anthropic message_start: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "event: content_block_start") || !strings.Contains(streamBody, "\"type\":\"text\"") {
+		t.Fatalf("missing postgres anthropic text block start: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "event: content_block_delta") || !strings.Contains(streamBody, "\"text\":\"PG Anthropic 流式回复\"") {
+		t.Fatalf("missing postgres anthropic delta: %s", streamBody)
+	}
+	if !strings.Contains(streamBody, "\"stop_reason\":\"end_turn\"") || !strings.Contains(streamBody, "event: message_stop") {
+		t.Fatalf("missing postgres anthropic completion markers: %s", streamBody)
+	}
+}
+
 type testEnv struct {
 	server          *httptest.Server
 	client          *http.Client

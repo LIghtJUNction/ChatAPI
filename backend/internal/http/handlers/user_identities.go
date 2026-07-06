@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/zyf/chatapi/internal/http/middleware"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
 )
@@ -18,12 +19,12 @@ type UserIdentitiesHandler struct {
 }
 
 func (h UserIdentitiesHandler) List(w http.ResponseWriter, r *http.Request) {
-	actor, ok := service.RequestActorFromContext(r.Context())
-	if !ok || strings.TrimSpace(actor.UserID) == "" {
+	userID := middleware.CurrentUserID(r)
+	if userID == "" {
 		http.Error(w, "session required", http.StatusUnauthorized)
 		return
 	}
-	identities, err := h.Service.List(r.Context(), actor.UserID)
+	identities, err := h.Service.List(r.Context(), userID)
 	if err != nil {
 		http.Error(w, "failed to list identities", http.StatusInternalServerError)
 		return
@@ -36,8 +37,8 @@ func (h UserIdentitiesHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserIdentitiesHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	actor, ok := service.RequestActorFromContext(r.Context())
-	if !ok || strings.TrimSpace(actor.UserID) == "" {
+	userID := middleware.CurrentUserID(r)
+	if userID == "" {
 		http.Error(w, "session required", http.StatusUnauthorized)
 		return
 	}
@@ -46,8 +47,8 @@ func (h UserIdentitiesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "identity id is required", http.StatusBadRequest)
 		return
 	}
-	if err := h.Service.Unlink(r.Context(), actor.UserID, identityID); err != nil {
-		h.record(r, actor.UserID, identityID, "unlink", "failure")
+	if err := h.Service.Unlink(r.Context(), userID, identityID); err != nil {
+		h.record(r, userID, identityID, "unlink", "failure")
 		switch {
 		case errors.Is(err, service.ErrLastLoginMethod):
 			http.Error(w, "cannot unlink the last login method", http.StatusConflict)
@@ -58,7 +59,7 @@ func (h UserIdentitiesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	h.record(r, actor.UserID, identityID, "unlink", "success")
+	h.record(r, userID, identityID, "unlink", "success")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }

@@ -33,3 +33,15 @@ func OwnerIDFromContext(ctx context.Context) string {
 	}
 	return strings.TrimSpace(actor.UserID)
 }
+
+func IsInteractiveUserActor(actor RequestActor) bool {
+	if strings.TrimSpace(actor.UserID) == "" {
+		return false
+	}
+	switch strings.TrimSpace(actor.Source) {
+	case "lab", "session", "oidc":
+		return true
+	default:
+		return false
+	}
+}

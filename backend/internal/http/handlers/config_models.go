@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/http/middleware"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
 )
@@ -89,8 +90,8 @@ func writeConfigModelsResponse(w http.ResponseWriter, items []service.VirtualMod
 }
 
 func currentActorUserID(r *http.Request, cfg config.Config) (string, error) {
-	if actor, ok := service.RequestActorFromContext(r.Context()); ok && strings.TrimSpace(actor.UserID) != "" {
-		return strings.TrimSpace(actor.UserID), nil
+	if userID := middleware.CurrentUserID(r); userID != "" {
+		return userID, nil
 	}
 	if cfg.Mode == config.ModeLab {
 		return "", errors.New("lab request actor is missing")

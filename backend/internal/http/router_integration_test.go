@@ -1409,6 +1409,43 @@ func TestUserModelAPIKeysManagementUsesSessionActor(t *testing.T) {
 	assertAuditCountForActor(t, env, "user_model_owner", "user.model_api_key", "model_api_key", keyID, "delete", "success", 1)
 }
 
+func TestUserRoutesRejectAPIKeyActors(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("user-routes-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_route_owner",
+		Username:     "user-route-owner",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed user route owner: %v", err)
+	}
+	appKey := env.seedAppAPIKey(t, "user_route_owner", []string{"requests:read"}, nil)
+	modelKey := env.seedModelAPIKey(t, "user_route_owner", "user-routes-model", "demo-user-route-model")
+
+	for _, testCase := range []struct {
+		name   string
+		path   string
+		apiKey string
+	}{
+		{name: "app_api_key", path: "/api/user/config", apiKey: appKey},
+		{name: "model_api_key", path: "/api/user/config", apiKey: modelKey},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			status, body := env.getTextWithHeaders(t, testCase.path, map[string]string{
+				"Authorization": "Bearer " + testCase.apiKey,
+			})
+			if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+				t.Fatalf("expected user route rejection for %s: status=%d body=%q", testCase.name, status, body)
+			}
+		})
+	}
+}
+
 func TestModelAPIKeyOwnsProtocolRequests(t *testing.T) {
 	env := newTestEnv(t)
 	modelKey := env.seedModelAPIKey(t, "model-user", "owner-key", "demo-owner-model")

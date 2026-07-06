@@ -1962,6 +1962,61 @@ func TestLabRequestsSchema(t *testing.T) {
 	}
 }
 
+func TestLabAccessPasswordBootstrapAndHTMLPage(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.LabPassword = "dev-password"
+	})
+
+	status, body := env.getText(t, "/api/health")
+	if status != http.StatusUnauthorized || !strings.Contains(body, "lab access denied") {
+		t.Fatalf("expected gated lab health rejection: status=%d body=%q", status, body)
+	}
+
+	htmlStatus, htmlBody, _ := env.getTextAndCookiesWithCookies(t, "/", nil)
+	if htmlStatus != http.StatusUnauthorized || !strings.Contains(htmlBody, "ChatAPI Lab") || !strings.Contains(htmlBody, "name=\"password\"") {
+		t.Fatalf("expected lab password page: status=%d body=%q", htmlStatus, htmlBody)
+	}
+
+	bootstrapStatus, bootstrapBody, cookies := env.getTextAndCookiesWithCookies(t, "/api/health?password=dev-password", nil)
+	if bootstrapStatus != http.StatusOK || !strings.Contains(bootstrapBody, "\"ok\":true") {
+		t.Fatalf("expected lab password bootstrap success: status=%d body=%q", bootstrapStatus, bootstrapBody)
+	}
+	labCookie := findCookie(cookies, "chatapi_lab_access")
+	if labCookie == nil || labCookie.Value == "" {
+		t.Fatalf("expected lab access cookie after bootstrap: %#v", cookies)
+	}
+
+	againStatus, againBody, _ := env.getTextAndCookiesWithCookies(t, "/api/health", []*http.Cookie{labCookie})
+	if againStatus != http.StatusOK || !strings.Contains(againBody, "\"ok\":true") {
+		t.Fatalf("expected lab cookie access success: status=%d body=%q", againStatus, againBody)
+	}
+}
+
+func TestLabAccessTokenIsSingleUse(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.LabToken = "lab-token"
+	})
+
+	firstStatus, firstBody, cookies := env.getTextAndCookiesWithCookies(t, "/api/health?token=lab-token", nil)
+	if firstStatus != http.StatusOK || !strings.Contains(firstBody, "\"ok\":true") {
+		t.Fatalf("expected first lab token use to pass: status=%d body=%q", firstStatus, firstBody)
+	}
+	labCookie := findCookie(cookies, "chatapi_lab_access")
+	if labCookie == nil || labCookie.Value == "" {
+		t.Fatalf("expected lab cookie after token bootstrap: %#v", cookies)
+	}
+
+	secondStatus, secondBody := env.getText(t, "/api/health?token=lab-token")
+	if secondStatus != http.StatusUnauthorized || !strings.Contains(secondBody, "lab access denied") {
+		t.Fatalf("expected single-use token rejection: status=%d body=%q", secondStatus, secondBody)
+	}
+
+	cookieStatus, cookieBody, _ := env.getTextAndCookiesWithCookies(t, "/api/health", []*http.Cookie{labCookie})
+	if cookieStatus != http.StatusOK || !strings.Contains(cookieBody, "\"ok\":true") {
+		t.Fatalf("expected lab cookie to keep working after token use: status=%d body=%q", cookieStatus, cookieBody)
+	}
+}
+
 func TestAutomationRuleAutoCompletesStructuredResponsesRequest(t *testing.T) {
 	env := newTestEnv(t)
 

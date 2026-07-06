@@ -1216,9 +1216,6 @@ func buildLabURL(cfg config.Config) string {
 	}
 	base := fmt.Sprintf("http://%s", host)
 	url := fmt.Sprintf("%s:%d", base, cfg.Port)
-	if cfg.LabPassword != "" {
-		return fmt.Sprintf("%s/?password=%s", url, cfg.LabPassword)
-	}
 	if cfg.LabToken != "" {
 		return fmt.Sprintf("%s/?token=%s", url, cfg.LabToken)
 	}

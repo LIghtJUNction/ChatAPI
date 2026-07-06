@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,6 +51,64 @@ func TestParseSMTPTestOptionsRejectsDryRunWithConnectOnly(t *testing.T) {
 	_, err := parseSMTPTestOptions([]string{"--dry-run", "--connect-only"})
 	if err == nil {
 		t.Fatal("expected incompatible smtp options error")
+	}
+}
+
+func TestSetupCommandDryRunDoesNotWriteEnv(t *testing.T) {
+	backendRoot := t.TempDir()
+	report, err := setupCommand(backendRoot, setupOptions{})
+	if err != nil {
+		t.Fatalf("setup dry-run: %v", err)
+	}
+	if !report.OK || report.Written || report.EnvTemplate == "" {
+		t.Fatalf("unexpected setup dry-run report: %#v", report)
+	}
+	if !strings.Contains(report.EnvTemplate, "CHATAPI_MASTER_KEY=") || !strings.Contains(report.EnvTemplate, "CHATAPI_ADMIN_PASSWORD=") {
+		t.Fatalf("setup template missing required secrets: %q", report.EnvTemplate)
+	}
+	if _, err := os.Stat(filepath.Join(backendRoot, ".env")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not write .env, err=%v", err)
+	}
+}
+
+func TestSetupCommandWriteEnv(t *testing.T) {
+	backendRoot := t.TempDir()
+	report, err := setupCommand(backendRoot, setupOptions{writeEnv: true})
+	if err != nil {
+		t.Fatalf("setup write-env: %v", err)
+	}
+	if !report.OK || !report.Written || report.EnvTemplate != "" {
+		t.Fatalf("unexpected setup write report: %#v", report)
+	}
+	data, err := os.ReadFile(filepath.Join(backendRoot, ".env"))
+	if err != nil {
+		t.Fatalf("read written .env: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "CHATAPI_MASTER_KEY=") || !strings.Contains(content, "CHATAPI_ADMIN_PASSWORD=") {
+		t.Fatalf("written .env missing required values: %q", content)
+	}
+}
+
+func TestSetupCommandRejectsExistingEnvWithoutForce(t *testing.T) {
+	backendRoot := t.TempDir()
+	envPath := filepath.Join(backendRoot, ".env")
+	if err := os.WriteFile(envPath, []byte("CHATAPI_MASTER_KEY=keep\n"), 0o600); err != nil {
+		t.Fatalf("seed .env: %v", err)
+	}
+	report, err := setupCommand(backendRoot, setupOptions{writeEnv: true})
+	if err == nil {
+		t.Fatal("expected existing .env rejection")
+	}
+	if report.OK || !strings.Contains(report.Error, "already exists") {
+		t.Fatalf("unexpected existing .env setup report: %#v", report)
+	}
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read existing .env: %v", err)
+	}
+	if string(data) != "CHATAPI_MASTER_KEY=keep\n" {
+		t.Fatalf("setup should not overwrite existing .env: %q", string(data))
 	}
 }
 

@@ -1665,12 +1665,12 @@ chatapi smtp test
 chatapi version
 ```
 
-首版至少应包含 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`；migration 能力必须可由启动流程和独立 CLI 调用。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor`、`db check`、`config print --redact`、`smtp test`、`version` 和 SQLite `migrate up|status`，`migrate down` / `setup` 仍待补。
+首版至少应包含 `serve`、`lab`、`doctor`、`db check`、`config print --redact` 和 `version`；migration 能力必须可由启动流程和独立 CLI 调用。`debug` 可以作为 `lab` 的兼容别名，但文档和 UI 文案统一使用 Lab 模式。当前 Go 重构分支已先落地 `serve`、`lab`、`doctor`、`db check`、`config print --redact`、`smtp test`、`setup`、`version` 和 SQLite `migrate up|status`；`migrate down` 仍待补。
 
 首次启动向导：
 
 - 当数据库为空、没有管理员账号、没有 session secret 或缺少必要 master key 时，`serve` 应进入明确的 bootstrap 状态，而不是静默使用危险默认值。
-- 支持 `chatapi setup` 或首次访问 `/setup` 完成初始化；仅在无管理员账号时可用。
+- 支持 `chatapi setup` 或首次访问 `/setup` 完成初始化；仅在无管理员账号时可用。当前 Go 重构分支已先落地 CLI 版 `chatapi setup`：默认只输出 `.env` 初始化模板，`--write-env` 写入 `backend/.env`，已有文件需要 `--force` 才覆盖；Web `/setup` 仍待后续用户体系一起实现。
 - setup 完成后立即关闭 bootstrap 能力，并写入审计日志。
 - 如果检测到 `CHATAPI_ADMIN_PASSWORD=change-me`、未配置生产 master key、OIDC callback URL 与外部访问 URL 不一致，应在 setup 和 `doctor` 中给出明确错误或高危警告。
 

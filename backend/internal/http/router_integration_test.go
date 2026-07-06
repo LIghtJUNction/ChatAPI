@@ -3895,6 +3895,121 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	}
 }
 
+func TestAutomationSkipAudits(t *testing.T) {
+	env := newTestEnv(t)
+
+	noRulesCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "audit-no-rules",
+		"input": "audit no rules",
+	})
+	noRulesConversation := env.waitForWaitingConversation(t, "audit no rules")
+	status, body := env.postText(t, "/api/conversations/"+noRulesConversation["id"].(string)+"/abort", map[string]any{
+		"error": "cleanup",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("expected abort ok for no-rules request: status=%d body=%q", status, body)
+	}
+	<-noRulesCh
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "audit_rule_never_match",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "will-not-match"}},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "never",
+				},
+			},
+		},
+	}, http.StatusOK)
+	noMatchCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "audit-no-match",
+		"input": "audit no match",
+	})
+	noMatchConversation := env.waitForWaitingConversation(t, "audit no match")
+	status, body = env.postText(t, "/api/conversations/"+noMatchConversation["id"].(string)+"/abort", map[string]any{
+		"error": "cleanup",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("expected abort ok for no-match request: status=%d body=%q", status, body)
+	}
+	<-noMatchCh
+
+	var noRulesMetadataRaw string
+	if err := env.rawDB.QueryRowContext(context.Background(), `
+		SELECT metadata_json
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'automation.rule'
+			AND action = 'auto_complete'
+			AND outcome = 'skipped'
+			AND json_extract(metadata_json, '$.reason') = 'no_rules'
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`).Scan(&noRulesMetadataRaw); err != nil {
+		t.Fatalf("select no-rules automation audit: %v", err)
+	}
+	var noRulesMetadata map[string]any
+	if err := json.Unmarshal([]byte(noRulesMetadataRaw), &noRulesMetadata); err != nil {
+		t.Fatalf("decode no-rules automation audit metadata: %v", err)
+	}
+	if nestedString(noRulesMetadata, "conversation_id") == "" || nestedString(noRulesMetadata, "model") != "audit-no-rules" {
+		t.Fatalf("unexpected no-rules audit metadata: %#v", noRulesMetadata)
+	}
+
+	var noMatchMetadataRaw string
+	if err := env.rawDB.QueryRowContext(context.Background(), `
+		SELECT metadata_json
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'automation.rule'
+			AND action = 'auto_complete'
+			AND outcome = 'skipped'
+			AND json_extract(metadata_json, '$.reason') = 'no_match'
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`).Scan(&noMatchMetadataRaw); err != nil {
+		t.Fatalf("select no-match automation audit: %v", err)
+	}
+	var noMatchMetadata map[string]any
+	if err := json.Unmarshal([]byte(noMatchMetadataRaw), &noMatchMetadata); err != nil {
+		t.Fatalf("decode no-match automation audit metadata: %v", err)
+	}
+	if numericValue(noMatchMetadata["skip_count"]) != 1 || nestedString(noMatchMetadata, "model") != "audit-no-match" {
+		t.Fatalf("unexpected no-match audit metadata: %#v", noMatchMetadata)
+	}
+	if !containsStringValue(noMatchMetadata["skip_reasons"], "contains_miss") {
+		t.Fatalf("unexpected no-match audit skip reasons: %#v", noMatchMetadata)
+	}
+
+	var ruleSkipMetadataRaw string
+	if err := env.rawDB.QueryRowContext(context.Background(), `
+		SELECT metadata_json
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'automation.rule'
+			AND resource_type = 'automation_rule'
+			AND resource_id = 'audit_rule_never_match'
+			AND action = 'rule_skip'
+			AND outcome = 'skipped'
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`).Scan(&ruleSkipMetadataRaw); err != nil {
+		t.Fatalf("select rule-skip automation audit: %v", err)
+	}
+	var ruleSkipMetadata map[string]any
+	if err := json.Unmarshal([]byte(ruleSkipMetadataRaw), &ruleSkipMetadata); err != nil {
+		t.Fatalf("decode rule-skip automation audit metadata: %v", err)
+	}
+	if nestedString(ruleSkipMetadata, "reason") != "contains_miss" || nestedString(ruleSkipMetadata, "model") != "audit-no-match" {
+		t.Fatalf("unexpected rule-skip audit metadata: %#v", ruleSkipMetadata)
+	}
+}
+
 func TestAdminRuntimeEndpointsWithPostgreSQL(t *testing.T) {
 	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
 

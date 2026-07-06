@@ -1009,7 +1009,7 @@ type Hub struct {
 - 后端当前已新增规则结构化 parser/validator：`ReplaceRules` 不再直接接受任意裸 `map[string]any` 入库，而是先解析成内部规则对象、校验 action 和 matcher、再输出规范化 payload。这样 WebUI、应用 API、未来导入导出以及规则执行共享同一套校验逻辑；对外 JSON 形状暂时保持不变，前端本轮不需要同步改协议。
 - 规则命中后，`ChatAPIService` 会在 pending turn 落库并进入 realtime 广播后，复用同一套 `CompleteConversation` 状态机直接自动完成请求；因此非流请求会直接返回自动结果，流式请求会在 SSE 起始事件后收到同样的完成事件，而不会走另一条旁路逻辑。
 - 当前自动执行是 best-effort：规则读取或匹配异常不会阻断主请求链路，只会退化为普通 pending turn。
-- 当前输出会受服务内最大长度限制截断；自动化规则自动完成命中已写入 `audit_logs`，并汇总到 `/api/app/statistics/summary`、`/api/admin/requests/overview`、`/api/admin/runtime/summary`、`/api/admin/runtime/automation` 和 `/metrics`。当前还会把 `ListAutomationRules` 失败、自动完成失败写入 `audit_logs` 的 `outcome=failure`，并把运行期 `no_rules` / `no_match` 跳过计数、规则级 `skip_by_reason` 聚合、按规则分组的 `skip_by_rule` 统计以及最近未命中样本暴露到管理员运行时接口；`/metrics` 继续只暴露低基数的 reason 维度，避免把 rule id 带进指标标签。更细的规则执行超时和逐条规则级跳过审计仍待继续补齐。
+- 当前输出会受服务内最大长度限制截断；自动化规则自动完成命中已写入 `audit_logs`，并汇总到 `/api/app/statistics/summary`、`/api/admin/requests/overview`、`/api/admin/runtime/summary`、`/api/admin/runtime/automation` 和 `/metrics`。当前还会把 `ListAutomationRules` 失败、自动完成失败写入 `audit_logs` 的 `outcome=failure`，并把运行期 `no_rules` / `no_match` 跳过计数、规则级 `skip_by_reason` 聚合、按规则分组的 `skip_by_rule` 统计以及最近未命中样本暴露到管理员运行时接口；`/metrics` 继续只暴露低基数的 reason 维度，避免把 rule id 带进指标标签。除此之外，请求级 `no_rules` / `no_match` 跳过结果也已写入 `audit_logs` 的 `outcome=skipped`，逐条规则级跳过会写成 `event_type=automation.rule`、`action=rule_skip` 的独立审计事件，metadata 带上 `reason`、`conversation_id`、`request_format` 和 `model`。更细的规则执行超时审计仍待继续补齐。
 
 ### 6.5 Upload/Image Store
 
@@ -1748,7 +1748,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 - 审计 metadata 会过滤包含 password、secret、token、authorization、key 的字段，避免误写敏感值。
 - 应用 API Key 请求当前仍写入 `app_api_key_audit_logs`，用于保留 key id、scope 拒绝和状态码等细节；管理员审计查询可通过 `include_app_api=1` 聚合查看这些请求，后续再扩展更细的分页游标和 source 过滤。
 
-仍待补齐的审计事件包括 ntfy/email 发送失败、上游模型辅助调用，以及自动化规则逐条规则级跳过等更细事件；OIDC 登录成功/失败、绑定发起、绑定成功/失败、角色同步变化、用户 OIDC 身份解绑、本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、用户配置、上传、API Key 管理，以及自动化规则自动完成命中/失败已开始写入 `audit_logs`。
+仍待补齐的审计事件包括 ntfy 发送失败、上游模型辅助调用，以及自动化规则更细的执行超时事件；OIDC 登录成功/失败、绑定发起、绑定成功/失败、角色同步变化、用户 OIDC 身份解绑、本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、管理员测试邮件发送成功/失败、用户配置、上传、API Key 管理，以及自动化规则自动完成命中/失败、请求级 `no_rules` / `no_match` 跳过和逐条规则级 `rule_skip` 已开始写入 `audit_logs`。
 
 审计日志应独立于普通运行日志等级：即使 `CHATAPI_LOG_LEVEL=warn`，关键安全事件仍应写入 audit channel。审计日志只记录必要元数据和结果，不记录完整请求体、密钥、密码、OIDC token 或上游模型输出全文。
 

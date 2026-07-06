@@ -118,9 +118,10 @@ func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request prot
 		return
 	}
 	ownerID := OwnerIDFromContext(ctx)
+	audit := NewAuditService(s.store)
 	decision, err := s.auto.MatchTurn(ctx, ownerID, request, conversationID, responseID)
 	if err != nil {
-		NewAuditService(s.store).Record(ctx, AuditEventInput{
+		audit.Record(ctx, AuditEventInput{
 			EventType:    "automation.rule",
 			ResourceType: "automation_rule",
 			Action:       "auto_complete",
@@ -138,19 +139,60 @@ func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request prot
 	switch decision.Status {
 	case automationStatusNoRules:
 		s.autoObs.RecordNoRules()
+		audit.Record(ctx, AuditEventInput{
+			EventType:    "automation.rule",
+			ResourceType: "automation_rule",
+			Action:       "auto_complete",
+			Outcome:      "skipped",
+			Metadata: map[string]any{
+				"conversation_id": conversationID,
+				"request_format":  request.Protocol.String(),
+				"model":           request.Model,
+				"reason":          automationStatusNoRules,
+			},
+		})
 		return
 	case automationStatusNoMatch:
 		s.autoObs.RecordNoMatch()
 		s.autoObs.RecordSkipReasons(decision.SkipReasons)
 		s.autoObs.RecordSkipDetails(decision.SkipDetails)
 		s.autoObs.RecordSkipSamples(automationSkipSamples(decision.SkipDetails, request, conversationID))
+		audit.Record(ctx, AuditEventInput{
+			EventType:    "automation.rule",
+			ResourceType: "automation_rule",
+			Action:       "auto_complete",
+			Outcome:      "skipped",
+			Metadata: map[string]any{
+				"conversation_id": conversationID,
+				"request_format":  request.Protocol.String(),
+				"model":           request.Model,
+				"reason":          automationStatusNoMatch,
+				"skip_count":      len(decision.SkipDetails),
+				"skip_reasons":    decision.SkipReasons,
+			},
+		})
+		for _, detail := range decision.SkipDetails {
+			audit.Record(ctx, AuditEventInput{
+				EventType:    "automation.rule",
+				ResourceType: "automation_rule",
+				ResourceID:   detail.RuleID,
+				Action:       "rule_skip",
+				Outcome:      "skipped",
+				Metadata: map[string]any{
+					"conversation_id": conversationID,
+					"request_format":  request.Protocol.String(),
+					"model":           request.Model,
+					"reason":          detail.Reason,
+				},
+			})
+		}
 		return
 	}
 	if decision.Match == nil {
 		return
 	}
 	if _, err := s.CompleteConversation(ctx, decision.Match.Input); err == nil {
-		NewAuditService(s.store).Record(ctx, AuditEventInput{
+		audit.Record(ctx, AuditEventInput{
 			EventType:    "automation.rule",
 			ResourceType: "automation_rule",
 			ResourceID:   decision.Match.RuleID,
@@ -164,7 +206,7 @@ func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request prot
 		})
 		return
 	} else {
-		NewAuditService(s.store).Record(ctx, AuditEventInput{
+		audit.Record(ctx, AuditEventInput{
 			EventType:    "automation.rule",
 			ResourceType: "automation_rule",
 			ResourceID:   decision.Match.RuleID,

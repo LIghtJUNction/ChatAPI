@@ -3502,6 +3502,54 @@ func TestServeAdminSessionLoginAndLogout(t *testing.T) {
 	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "logout", "success", 1)
 }
 
+func TestAuthSchemaReflectsServeSettings(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.OIDCEnabled = true
+		cfg.OIDCProviderName = "Kirari"
+		cfg.SMTPEnabled = true
+	})
+	if _, err := env.store.SetSystemConfig(context.Background(), store.SetSystemConfigInput{
+		Key: "system_settings",
+		Value: map[string]any{
+			"external_registration_enabled": true,
+			"email_verification_enabled":    true,
+		},
+	}); err != nil {
+		t.Fatalf("seed auth schema system settings: %v", err)
+	}
+
+	resp := env.getJSON(t, "/api/auth/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	capabilities := schema["capabilities"].(map[string]any)
+	if capabilities["lab_mode"] != false ||
+		capabilities["oidc_enabled"] != true ||
+		capabilities["registration_enabled"] != true ||
+		capabilities["password_reset_enabled"] != true ||
+		nestedString(capabilities, "oidc_provider_name") != "Kirari" {
+		t.Fatalf("unexpected auth schema capabilities: %#v", resp)
+	}
+	operations := schema["operations"].([]any)
+	if len(operations) != 15 {
+		t.Fatalf("unexpected auth schema operations: %#v", resp)
+	}
+	if nestedString(operations[0].(map[string]any), "name") != "session" ||
+		nestedString(operations[1].(map[string]any), "name") != "login" ||
+		nestedString(operations[12].(map[string]any), "name") != "oidc_config" {
+		t.Fatalf("unexpected auth schema operation ordering: %#v", resp)
+	}
+}
+
+func TestAuthSchemaReflectsLabMode(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeLab)
+
+	resp := env.getJSON(t, "/api/auth/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	capabilities := schema["capabilities"].(map[string]any)
+	if capabilities["lab_mode"] != true || capabilities["oidc_enabled"] != false {
+		t.Fatalf("unexpected lab auth schema capabilities: %#v", resp)
+	}
+}
+
 func TestOIDCConfigEndpointReflectsServeSettings(t *testing.T) {
 	disabledEnv := newTestEnvWithMode(t, config.ModeServe)
 	disabled := disabledEnv.getJSON(t, "/api/auth/oidc/config", http.StatusOK)

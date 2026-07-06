@@ -32,6 +32,18 @@ type AuthHandler struct {
 	LoginLimiter *service.LoginRateLimiter
 }
 
+func (h AuthHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.Settings.Public(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildAuthSchema(h.Config, settings),
+	})
+}
+
 func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 	type user struct {
 		ID       string `json:"id"`

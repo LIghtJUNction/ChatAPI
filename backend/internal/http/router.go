@@ -94,6 +94,7 @@ func NewRouter(
 	if cfg.MetricsEnabled {
 		router.Get("/metrics", metricsHandler.ServeHTTP)
 	}
+	router.Get("/api/auth/schema", authHandler.Schema)
 	router.Get("/api/auth/session", authHandler.Session)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)

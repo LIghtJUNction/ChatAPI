@@ -128,6 +128,7 @@ func NewRouter(
 	router.Get("/api/config/automation-rules/schema", configAutomationRulesHandler.Schema)
 	router.Post("/api/config/automation-rules", configAutomationRulesHandler.Post)
 	router.Get("/api/config/models", configModelsHandler.Get)
+	router.Get("/api/config/models/schema", configModelsHandler.Schema)
 	router.Post("/api/config/models", configModelsHandler.Post)
 	router.Delete("/api/config/models/{modelID}", configModelsHandler.Delete)
 	router.Get("/api/config/system", configSystemHandler.Get)

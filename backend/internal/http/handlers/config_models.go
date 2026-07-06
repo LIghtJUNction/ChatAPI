@@ -34,6 +34,18 @@ func (h ConfigModelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeConfigModelsResponse(w, items)
 }
 
+func (h ConfigModelsHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	userID, err := currentActorUserID(r, h.Config)
+	if err != nil || userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": h.Service.Schema(),
+	})
+}
+
 func (h ConfigModelsHandler) Post(w http.ResponseWriter, r *http.Request) {
 	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {

@@ -1273,6 +1273,12 @@ func TestUserConfigManagementUsesSessionActor(t *testing.T) {
 func TestConfigModelsRoutesAndModelsEndpoint(t *testing.T) {
 	env := newTestEnv(t)
 
+	schemaResp := env.getJSON(t, "/api/config/models/schema", http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	if !containsMapItemWithStringField(schema["create_fields"], "name", "id") || !containsMapItemWithStringField(schema["create_fields"], "name", "name") {
+		t.Fatalf("unexpected config models schema response: %#v", schemaResp)
+	}
+
 	initial := env.getJSON(t, "/api/config/models", http.StatusOK)
 	initialModels := initial["models"].([]any)
 	if len(initialModels) != 1 || initialModels[0].(string) != "chatapi-lab" {

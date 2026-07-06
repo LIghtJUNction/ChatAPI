@@ -51,3 +51,16 @@ func TestVirtualModelServiceDefaultsUpsertsAndDeletes(t *testing.T) {
 		t.Fatalf("unexpected virtual models after delete: %#v", updated)
 	}
 }
+
+func TestVirtualModelServiceSchema(t *testing.T) {
+	schema := NewVirtualModelService(nil).Schema()
+	if len(schema.CreateFields) != 5 {
+		t.Fatalf("unexpected virtual model schema fields: %#v", schema)
+	}
+	if schema.CreateFields[0].Name != "id" || !schema.CreateFields[0].Required {
+		t.Fatalf("unexpected virtual model id field: %#v", schema.CreateFields)
+	}
+	if schema.CreateFields[1].Name != "name" || !schema.CreateFields[1].Required {
+		t.Fatalf("unexpected virtual model name field: %#v", schema.CreateFields)
+	}
+}

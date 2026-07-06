@@ -22,12 +22,34 @@ type VirtualModel struct {
 	Enabled bool   `json:"enabled"`
 }
 
+type VirtualModelSchema struct {
+	CreateFields []VirtualModelFieldSpec `json:"create_fields"`
+}
+
+type VirtualModelFieldSpec struct {
+	Name        string `json:"name"`
+	Required    bool   `json:"required"`
+	Description string `json:"description"`
+}
+
 type VirtualModelService struct {
 	store store.Store
 }
 
 func NewVirtualModelService(dataStore store.Store) *VirtualModelService {
 	return &VirtualModelService{store: dataStore}
+}
+
+func (s *VirtualModelService) Schema() VirtualModelSchema {
+	return VirtualModelSchema{
+		CreateFields: []VirtualModelFieldSpec{
+			{Name: "id", Required: true, Description: "Virtual model identifier exposed to external clients."},
+			{Name: "name", Required: true, Description: "Display name for the virtual model."},
+			{Name: "owned_by", Required: false, Description: "Owner label returned by model listing endpoints."},
+			{Name: "created", Required: false, Description: "Unix timestamp returned by model listing endpoints."},
+			{Name: "enabled", Required: false, Description: "Whether the virtual model is visible in /models responses."},
+		},
+	}
 }
 
 func (s *VirtualModelService) List(ctx context.Context, userID string) ([]VirtualModel, error) {

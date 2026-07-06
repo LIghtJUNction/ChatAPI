@@ -43,6 +43,7 @@
 - 虚拟模型 API Key 配置契约当前也已开始显式暴露：`GET /api/user/model-api-keys/schema` 和 `GET /api/app/model-keys/schema` 会返回 `sk-` 前缀和创建字段定义；同时服务端已开始把 `model` 收紧为必填，避免生成未绑定虚拟模型名的 key。
 - 用户侧虚拟模型配置已补上最小接口：`GET/POST/DELETE /api/config/models` 当前按 actor 读写 `user_configs.virtual_models`，用于保存当前用户自己的虚拟模型列表；`GET /models` / `GET /v1/models` 也已开始优先返回当前 actor 的已启用虚拟模型，而不是硬编码单个 `chatapi-lab`。若当前用户没有配置模型，则回退到默认 `chatapi-lab`。
 - 为兼容当前前端设置面板，`/api/config/models` 当前同时返回 `models: string[]` 和 `items`；前端仍按简单字符串列表工作，后续前端改造时再逐步切到更完整的模型对象结构。
+- 虚拟模型配置契约当前也已开始显式暴露：`GET /api/config/models/schema` 会返回创建字段定义，避免前端继续硬编码 `id/name/owned_by/created/enabled` 这组字段。
 - 为兼容当前前端自动规则面板，`GET/POST /api/config/automation-rules` 已补上用户侧兼容接口，直接按当前 actor 读写自己的自动规则列表，响应格式对齐前端使用中的 `{ ok, rules }`；底层复用与应用 API 同一套 `automation_rules` 存储与校验逻辑，后续前端切到应用 API 时不需要再迁移数据结构。
 - 自动化规则 schema metadata 已开始对外暴露：`GET /api/config/automation-rules/schema` 和 `GET /api/app/automation-rules/schema` 当前返回 action 类型、legacy matcher 支持的 `field` / `match_type`，以及 typed condition 列表，供前端和外部程序做前置校验；规则读写接口本身的 JSON 形状本轮保持不变。
 - 应用 API 当前已开始覆盖 `model_keys:read` / `model_keys:write` / `model_keys:delete`：`/api/app/model-keys` 可按 scope 和 `allowed_virtual_models` / `allowed_model_key_ids` 管理当前用户自己的虚拟模型 API Key。
@@ -1569,6 +1570,7 @@ Go 版首个可替换版本必须覆盖：
   - 终止请求：`POST /api/conversations/{conversation_id}/abort`
 - 这样可以把“非流式一次完成”和“流式逐段输出”拆成两条明确语义路径，避免后续前端把所有手工回复都硬塞进流式草稿模型。
 - `GET /api/config/models`
+- `GET /api/config/models/schema`
 - `POST /api/config/models`
 - `DELETE /api/config/models/{model_id}`
 - `GET /api/config/stream-heartbeat`

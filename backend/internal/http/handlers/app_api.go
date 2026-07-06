@@ -49,6 +49,7 @@ func (h AppAPIHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	items = filterRequestsForAppAPI(items, principal)
 	parsedItems := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		parsedItems = append(parsedItems, requestParsedSummary(item))
@@ -72,6 +73,10 @@ func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		h.writeRequestError(w, err)
 		return
 	}
+	if !appAPIRequestAllowed(principal, item) {
+		h.writeRequestError(w, service.ErrForbidden)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item, "parsed": requestParsedView(item)})
 }
 
@@ -86,6 +91,7 @@ func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	items = filterConversationsForAppAPI(items, principal)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
@@ -103,6 +109,10 @@ func (h AppAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.R
 			return
 		}
 		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if !appAPIConversationIDAllowed(principal, conversationID) {
+		http.Error(w, service.ErrForbidden.Error(), http.StatusForbidden)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
@@ -306,6 +316,10 @@ func (h AppAPIHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.
 		h.writeRequestError(w, err)
 		return
 	}
+	if !appAPIRequestAllowed(principal, request) {
+		h.writeRequestError(w, service.ErrForbidden)
+		return
+	}
 	body := decodeBodyOrEmpty(r)
 	command := service.TurnControlCommand{
 		Kind:                kind,
@@ -363,6 +377,72 @@ func stringSetFromAny(value any) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+func filterRequestsForAppAPI(items []store.Request, principal service.AppAPIPrincipal) []store.Request {
+	if len(items) == 0 {
+		return []store.Request{}
+	}
+	filtered := make([]store.Request, 0, len(items))
+	for _, item := range items {
+		if appAPIRequestAllowed(principal, item) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func appAPIRequestAllowed(principal service.AppAPIPrincipal, item store.Request) bool {
+	if !appAPIModelAllowed(principal, item.Model) {
+		return false
+	}
+	if !appAPIRequestIDAllowed(principal, item.RequestID) {
+		return false
+	}
+	if !appAPIConversationIDAllowed(principal, item.ConversationID) {
+		return false
+	}
+	return true
+}
+
+func filterConversationsForAppAPI(items []store.Conversation, principal service.AppAPIPrincipal) []store.Conversation {
+	if len(items) == 0 {
+		return []store.Conversation{}
+	}
+	filtered := make([]store.Conversation, 0, len(items))
+	for _, item := range items {
+		if appAPIConversationIDAllowed(principal, item.ID) && appAPIModelAllowed(principal, stringValue(item.Metadata["model"], "")) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func appAPIRequestIDAllowed(principal service.AppAPIPrincipal, requestID string) bool {
+	allowed := stringSetFromAny(principal.ResourceLimits["allowed_request_ids"])
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[strings.TrimSpace(requestID)]
+	return ok
+}
+
+func appAPIConversationIDAllowed(principal service.AppAPIPrincipal, conversationID string) bool {
+	allowed := stringSetFromAny(principal.ResourceLimits["allowed_conversation_ids"])
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[strings.TrimSpace(conversationID)]
+	return ok
+}
+
+func appAPIModelAllowed(principal service.AppAPIPrincipal, model string) bool {
+	allowed := stringSetFromAny(principal.ResourceLimits["allowed_virtual_models"])
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[strings.TrimSpace(model)]
+	return ok
 }
 
 func positiveIntFromAny(value any) int {

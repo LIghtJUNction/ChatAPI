@@ -612,6 +612,88 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 	}
 }
 
+func TestAppAPIRequestsResourceLimits(t *testing.T) {
+	env := newTestEnv(t)
+
+	allowedCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-requests-allowed",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "allowed request"}},
+			},
+		},
+	})
+	blockedCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-requests-blocked",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "blocked request"}},
+			},
+		},
+	})
+
+	allowedConversation := env.waitForWaitingConversation(t, "allowed request")
+	blockedConversation := env.waitForWaitingConversation(t, "blocked request")
+	allowedRequestID := env.requestIDForConversation(t, allowedConversation["id"].(string))
+	blockedRequestID := env.requestIDForConversation(t, blockedConversation["id"].(string))
+
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read", "requests:respond"}, map[string]any{
+		"allowed_request_ids":     []string{allowedRequestID},
+		"allowed_virtual_models":  []string{"demo-requests-allowed"},
+		"allowed_request_actions": []string{"complete"},
+	})
+
+	listResp := env.appGetJSON(t, "/api/app/requests", appKey, http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) != 1 || nestedString(items[0].(map[string]any), "request_id") != allowedRequestID {
+		t.Fatalf("unexpected resource-limited request list: %#v", listResp)
+	}
+	parsedItems := listResp["parsed_items"].([]any)
+	if len(parsedItems) != 1 || nestedString(parsedItems[0].(map[string]any), "request_id") != allowedRequestID {
+		t.Fatalf("unexpected resource-limited parsed request list: %#v", listResp)
+	}
+
+	allowedResp := env.appGetJSON(t, "/api/app/requests/"+allowedRequestID, appKey, http.StatusOK)
+	if nestedPathString(allowedResp, "request", "request_id") != allowedRequestID {
+		t.Fatalf("unexpected allowed request detail: %#v", allowedResp)
+	}
+
+	status, body := env.appGetText(t, "/api/app/requests/"+blockedRequestID, appKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "forbidden") {
+		t.Fatalf("expected blocked request detail rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appPostText(t, "/api/app/requests/"+blockedRequestID+"/complete", appKey, map[string]any{
+		"text": "should not pass",
+		"mode": "assistant_message",
+	})
+	if status != http.StatusForbidden || !strings.Contains(body, "forbidden") {
+		t.Fatalf("expected blocked request complete rejection: status=%d body=%q", status, body)
+	}
+
+	env.appPostJSON(t, "/api/app/requests/"+allowedRequestID+"/complete", appKey, map[string]any{
+		"text": "allowed app api complete",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/conversations/"+blockedConversation["id"].(string)+"/respond", map[string]any{
+		"text": "blocked fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+
+	allowedFinal := <-allowedCh
+	if got := nestedString(allowedFinal, "output_text"); got != "allowed app api complete" {
+		t.Fatalf("unexpected allowed request final response: %#v", allowedFinal)
+	}
+	blockedFinal := <-blockedCh
+	if got := nestedString(blockedFinal, "output_text"); got != "blocked fallback" {
+		t.Fatalf("unexpected blocked request final response: %#v", blockedFinal)
+	}
+}
+
 func TestAppAPIRejectsMissingRespondScope(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
@@ -752,6 +834,67 @@ func TestAppAPIConversationsRead(t *testing.T) {
 		"mode": "assistant_message",
 	}, http.StatusOK)
 	<-resultCh
+}
+
+func TestAppAPIConversationResourceLimits(t *testing.T) {
+	env := newTestEnv(t)
+
+	allowedCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-conv-allowed",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "allowed conversation"}},
+			},
+		},
+	})
+	blockedCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-conv-blocked",
+		"input": []map[string]any{
+			{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]any{{"type": "input_text", "text": "blocked conversation"}},
+			},
+		},
+	})
+
+	allowedConversation := env.waitForWaitingConversation(t, "allowed conversation")
+	blockedConversation := env.waitForWaitingConversation(t, "blocked conversation")
+
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"conversations:read"}, map[string]any{
+		"allowed_conversation_ids": []string{allowedConversation["id"].(string)},
+		"allowed_virtual_models":   []string{"demo-conv-allowed"},
+	})
+
+	listResp := env.appGetJSON(t, "/api/app/conversations", appKey, http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) != 1 || nestedString(items[0].(map[string]any), "id") != allowedConversation["id"].(string) {
+		t.Fatalf("unexpected resource-limited conversation list: %#v", listResp)
+	}
+
+	messagesResp := env.appGetJSON(t, "/api/app/conversations/"+allowedConversation["id"].(string)+"/messages", appKey, http.StatusOK)
+	messageItems := messagesResp["items"].([]any)
+	if len(messageItems) == 0 || nestedString(messageItems[0].(map[string]any), "content") != "allowed conversation" {
+		t.Fatalf("unexpected allowed conversation messages: %#v", messagesResp)
+	}
+
+	status, body := env.appGetText(t, "/api/app/conversations/"+blockedConversation["id"].(string)+"/messages", appKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "forbidden") {
+		t.Fatalf("expected blocked conversation messages rejection: status=%d body=%q", status, body)
+	}
+
+	env.postJSON(t, "/api/conversations/"+allowedConversation["id"].(string)+"/respond", map[string]any{
+		"text": "allowed conversation fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/conversations/"+blockedConversation["id"].(string)+"/respond", map[string]any{
+		"text": "blocked conversation fallback",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-allowedCh
+	<-blockedCh
 }
 
 func TestAppAPIConversationsOwnerIsolation(t *testing.T) {

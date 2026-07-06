@@ -1379,6 +1379,8 @@ user_app_api_keys
 建议 resource limits：
 
 - `allowed_model_key_ids`：只允许管理指定虚拟模型 API Key；为空表示按 scope 允许当前用户全部虚拟模型 key。
+- `allowed_request_ids`：只允许读取和响应指定 request id。
+- `allowed_conversation_ids`：只允许读取指定会话及其消息。
 - `allowed_virtual_models`：只允许处理指定虚拟模型名称收到的请求。
 - `allowed_automation_rule_ids`：只允许读写指定自动化规则。
 - `allowed_request_actions`：细分 `delta`、`complete`、`abort`，避免只需要流式输出的程序获得终止能力。
@@ -1436,6 +1438,8 @@ user_app_api_keys
 - `GET /api/app/automation-rules`：需要 `automation:read`，返回当前用户自己的规则数组；如果配置了 `allowed_automation_rule_ids`，只返回允许的规则。
 - `GET /api/app/automation-rules/schema`：需要 `automation:read`，返回当前后端支持的自动化规则 schema metadata，供外部程序做表单/配置校验。
 - `PUT /api/app/automation-rules`：需要 `automation:write`，请求体为 `{ "rules": [...] }`。未配置 `allowed_automation_rule_ids` 时替换当前用户全部规则；配置后只允许替换指定规则，提交未授权规则 id 返回 `403`。
+- `GET /api/app/requests*`：当前已开始同时检查 `allowed_request_ids`、`allowed_conversation_ids` 和 `allowed_virtual_models`。列表接口会直接过滤未授权请求；详情和响应接口命中未授权对象时返回 `403`。
+- `GET /api/app/conversations*`：当前已开始同时检查 `allowed_conversation_ids` 和 `allowed_virtual_models`。列表接口会直接过滤未授权会话；消息读取命中未授权对象时返回 `403`。
 - `max_requests_per_minute`：当前已按应用 API Key 在单 Go 进程内实现 1 分钟窗口限流；值为空或 `0` 表示不限流。超限请求返回 `429 app api key rate limited`，并记录 `error_code=rate_limited`。后续多实例部署需要迁移到 Redis 或数据库限流器。
 - `allowed_source_ips`：当前已在应用 API 鉴权后、scope 校验前执行。未配置时不限制；配置后请求来源 IP 不匹配则返回 `403 app api key source ip forbidden`，并记录 `error_code=source_ip_forbidden`。
 - `GET /api/app/model-keys`：需要 `model_keys:read`，返回当前用户自己的虚拟模型 API Key；如果配置了 `allowed_model_key_ids`，只返回允许的 key。

@@ -5,20 +5,17 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/zyf/chatapi/internal/config"
 	pgstore "github.com/zyf/chatapi/internal/repository/postgresql"
 	"github.com/zyf/chatapi/internal/service"
+	"github.com/zyf/chatapi/internal/testutil/pgtest"
 )
 
 func TestAdminStorageVacuumRejectsPostgreSQL(t *testing.T) {
-	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
-	if dsn == "" {
-		t.Skip("CHATAPI_PG_TEST_DSN is not set")
-	}
+	dsn := pgtest.IsolatedDSN(t)
 	ctx := context.Background()
 	st, err := pgstore.Open(ctx, dsn)
 	if err != nil {

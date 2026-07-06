@@ -27,6 +27,7 @@ import (
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/testutil/pgtest"
 )
 
 func TestResponsesDeltaAndComplete(t *testing.T) {
@@ -3619,10 +3620,7 @@ func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Co
 func newPostgresTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Config)) *testEnv {
 	t.Helper()
 
-	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
-	if dsn == "" {
-		t.Skip("CHATAPI_PG_TEST_DSN is not set")
-	}
+	dsn := pgtest.IsolatedDSN(t)
 
 	tempDir := t.TempDir()
 	cfg := config.Config{

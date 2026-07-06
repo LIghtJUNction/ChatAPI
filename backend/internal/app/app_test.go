@@ -17,6 +17,7 @@ import (
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/testutil/pgtest"
 )
 
 func TestParseSMTPTestOptionsConnectOnly(t *testing.T) {
@@ -424,10 +425,7 @@ func TestMigrateCommandDownResetsSQLite(t *testing.T) {
 }
 
 func TestRuntimeMigrationStatusBootstrapsPostgreSQL(t *testing.T) {
-	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
-	if dsn == "" {
-		t.Skip("CHATAPI_PG_TEST_DSN is not set")
-	}
+	dsn := pgtest.IsolatedDSN(t)
 	backendRoot := t.TempDir()
 	cfg := config.Default(config.ModeServe, backendRoot)
 	cfg.DatabaseDriver = "postgresql"
@@ -458,10 +456,7 @@ func TestRuntimeMigrationStatusBootstrapsPostgreSQL(t *testing.T) {
 }
 
 func TestDBCheckCommandReportsPostgreSQLStatus(t *testing.T) {
-	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
-	if dsn == "" {
-		t.Skip("CHATAPI_PG_TEST_DSN is not set")
-	}
+	dsn := pgtest.IsolatedDSN(t)
 	backendRoot := t.TempDir()
 	t.Setenv("CHATAPI_DB_DRIVER", "postgresql")
 	t.Setenv("CHATAPI_DB_DSN", dsn)
@@ -480,10 +475,7 @@ func TestDBCheckCommandReportsPostgreSQLStatus(t *testing.T) {
 }
 
 func TestMigrateCommandDownResetsPostgreSQL(t *testing.T) {
-	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
-	if dsn == "" {
-		t.Skip("CHATAPI_PG_TEST_DSN is not set")
-	}
+	dsn := pgtest.IsolatedDSN(t)
 	backendRoot := t.TempDir()
 	t.Setenv("CHATAPI_DB_DRIVER", "postgresql")
 	t.Setenv("CHATAPI_DB_DSN", dsn)

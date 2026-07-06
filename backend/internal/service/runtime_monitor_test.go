@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	pgstore "github.com/zyf/chatapi/internal/repository/postgresql"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
+	"github.com/zyf/chatapi/internal/testutil/pgtest"
 )
 
 func TestRuntimeMonitorSummaryIncludesSQLiteDatabaseInfo(t *testing.T) {
@@ -69,10 +69,7 @@ func TestMetricsServiceIncludesSQLiteDatabaseMetrics(t *testing.T) {
 }
 
 func TestRuntimeMonitorSummaryIncludesPostgreSQLPoolInfo(t *testing.T) {
-	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
-	if dsn == "" {
-		t.Skip("CHATAPI_PG_TEST_DSN is not set")
-	}
+	dsn := pgtest.IsolatedDSN(t)
 	ctx := context.Background()
 	st, err := pgstore.Open(ctx, dsn)
 	if err != nil {
@@ -104,10 +101,7 @@ func TestRuntimeMonitorSummaryIncludesPostgreSQLPoolInfo(t *testing.T) {
 }
 
 func TestMetricsServiceIncludesPostgreSQLPoolMetrics(t *testing.T) {
-	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
-	if dsn == "" {
-		t.Skip("CHATAPI_PG_TEST_DSN is not set")
-	}
+	dsn := pgtest.IsolatedDSN(t)
 	ctx := context.Background()
 	st, err := pgstore.Open(ctx, dsn)
 	if err != nil {

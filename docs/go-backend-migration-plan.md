@@ -762,9 +762,9 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 - 业务层不依赖 SQLite JSON 函数、PostgreSQL JSONB 函数、RETURNING 等数据库专属能力；如果确实需要，封装在 repository 内并提供双实现。
 - migration 文件可以按数据库拆分目录，例如 `migrations/sqlite` 和 `migrations/postgresql`。
 - 单元测试必须对 SQLite 和 PostgreSQL repository 跑同一套 contract tests。
-- CI 至少跑 SQLite；PostgreSQL 使用 service container 跑集成测试。
+- CI 至少跑 SQLite；PostgreSQL 使用 service container 跑集成测试。为了避免多个 package/子测试共享同一个库时互相 `Reset/Bootstrap` 造成死锁或 catalog 冲突，PostgreSQL 测试应默认按“每个测试独立 schema/DSN”隔离，而不是整套测试共用一个 schema。
 
-当前 Go 重构分支已新增 `internal/repository/storetest` 作为 repository contract test 的复用入口；SQLite repository 已开始复用这套 contract 覆盖 users、user_identities、config、user_configs、应用 API Key、应用 API Key 审计日志、虚拟模型 API Key、通用审计日志、自动化规则、上传图片、用户存储配额、上传删除失败队列，以及 conversations/messages/requests/pending turn 最小状态机。PostgreSQL repository 已挂载同一套 contract tests，使用 `CHATAPI_PG_TEST_DSN` 可选启用；当前已覆盖 users、user_identities、config、user_configs、user_app_api_keys、app_api_key_audit_logs、user_api_keys、audit_logs、automation_rules、uploaded_images、storage_user_quotas、storage_file_deletion_failures、conversations、messages 和 pending turn 生命周期。HTTP 层也已补上 PostgreSQL 下 `/metrics`、管理员 runtime summary/connections/queue、管理员 storage summary/users/vacuum，以及 OpenAI Responses / Chat Completions / Anthropic Messages 三套协议的最小非流闭环与基础 SSE 集成覆盖；后续继续补 PostgreSQL 专属 migration、运行时切换和更完整的集成测试。
+当前 Go 重构分支已新增 `internal/repository/storetest` 作为 repository contract test 的复用入口；SQLite repository 已开始复用这套 contract 覆盖 users、user_identities、config、user_configs、应用 API Key、应用 API Key 审计日志、虚拟模型 API Key、通用审计日志、自动化规则、上传图片、用户存储配额、上传删除失败队列，以及 conversations/messages/requests/pending turn 最小状态机。PostgreSQL repository 已挂载同一套 contract tests，使用 `CHATAPI_PG_TEST_DSN` 可选启用；当前已覆盖 users、user_identities、config、user_configs、user_app_api_keys、app_api_key_audit_logs、user_api_keys、audit_logs、automation_rules、uploaded_images、storage_user_quotas、storage_file_deletion_failures、conversations、messages 和 pending turn 生命周期。为保证真实 PG 容器上 `go test ./...` 可并发稳定运行，测试基建已开始通过 `internal/testutil/pgtest` 为每个测试生成独立 schema 和派生 DSN，避免 `Reset/Bootstrap` 互相冲突。HTTP 层也已补上 PostgreSQL 下 `/metrics`、管理员 runtime summary/connections/queue、管理员 storage summary/users/vacuum，以及 OpenAI Responses / Chat Completions / Anthropic Messages 三套协议的最小非流闭环与基础 SSE 集成覆盖；后续继续补 PostgreSQL 专属 migration、运行时切换和更完整的集成测试。
 
 SQLite 到 PostgreSQL 迁移：
 

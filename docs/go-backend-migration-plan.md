@@ -35,6 +35,7 @@
 - 已补上统一的 request 读取视图（列表 + 详情）并先用于 `GET /lab/requests`、`GET /lab/requests/{request_id}`；后续 `/api/app/requests` 应直接复用这套 request reader，而不是再单独拼查询结构。
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
 - 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
+- 应用 API Key 创建当前已开始做服务端白名单校验：scope 必须来自后端支持集合，且至少选择一个；`resource_limits` 只接受已知 key、已知类型和值域，未知 key/类型会返回 `400`；`allowed_request_actions` 还要求同时声明 `requests:respond` scope，避免生成语义自相矛盾的 key 配置。
 - 当前旧前端 `ApiKeyManagementPanel` 仍请求 `/api/user/api-keys*` 并假设服务端可再次返回完整明文 key；这与 Go 重构版“应用 API Key 只存 hash、明文只在创建时返回一次”的安全边界冲突，因此不应继续为旧接口补明文兼容，后续前端应改接 `/api/user/app-api-keys` 并调整为“一次性展示 + 前缀/元数据列表”模型。
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
 - 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
@@ -1428,6 +1429,7 @@ user_app_api_keys
 - 每个应用 API 请求都必须绑定 owner_id，只能访问 key 所属用户的数据。
 - 每个接口都要检查 scope，不能只检查 key 有效。
 - scope 通过后仍要检查 resource limits，不能只靠 owner_id 粗粒度授权。
+- 创建应用 API Key 时也要校验 scope 和 resource limits 本身，不能把未知 key、错误类型或无意义组合原样存库，再把歧义留给运行时。
 - 支持过期时间和撤销。当前 Go 重构分支的用户侧应用 API Key 创建接口已支持 `expires_at`，过期时间必须晚于当前时间。
 - 记录 `last_used_at`，但写入频率要节流，避免高频请求导致 SQLite 写放大。
 - 对 `requests:respond` 加限流，避免外部自动化错误循环刷屏。

@@ -936,7 +936,7 @@ func TestUserAppAPIKeysManagement(t *testing.T) {
 
 	createResp := env.postJSON(t, "/api/user/app-api-keys", map[string]any{
 		"name":            "managed-key",
-		"scopes":          []string{"requests:read"},
+		"scopes":          []string{"requests:read", "requests:respond"},
 		"resource_limits": map[string]any{"allowed_request_actions": []string{"complete"}},
 		"expires_at":      expiresAt.Format(time.RFC3339),
 	}, http.StatusOK)
@@ -981,6 +981,68 @@ func TestUserAppAPIKeysManagement(t *testing.T) {
 	})
 	if status != http.StatusBadRequest || !strings.Contains(body, "expires_at must be in the future") {
 		t.Fatalf("expected expired app key creation rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestUserAppAPIKeysRejectInvalidConfig(t *testing.T) {
+	env := newTestEnv(t)
+
+	cases := []struct {
+		name    string
+		body    map[string]any
+		wantErr string
+	}{
+		{
+			name: "missing_scopes",
+			body: map[string]any{
+				"name": "invalid-key",
+			},
+			wantErr: "scopes are required",
+		},
+		{
+			name: "unknown_scope",
+			body: map[string]any{
+				"name":   "invalid-key",
+				"scopes": []string{"unknown:scope"},
+			},
+			wantErr: "unsupported app api key scope",
+		},
+		{
+			name: "unknown_resource_limit",
+			body: map[string]any{
+				"name":            "invalid-key",
+				"scopes":          []string{"requests:read"},
+				"resource_limits": map[string]any{"unexpected_limit": true},
+			},
+			wantErr: "unsupported app api key resource limit",
+		},
+		{
+			name: "request_actions_without_scope",
+			body: map[string]any{
+				"name":            "invalid-key",
+				"scopes":          []string{"requests:read"},
+				"resource_limits": map[string]any{"allowed_request_actions": []string{"complete"}},
+			},
+			wantErr: "requires requests:respond scope",
+		},
+		{
+			name: "invalid_source_ip",
+			body: map[string]any{
+				"name":            "invalid-key",
+				"scopes":          []string{"requests:read"},
+				"resource_limits": map[string]any{"allowed_source_ips": []string{"not-an-ip"}},
+			},
+			wantErr: "invalid allowed_source_ips entry",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, body := env.postText(t, "/api/user/app-api-keys", tc.body)
+			if status != http.StatusBadRequest || !strings.Contains(body, tc.wantErr) {
+				t.Fatalf("expected invalid config rejection: status=%d body=%q", status, body)
+			}
+		})
 	}
 }
 

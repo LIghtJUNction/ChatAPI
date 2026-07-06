@@ -64,6 +64,11 @@ func (h UserAppAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		var configErr *service.AppAPIKeyConfigError
+		if errors.As(err, &configErr) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

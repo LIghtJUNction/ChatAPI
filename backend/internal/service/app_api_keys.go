@@ -39,6 +39,35 @@ const maxIntValue = int(^uint(0) >> 1)
 
 var ErrInvalidAppAPIKeyExpiry = errors.New("app api key expires_at must be in the future")
 
+var supportedAppAPIScopes = map[string]struct{}{
+	"requests:read":      {},
+	"requests:respond":   {},
+	"conversations:read": {},
+	"automation:read":    {},
+	"automation:write":   {},
+	"model_keys:read":    {},
+	"model_keys:write":   {},
+	"model_keys:delete":  {},
+	"statistics:read":    {},
+}
+
+var supportedAppAPIRequestActions = map[string]struct{}{
+	"delta":    {},
+	"complete": {},
+	"abort":    {},
+}
+
+type AppAPIKeyConfigError struct {
+	message string
+}
+
+func (e *AppAPIKeyConfigError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.message
+}
+
 func NewAppAPIKeyService(dataStore store.Store) *AppAPIKeyService {
 	return &AppAPIKeyService{store: dataStore, rateLimitHits: map[string][]time.Time{}}
 }
@@ -46,6 +75,10 @@ func NewAppAPIKeyService(dataStore store.Store) *AppAPIKeyService {
 func (s *AppAPIKeyService) CreateKey(ctx context.Context, userID string, name string, scopes []string, resourceLimits map[string]any, expiresAt *time.Time) (store.AppAPIKey, string, error) {
 	if expiresAt != nil && !expiresAt.After(time.Now().UTC()) {
 		return store.AppAPIKey{}, "", ErrInvalidAppAPIKeyExpiry
+	}
+	scopes, resourceLimits, err := normalizeAppAPIKeyConfig(scopes, resourceLimits)
+	if err != nil {
+		return store.AppAPIKey{}, "", err
 	}
 	raw := "ak-" + uuid.NewString()
 	item, err := s.store.CreateAppAPIKey(ctx, store.CreateAppAPIKeyInput{
@@ -225,4 +258,155 @@ func positiveInt(value any) int {
 		}
 	}
 	return 0
+}
+
+func normalizeAppAPIKeyConfig(scopes []string, resourceLimits map[string]any) ([]string, map[string]any, error) {
+	normalizedScopes, scopeSet, err := normalizeAppAPIKeyScopes(scopes)
+	if err != nil {
+		return nil, nil, err
+	}
+	normalizedLimits, err := normalizeAppAPIResourceLimits(resourceLimits, scopeSet)
+	if err != nil {
+		return nil, nil, err
+	}
+	return normalizedScopes, normalizedLimits, nil
+}
+
+func normalizeAppAPIKeyScopes(scopes []string) ([]string, map[string]struct{}, error) {
+	if len(scopes) == 0 {
+		return nil, nil, &AppAPIKeyConfigError{message: "app api key scopes are required"}
+	}
+	normalized := make([]string, 0, len(scopes))
+	scopeSet := make(map[string]struct{}, len(scopes))
+	for _, raw := range scopes {
+		scope := strings.TrimSpace(raw)
+		if scope == "" {
+			continue
+		}
+		if _, ok := supportedAppAPIScopes[scope]; !ok {
+			return nil, nil, &AppAPIKeyConfigError{message: "unsupported app api key scope: " + scope}
+		}
+		if _, exists := scopeSet[scope]; exists {
+			continue
+		}
+		scopeSet[scope] = struct{}{}
+		normalized = append(normalized, scope)
+	}
+	if len(normalized) == 0 {
+		return nil, nil, &AppAPIKeyConfigError{message: "app api key scopes are required"}
+	}
+	return normalized, scopeSet, nil
+}
+
+func normalizeAppAPIResourceLimits(resourceLimits map[string]any, scopes map[string]struct{}) (map[string]any, error) {
+	if len(resourceLimits) == 0 {
+		return map[string]any{}, nil
+	}
+	normalized := make(map[string]any, len(resourceLimits))
+	for key, rawValue := range resourceLimits {
+		switch strings.TrimSpace(key) {
+		case "allowed_model_key_ids", "allowed_request_ids", "allowed_conversation_ids", "allowed_virtual_models", "allowed_automation_rule_ids":
+			items, err := normalizeStringList(rawValue, key)
+			if err != nil {
+				return nil, err
+			}
+			normalized[key] = items
+		case "allowed_request_actions":
+			items, err := normalizeStringList(rawValue, key)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := scopes["requests:respond"]; !ok {
+				return nil, &AppAPIKeyConfigError{message: "allowed_request_actions requires requests:respond scope"}
+			}
+			for _, item := range items {
+				if _, ok := supportedAppAPIRequestActions[item]; !ok {
+					return nil, &AppAPIKeyConfigError{message: "unsupported allowed_request_action: " + item}
+				}
+			}
+			normalized[key] = items
+		case "max_requests_per_minute", "max_model_keys":
+			value := positiveInt(rawValue)
+			if value <= 0 {
+				return nil, &AppAPIKeyConfigError{message: key + " must be a positive integer"}
+			}
+			normalized[key] = value
+		case "allowed_source_ips":
+			items, err := normalizeStringList(rawValue, key)
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range items {
+				if !isValidIPOrCIDR(item) {
+					return nil, &AppAPIKeyConfigError{message: "invalid allowed_source_ips entry: " + item}
+				}
+			}
+			normalized[key] = items
+		default:
+			return nil, &AppAPIKeyConfigError{message: "unsupported app api key resource limit: " + strings.TrimSpace(key)}
+		}
+	}
+	return normalized, nil
+}
+
+func normalizeStringList(value any, field string) ([]string, error) {
+	switch raw := value.(type) {
+	case []string:
+		return dedupeNonEmptyStrings(raw), nil
+	case []any:
+		items := make([]string, 0, len(raw))
+		for _, item := range raw {
+			text, ok := item.(string)
+			if !ok {
+				return nil, &AppAPIKeyConfigError{message: field + " must be an array of strings"}
+			}
+			text = strings.TrimSpace(text)
+			if text != "" {
+				items = append(items, text)
+			}
+		}
+		return dedupeNonEmptyStrings(items), nil
+	case nil:
+		return []string{}, nil
+	default:
+		return nil, &AppAPIKeyConfigError{message: field + " must be an array of strings"}
+	}
+}
+
+func dedupeNonEmptyStrings(items []string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(items))
+	normalized := make([]string, 0, len(items))
+	for _, raw := range items {
+		item := strings.TrimSpace(raw)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+func isValidIPOrCIDR(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if strings.Contains(value, "/") {
+		_, err := netip.ParsePrefix(value)
+		return err == nil
+	}
+	_, err := netip.ParseAddr(value)
+	return err == nil
+}
+
+func (s *AppAPIKeyService) ValidateConfig(scopes []string, resourceLimits map[string]any) error {
+	_, _, err := normalizeAppAPIKeyConfig(scopes, resourceLimits)
+	return err
 }

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"net"
@@ -14,6 +15,7 @@ import (
 type AuthHandler struct {
 	Config       config.Config
 	Audit        *service.AuditService
+	LocalAuth    *service.LocalAuthService
 	LoginLimiter *service.LoginRateLimiter
 }
 
@@ -84,22 +86,37 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many failed login attempts", http.StatusTooManyRequests)
 		return
 	}
-	if !h.validAdminPassword(username, input.Password) {
-		if h.LoginLimiter != nil {
-			h.LoginLimiter.RecordFailure(limitKey)
+	if actor, err := h.authenticateLocalUser(r.Context(), username, input.Password); err == nil {
+		h.writeLoginSuccess(w, r, actor, limitKey)
+		return
+	}
+	if h.validAdminPassword(username, input.Password) {
+		actor := service.RequestActor{
+			UserID:   "admin",
+			Username: "admin",
+			Role:     "admin",
+			Source:   "session",
 		}
-		h.recordAuthAudit(r, "login", "failure")
-		http.Error(w, "invalid username or password", http.StatusUnauthorized)
+		h.writeLoginSuccess(w, r, actor, limitKey)
 		return
 	}
 	if h.LoginLimiter != nil {
-		h.LoginLimiter.Reset(limitKey)
+		h.LoginLimiter.RecordFailure(limitKey)
 	}
-	actor := service.RequestActor{
-		UserID:   "admin",
-		Username: "admin",
-		Role:     "admin",
-		Source:   "session",
+	h.recordAuthAudit(r, "login", "failure")
+	http.Error(w, "invalid username or password", http.StatusUnauthorized)
+}
+
+func (h AuthHandler) authenticateLocalUser(ctx context.Context, username string, password string) (service.RequestActor, error) {
+	if h.LocalAuth == nil {
+		return service.RequestActor{}, service.ErrInvalidCredentials
+	}
+	return h.LocalAuth.Authenticate(ctx, username, password)
+}
+
+func (h AuthHandler) writeLoginSuccess(w http.ResponseWriter, r *http.Request, actor service.RequestActor, limitKey string) {
+	if h.LoginLimiter != nil {
+		h.LoginLimiter.Reset(limitKey)
 	}
 	codec := service.NewSessionCodec(h.Config.SessionSecret)
 	sessionValue, err := codec.Encode(actor, service.DefaultSessionTTL)
@@ -154,10 +171,14 @@ func (h AuthHandler) recordAuthAudit(r *http.Request, action string, outcome str
 	if h.Audit == nil {
 		return
 	}
+	resourceID := "admin"
+	if actor, ok := service.RequestActorFromContext(r.Context()); ok && strings.TrimSpace(actor.UserID) != "" {
+		resourceID = strings.TrimSpace(actor.UserID)
+	}
 	h.Audit.Record(r.Context(), service.AuditEventInput{
 		EventType:    "auth.session",
 		ResourceType: "session",
-		ResourceID:   "admin",
+		ResourceID:   resourceID,
 		Action:       action,
 		Outcome:      outcome,
 		IPAddress:    clientIP(r),

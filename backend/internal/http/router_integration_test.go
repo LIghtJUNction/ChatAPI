@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
 	"github.com/zyf/chatapi/internal/platform/apikey"
+	passwordhash "github.com/zyf/chatapi/internal/platform/password"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service"
@@ -1344,6 +1346,72 @@ func TestServeAdminSessionLoginAndLogout(t *testing.T) {
 	}
 	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "login", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "logout", "success", 1)
+}
+
+func TestServeLocalUserLoginFromUsersTable(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("alice-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_alice",
+		Username:     "alice",
+		Email:        "alice@example.com",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	loginResp, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "alice",
+		"password": "alice-secret",
+	}, http.StatusOK)
+	if loginResp["ok"] != true || nestedPathString(loginResp, "user", "id") != "user_alice" || nestedPathString(loginResp, "user", "role") != "user" {
+		t.Fatalf("unexpected local user login response: %#v", loginResp)
+	}
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatalf("expected local user session cookie, got %#v", cookies)
+	}
+	sessionResp := env.getJSONWithCookie(t, "/api/auth/session", sessionCookie, http.StatusOK)
+	if sessionResp["authenticated"] != true || nestedPathString(sessionResp, "user", "id") != "user_alice" {
+		t.Fatalf("expected authenticated local user session: %#v", sessionResp)
+	}
+}
+
+func TestServeLocalUserLoginUpgradesLegacyPasswordHash(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	salt := "legacy-salt"
+	sum := sha256.Sum256([]byte(salt + "legacy-secret"))
+	legacyHash := fmt.Sprintf("%s$%x", salt, sum[:])
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_legacy",
+		Username:     "legacy",
+		Email:        "legacy@example.com",
+		PasswordHash: legacyHash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed legacy user: %v", err)
+	}
+
+	env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "legacy@example.com",
+		"password": "legacy-secret",
+	}, http.StatusOK)
+	updated, err := env.store.GetUser(context.Background(), "user_legacy")
+	if err != nil {
+		t.Fatalf("load updated user: %v", err)
+	}
+	if !strings.HasPrefix(updated.PasswordHash, "$argon2id$v=19$") {
+		t.Fatalf("expected password hash upgrade, got %q", updated.PasswordHash)
+	}
+	if updated.LastLoginAt == nil || updated.LastLoginAt.IsZero() {
+		t.Fatalf("expected last login to be updated: %#v", updated)
+	}
 }
 
 func TestServeAdminLoginRateLimit(t *testing.T) {

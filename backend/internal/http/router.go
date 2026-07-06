@@ -43,7 +43,12 @@ func NewRouter(
 	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	auditService := service.NewAuditService(dataStore)
-	authHandler := handlers.AuthHandler{Config: cfg, Audit: auditService, LoginLimiter: service.NewLoginRateLimiter(5, time.Minute)}
+	authHandler := handlers.AuthHandler{
+		Config:       cfg,
+		Audit:        auditService,
+		LocalAuth:    service.NewLocalAuthService(dataStore),
+		LoginLimiter: service.NewLoginRateLimiter(5, time.Minute),
+	}
 	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore), Audit: auditService}
 	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
 	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)

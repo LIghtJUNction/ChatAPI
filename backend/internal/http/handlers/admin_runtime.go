@@ -14,6 +14,13 @@ type AdminRuntimeHandler struct {
 	Audit   *service.AuditService
 }
 
+func (h AdminRuntimeHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildAdminRuntimeSchema(),
+	})
+}
+
 func (h AdminRuntimeHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,

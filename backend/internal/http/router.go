@@ -225,6 +225,7 @@ func NewRouter(
 	adminRouter.Get("/runtime/system", adminRuntimeHandler.System)
 	adminRouter.Get("/runtime/connections", adminRuntimeHandler.Connections)
 	adminRouter.Get("/runtime/queue", adminRuntimeHandler.Queue)
+	adminRouter.Get("/runtime/schema", adminRuntimeHandler.Schema)
 	adminRouter.Get("/runtime/settings", adminRuntimeHandler.Settings)
 	adminRouter.Put("/runtime/settings", adminRuntimeHandler.UpdateSettings)
 	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)

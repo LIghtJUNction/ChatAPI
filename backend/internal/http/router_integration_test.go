@@ -3388,6 +3388,22 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	if nestedString(filteredFirst, "rule_id") != "runtime_rule_never_match" || nestedString(filteredFirst, "reason") != "contains_miss" {
 		t.Fatalf("unexpected filtered runtime automation sample: %#v", filteredResp)
 	}
+
+	schemaResp := env.getJSON(t, "/api/admin/runtime/schema", http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 3 {
+		t.Fatalf("unexpected runtime schema operations: %#v", schemaResp)
+	}
+	if nestedString(operations[0].(map[string]any), "name") != "automation_diagnostics" {
+		t.Fatalf("unexpected first runtime schema operation: %#v", schemaResp)
+	}
+	if nestedString(operations[1].(map[string]any), "name") != "update_runtime_settings" {
+		t.Fatalf("unexpected second runtime schema operation: %#v", schemaResp)
+	}
+	if nestedString(operations[2].(map[string]any), "name") != "force_gc" {
+		t.Fatalf("unexpected third runtime schema operation: %#v", schemaResp)
+	}
 }
 
 func TestAdminRuntimeEndpointsWithPostgreSQL(t *testing.T) {
@@ -3950,6 +3966,13 @@ func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key runtime settings rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/runtime/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key runtime schema rejection: status=%d body=%q", status, body)
 	}
 }
 

@@ -2354,6 +2354,15 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	if numericValue(skipByReason["contains_miss"]) != 1 {
 		t.Fatalf("unexpected runtime automation skip summary: %#v", summaryResp)
 	}
+	skipByRule := automation["skip_by_rule"].(map[string]any)
+	ruleSummary := skipByRule["runtime_rule_never_match"].(map[string]any)
+	if numericValue(ruleSummary["total"]) != 1 {
+		t.Fatalf("unexpected runtime automation rule summary: %#v", summaryResp)
+	}
+	ruleReasons := ruleSummary["by_reason"].(map[string]any)
+	if numericValue(ruleReasons["contains_miss"]) != 1 {
+		t.Fatalf("unexpected runtime automation rule reasons: %#v", summaryResp)
+	}
 	system := summary["system"].(map[string]any)
 	if nestedString(system, "os") == "" || numericValue(system["num_cpu"]) <= 0 || numericValue(system["process_open_fds"]) <= 0 {
 		t.Fatalf("unexpected runtime system summary: %#v", summaryResp)

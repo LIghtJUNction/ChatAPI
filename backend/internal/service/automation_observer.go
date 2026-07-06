@@ -2,6 +2,7 @@ package service
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -11,16 +12,26 @@ type AutomationObserver struct {
 	noMatch atomic.Int64
 	mu      sync.Mutex
 	skips   map[string]int64
+	byRule  map[string]map[string]int64
 }
 
 type AutomationObserverSnapshot struct {
-	NoRules      int            `json:"no_rules"`
-	NoMatch      int            `json:"no_match"`
-	SkipByReason map[string]int `json:"skip_by_reason,omitempty"`
+	NoRules      int                            `json:"no_rules"`
+	NoMatch      int                            `json:"no_match"`
+	SkipByReason map[string]int                 `json:"skip_by_reason,omitempty"`
+	SkipByRule   map[string]AutomationRuleSkips `json:"skip_by_rule,omitempty"`
+}
+
+type AutomationRuleSkips struct {
+	Total    int            `json:"total"`
+	ByReason map[string]int `json:"by_reason,omitempty"`
 }
 
 func NewAutomationObserver() *AutomationObserver {
-	return &AutomationObserver{skips: map[string]int64{}}
+	return &AutomationObserver{
+		skips:  map[string]int64{},
+		byRule: map[string]map[string]int64{},
+	}
 }
 
 func (o *AutomationObserver) RecordNoRules() {
@@ -56,6 +67,29 @@ func (o *AutomationObserver) RecordSkipReasons(reasons []string) {
 	}
 }
 
+func (o *AutomationObserver) RecordSkipDetail(ruleID string, reason string) {
+	if o == nil {
+		return
+	}
+	ruleID = strings.TrimSpace(ruleID)
+	reason = normalizeAutomationSkipReason(reason)
+	if ruleID == "" || reason == "" {
+		return
+	}
+	o.mu.Lock()
+	if _, ok := o.byRule[ruleID]; !ok {
+		o.byRule[ruleID] = map[string]int64{}
+	}
+	o.byRule[ruleID][reason]++
+	o.mu.Unlock()
+}
+
+func (o *AutomationObserver) RecordSkipDetails(details []AutomationRuleSkipDetail) {
+	for _, detail := range details {
+		o.RecordSkipDetail(detail.RuleID, detail.Reason)
+	}
+}
+
 func (o *AutomationObserver) Snapshot() AutomationObserverSnapshot {
 	if o == nil {
 		return AutomationObserverSnapshot{}
@@ -74,6 +108,29 @@ func (o *AutomationObserver) Snapshot() AutomationObserverSnapshot {
 		sort.Strings(keys)
 		for _, key := range keys {
 			snapshot.SkipByReason[key] = int(o.skips[key])
+		}
+	}
+	if len(o.byRule) > 0 {
+		snapshot.SkipByRule = make(map[string]AutomationRuleSkips, len(o.byRule))
+		ruleIDs := make([]string, 0, len(o.byRule))
+		for ruleID := range o.byRule {
+			ruleIDs = append(ruleIDs, ruleID)
+		}
+		sort.Strings(ruleIDs)
+		for _, ruleID := range ruleIDs {
+			reasons := o.byRule[ruleID]
+			item := AutomationRuleSkips{ByReason: map[string]int{}}
+			reasonKeys := make([]string, 0, len(reasons))
+			for reason := range reasons {
+				reasonKeys = append(reasonKeys, reason)
+			}
+			sort.Strings(reasonKeys)
+			for _, reason := range reasonKeys {
+				count := int(reasons[reason])
+				item.ByReason[reason] = count
+				item.Total += count
+			}
+			snapshot.SkipByRule[ruleID] = item
 		}
 	}
 	o.mu.Unlock()

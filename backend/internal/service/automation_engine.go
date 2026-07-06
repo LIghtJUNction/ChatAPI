@@ -19,6 +19,12 @@ type AutomationDecision struct {
 	Status      string
 	Match       *AutomationMatch
 	SkipReasons []string
+	SkipDetails []AutomationRuleSkipDetail
+}
+
+type AutomationRuleSkipDetail struct {
+	RuleID string
+	Reason string
 }
 
 const (
@@ -37,6 +43,7 @@ func (s *AutomationRuleService) MatchTurn(ctx context.Context, userID string, re
 	}
 	enabledRules := 0
 	skipReasons := make([]string, 0, len(items))
+	skipDetails := make([]AutomationRuleSkipDetail, 0, len(items))
 	for _, item := range items {
 		if item.Enabled {
 			enabledRules++
@@ -49,12 +56,13 @@ func (s *AutomationRuleService) MatchTurn(ctx context.Context, userID string, re
 		}
 		if reason != "" {
 			skipReasons = append(skipReasons, reason)
+			skipDetails = append(skipDetails, AutomationRuleSkipDetail{RuleID: item.ID, Reason: reason})
 		}
 	}
 	if enabledRules == 0 {
 		return AutomationDecision{Status: automationStatusNoRules}, nil
 	}
-	return AutomationDecision{Status: automationStatusNoMatch, SkipReasons: skipReasons}, nil
+	return AutomationDecision{Status: automationStatusNoMatch, SkipReasons: skipReasons, SkipDetails: skipDetails}, nil
 }
 
 func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest, conversationID string, responseID string) (*AutomationMatch, string, bool) {

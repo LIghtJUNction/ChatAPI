@@ -65,6 +65,9 @@ func TestAutomationRuleServiceMatchTurnMatchesContainsAndExcludes(t *testing.T) 
 	if len(blocked.SkipReasons) != 1 || blocked.SkipReasons[0] != "excluded" {
 		t.Fatalf("expected excluded skip reason, got %#v", blocked)
 	}
+	if len(blocked.SkipDetails) != 1 || blocked.SkipDetails[0].RuleID != "rule_skip" || blocked.SkipDetails[0].Reason != "excluded" {
+		t.Fatalf("expected excluded skip detail, got %#v", blocked)
+	}
 }
 
 func TestAutomationRuleServiceMatchTurnTruncatesLongOutput(t *testing.T) {
@@ -165,6 +168,9 @@ func TestAutomationRuleServiceMatchTurnMatchesStructuredFields(t *testing.T) {
 	if len(miss.SkipReasons) != 1 || miss.SkipReasons[0] != "contains_miss" {
 		t.Fatalf("expected contains_miss skip reason, got %#v", miss)
 	}
+	if len(miss.SkipDetails) != 1 || miss.SkipDetails[0].RuleID != "rule_structured" || miss.SkipDetails[0].Reason != "contains_miss" {
+		t.Fatalf("expected structured skip detail, got %#v", miss)
+	}
 }
 
 func TestAutomationRuleServiceMatchTurnReportsNoRules(t *testing.T) {
@@ -251,6 +257,9 @@ func TestAutomationRuleServiceMatchTurnSupportsTypedConditions(t *testing.T) {
 	}
 	if len(miss.SkipReasons) != 1 || miss.SkipReasons[0] != "excluded" {
 		t.Fatalf("expected typed excluded skip reason, got %#v", miss)
+	}
+	if len(miss.SkipDetails) != 1 || miss.SkipDetails[0].RuleID != "rule_typed" || miss.SkipDetails[0].Reason != "excluded" {
+		t.Fatalf("expected typed skip detail, got %#v", miss)
 	}
 }
 

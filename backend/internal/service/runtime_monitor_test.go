@@ -61,6 +61,7 @@ func TestMetricsServiceIncludesSQLiteDatabaseMetrics(t *testing.T) {
 	observer.RecordNoRules()
 	observer.RecordNoMatch()
 	observer.RecordSkipReason("contains_miss")
+	observer.RecordSkipDetail("rule_a", "contains_miss")
 	monitor.SetAutomationObserver(observer)
 	metrics := NewMetricsService(monitor, NewHTTPMetricsRegistry()).PrometheusText()
 	for _, expected := range []string{
@@ -132,6 +133,7 @@ func TestMetricsServiceIncludesPostgreSQLPoolMetrics(t *testing.T) {
 	observer := NewAutomationObserver()
 	observer.RecordNoRules()
 	observer.RecordSkipReason("excluded")
+	observer.RecordSkipDetail("rule_b", "excluded")
 	monitor.SetAutomationObserver(observer)
 	metrics := NewMetricsService(monitor, NewHTTPMetricsRegistry()).PrometheusText()
 	for _, expected := range []string{
@@ -145,5 +147,39 @@ func TestMetricsServiceIncludesPostgreSQLPoolMetrics(t *testing.T) {
 		if !strings.Contains(metrics, expected) {
 			t.Fatalf("expected postgres metric %q in body:\n%s", expected, metrics)
 		}
+	}
+}
+
+func TestRuntimeMonitorSummaryIncludesAutomationSkipByRule(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "chatapi.sqlite3")
+	st, err := sqlitestore.Open(dsn)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := migrations.Bootstrap(context.Background(), st.DB()); err != nil {
+		t.Fatalf("bootstrap sqlite: %v", err)
+	}
+
+	cfg := config.Default(config.ModeServe, t.TempDir())
+	cfg.DatabaseDriver = "sqlite"
+	cfg.DatabaseDSN = dsn
+
+	monitor := NewRuntimeMonitorService(cfg, st, NewRealtimeHub(st), NewPendingRegistry())
+	observer := NewAutomationObserver()
+	observer.RecordNoMatch()
+	observer.RecordSkipDetail("rule_diag", "contains_miss")
+	observer.RecordSkipDetail("rule_diag", "contains_miss")
+	observer.RecordSkipDetail("rule_excluded", "excluded")
+	monitor.SetAutomationObserver(observer)
+
+	summary := monitor.Summary()
+	ruleDiag, ok := summary.Automation.SkipByRule["rule_diag"]
+	if !ok || ruleDiag.Total != 2 || ruleDiag.ByReason["contains_miss"] != 2 {
+		t.Fatalf("unexpected automation skip by rule summary: %#v", summary.Automation)
+	}
+	ruleExcluded, ok := summary.Automation.SkipByRule["rule_excluded"]
+	if !ok || ruleExcluded.Total != 1 || ruleExcluded.ByReason["excluded"] != 1 {
+		t.Fatalf("unexpected automation skip by rule summary: %#v", summary.Automation)
 	}
 }

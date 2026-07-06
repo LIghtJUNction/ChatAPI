@@ -135,6 +135,7 @@ func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request prot
 	case automationStatusNoMatch:
 		s.autoObs.RecordNoMatch()
 		s.autoObs.RecordSkipReasons(decision.SkipReasons)
+		s.autoObs.RecordSkipDetails(decision.SkipDetails)
 		return
 	}
 	if decision.Match == nil {

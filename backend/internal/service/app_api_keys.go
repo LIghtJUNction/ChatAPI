@@ -310,6 +310,9 @@ func normalizeAppAPIResourceLimits(resourceLimits map[string]any, scopes map[str
 			if err != nil {
 				return nil, err
 			}
+			if err := validateAppAPIResourceLimitScope(key, scopes); err != nil {
+				return nil, err
+			}
 			normalized[key] = items
 		case "allowed_request_actions":
 			items, err := normalizeStringList(rawValue, key)
@@ -329,6 +332,9 @@ func normalizeAppAPIResourceLimits(resourceLimits map[string]any, scopes map[str
 			value := positiveInt(rawValue)
 			if value <= 0 {
 				return nil, &AppAPIKeyConfigError{message: key + " must be a positive integer"}
+			}
+			if err := validateAppAPIResourceLimitScope(key, scopes); err != nil {
+				return nil, err
 			}
 			normalized[key] = value
 		case "allowed_source_ips":
@@ -404,6 +410,30 @@ func isValidIPOrCIDR(value string) bool {
 	}
 	_, err := netip.ParseAddr(value)
 	return err == nil
+}
+
+func validateAppAPIResourceLimitScope(key string, scopes map[string]struct{}) error {
+	if len(scopes) == 0 {
+		return &AppAPIKeyConfigError{message: key + " requires matching scope"}
+	}
+	requiredAny := map[string][]string{
+		"allowed_model_key_ids":       {"model_keys:read", "model_keys:delete"},
+		"allowed_request_ids":         {"requests:read", "requests:respond"},
+		"allowed_conversation_ids":    {"conversations:read", "requests:read", "requests:respond"},
+		"allowed_virtual_models":      {"requests:read", "requests:respond", "conversations:read", "model_keys:write"},
+		"allowed_automation_rule_ids": {"automation:read", "automation:write"},
+		"max_model_keys":              {"model_keys:write"},
+	}
+	allowedScopes, ok := requiredAny[key]
+	if !ok {
+		return nil
+	}
+	for _, scope := range allowedScopes {
+		if _, ok := scopes[scope]; ok {
+			return nil
+		}
+	}
+	return &AppAPIKeyConfigError{message: key + " requires one of scopes: " + strings.Join(allowedScopes, ", ")}
 }
 
 func (s *AppAPIKeyService) ValidateConfig(scopes []string, resourceLimits map[string]any) error {

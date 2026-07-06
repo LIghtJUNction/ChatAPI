@@ -1026,6 +1026,33 @@ func TestUserAppAPIKeysRejectInvalidConfig(t *testing.T) {
 			wantErr: "requires requests:respond scope",
 		},
 		{
+			name: "request_ids_without_request_scope",
+			body: map[string]any{
+				"name":            "invalid-key",
+				"scopes":          []string{"statistics:read"},
+				"resource_limits": map[string]any{"allowed_request_ids": []string{"req_1"}},
+			},
+			wantErr: "allowed_request_ids requires one of scopes",
+		},
+		{
+			name: "virtual_models_without_matching_scope",
+			body: map[string]any{
+				"name":            "invalid-key",
+				"scopes":          []string{"statistics:read"},
+				"resource_limits": map[string]any{"allowed_virtual_models": []string{"demo-a"}},
+			},
+			wantErr: "allowed_virtual_models requires one of scopes",
+		},
+		{
+			name: "max_model_keys_without_write_scope",
+			body: map[string]any{
+				"name":            "invalid-key",
+				"scopes":          []string{"model_keys:read"},
+				"resource_limits": map[string]any{"max_model_keys": 1},
+			},
+			wantErr: "max_model_keys requires one of scopes",
+		},
+		{
 			name: "invalid_source_ip",
 			body: map[string]any{
 				"name":            "invalid-key",

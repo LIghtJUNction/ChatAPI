@@ -33,6 +33,30 @@ func TestAppAPIKeyValidateConfig(t *testing.T) {
 			wantErr: "requires requests:respond scope",
 		},
 		{
+			name:   "allowed_request_ids_without_request_scope",
+			scopes: []string{"statistics:read"},
+			resourceLimits: map[string]any{
+				"allowed_request_ids": []any{"req_1"},
+			},
+			wantErr: "allowed_request_ids requires one of scopes",
+		},
+		{
+			name:   "allowed_model_key_ids_without_model_scope",
+			scopes: []string{"requests:read"},
+			resourceLimits: map[string]any{
+				"allowed_model_key_ids": []any{"mk_1"},
+			},
+			wantErr: "allowed_model_key_ids requires one of scopes",
+		},
+		{
+			name:   "max_model_keys_without_write_scope",
+			scopes: []string{"model_keys:read"},
+			resourceLimits: map[string]any{
+				"max_model_keys": 1,
+			},
+			wantErr: "max_model_keys requires one of scopes",
+		},
+		{
 			name:   "invalid_allowed_request_action_value",
 			scopes: []string{"requests:respond"},
 			resourceLimits: map[string]any{
@@ -66,10 +90,11 @@ func TestAppAPIKeyValidateConfig(t *testing.T) {
 		},
 		{
 			name:   "valid_config",
-			scopes: []string{"requests:read", "requests:respond", "requests:read"},
+			scopes: []string{"requests:read", "requests:respond", "requests:read", "model_keys:write"},
 			resourceLimits: map[string]any{
 				"allowed_request_ids":      []any{"req_1", "req_1", "req_2"},
 				"allowed_conversation_ids": []any{"conv_1"},
+				"allowed_virtual_models":   []any{"demo-a", "demo-a"},
 				"allowed_request_actions":  []any{"complete", "delta"},
 				"allowed_source_ips":       []any{"127.0.0.1", "10.0.0.0/8"},
 				"max_requests_per_minute":  5,

@@ -52,15 +52,15 @@
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
 - 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
-- 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope、realtime 连接预留配置等风险。
+- 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、session secret、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope、realtime 连接预留配置等风险。
 - 数据库版本诊断已落地最小版本：SQLite bootstrap 会维护 `db_meta` 和 `schema_migrations`，并提供 `chatapi db check` 输出 schema version、dirty 状态、创建来源、最近迁移时间和已应用迁移列表。
-- 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出；`chatapi migrate up|status|down --force` 可对当前 SQLite schema 执行 bootstrap migration、状态查询和本地重置；`chatapi oidc test` 可拉取 OIDC discovery document 并校验 issuer 与核心 endpoint。
+- 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、session secret、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出；`chatapi migrate up|status|down --force` 可对当前 SQLite schema 执行 bootstrap migration、状态查询和本地重置；`chatapi oidc test` 可拉取 OIDC discovery document 并校验 issuer 与核心 endpoint。
 - SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --connect-only` 可执行 SMTP 连接/TLS/Auth 握手但不发信，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
 - SQLite bootstrap schema 已补齐用户体系基础表：`users`、`user_identities`、`user_configs`、`config`，并已补上 `users` / `user_identities` / `config` / `user_configs` 的 SQLite 仓储基础方法和 repository 测试。当前业务仍使用 Lab actor 和 `.env` admin session；这些表和仓储先作为后续 OIDC、本地用户、管理员用户管理、用户配置和系统配置的稳定落点。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
-- 本地管理员 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 校验 `admin` 用户，成功后写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。完整 users 表、注册、密码重置、TOTP 和 OIDC RP 登录仍是后续工作。
+- 本地管理员 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 校验 `admin` 用户，成功后用独立 `CHATAPI_SESSION_SECRET` 写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。`chatapi setup` 已生成 `CHATAPI_SESSION_SECRET`；如果老部署未配置，serve 启动会生成随机 session secret 并持久化到 `config` 表的 `security.session_secret`，Lab 使用进程内不安全默认值且不持久化。完整 users 表、注册、密码重置、TOTP 和 OIDC RP 登录仍是后续工作。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
@@ -1552,7 +1552,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 ### 8.1 默认安全策略
 
 - 默认管理员密码仍兼容 `.env`，但启动时如果是 `change-me` 必须打印高危告警。
-- Session secret 如果未配置，继续自动生成并持久化到 `config` 表。
+- Session secret 与 master key 分离。`CHATAPI_SESSION_SECRET` 显式配置优先；如果未配置，serve 启动会自动生成并持久化到 `config` 表 key `security.session_secret`。Lab 模式使用进程内不安全默认值，不写入数据库。
 - 登录失败应有限流，避免暴力破解。
 - OIDC callback 必须校验 state、nonce、issuer、audience、expiry 和签名。
 - OIDC client secret 只允许来自环境变量，不能写入数据库、日志、前端响应或系统配置接口。
@@ -1675,7 +1675,7 @@ chatapi version
 首次启动向导：
 
 - 当数据库为空、没有管理员账号、没有 session secret 或缺少必要 master key 时，`serve` 应进入明确的 bootstrap 状态，而不是静默使用危险默认值。
-- 支持 `chatapi setup` 或首次访问 `/setup` 完成初始化；仅在无管理员账号时可用。当前 Go 重构分支已先落地 CLI 版 `chatapi setup`：默认只输出 `.env` 初始化模板，`--write-env` 写入 `backend/.env`，已有文件需要 `--force` 才覆盖；Web `/setup` 仍待后续用户体系一起实现。
+- 支持 `chatapi setup` 或首次访问 `/setup` 完成初始化；仅在无管理员账号时可用。当前 Go 重构分支已先落地 CLI 版 `chatapi setup`：默认只输出 `.env` 初始化模板并生成 `CHATAPI_MASTER_KEY`、`CHATAPI_SESSION_SECRET`、`CHATAPI_ADMIN_PASSWORD`，`--write-env` 写入 `backend/.env`，已有文件需要 `--force` 才覆盖；Web `/setup` 仍待后续用户体系一起实现。
 - setup 完成后立即关闭 bootstrap 能力，并写入审计日志。
 - 如果检测到 `CHATAPI_ADMIN_PASSWORD=change-me`、未配置生产 master key、OIDC callback URL 与外部访问 URL 不一致，应在 setup 和 `doctor` 中给出明确错误或高危警告。
 

@@ -19,6 +19,9 @@ func TestDiagnoseServeRequiresProductionSecrets(t *testing.T) {
 	if !hasDiagnostic(report, DiagnosticError, "secret.admin_password_default") {
 		t.Fatalf("missing default admin password diagnostic: %#v", report)
 	}
+	if !hasDiagnostic(report, DiagnosticInfo, "secret.session_secret_generated") {
+		t.Fatalf("missing generated session secret diagnostic: %#v", report)
+	}
 	if !hasDiagnostic(report, DiagnosticWarn, "database.sqlite_in_serve") {
 		t.Fatalf("missing sqlite serve warning: %#v", report)
 	}
@@ -63,9 +66,22 @@ func TestFromEnvLoadsTrustedProxies(t *testing.T) {
 	}
 }
 
+func TestFromEnvLoadsSessionSecret(t *testing.T) {
+	t.Setenv("CHATAPI_SESSION_SECRET", "session-secret-from-env")
+
+	cfg, err := FromEnvUnchecked(ModeServe, t.TempDir())
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.SessionSecret != "session-secret-from-env" {
+		t.Fatalf("unexpected session secret: %q", cfg.SessionSecret)
+	}
+}
+
 func TestDiagnoseTrustedProxyValidation(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
 	cfg.MasterKey = "01234567890123456789012345678901"
+	cfg.SessionSecret = "01234567890123456789012345678901"
 	cfg.AdminPassword = "not-change-me"
 	cfg.TrustedProxies = []string{"not-an-ip"}
 
@@ -78,9 +94,22 @@ func TestDiagnoseTrustedProxyValidation(t *testing.T) {
 	}
 }
 
+func TestDiagnoseWarnsForShortSessionSecret(t *testing.T) {
+	cfg := Default(ModeServe, t.TempDir())
+	cfg.MasterKey = "01234567890123456789012345678901"
+	cfg.SessionSecret = "short"
+	cfg.AdminPassword = "not-change-me"
+
+	report := Diagnose(cfg, cfg.Validate())
+	if !hasDiagnostic(report, DiagnosticWarn, "secret.session_secret_short") {
+		t.Fatalf("missing short session secret warning: %#v", report)
+	}
+}
+
 func TestDiagnoseOIDCPrivateRPRequirements(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
 	cfg.MasterKey = "01234567890123456789012345678901"
+	cfg.SessionSecret = "01234567890123456789012345678901"
 	cfg.AdminPassword = "not-change-me"
 	cfg.OIDCEnabled = true
 	cfg.OIDCClientID = "chatapi"

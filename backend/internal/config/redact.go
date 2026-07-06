@@ -11,6 +11,7 @@ type RedactedConfig struct {
 	DatabaseDriver                        string   `json:"database_driver"`
 	DatabaseDSN                           string   `json:"database_dsn"`
 	MasterKey                             string   `json:"master_key"`
+	SessionSecret                         string   `json:"session_secret"`
 	AllowRemoteLab                        bool     `json:"allow_remote_lab"`
 	OpenBrowser                           bool     `json:"open_browser"`
 	LabToken                              string   `json:"lab_token"`
@@ -68,6 +69,7 @@ func (c Config) Redacted() RedactedConfig {
 		DatabaseDriver:                        c.DatabaseDriver,
 		DatabaseDSN:                           redactDatabaseDSN(c),
 		MasterKey:                             redactSecret(c.MasterKey),
+		SessionSecret:                         redactSecret(c.SessionSecret),
 		AllowRemoteLab:                        c.AllowRemoteLab,
 		OpenBrowser:                           c.OpenBrowser,
 		LabToken:                              redactSecret(c.LabToken),

@@ -23,6 +23,7 @@ import (
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service"
+	"github.com/zyf/chatapi/internal/store"
 )
 
 var (
@@ -30,6 +31,8 @@ var (
 	Commit    = "unknown"
 	BuildDate = "unknown"
 )
+
+const sessionSecretConfigKey = "security.session_secret"
 
 func Run(ctx context.Context, args []string) error {
 	backendRoot, err := os.Getwd()
@@ -88,6 +91,9 @@ func Run(ctx context.Context, args []string) error {
 	if err := migrations.Bootstrap(ctx, dataStore.DB()); err != nil {
 		return err
 	}
+	if err := ensureSessionSecret(ctx, &cfg, dataStore, logger); err != nil {
+		return err
+	}
 	pendingRegistry := service.NewPendingRegistry()
 	realtimeHub := service.NewRealtimeHub(dataStore, service.NewRealtimeLimits(
 		cfg.RealtimeMaxConnections,
@@ -132,6 +138,48 @@ func Run(ctx context.Context, args []string) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func ensureSessionSecret(ctx context.Context, cfg *config.Config, dataStore *sqlitestore.Store, logger *slog.Logger) error {
+	if cfg == nil {
+		return errors.New("config is nil")
+	}
+	if strings.TrimSpace(cfg.SessionSecret) != "" {
+		return nil
+	}
+	if cfg.Mode == config.ModeLab {
+		cfg.SessionSecret = "chatapi-lab-insecure-session-secret"
+		return nil
+	}
+	item, err := dataStore.GetSystemConfig(ctx, sessionSecretConfigKey)
+	if err == nil {
+		if secret, _ := item.Value["secret"].(string); strings.TrimSpace(secret) != "" {
+			cfg.SessionSecret = strings.TrimSpace(secret)
+			return nil
+		}
+	}
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("load session secret: %w", err)
+	}
+	secret, err := randomURLToken(32)
+	if err != nil {
+		return fmt.Errorf("generate session secret: %w", err)
+	}
+	_, err = dataStore.SetSystemConfig(ctx, store.SetSystemConfigInput{
+		Key: sessionSecretConfigKey,
+		Value: map[string]any{
+			"secret":       secret,
+			"generated_at": time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("persist session secret: %w", err)
+	}
+	cfg.SessionSecret = secret
+	if logger != nil {
+		logger.Info("generated and persisted session secret", slog.String("config_key", sessionSecretConfigKey))
+	}
+	return nil
 }
 
 func startPendingExpirationWorker(ctx context.Context, cfg config.Config, chatService *service.ChatAPIService, logger *slog.Logger) {
@@ -592,6 +640,7 @@ func setupCommand(backendRoot string, options setupOptions) (setupReport, error)
 		ExistingEnv: existingEnv,
 		GeneratedKeys: []string{
 			"CHATAPI_MASTER_KEY",
+			"CHATAPI_SESSION_SECRET",
 			"CHATAPI_ADMIN_PASSWORD",
 		},
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
@@ -614,8 +663,15 @@ func setupCommand(backendRoot string, options setupOptions) (setupReport, error)
 		report.Error = err.Error()
 		return report, err
 	}
+	sessionSecret, err := randomURLToken(32)
+	if err != nil {
+		report.OK = false
+		report.Error = err.Error()
+		return report, err
+	}
 	template := strings.Join([]string{
 		"CHATAPI_MASTER_KEY=" + masterKey,
+		"CHATAPI_SESSION_SECRET=" + sessionSecret,
 		"CHATAPI_ADMIN_PASSWORD=" + adminPassword,
 		"CHATAPI_DB_DRIVER=sqlite",
 		"CHATAPI_DB_DSN=./data/chatapi.sqlite3",

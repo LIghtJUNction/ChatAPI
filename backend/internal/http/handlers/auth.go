@@ -87,7 +87,7 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Role:     "admin",
 		Source:   "session",
 	}
-	codec := service.NewSessionCodec(h.Config.MasterKey)
+	codec := service.NewSessionCodec(h.Config.SessionSecret)
 	sessionValue, err := codec.Encode(actor, service.DefaultSessionTTL)
 	if err != nil {
 		http.Error(w, "session is not configured", http.StatusInternalServerError)

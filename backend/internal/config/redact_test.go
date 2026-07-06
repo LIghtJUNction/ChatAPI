@@ -9,6 +9,7 @@ import (
 func TestRedactedConfigHidesSecrets(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
 	cfg.MasterKey = "super-secret-master"
+	cfg.SessionSecret = "super-secret-session"
 	cfg.LabToken = "lab-token-secret"
 	cfg.LabPassword = "lab-password-secret"
 	cfg.AdminPassword = "admin-password-secret"
@@ -22,6 +23,7 @@ func TestRedactedConfigHidesSecrets(t *testing.T) {
 	raw := string(data)
 	for _, secret := range []string{
 		cfg.MasterKey,
+		cfg.SessionSecret,
 		cfg.LabToken,
 		cfg.LabPassword,
 		cfg.AdminPassword,
@@ -34,6 +36,9 @@ func TestRedactedConfigHidesSecrets(t *testing.T) {
 	}
 	if got := cfg.Redacted().MasterKey; got != "<redacted>" {
 		t.Fatalf("unexpected master key redaction: %q", got)
+	}
+	if got := cfg.Redacted().SessionSecret; got != "<redacted>" {
+		t.Fatalf("unexpected session secret redaction: %q", got)
 	}
 }
 

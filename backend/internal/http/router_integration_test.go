@@ -2737,6 +2737,7 @@ func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Co
 		AllowRemoteLab: false,
 		OpenBrowser:    false,
 		MasterKey:      "test-master-key",
+		SessionSecret:  "test-session-secret",
 		LogLevel:       "error",
 		CORSOrigins:    []string{"http://localhost"},
 	}

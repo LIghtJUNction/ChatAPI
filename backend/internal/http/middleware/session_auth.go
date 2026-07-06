@@ -8,7 +8,7 @@ import (
 )
 
 func InjectSessionRequestActor(cfg config.Config) func(http.Handler) http.Handler {
-	codec := service.NewSessionCodec(cfg.MasterKey)
+	codec := service.NewSessionCodec(cfg.SessionSecret)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if cfg.Mode == config.ModeLab {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/repository/migrations"
+	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
+	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestParseSMTPTestOptionsConnectOnly(t *testing.T) {
@@ -47,6 +50,80 @@ func TestDurationUntilDailyRun(t *testing.T) {
 
 	if _, err := durationUntilDailyRun(now, "25:00"); err == nil {
 		t.Fatalf("expected invalid daily time error")
+	}
+}
+
+func TestEnsureSessionSecretKeepsEnvValue(t *testing.T) {
+	ctx := context.Background()
+	st := openAppTestStore(t)
+	cfg := config.Default(config.ModeServe, t.TempDir())
+	cfg.SessionSecret = "env-session-secret"
+
+	if err := ensureSessionSecret(ctx, &cfg, st, nil); err != nil {
+		t.Fatalf("ensure session secret: %v", err)
+	}
+	if cfg.SessionSecret != "env-session-secret" {
+		t.Fatalf("unexpected session secret: %q", cfg.SessionSecret)
+	}
+	if _, err := st.GetSystemConfig(ctx, sessionSecretConfigKey); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("env session secret should not be persisted by ensure, got %v", err)
+	}
+}
+
+func TestEnsureSessionSecretLoadsPersistedValue(t *testing.T) {
+	ctx := context.Background()
+	st := openAppTestStore(t)
+	if _, err := st.SetSystemConfig(ctx, store.SetSystemConfigInput{
+		Key: sessionSecretConfigKey,
+		Value: map[string]any{
+			"secret": "persisted-session-secret",
+		},
+	}); err != nil {
+		t.Fatalf("seed session secret: %v", err)
+	}
+	cfg := config.Default(config.ModeServe, t.TempDir())
+
+	if err := ensureSessionSecret(ctx, &cfg, st, nil); err != nil {
+		t.Fatalf("ensure session secret: %v", err)
+	}
+	if cfg.SessionSecret != "persisted-session-secret" {
+		t.Fatalf("unexpected session secret: %q", cfg.SessionSecret)
+	}
+}
+
+func TestEnsureSessionSecretGeneratesAndPersistsServeSecret(t *testing.T) {
+	ctx := context.Background()
+	st := openAppTestStore(t)
+	cfg := config.Default(config.ModeServe, t.TempDir())
+
+	if err := ensureSessionSecret(ctx, &cfg, st, nil); err != nil {
+		t.Fatalf("ensure session secret: %v", err)
+	}
+	if len(cfg.SessionSecret) < 32 {
+		t.Fatalf("expected generated session secret, got %q", cfg.SessionSecret)
+	}
+	item, err := st.GetSystemConfig(ctx, sessionSecretConfigKey)
+	if err != nil {
+		t.Fatalf("load persisted session secret: %v", err)
+	}
+	if item.Value["secret"] != cfg.SessionSecret || item.Value["generated_at"] == "" {
+		t.Fatalf("unexpected persisted session secret: %#v", item)
+	}
+}
+
+func TestEnsureSessionSecretUsesLabDefaultWithoutPersistence(t *testing.T) {
+	ctx := context.Background()
+	st := openAppTestStore(t)
+	cfg := config.Default(config.ModeLab, t.TempDir())
+
+	if err := ensureSessionSecret(ctx, &cfg, st, nil); err != nil {
+		t.Fatalf("ensure lab session secret: %v", err)
+	}
+	if cfg.SessionSecret != "chatapi-lab-insecure-session-secret" {
+		t.Fatalf("unexpected lab session secret: %q", cfg.SessionSecret)
+	}
+	if _, err := st.GetSystemConfig(ctx, sessionSecretConfigKey); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("lab session secret should not be persisted, got %v", err)
 	}
 }
 
@@ -138,7 +215,7 @@ func TestSetupCommandDryRunDoesNotWriteEnv(t *testing.T) {
 	if !report.OK || report.Written || report.EnvTemplate == "" {
 		t.Fatalf("unexpected setup dry-run report: %#v", report)
 	}
-	if !strings.Contains(report.EnvTemplate, "CHATAPI_MASTER_KEY=") || !strings.Contains(report.EnvTemplate, "CHATAPI_ADMIN_PASSWORD=") {
+	if !strings.Contains(report.EnvTemplate, "CHATAPI_MASTER_KEY=") || !strings.Contains(report.EnvTemplate, "CHATAPI_SESSION_SECRET=") || !strings.Contains(report.EnvTemplate, "CHATAPI_ADMIN_PASSWORD=") {
 		t.Fatalf("setup template missing required secrets: %q", report.EnvTemplate)
 	}
 	if _, err := os.Stat(filepath.Join(backendRoot, ".env")); !os.IsNotExist(err) {
@@ -160,7 +237,7 @@ func TestSetupCommandWriteEnv(t *testing.T) {
 		t.Fatalf("read written .env: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "CHATAPI_MASTER_KEY=") || !strings.Contains(content, "CHATAPI_ADMIN_PASSWORD=") {
+	if !strings.Contains(content, "CHATAPI_MASTER_KEY=") || !strings.Contains(content, "CHATAPI_SESSION_SECRET=") || !strings.Contains(content, "CHATAPI_ADMIN_PASSWORD=") {
 		t.Fatalf("written .env missing required values: %q", content)
 	}
 }
@@ -278,4 +355,19 @@ func TestMigrateCommandDownResetsSQLite(t *testing.T) {
 	if statusReport.OK || !strings.Contains(statusReport.Error, "read db_meta") {
 		t.Fatalf("unexpected status after down: %#v", statusReport)
 	}
+}
+
+func openAppTestStore(t *testing.T) *sqlitestore.Store {
+	t.Helper()
+	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = st.DB().Close()
+	})
+	if err := migrations.Bootstrap(context.Background(), st.DB()); err != nil {
+		t.Fatalf("bootstrap sqlite store: %v", err)
+	}
+	return st
 }

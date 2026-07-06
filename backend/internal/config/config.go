@@ -30,6 +30,7 @@ type Config struct {
 	DatabaseDriver                        string
 	DatabaseDSN                           string
 	MasterKey                             string
+	SessionSecret                         string
 	AllowRemoteLab                        bool
 	OpenBrowser                           bool
 	LabToken                              string
@@ -111,6 +112,7 @@ func Default(mode Mode, backendRoot string) Config {
 		DatabaseDriver:                        "sqlite",
 		DatabaseDSN:                           filepath.Join(dataDir, "chatapi.sqlite3"),
 		MasterKey:                             masterKey,
+		SessionSecret:                         "",
 		AllowRemoteLab:                        false,
 		OpenBrowser:                           openBrowser,
 		LabToken:                              "",
@@ -176,6 +178,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.DatabaseDriver = firstNonEmpty(os.Getenv("CHATAPI_DB_DRIVER"), cfg.DatabaseDriver)
 	cfg.DatabaseDSN = firstNonEmpty(os.Getenv("CHATAPI_DB_DSN"), cfg.DatabaseDSN)
 	cfg.MasterKey = firstNonEmpty(os.Getenv("CHATAPI_MASTER_KEY"), cfg.MasterKey)
+	cfg.SessionSecret = firstNonEmpty(os.Getenv("CHATAPI_SESSION_SECRET"), cfg.SessionSecret)
 	cfg.LogLevel = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_LEVEL"), cfg.LogLevel))
 	cfg.LabToken = strings.TrimSpace(os.Getenv("CHATAPI_LAB_TOKEN"))
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))

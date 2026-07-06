@@ -136,6 +136,11 @@ func (r *DiagnosticReport) checkSecrets(cfg Config) {
 		} else if len(cfg.MasterKey) < 32 {
 			r.add(DiagnosticWarn, "secret.master_key_short", "CHATAPI_MASTER_KEY 长度偏短，建议至少 32 个随机字符并纳入备份。")
 		}
+		if cfg.SessionSecret == "" {
+			r.add(DiagnosticInfo, "secret.session_secret_generated", "CHATAPI_SESSION_SECRET 未配置；启动服务时会自动生成并持久化到 config 表。")
+		} else if len(cfg.SessionSecret) < 32 {
+			r.add(DiagnosticWarn, "secret.session_secret_short", "CHATAPI_SESSION_SECRET 长度偏短，建议至少 32 个随机字符。")
+		}
 		if cfg.AdminPassword == "" {
 			r.add(DiagnosticWarn, "secret.admin_password_missing", "CHATAPI_ADMIN_PASSWORD 未配置；正式 session/admin 登录接入前需要补齐恢复入口。")
 		} else if cfg.AdminPassword == "change-me" {

@@ -15,8 +15,12 @@ var bootstrapTables = []string{
 	"audit_logs",
 	"app_api_key_audit_logs",
 	"user_app_api_keys",
+	"user_identities",
+	"user_configs",
 	"automation_rules",
 	"user_api_keys",
+	"users",
+	"config",
 	"messages",
 	"conversations",
 	"schema_migrations",
@@ -64,6 +68,43 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_created_at
 ON messages(conversation_id, created_at, id);
 
+CREATE TABLE IF NOT EXISTS users (
+	id TEXT PRIMARY KEY,
+	username TEXT NOT NULL DEFAULT '',
+	email TEXT NOT NULL DEFAULT '',
+	password_hash TEXT NOT NULL DEFAULT '',
+	role TEXT NOT NULL DEFAULT 'user',
+	is_active INTEGER NOT NULL DEFAULT 1,
+	local_admin INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	last_login_at TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username
+ON users(username)
+WHERE username <> '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+ON users(email)
+WHERE email <> '';
+
+CREATE TABLE IF NOT EXISTS user_configs (
+	user_id TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	PRIMARY KEY(user_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS config (
+	key TEXT PRIMARY KEY,
+	value_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS user_api_keys (
 	id TEXT PRIMARY KEY,
 	user_id TEXT NOT NULL,
@@ -81,6 +122,23 @@ ON user_api_keys(key_prefix);
 
 CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_id
 ON user_api_keys(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS user_identities (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	provider TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	email TEXT NOT NULL DEFAULT '',
+	email_verified INTEGER NOT NULL DEFAULT 0,
+	profile_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+	last_login_at TEXT,
+	UNIQUE(provider, subject)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_identities_user_provider
+ON user_identities(user_id, provider);
 
 CREATE TABLE IF NOT EXISTS automation_rules (
 	id TEXT NOT NULL,

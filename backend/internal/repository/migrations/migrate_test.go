@@ -31,6 +31,16 @@ func TestBootstrapSeedsMigrationMetadata(t *testing.T) {
 	if len(status.Applied) != 1 || status.Applied[0].Version != BootstrapVersion || status.Applied[0].Name != "bootstrap" {
 		t.Fatalf("unexpected applied migrations: %#v", status.Applied)
 	}
+	for _, table := range []string{"users", "user_identities", "user_configs", "config"} {
+		if !tableExists(t, db, table) {
+			t.Fatalf("expected bootstrap table %s", table)
+		}
+	}
+	for _, index := range []string{"idx_users_username", "idx_users_email", "idx_user_identities_user_provider"} {
+		if !indexExists(t, db, index) {
+			t.Fatalf("expected bootstrap index %s", index)
+		}
+	}
 }
 
 func TestBootstrapUpgradesThinMetadataTables(t *testing.T) {
@@ -147,4 +157,30 @@ func openTestDB(t *testing.T) *sql.DB {
 		_ = db.Close()
 	})
 	return db
+}
+
+func tableExists(t *testing.T, db *sql.DB, table string) bool {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'table' AND name = ?
+	`, table).Scan(&count); err != nil {
+		t.Fatalf("inspect table %s: %v", table, err)
+	}
+	return count == 1
+}
+
+func indexExists(t *testing.T, db *sql.DB, index string) bool {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'index' AND name = ?
+	`, index).Scan(&count); err != nil {
+		t.Fatalf("inspect index %s: %v", index, err)
+	}
+	return count == 1
 }

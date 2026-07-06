@@ -34,6 +34,9 @@ type RedactedConfig struct {
 	RealtimeMaxConnections                int      `json:"realtime_max_connections"`
 	RealtimeMaxConnectionsPerUser         int      `json:"realtime_max_connections_per_user"`
 	RealtimeWebUIReservedPerUser          int      `json:"realtime_webui_reserved_per_user"`
+	GeetestCaptchaID                      string   `json:"geetest_captcha_id,omitempty"`
+	GeetestCaptchaKey                     string   `json:"geetest_captcha_key"`
+	GeetestAPIServer                      string   `json:"geetest_api_server,omitempty"`
 
 	SMTPEnabled  bool   `json:"smtp_enabled"`
 	SMTPHost     string `json:"smtp_host,omitempty"`
@@ -92,6 +95,9 @@ func (c Config) Redacted() RedactedConfig {
 		RealtimeMaxConnections:                c.RealtimeMaxConnections,
 		RealtimeMaxConnectionsPerUser:         c.RealtimeMaxConnectionsPerUser,
 		RealtimeWebUIReservedPerUser:          c.RealtimeWebUIReservedPerUser,
+		GeetestCaptchaID:                      c.GeetestCaptchaID,
+		GeetestCaptchaKey:                     redactSecret(c.GeetestCaptchaKey),
+		GeetestAPIServer:                      c.GeetestAPIServer,
 		SMTPEnabled:                           c.SMTPEnabled,
 		SMTPHost:                              c.SMTPHost,
 		SMTPPort:                              c.SMTPPort,

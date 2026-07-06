@@ -2499,6 +2499,176 @@ func TestPasswordResetCodeTooManyAttempts(t *testing.T) {
 	}
 }
 
+func TestLoginRequiresGeeTestWhenEnabled(t *testing.T) {
+	geetestServer := newFakeGeeTestServer(t)
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.GeetestCaptchaID = "captcha-id"
+		cfg.GeetestCaptchaKey = "captcha-key"
+		cfg.GeetestAPIServer = geetestServer.server.URL
+	})
+	hash, err := passwordhash.Hash("login-secret")
+	if err != nil {
+		t.Fatalf("hash login password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "geetest-login-user",
+		Username:     "geetest-login@example.com",
+		Email:        "geetest-login@example.com",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed login user: %v", err)
+	}
+
+	sessionResp := env.getJSON(t, "/api/auth/session", http.StatusOK)
+	if !nestedPathBool(sessionResp, "geetest_enabled") || nestedPathString(sessionResp, "geetest_captcha_id") != "captcha-id" {
+		t.Fatalf("unexpected auth session geetest flags: %#v", sessionResp)
+	}
+
+	status, body := env.postText(t, "/api/auth/login", map[string]any{
+		"username": "geetest-login@example.com",
+		"password": "login-secret",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "geetest verification is required") {
+		t.Fatalf("expected geetest challenge on login: status=%d body=%q", status, body)
+	}
+
+	loginResp, _ := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username":       "geetest-login@example.com",
+		"password":       "login-secret",
+		"geetest_params": geetestServer.params(),
+	}, http.StatusOK)
+	if nestedPathString(loginResp, "user", "id") != "geetest-login-user" {
+		t.Fatalf("unexpected login response: %#v", loginResp)
+	}
+}
+
+func TestRegistrationSendCodeAndDirectRegisterRequireGeeTestWhenEnabled(t *testing.T) {
+	geetestServer := newFakeGeeTestServer(t)
+	smtpServer := newFakeSMTPServer(t)
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.SMTPEnabled = true
+		cfg.SMTPHost = smtpServer.host
+		cfg.SMTPPort = smtpServer.port
+		cfg.SMTPSecurity = "none"
+		cfg.SMTPFrom = "noreply@example.com"
+		cfg.SMTPTimeout = 10 * time.Second
+		cfg.GeetestCaptchaID = "captcha-id"
+		cfg.GeetestCaptchaKey = "captcha-key"
+		cfg.GeetestAPIServer = geetestServer.server.URL
+	})
+	if _, err := env.store.SetSystemConfig(context.Background(), store.SetSystemConfigInput{
+		Key: "system_settings",
+		Value: map[string]any{
+			"external_registration_enabled": true,
+			"email_verification_enabled":    true,
+		},
+	}); err != nil {
+		t.Fatalf("seed register settings: %v", err)
+	}
+
+	configResp := env.getJSON(t, "/api/auth/register/config", http.StatusOK)
+	if !nestedPathBool(configResp, "geetest_enabled") || nestedPathString(configResp, "geetest_captcha_id") != "captcha-id" {
+		t.Fatalf("unexpected register config geetest flags: %#v", configResp)
+	}
+
+	status, body := env.postText(t, "/api/auth/register/send-code", map[string]any{
+		"email": "geetest-register@example.com",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "geetest verification is required") {
+		t.Fatalf("expected geetest challenge on register send-code: status=%d body=%q", status, body)
+	}
+
+	status, body = env.postText(t, "/api/auth/register/send-code", map[string]any{
+		"email":          "geetest-register@example.com",
+		"geetest_params": geetestServer.params(),
+	})
+	if status != http.StatusOK {
+		t.Fatalf("unexpected register send-code response: status=%d body=%q", status, body)
+	}
+
+	envNoCode := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.GeetestCaptchaID = "captcha-id"
+		cfg.GeetestCaptchaKey = "captcha-key"
+		cfg.GeetestAPIServer = geetestServer.server.URL
+	})
+	if _, err := envNoCode.store.SetSystemConfig(context.Background(), store.SetSystemConfigInput{
+		Key: "system_settings",
+		Value: map[string]any{
+			"external_registration_enabled": true,
+			"email_verification_enabled":    false,
+		},
+	}); err != nil {
+		t.Fatalf("seed direct register settings: %v", err)
+	}
+
+	status, body = envNoCode.postText(t, "/api/auth/register", map[string]any{
+		"email":    "direct-register@example.com",
+		"password": "direct-secret",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "geetest verification is required") {
+		t.Fatalf("expected geetest challenge on direct register: status=%d body=%q", status, body)
+	}
+	registerResp := envNoCode.postJSON(t, "/api/auth/register", map[string]any{
+		"email":          "direct-register@example.com",
+		"password":       "direct-secret",
+		"geetest_params": geetestServer.params(),
+	}, http.StatusOK)
+	if nestedPathString(registerResp, "user", "id") == "" {
+		t.Fatalf("unexpected direct register response: %#v", registerResp)
+	}
+}
+
+func TestPasswordSendCodeRequiresGeeTestWhenEnabled(t *testing.T) {
+	geetestServer := newFakeGeeTestServer(t)
+	smtpServer := newFakeSMTPServer(t)
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.SMTPEnabled = true
+		cfg.SMTPHost = smtpServer.host
+		cfg.SMTPPort = smtpServer.port
+		cfg.SMTPSecurity = "none"
+		cfg.SMTPFrom = "noreply@example.com"
+		cfg.SMTPTimeout = 10 * time.Second
+		cfg.GeetestCaptchaID = "captcha-id"
+		cfg.GeetestCaptchaKey = "captcha-key"
+		cfg.GeetestAPIServer = geetestServer.server.URL
+	})
+	hash, err := passwordhash.Hash("reset-secret")
+	if err != nil {
+		t.Fatalf("hash reset password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "geetest-reset-user",
+		Username:     "geetest-reset@example.com",
+		Email:        "geetest-reset@example.com",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed reset user: %v", err)
+	}
+
+	configResp := env.getJSON(t, "/api/auth/password/config", http.StatusOK)
+	if !nestedPathBool(configResp, "geetest_enabled") || nestedPathString(configResp, "geetest_captcha_id") != "captcha-id" {
+		t.Fatalf("unexpected password config geetest flags: %#v", configResp)
+	}
+
+	status, body := env.postText(t, "/api/auth/password/send-code", map[string]any{
+		"email": "geetest-reset@example.com",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "geetest verification is required") {
+		t.Fatalf("expected geetest challenge on password send-code: status=%d body=%q", status, body)
+	}
+	status, body = env.postText(t, "/api/auth/password/send-code", map[string]any{
+		"email":          "geetest-reset@example.com",
+		"geetest_params": geetestServer.params(),
+	})
+	if status != http.StatusOK {
+		t.Fatalf("unexpected password send-code response: status=%d body=%q", status, body)
+	}
+}
+
 func TestUserIdentitiesListAndUnlink(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("identity-secret")
@@ -7649,6 +7819,10 @@ type fakeSMTPServer struct {
 	messages []string
 }
 
+type fakeGeeTestServer struct {
+	server *httptest.Server
+}
+
 func newFakeSMTPServer(t *testing.T) *fakeSMTPServer {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -7667,6 +7841,40 @@ func newFakeSMTPServer(t *testing.T) *fakeSMTPServer {
 	go server.serve()
 	t.Cleanup(func() { _ = ln.Close() })
 	return server
+}
+
+func newFakeGeeTestServer(t *testing.T) *fakeGeeTestServer {
+	t.Helper()
+	server := &fakeGeeTestServer{}
+	server.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected geetest method: %s", r.Method)
+		}
+		if got := r.URL.Query().Get("captcha_id"); got != "captcha-id" {
+			t.Fatalf("unexpected geetest captcha_id: %q", got)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse geetest form: %v", err)
+		}
+		for _, key := range []string{"lot_number", "captcha_output", "pass_token", "gen_time", "sign_token"} {
+			if strings.TrimSpace(r.PostForm.Get(key)) == "" {
+				t.Fatalf("missing geetest form key %q: %#v", key, r.PostForm)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":"success"}`))
+	}))
+	t.Cleanup(server.server.Close)
+	return server
+}
+
+func (s *fakeGeeTestServer) params() map[string]any {
+	return map[string]any{
+		"lot_number":     "lot-123",
+		"captcha_output": "captcha-output",
+		"pass_token":     "pass-token",
+		"gen_time":       "1720000000",
+	}
 }
 
 func (s *fakeSMTPServer) serve() {

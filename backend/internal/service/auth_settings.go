@@ -40,8 +40,8 @@ func (s *AuthSettingsService) Public(ctx context.Context) (AuthPublicSettings, e
 		RegistrationEmailDomainRestriction: false,
 		RegistrationEmailDomains:           "",
 		PasswordResetEnabled:               s.cfg.SMTPEnabled,
-		GeetestEnabled:                     false,
-		GeetestCaptchaID:                   "",
+		GeetestEnabled:                     strings.TrimSpace(s.cfg.GeetestCaptchaID) != "" && strings.TrimSpace(s.cfg.GeetestCaptchaKey) != "",
+		GeetestCaptchaID:                   strings.TrimSpace(s.cfg.GeetestCaptchaID),
 	}
 	item, err := s.store.GetSystemConfig(ctx, systemSettingsKey)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {

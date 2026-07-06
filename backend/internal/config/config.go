@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,6 +54,10 @@ type Config struct {
 	RealtimeMaxConnections                int
 	RealtimeMaxConnectionsPerUser         int
 	RealtimeWebUIReservedPerUser          int
+
+	GeetestCaptchaID  string
+	GeetestCaptchaKey string
+	GeetestAPIServer  string
 
 	SMTPEnabled  bool
 	SMTPHost     string
@@ -135,6 +140,9 @@ func Default(mode Mode, backendRoot string) Config {
 		RealtimeMaxConnections:                0,
 		RealtimeMaxConnectionsPerUser:         0,
 		RealtimeWebUIReservedPerUser:          1,
+		GeetestCaptchaID:                      "",
+		GeetestCaptchaKey:                     "",
+		GeetestAPIServer:                      "https://gcaptcha4.geetest.com",
 		SMTPEnabled:                           false,
 		SMTPHost:                              "",
 		SMTPPort:                              587,
@@ -260,6 +268,9 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 		}
 		cfg.RealtimeWebUIReservedPerUser = value
 	}
+	cfg.GeetestCaptchaID = firstNonEmpty(os.Getenv("CHATAPI_GEETEST_CAPTCHA_ID"), os.Getenv("GEETEST_CAPTCHA_ID"))
+	cfg.GeetestCaptchaKey = firstNonEmpty(os.Getenv("CHATAPI_GEETEST_CAPTCHA_KEY"), os.Getenv("GEETEST_CAPTCHA_KEY"))
+	cfg.GeetestAPIServer = firstNonEmpty(os.Getenv("CHATAPI_GEETEST_API_SERVER"), os.Getenv("GEETEST_API_SERVER"), cfg.GeetestAPIServer)
 	cfg.SMTPEnabled = parseBool(os.Getenv("CHATAPI_SMTP_ENABLED"), cfg.SMTPEnabled)
 	cfg.SMTPHost = strings.TrimSpace(os.Getenv("CHATAPI_SMTP_HOST"))
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_SMTP_PORT")); raw != "" {
@@ -384,6 +395,15 @@ func (c Config) Validate() error {
 	}
 	if c.RealtimeWebUIReservedPerUser < 0 {
 		return errors.New("realtime webui reserved per user must be non-negative")
+	}
+	if (strings.TrimSpace(c.GeetestCaptchaID) == "") != (strings.TrimSpace(c.GeetestCaptchaKey) == "") {
+		return errors.New("geetest captcha id and key must be configured together")
+	}
+	if strings.TrimSpace(c.GeetestCaptchaID) != "" {
+		parsed, err := url.Parse(strings.TrimSpace(c.GeetestAPIServer))
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+			return errors.New("geetest api server must be a valid http/https url")
+		}
 	}
 	if c.SMTPEnabled {
 		if strings.TrimSpace(c.SMTPHost) == "" {

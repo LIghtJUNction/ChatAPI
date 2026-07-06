@@ -156,6 +156,20 @@ func TestFromEnvLoadsSMTPConfig(t *testing.T) {
 	}
 }
 
+func TestFromEnvLoadsGeeTestConfig(t *testing.T) {
+	t.Setenv("CHATAPI_GEETEST_CAPTCHA_ID", "captcha-id")
+	t.Setenv("CHATAPI_GEETEST_CAPTCHA_KEY", "captcha-key")
+	t.Setenv("CHATAPI_GEETEST_API_SERVER", "https://geetest.example.com")
+
+	cfg, err := FromEnvUnchecked(ModeLab, t.TempDir())
+	if err != nil {
+		t.Fatalf("load geetest config: %v", err)
+	}
+	if cfg.GeetestCaptchaID != "captcha-id" || cfg.GeetestCaptchaKey != "captcha-key" || cfg.GeetestAPIServer != "https://geetest.example.com" {
+		t.Fatalf("unexpected geetest config: %#v", cfg)
+	}
+}
+
 func TestFromEnvLoadsStorageQuota(t *testing.T) {
 	t.Setenv("CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES", "12345")
 
@@ -223,6 +237,22 @@ func TestDiagnoseStorageQuota(t *testing.T) {
 	report = Diagnose(cfg, cfg.Validate())
 	if !hasDiagnostic(report, DiagnosticWarn, "storage.quota_low") {
 		t.Fatalf("missing low storage quota diagnostic: %#v", report)
+	}
+}
+
+func TestDiagnoseGeeTestPartialConfig(t *testing.T) {
+	cfg := Default(ModeServe, t.TempDir())
+	cfg.MasterKey = "01234567890123456789012345678901"
+	cfg.SessionSecret = "01234567890123456789012345678901"
+	cfg.AdminPassword = "not-change-me"
+	cfg.GeetestCaptchaID = "captcha-id"
+
+	report := Diagnose(cfg, cfg.Validate())
+	if report.OK {
+		t.Fatalf("expected geetest diagnostics to fail: %#v", report)
+	}
+	if !hasDiagnostic(report, DiagnosticError, "geetest.partial_config") {
+		t.Fatalf("missing geetest partial config diagnostic: %#v", report)
 	}
 }
 

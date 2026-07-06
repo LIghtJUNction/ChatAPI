@@ -28,6 +28,7 @@ const (
 type AuthHandler struct {
 	Config       config.Config
 	Audit        *service.AuditService
+	GeeTest      *service.GeeTestService
 	LocalAuth    *service.LocalAuthService
 	OIDCAuth     *service.OIDCAuthService
 	TOTP         *service.TOTPService
@@ -83,6 +84,8 @@ func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 	if h.Settings != nil {
 		if settings, err := h.Settings.Public(r.Context()); err == nil {
 			payload.RegistrationEnabled = settings.RegistrationEnabled
+			payload.GeetestEnabled = settings.GeetestEnabled
+			payload.GeetestCaptchaID = settings.GeetestCaptchaID
 		}
 	}
 	if actor, ok := service.RequestActorFromContext(r.Context()); ok {
@@ -115,10 +118,15 @@ func (h AuthHandler) RegisterConfig(w http.ResponseWriter, r *http.Request) {
 
 func (h AuthHandler) RegisterSendCode(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Email string `json:"email"`
+		Email         string                `json:"email"`
+		GeeTestParams service.GeeTestParams `json:"geetest_params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid register send-code request", http.StatusBadRequest)
+		return
+	}
+	if err := h.validateGeeTest(r.Context(), input.GeeTestParams); err != nil {
+		writeGeeTestError(w, err)
 		return
 	}
 	if err := h.Registration.SendCode(r.Context(), input.Email); err != nil {
@@ -131,13 +139,25 @@ func (h AuthHandler) RegisterSendCode(w http.ResponseWriter, r *http.Request) {
 
 func (h AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		Code     string `json:"code"`
+		Email         string                `json:"email"`
+		Password      string                `json:"password"`
+		Code          string                `json:"code"`
+		GeeTestParams service.GeeTestParams `json:"geetest_params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid register request", http.StatusBadRequest)
 		return
+	}
+	if err := h.validateGeeTest(r.Context(), input.GeeTestParams); err != nil {
+		if settings, settingsErr := h.Settings.Public(r.Context()); settingsErr == nil && settings.EmailVerificationEnabled {
+			if errors.Is(err, service.ErrGeeTestRequired) {
+				err = nil
+			}
+		}
+		if err != nil {
+			writeGeeTestError(w, err)
+			return
+		}
 	}
 	user, err := h.Registration.Register(r.Context(), input.Email, input.Password, input.Code)
 	if err != nil {
@@ -176,10 +196,15 @@ func (h AuthHandler) PasswordConfig(w http.ResponseWriter, r *http.Request) {
 
 func (h AuthHandler) PasswordSendCode(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Email string `json:"email"`
+		Email         string                `json:"email"`
+		GeeTestParams service.GeeTestParams `json:"geetest_params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid password send-code request", http.StatusBadRequest)
+		return
+	}
+	if err := h.validateGeeTest(r.Context(), input.GeeTestParams); err != nil {
+		writeGeeTestError(w, err)
 		return
 	}
 	if err := h.Passwords.SendCode(r.Context(), input.Email); err != nil {
@@ -444,12 +469,18 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		TOTP     string `json:"totp"`
+		Username string                `json:"username"`
+		Password string                `json:"password"`
+		TOTP     string                `json:"totp"`
+		GeeTest  service.GeeTestParams `json:"geetest_params"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid login request", http.StatusBadRequest)
+		return
+	}
+	if err := h.validateGeeTest(r.Context(), input.GeeTest); err != nil {
+		writeGeeTestError(w, err)
+		h.recordAuthAuditWithMetadata(r, "login_geetest", "failure", map[string]any{"reason": err.Error()})
 		return
 	}
 	username := strings.TrimSpace(input.Username)
@@ -728,6 +759,25 @@ func writePasswordResetError(w http.ResponseWriter, err error) {
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func writeGeeTestError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrGeeTestRequired),
+		errors.Is(err, service.ErrGeeTestInvalidParams),
+		errors.Is(err, service.ErrGeeTestFailed),
+		errors.Is(err, service.ErrGeeTestUnavailable):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (h AuthHandler) validateGeeTest(ctx context.Context, params service.GeeTestParams) error {
+	if h.GeeTest == nil {
+		return nil
+	}
+	return h.GeeTest.Validate(ctx, params)
 }
 
 func sessionCookie(r *http.Request, value string, maxAge int) *http.Cookie {

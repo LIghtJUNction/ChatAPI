@@ -51,6 +51,7 @@ func BuildAuthSchema(cfg config.Config, settings AuthPublicSettings) AuthSchema 
 					{Key: "username", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Username or email. When omitted, the handler falls back to admin."},
 					{Key: "password", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Local account password or recovery admin password."},
 					{Key: "totp", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Required only when TOTP is enabled for the matched account."},
+					{Key: "geetest_params", ValueType: "object", DefaultValue: nil, Public: false, AdminWriteOnly: true, Description: "Required when GeeTest is enabled. Shape: {lot_number, captcha_output, pass_token, gen_time}."},
 				},
 				Notes: []string{
 					"In lab mode, this endpoint returns the injected lab actor instead of creating a real session cookie.",
@@ -79,6 +80,7 @@ func BuildAuthSchema(cfg config.Config, settings AuthPublicSettings) AuthSchema 
 				Description: "Send a verification email for user registration.",
 				Fields: []ConfigFieldSchema{
 					{Key: "email", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Email address to verify for registration."},
+					{Key: "geetest_params", ValueType: "object", DefaultValue: nil, Public: false, AdminWriteOnly: true, Description: "Required when GeeTest is enabled. Shape: {lot_number, captcha_output, pass_token, gen_time}."},
 				},
 				Notes: []string{
 					"Rate limited per email and purpose.",
@@ -93,6 +95,7 @@ func BuildAuthSchema(cfg config.Config, settings AuthPublicSettings) AuthSchema 
 					{Key: "email", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Email address used during registration."},
 					{Key: "password", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Initial account password."},
 					{Key: "code", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Verification code sent to the email address."},
+					{Key: "geetest_params", ValueType: "object", DefaultValue: nil, Public: false, AdminWriteOnly: true, Description: "Required when GeeTest is enabled and registration is not using email verification."},
 				},
 			},
 			{
@@ -108,6 +111,7 @@ func BuildAuthSchema(cfg config.Config, settings AuthPublicSettings) AuthSchema 
 				Description: "Send a password reset verification code.",
 				Fields: []ConfigFieldSchema{
 					{Key: "email", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Email address of the local user resetting their password."},
+					{Key: "geetest_params", ValueType: "object", DefaultValue: nil, Public: false, AdminWriteOnly: true, Description: "Required when GeeTest is enabled. Shape: {lot_number, captcha_output, pass_token, gen_time}."},
 				},
 			},
 			{

@@ -46,9 +46,11 @@ func NewRouter(
 	auditService := service.NewAuditService(dataStore)
 	authSettingsService := service.NewAuthSettingsService(dataStore, cfg)
 	emailCodeService := service.NewEmailCodeService(dataStore, cfg.MasterKey, email.SMTPConfigFromConfig(cfg), nil)
+	geetestService := service.NewGeeTestService(cfg, nil)
 	authHandler := handlers.AuthHandler{
 		Config:       cfg,
 		Audit:        auditService,
+		GeeTest:      geetestService,
 		LocalAuth:    service.NewLocalAuthService(dataStore),
 		OIDCAuth:     service.NewOIDCAuthService(dataStore, cfg),
 		TOTP:         service.NewTOTPService(dataStore, cfg.MasterKey, "ChatAPI"),

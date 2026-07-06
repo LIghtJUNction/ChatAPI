@@ -15,6 +15,7 @@ func TestRedactedConfigHidesSecrets(t *testing.T) {
 	cfg.AdminPassword = "admin-password-secret"
 	cfg.OIDCClientSecret = "oidc-client-secret"
 	cfg.SMTPPassword = "smtp-password-secret"
+	cfg.GeetestCaptchaKey = "geetest-captcha-secret"
 
 	data, err := json.Marshal(cfg.Redacted())
 	if err != nil {
@@ -29,6 +30,7 @@ func TestRedactedConfigHidesSecrets(t *testing.T) {
 		cfg.AdminPassword,
 		cfg.OIDCClientSecret,
 		cfg.SMTPPassword,
+		cfg.GeetestCaptchaKey,
 	} {
 		if strings.Contains(raw, secret) {
 			t.Fatalf("redacted config leaked secret %q in %s", secret, raw)

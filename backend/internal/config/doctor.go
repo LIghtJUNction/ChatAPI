@@ -72,6 +72,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 	report.checkPending(cfg)
 	report.checkRuntime(cfg)
 	report.checkRealtime(cfg)
+	report.checkGeeTest(cfg)
 	report.checkSMTP(cfg)
 	report.checkOIDC(cfg)
 	report.checkLogLevel(cfg)
@@ -266,6 +267,28 @@ func (r *DiagnosticReport) checkSMTP(cfg Config) {
 	if cfg.SMTPPassword != "" && cfg.SMTPUsername == "" {
 		r.add(DiagnosticWarn, "smtp.password_without_username", "配置了 SMTP password 但 username 为空，确认服务器是否支持该认证方式。")
 	}
+}
+
+func (r *DiagnosticReport) checkGeeTest(cfg Config) {
+	enabledByID := strings.TrimSpace(cfg.GeetestCaptchaID) != ""
+	enabledByKey := strings.TrimSpace(cfg.GeetestCaptchaKey) != ""
+	if !enabledByID && !enabledByKey {
+		r.add(DiagnosticInfo, "geetest.disabled", "GeeTest 未启用；登录、注册和找回密码不会要求额外人机验证。")
+		return
+	}
+	if !enabledByID || !enabledByKey {
+		r.add(DiagnosticError, "geetest.partial_config", "GeeTest 必须同时配置 CHATAPI_GEETEST_CAPTCHA_ID 和 CHATAPI_GEETEST_CAPTCHA_KEY。")
+		return
+	}
+	parsed, err := url.Parse(strings.TrimSpace(cfg.GeetestAPIServer))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		r.add(DiagnosticError, "geetest.api_server_invalid", "CHATAPI_GEETEST_API_SERVER 必须是有效的 HTTP/HTTPS URL。")
+		return
+	}
+	if parsed.Scheme == "http" && cfg.Mode == ModeServe {
+		r.add(DiagnosticWarn, "geetest.api_server_plain_http", "GeeTest API server 使用明文 HTTP；正式环境建议改为 HTTPS。")
+	}
+	r.add(DiagnosticInfo, "geetest.enabled", "GeeTest 已启用；登录、注册和找回密码发码会要求前端提交 geetest_params。")
 }
 
 func (r *DiagnosticReport) checkStorage(cfg Config) {

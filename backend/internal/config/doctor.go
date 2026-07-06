@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -66,6 +67,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 	report.checkSecrets(cfg)
 	report.checkPaths(cfg)
 	report.checkCORS(cfg)
+	report.checkTrustedProxies(cfg)
 	report.checkStorage(cfg)
 	report.checkPending(cfg)
 	report.checkRuntime(cfg)
@@ -176,6 +178,28 @@ func (r *DiagnosticReport) checkCORS(cfg Config) {
 			r.add(DiagnosticWarn, "cors.wildcard", "serve 模式不建议使用通配 CORS origin。")
 		}
 	}
+}
+
+func (r *DiagnosticReport) checkTrustedProxies(cfg Config) {
+	if len(cfg.TrustedProxies) == 0 {
+		return
+	}
+	for _, rawRule := range cfg.TrustedProxies {
+		rule := strings.TrimSpace(rawRule)
+		if rule == "" {
+			continue
+		}
+		if strings.Contains(rule, "/") {
+			if _, err := netip.ParsePrefix(rule); err != nil {
+				r.add(DiagnosticError, "trusted_proxy.invalid", "CHATAPI_TRUSTED_PROXIES 包含无效 CIDR: "+rule)
+			}
+			continue
+		}
+		if _, err := netip.ParseAddr(rule); err != nil {
+			r.add(DiagnosticError, "trusted_proxy.invalid", "CHATAPI_TRUSTED_PROXIES 包含无效 IP: "+rule)
+		}
+	}
+	r.add(DiagnosticInfo, "trusted_proxy.enabled", "已启用可信代理；只有来自这些代理的请求才会读取 X-Forwarded-For / X-Real-IP。")
 }
 
 func (r *DiagnosticReport) checkOIDC(cfg Config) {

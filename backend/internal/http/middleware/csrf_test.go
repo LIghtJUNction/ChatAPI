@@ -59,3 +59,25 @@ func TestRequireSessionCSRFSkipsAPIKeyBearer(t *testing.T) {
 		t.Fatalf("expected api key request to skip csrf")
 	}
 }
+
+func TestAppAPIRequestSourceIPUsesForwardedForFromTrustedProxy(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://chat.example.com/api/app/me", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.8, 127.0.0.1")
+
+	got := appAPIRequestSourceIP(req, []string{"127.0.0.0/8"})
+	if got != "203.0.113.8" {
+		t.Fatalf("unexpected trusted forwarded source ip: %q", got)
+	}
+}
+
+func TestAppAPIRequestSourceIPIgnoresForwardedForWithoutTrustedProxy(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://chat.example.com/api/app/me", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.8")
+
+	got := appAPIRequestSourceIP(req, nil)
+	if got != "127.0.0.1" {
+		t.Fatalf("unexpected untrusted forwarded source ip: %q", got)
+	}
+}

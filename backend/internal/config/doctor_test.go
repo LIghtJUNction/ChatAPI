@@ -51,6 +51,33 @@ func TestFromEnvUncheckedKeepsLabDefaultMasterKey(t *testing.T) {
 	}
 }
 
+func TestFromEnvLoadsTrustedProxies(t *testing.T) {
+	t.Setenv("CHATAPI_TRUSTED_PROXIES", "127.0.0.1,10.0.0.0/8")
+
+	cfg, err := FromEnvUnchecked(ModeServe, t.TempDir())
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 2 || cfg.TrustedProxies[0] != "127.0.0.1" || cfg.TrustedProxies[1] != "10.0.0.0/8" {
+		t.Fatalf("unexpected trusted proxies: %#v", cfg.TrustedProxies)
+	}
+}
+
+func TestDiagnoseTrustedProxyValidation(t *testing.T) {
+	cfg := Default(ModeServe, t.TempDir())
+	cfg.MasterKey = "01234567890123456789012345678901"
+	cfg.AdminPassword = "not-change-me"
+	cfg.TrustedProxies = []string{"not-an-ip"}
+
+	report := Diagnose(cfg, cfg.Validate())
+	if report.OK {
+		t.Fatalf("expected trusted proxy diagnostics to fail: %#v", report)
+	}
+	if !hasDiagnostic(report, DiagnosticError, "trusted_proxy.invalid") {
+		t.Fatalf("missing trusted proxy diagnostic: %#v", report)
+	}
+}
+
 func TestDiagnoseOIDCPrivateRPRequirements(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
 	cfg.MasterKey = "01234567890123456789012345678901"

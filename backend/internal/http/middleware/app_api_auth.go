@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -11,7 +13,7 @@ import (
 
 type appAPIPrincipalContextKey struct{}
 
-func RequireAppAPIKey(authService *service.AppAPIKeyService, scopes ...string) func(http.Handler) http.Handler {
+func RequireAppAPIKey(authService *service.AppAPIKeyService, trustedProxies []string, scopes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rawKey := extractAppAPIKey(r)
@@ -27,7 +29,8 @@ func RequireAppAPIKey(authService *service.AppAPIKeyService, scopes ...string) f
 				Role:     "app_api",
 				Source:   "app_api_key",
 			})
-			if !authService.AllowSourceIP(principal, r.RemoteAddr) {
+			sourceIP := appAPIRequestSourceIP(r, trustedProxies)
+			if !authService.AllowSourceIP(principal, sourceIP) {
 				authService.RecordAudit(ctx, principal, r.URL.Path, http.StatusForbidden, "source_ip_forbidden")
 				http.Error(w, "app api key source ip forbidden", http.StatusForbidden)
 				return
@@ -47,6 +50,62 @@ func RequireAppAPIKey(authService *service.AppAPIKeyService, scopes ...string) f
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func appAPIRequestSourceIP(r *http.Request, trustedProxies []string) string {
+	remoteIP := hostFromRemoteAddr(r.RemoteAddr)
+	if !isTrustedProxy(remoteIP, trustedProxies) {
+		return remoteIP
+	}
+	if value := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); value != "" {
+		parts := strings.Split(value, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				return part
+			}
+		}
+	}
+	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
+		return value
+	}
+	return remoteIP
+}
+
+func hostFromRemoteAddr(remoteAddr string) string {
+	host := strings.TrimSpace(remoteAddr)
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	return host
+}
+
+func isTrustedProxy(remoteIP string, trustedProxies []string) bool {
+	if len(trustedProxies) == 0 {
+		return false
+	}
+	addr, err := netip.ParseAddr(strings.TrimSpace(remoteIP))
+	if err != nil {
+		return false
+	}
+	for _, rawRule := range trustedProxies {
+		rule := strings.TrimSpace(rawRule)
+		if rule == "" {
+			continue
+		}
+		if strings.Contains(rule, "/") {
+			prefix, err := netip.ParsePrefix(rule)
+			if err == nil && prefix.Contains(addr) {
+				return true
+			}
+			continue
+		}
+		allowedAddr, err := netip.ParseAddr(rule)
+		if err == nil && allowedAddr == addr {
+			return true
+		}
+	}
+	return false
 }
 
 func AppAPIPrincipalFromContext(ctx context.Context) (service.AppAPIPrincipal, bool) {

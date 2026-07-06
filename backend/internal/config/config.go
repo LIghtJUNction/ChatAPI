@@ -37,6 +37,7 @@ type Config struct {
 	AdminPassword                         string
 	LogLevel                              string
 	CORSOrigins                           []string
+	TrustedProxies                        []string
 	MetricsEnabled                        bool
 	UploadMaxBytes                        int64
 	StorageDefaultQuotaBytes              int64
@@ -117,6 +118,7 @@ func Default(mode Mode, backendRoot string) Config {
 		AdminPassword:                         "",
 		LogLevel:                              "info",
 		CORSOrigins:                           []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		TrustedProxies:                        nil,
 		MetricsEnabled:                        false,
 		UploadMaxBytes:                        10 << 20,
 		StorageDefaultQuotaBytes:              0,
@@ -298,6 +300,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_CORS_ORIGINS")); raw != "" {
 		cfg.CORSOrigins = splitCSV(raw)
 	}
+	cfg.TrustedProxies = splitCSV(os.Getenv("CHATAPI_TRUSTED_PROXIES"))
 
 	cfg.AllowRemoteLab = parseBool(os.Getenv("CHATAPI_ALLOW_REMOTE_LAB"), cfg.AllowRemoteLab)
 	cfg.OpenBrowser = parseBool(os.Getenv("CHATAPI_OPEN_BROWSER"), cfg.OpenBrowser)

@@ -42,7 +42,7 @@
 - 应用 API 当前已开始覆盖 `automation:read` / `automation:write`：`GET/PUT /api/app/automation-rules` 可读写当前用户自己的自动化规则，并支持 `allowed_automation_rule_ids` 限制外部程序只能管理指定规则。
 - 应用 API 当前已开始覆盖 `statistics:read`：`GET /api/app/statistics/summary` 返回当前用户自己的请求态势摘要，包括总请求数、waiting/streaming/closed/aborted 计数、按模型和状态聚合、最老 pending 等待秒数。
 - 应用 API 当前已开始覆盖 `max_requests_per_minute` 资源限制：在单进程内按应用 API Key 做 1 分钟窗口限流，超限返回 `429` 并写入 `app_api_key_audit_logs`，管理员审计聚合视图中显示为 `app_api.request` failure / `rate_limited`。
-- 应用 API 当前已开始覆盖 `allowed_source_ips` 资源限制：支持精确 IP 和 CIDR，当前按直连 `RemoteAddr` 判断，不信任 `X-Forwarded-For` 等代理头；拒绝时返回 `403` 并记录 `source_ip_forbidden`。
+- 应用 API 当前已开始覆盖 `allowed_source_ips` 资源限制：支持精确 IP 和 CIDR，默认按直连 `RemoteAddr` 判断；配置 `CHATAPI_TRUSTED_PROXIES` 后，仅当直连来源命中可信代理时才读取 `X-Forwarded-For` / `X-Real-IP`；拒绝时返回 `403` 并记录 `source_ip_forbidden`。
 - 应用 API Key 创建已开始支持 `expires_at`：用户创建应用 API Key 时可传 RFC3339 过期时间，必须晚于当前时间；过期 key 鉴权返回 `401`。
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/system`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、Linux 系统内存/load/disk/RSS/FD、pending turn、realtime subscriber 和 SQLite 文件大小等可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
 - Realtime 事件广播已补上最小背压策略：每个订阅者使用固定队列，队列满时记录 recoverable drop，连续满队列会断开慢订阅者并累计 `slow_disconnects`；`/api/admin/runtime/queue` 和 `/metrics` 都会暴露相关计数。
@@ -1315,7 +1315,7 @@ user_app_api_keys
 - `allowed_request_actions`：细分 `delta`、`complete`、`abort`，避免只需要流式输出的程序获得终止能力。
 - `max_requests_per_minute`：覆盖默认限流。
 - `max_model_keys`：限制该应用 API Key 创建虚拟模型 API Key 时，当前用户最多可持有的未撤销虚拟模型 key 数量。
-- `allowed_source_ips`：可选 IP allowlist，适合部署在固定出口的自动化程序。当前 Go 重构分支已支持精确 IP 和 CIDR，按直连 `RemoteAddr` 判断；如果部署在反向代理后，需要后续增加可信代理配置后才能安全读取转发头。
+- `allowed_source_ips`：可选 IP allowlist，适合部署在固定出口的自动化程序。当前 Go 重构分支已支持精确 IP 和 CIDR；默认按直连 `RemoteAddr` 判断，如果配置 `CHATAPI_TRUSTED_PROXIES`，且直连来源命中可信代理列表，应用 API 鉴权会读取 `X-Forwarded-For` / `X-Real-IP` 作为真实客户端 IP。不要把不受控网络段加入可信代理。
 
 建议应用 API 路由统一放在 `/api/app/*`，只接受应用 API Key，不接受浏览器 session：
 

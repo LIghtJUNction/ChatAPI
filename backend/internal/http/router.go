@@ -86,60 +86,63 @@ func NewRouter(
 	router.Post("/lab/requests/{requestID}/abort", labHandler.RequestAbort)
 	router.Get("/api/ws", realtimeHandler.WebSocket)
 	appRouter := chi.NewRouter()
+	appAuth := func(scopes ...string) func(http.Handler) http.Handler {
+		return middleware.RequireAppAPIKey(appAPIKeyService, cfg.TrustedProxies, scopes...)
+	}
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "requests:read"),
+		appAuth("requests:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/me", appAPIHandler.Me)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "requests:read"),
+		appAuth("requests:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/requests", appAPIHandler.ListRequests)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "requests:read"),
+		appAuth("requests:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/requests/{requestID}", appAPIHandler.GetRequest)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "conversations:read"),
+		appAuth("conversations:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/conversations", appAPIHandler.ListConversations)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "conversations:read"),
+		appAuth("conversations:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/conversations/{conversationID}/messages", appAPIHandler.ListConversationMessages)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "automation:read"),
+		appAuth("automation:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/automation-rules", appAPIHandler.ListAutomationRules)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "automation:write"),
+		appAuth("automation:write"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Put("/automation-rules", appAPIHandler.PutAutomationRules)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "statistics:read"),
+		appAuth("statistics:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/statistics/summary", appAPIHandler.StatisticsSummary)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "model_keys:read"),
+		appAuth("model_keys:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/model-keys", appAPIHandler.ListModelAPIKeys)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "model_keys:write"),
+		appAuth("model_keys:write"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Post("/model-keys", appAPIHandler.CreateModelAPIKey)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "model_keys:delete"),
+		appAuth("model_keys:delete"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Delete("/model-keys/{keyID}", appAPIHandler.DeleteModelAPIKey)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond"),
+		appAuth("requests:respond"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Post("/requests/{requestID}/delta", appAPIHandler.RequestDelta)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond"),
+		appAuth("requests:respond"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Post("/requests/{requestID}/complete", appAPIHandler.RequestComplete)
 	appRouter.With(
-		middleware.RequireAppAPIKey(appAPIKeyService, "requests:respond"),
+		appAuth("requests:respond"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Post("/requests/{requestID}/abort", appAPIHandler.RequestAbort)
 	router.Mount("/api/app", appRouter)

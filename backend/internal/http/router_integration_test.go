@@ -2223,6 +2223,21 @@ func TestAppAPISourceIPLimit(t *testing.T) {
 	}
 }
 
+func TestAppAPISourceIPLimitUsesTrustedForwardedFor(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.TrustedProxies = []string{"127.0.0.0/8"}
+	})
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, map[string]any{
+		"allowed_source_ips": []string{"203.0.113.8"},
+	})
+	status, body := env.appGetTextWithHeaders(t, "/api/app/me", appKey, map[string]string{
+		"X-Forwarded-For": "203.0.113.8, 127.0.0.1",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("expected trusted forwarded source ip to pass: status=%d body=%q", status, body)
+	}
+}
+
 func TestChatCompletionsProtocolShape(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -3046,11 +3061,19 @@ func (e *testEnv) appGetJSON(t *testing.T, path string, appKey string, wantStatu
 
 func (e *testEnv) appGetText(t *testing.T, path string, appKey string) (int, string) {
 	t.Helper()
+	return e.appGetTextWithHeaders(t, path, appKey, nil)
+}
+
+func (e *testEnv) appGetTextWithHeaders(t *testing.T, path string, appKey string, headers map[string]string) (int, string) {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, e.server.URL+path, nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+appKey)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
 	resp, err := e.client.Do(req)
 	if err != nil {
 		t.Fatalf("do app get %s: %v", path, err)

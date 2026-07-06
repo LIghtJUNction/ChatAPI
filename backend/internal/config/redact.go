@@ -18,6 +18,7 @@ type RedactedConfig struct {
 	AdminPassword                         string   `json:"admin_password"`
 	LogLevel                              string   `json:"log_level"`
 	CORSOrigins                           []string `json:"cors_origins"`
+	TrustedProxies                        []string `json:"trusted_proxies,omitempty"`
 	MetricsEnabled                        bool     `json:"metrics_enabled"`
 	UploadMaxBytes                        int64    `json:"upload_max_bytes"`
 	StorageDefaultQuotaBytes              int64    `json:"storage_default_quota_bytes"`
@@ -74,6 +75,7 @@ func (c Config) Redacted() RedactedConfig {
 		AdminPassword:                         redactSecret(c.AdminPassword),
 		LogLevel:                              c.LogLevel,
 		CORSOrigins:                           append([]string(nil), c.CORSOrigins...),
+		TrustedProxies:                        append([]string(nil), c.TrustedProxies...),
 		MetricsEnabled:                        c.MetricsEnabled,
 		UploadMaxBytes:                        c.UploadMaxBytes,
 		StorageDefaultQuotaBytes:              c.StorageDefaultQuotaBytes,

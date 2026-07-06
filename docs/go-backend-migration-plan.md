@@ -919,6 +919,7 @@ ChatAPI 的 OpenAI Responses、Chat Completions、Anthropic Messages 三套协�
 - 输入归一化侧当前已继续补齐两类常见多模态变体：OpenAI Responses 风格的 `input` 现在不仅支持 message 数组，也支持直接给 `input_text` / `input_image` content part 数组；Anthropic `image` block 的 `source.media_type` / `source.data|url` 也已通过协议测试固化。这样后续浏览器端辅助或外部 SDK 直接复用 protocol 包时，不需要额外再套一层“伪 message” 包装。
 - 工具结果输入侧当前也已开始归一化：OpenAI Responses `function_call_output`、Chat Completions `role=tool` 消息，以及 Anthropic `tool_result` block 都会统一映射成 `InputPart{Type:"tool_result", Text:"..."}`，并参与 `UserContent` 拼接。这样自动化规则、后续上游辅助和调试界面读取请求上下文时，可以直接看到工具返回文本，而不需要分别理解三套协议的工具结果外形。
 - 指令角色侧当前也已开始显式保留：`TurnRequest` 已新增 `SystemContent` / `DeveloperContent`，会从 Chat Completions / Responses 的 `role=system|developer` 消息，以及 Anthropic 的顶层 `system` 字段里提取文本。这样后续如果要做更完整的上游代理、调试上下文展示或策略校验，不需要再回退到原始 body 里自己翻 role。
+- assistant 上下文侧当前也已开始显式保留：`TurnRequest.AssistantContent` 会提取三套协议里历史 assistant 文本消息内容。这样后续如果要在浏览器端做“请求大模型”辅助、展示更完整的最近上下文，或在后端做更细的规则匹配，不需要只盯着最后一条 user/tool 输入。
 
 这个包可以同时被 ChatAPI 和 KirariNetwork 使用：ChatAPI 用它接收外部 Agent 请求并归一化为 pending turn，KirariNetwork 可用它把不同上游模型协议归一化为统一模型网关响应。
 

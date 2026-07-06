@@ -20,6 +20,7 @@ type TurnRequest struct {
 	Stream           bool
 	SystemContent    string
 	DeveloperContent string
+	AssistantContent string
 	UserContent      string
 	InputParts       []InputPart
 	ToolSchemas      []any
@@ -82,6 +83,7 @@ func ParseRequest(protocolValue string, body map[string]any) TurnRequest {
 		Stream:           boolValue(body["stream"]),
 		SystemContent:    extractRoleContent(body, "system"),
 		DeveloperContent: extractRoleContent(body, "developer"),
+		AssistantContent: extractRoleContent(body, "assistant"),
 		UserContent:      joinInputPartText(inputParts),
 		InputParts:       inputParts,
 		ToolSchemas:      extractToolSchemas(body),
@@ -265,10 +267,6 @@ func extractPartsFromTurnInput(input []any) []InputPart {
 			parts = append(parts, extractPartsFromMessageContent(record["content"])...)
 		case "tool":
 			parts = append(parts, extractToolResultParts(record["content"])...)
-		default:
-			if stringValue(record["type"], "") == "message" {
-				parts = append(parts, extractPartsFromMessageContent(record["content"])...)
-			}
 		}
 	}
 	return parts

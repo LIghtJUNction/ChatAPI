@@ -185,6 +185,7 @@ func TestParseRequestCapturesSystemAndDeveloperContent(t *testing.T) {
 			map[string]any{"role": "developer", "content": []any{
 				map[string]any{"type": "text", "text": "developer note"},
 			}},
+			map[string]any{"role": "assistant", "content": "assistant context"},
 			map[string]any{"role": "user", "content": "hello"},
 		},
 	})
@@ -193,6 +194,9 @@ func TestParseRequestCapturesSystemAndDeveloperContent(t *testing.T) {
 	}
 	if request.DeveloperContent != "developer note" {
 		t.Fatalf("unexpected developer content: %#v", request.DeveloperContent)
+	}
+	if request.AssistantContent != "assistant context" {
+		t.Fatalf("unexpected assistant content: %#v", request.AssistantContent)
 	}
 	if request.UserContent != "hello" {
 		t.Fatalf("unexpected user content: %#v", request.UserContent)
@@ -212,6 +216,30 @@ func TestParseRequestCapturesAnthropicTopLevelSystem(t *testing.T) {
 	}
 	if request.UserContent != "hello" {
 		t.Fatalf("unexpected user content: %#v", request.UserContent)
+	}
+}
+
+func TestParseRequestCapturesResponsesAssistantInputMessages(t *testing.T) {
+	request := ParseRequest("responses", map[string]any{
+		"model": "gpt-test",
+		"input": []any{
+			map[string]any{
+				"type":    "message",
+				"role":    "assistant",
+				"content": []any{map[string]any{"type": "output_text", "text": "previous answer"}},
+			},
+			map[string]any{
+				"type":    "message",
+				"role":    "user",
+				"content": []any{map[string]any{"type": "input_text", "text": "next question"}},
+			},
+		},
+	})
+	if request.AssistantContent != "previous answer" {
+		t.Fatalf("unexpected responses assistant content: %#v", request.AssistantContent)
+	}
+	if request.UserContent != "next question" {
+		t.Fatalf("unexpected responses user content: %#v", request.UserContent)
 	}
 }
 

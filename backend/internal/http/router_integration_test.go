@@ -4,16 +4,21 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/pquerna/otp/totp"
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
@@ -2234,6 +2241,108 @@ func TestOIDCLoginRedirectUsesPKCE(t *testing.T) {
 		findCookie(cookies, "chatapi_oidc_pkce") == nil {
 		t.Fatalf("expected state, nonce and pkce cookies, got %#v", cookies)
 	}
+}
+
+func TestOIDCCallbackCreatesSessionFromVerifiedAdminEmail(t *testing.T) {
+	const state = "state-success"
+	const nonce = "nonce-success"
+	provider := newTestOIDCProvider(t, testOIDCProviderConfig{
+		IDTokenClaims: map[string]any{
+			"sub":   "oidc-admin-sub",
+			"nonce": nonce,
+		},
+		UserInfoClaims: map[string]any{
+			"sub":            "oidc-admin-sub",
+			"email":          "admin@example.com",
+			"email_verified": true,
+			"name":           "OIDC Admin",
+		},
+	})
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.OIDCEnabled = true
+		cfg.OIDCIssuerURL = provider.Issuer()
+		cfg.OIDCClientID = "chatapi"
+		cfg.OIDCClientSecret = "secret"
+		cfg.OIDCRedirectURL = "http://chat.example.com/api/auth/oidc/callback"
+		cfg.OIDCAutoCreateUser = true
+		cfg.OIDCAdminEmails = []string{"admin@example.com"}
+	})
+
+	callbackResp, callbackCookies := env.getJSONAndCookiesWithCookies(t, "/api/auth/oidc/callback?code=success-code&state="+neturl.QueryEscape(state), []*http.Cookie{
+		{Name: "chatapi_oidc_state", Value: neturl.QueryEscape(state), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_nonce", Value: neturl.QueryEscape(nonce), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_pkce", Value: neturl.QueryEscape("pkce-success"), Path: "/api/auth/oidc"},
+	}, http.StatusOK)
+	if callbackResp["ok"] != true || nestedPathString(callbackResp, "user", "role") != "admin" {
+		t.Fatalf("unexpected oidc callback response: %#v", callbackResp)
+	}
+	sessionCookie := findCookie(callbackCookies, service.SessionCookieName)
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatalf("expected session cookie after oidc callback, got %#v", callbackCookies)
+	}
+	sessionResp := env.getJSONWithCookie(t, "/api/auth/session", sessionCookie, http.StatusOK)
+	if sessionResp["authenticated"] != true || nestedPathString(sessionResp, "user", "role") != "admin" {
+		t.Fatalf("expected authenticated oidc admin session: %#v", sessionResp)
+	}
+
+	user, err := env.store.GetUserByEmail(context.Background(), "admin@example.com")
+	if err != nil {
+		t.Fatalf("load oidc user by email: %v", err)
+	}
+	if user.Role != "admin" || user.LastLoginAt == nil {
+		t.Fatalf("unexpected stored oidc user: %#v", user)
+	}
+	identity, err := env.store.GetUserIdentity(context.Background(), "oidc", "oidc-admin-sub")
+	if err != nil {
+		t.Fatalf("load oidc identity: %v", err)
+	}
+	if identity.UserID != user.ID || !identity.EmailVerified {
+		t.Fatalf("unexpected oidc identity after callback: %#v", identity)
+	}
+	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "login", "success", 1)
+}
+
+func TestOIDCCallbackRejectsUserInfoSubjectMismatch(t *testing.T) {
+	const state = "state-mismatch"
+	const nonce = "nonce-mismatch"
+	provider := newTestOIDCProvider(t, testOIDCProviderConfig{
+		IDTokenClaims: map[string]any{
+			"sub":            "oidc-subject-id-token",
+			"nonce":          nonce,
+			"email":          "user@example.com",
+			"email_verified": true,
+		},
+		UserInfoClaims: map[string]any{
+			"sub":            "oidc-subject-userinfo-other",
+			"email":          "user@example.com",
+			"email_verified": true,
+		},
+	})
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.OIDCEnabled = true
+		cfg.OIDCIssuerURL = provider.Issuer()
+		cfg.OIDCClientID = "chatapi"
+		cfg.OIDCClientSecret = "secret"
+		cfg.OIDCRedirectURL = "http://chat.example.com/api/auth/oidc/callback"
+		cfg.OIDCAutoCreateUser = true
+	})
+
+	status, body, callbackCookies := env.getTextAndCookiesWithCookies(t, "/api/auth/oidc/callback?code=success-code&state="+neturl.QueryEscape(state), []*http.Cookie{
+		{Name: "chatapi_oidc_state", Value: neturl.QueryEscape(state), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_nonce", Value: neturl.QueryEscape(nonce), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_pkce", Value: neturl.QueryEscape("pkce-mismatch"), Path: "/api/auth/oidc"},
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "oidc userinfo claims are invalid") {
+		t.Fatalf("expected oidc userinfo mismatch rejection: status=%d body=%q", status, body)
+	}
+	if sessionCookie := findCookie(callbackCookies, service.SessionCookieName); sessionCookie != nil && sessionCookie.Value != "" {
+		t.Fatalf("unexpected session cookie on oidc userinfo mismatch: %#v", callbackCookies)
+	}
+	assertAuditCountForActor(t, env, "", "auth.session", "session", "admin", "oidc_userinfo", "failure", 1)
 }
 
 func TestServeLocalUserLoginFromUsersTable(t *testing.T) {
@@ -4448,6 +4557,132 @@ func newPostgresTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*c
 	}
 }
 
+type testOIDCProviderConfig struct {
+	IDTokenClaims  map[string]any
+	UserInfoClaims map[string]any
+}
+
+type testOIDCProvider struct {
+	server         *httptest.Server
+	privateKey     *rsa.PrivateKey
+	keyID          string
+	idTokenClaims  map[string]any
+	userInfoClaims map[string]any
+}
+
+func newTestOIDCProvider(t *testing.T, cfg testOIDCProviderConfig) *testOIDCProvider {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate oidc test rsa key: %v", err)
+	}
+	provider := &testOIDCProvider{
+		privateKey:     privateKey,
+		keyID:          "test-key-1",
+		idTokenClaims:  cloneMap(cfg.IDTokenClaims),
+		userInfoClaims: cloneMap(cfg.UserInfoClaims),
+	}
+	if provider.idTokenClaims == nil {
+		provider.idTokenClaims = map[string]any{
+			"sub": "oidc-test-sub",
+		}
+	}
+	if provider.userInfoClaims == nil {
+		provider.userInfoClaims = cloneMap(provider.idTokenClaims)
+	}
+	provider.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                 provider.server.URL,
+				"authorization_endpoint": provider.server.URL + "/authorize",
+				"token_endpoint":         provider.server.URL + "/token",
+				"jwks_uri":               provider.server.URL + "/jwks",
+				"userinfo_endpoint":      provider.server.URL + "/userinfo",
+			})
+		case "/jwks":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"keys": []map[string]any{provider.publicJWK()},
+			})
+		case "/token":
+			idToken, err := provider.signedIDToken()
+			if err != nil {
+				http.Error(w, "failed to sign id token", http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "oidc-access-token",
+				"token_type":   "Bearer",
+				"expires_in":   3600,
+				"id_token":     idToken,
+			})
+		case "/userinfo":
+			_ = json.NewEncoder(w).Encode(provider.userInfoClaims)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return provider
+}
+
+func (p *testOIDCProvider) Close() {
+	if p != nil && p.server != nil {
+		p.server.Close()
+	}
+}
+
+func (p *testOIDCProvider) Issuer() string {
+	if p == nil || p.server == nil {
+		return ""
+	}
+	return p.server.URL
+}
+
+func (p *testOIDCProvider) publicJWK() map[string]any {
+	return map[string]any{
+		"kty": "RSA",
+		"alg": "RS256",
+		"use": "sig",
+		"kid": p.keyID,
+		"n":   base64.RawURLEncoding.EncodeToString(p.privateKey.PublicKey.N.Bytes()),
+		"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(p.privateKey.PublicKey.E)).Bytes()),
+	}
+}
+
+func (p *testOIDCProvider) signedIDToken() (string, error) {
+	signer, err := jose.NewSigner(jose.SigningKey{
+		Algorithm: jose.RS256,
+		Key: jose.JSONWebKey{
+			Key:       p.privateKey,
+			KeyID:     p.keyID,
+			Use:       "sig",
+			Algorithm: string(jose.RS256),
+		},
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	claims := cloneMap(p.idTokenClaims)
+	now := time.Now().UTC()
+	claims["iss"] = p.server.URL
+	claims["aud"] = "chatapi"
+	claims["iat"] = now.Unix()
+	claims["exp"] = now.Add(time.Hour).Unix()
+	return jwt.Signed(signer).Claims(claims).Serialize()
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if input == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
 func (e *testEnv) postJSON(t *testing.T, path string, body map[string]any, wantStatus int) map[string]any {
 	t.Helper()
 	rawBody, err := json.Marshal(body)
@@ -4552,6 +4787,42 @@ func (e *testEnv) getJSONWithCookie(t *testing.T, path string, cookie *http.Cook
 		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
 	}
 	return payload
+}
+
+func (e *testEnv) getJSONAndCookiesWithCookies(t *testing.T, path string, cookies []*http.Cookie, wantStatus int) (map[string]any, []*http.Cookie) {
+	t.Helper()
+	status, body, responseCookies := e.getTextAndCookiesWithCookies(t, path, cookies)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode response %s: %v body=%q", path, err, body)
+	}
+	if status != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, status, wantStatus, payload)
+	}
+	return payload, responseCookies
+}
+
+func (e *testEnv) getTextAndCookiesWithCookies(t *testing.T, path string, cookies []*http.Cookie) (int, string, []*http.Cookie) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	for _, cookie := range cookies {
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do get %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data), resp.Cookies()
 }
 
 func (e *testEnv) postMultipart(t *testing.T, path string, field string, filename string, data []byte, wantStatus int) map[string]any {

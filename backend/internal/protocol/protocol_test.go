@@ -203,3 +203,71 @@ func TestBuildStreamCompleteIncludesUsageForResponsesAndAnthropic(t *testing.T) 
 		t.Fatalf("unexpected anthropic stream usage: %#v", usage)
 	}
 }
+
+func TestValidateRequestRejectsEmptyInput(t *testing.T) {
+	cases := []struct {
+		name         string
+		protocolName string
+		body         map[string]any
+		param        string
+	}{
+		{
+			name:         "responses",
+			protocolName: "responses",
+			body:         map[string]any{"model": "demo"},
+			param:        "input",
+		},
+		{
+			name:         "chat_completions",
+			protocolName: "chat_completions",
+			body:         map[string]any{"model": "demo", "messages": []any{}},
+			param:        "messages",
+		},
+		{
+			name:         "anthropic_messages",
+			protocolName: "anthropic_messages",
+			body:         map[string]any{"model": "demo", "messages": []any{}},
+			param:        "messages",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRequest(tc.protocolName, tc.body)
+			requestErr, ok := err.(*RequestError)
+			if !ok || requestErr == nil {
+				t.Fatalf("expected request error, got %v", err)
+			}
+			if requestErr.Param != tc.param || requestErr.StatusCode != 400 {
+				t.Fatalf("unexpected request error: %#v", requestErr)
+			}
+		})
+	}
+}
+
+func TestBuildErrorBodyUsesProtocolShape(t *testing.T) {
+	responsesBody := BuildErrorBody("responses", InvalidRequest("bad input", "input"))
+	if nestedPathString(responsesBody, "error", "message") != "bad input" || nestedPathString(responsesBody, "error", "param") != "input" {
+		t.Fatalf("unexpected responses error body: %#v", responsesBody)
+	}
+
+	anthropicBody := BuildErrorBody("anthropic_messages", InvalidRequest("bad input", "messages"))
+	if nestedPathString(anthropicBody, "error", "message") != "bad input" {
+		t.Fatalf("unexpected anthropic error body: %#v", anthropicBody)
+	}
+	if got := stringValue(anthropicBody["type"], ""); got != "error" {
+		t.Fatalf("unexpected anthropic envelope type: %#v", anthropicBody)
+	}
+}
+
+func nestedPathString(payload map[string]any, keys ...string) string {
+	current := any(payload)
+	for _, key := range keys {
+		record, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = record[key]
+	}
+	return stringValue(current, "")
+}

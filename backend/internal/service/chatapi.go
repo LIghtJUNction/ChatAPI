@@ -366,13 +366,7 @@ func (s *ChatAPIService) AbortConversation(ctx context.Context, conversationID s
 		s.realtime.PublishConversationUpsert(conversation, []store.Message{message})
 	}
 
-	body := map[string]any{
-		"error": map[string]any{
-			"message": reason,
-			"type":    "request_aborted",
-			"code":    "request_aborted",
-		},
-	}
+	body := protocol.AbortError(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses)), reason)
 	_ = s.pending.Publish(conversationID, PendingEvent{
 		Type:      "abort",
 		ErrorBody: body,

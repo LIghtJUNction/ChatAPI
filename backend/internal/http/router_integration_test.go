@@ -109,6 +109,91 @@ func TestResponsesAbort(t *testing.T) {
 	}
 }
 
+func TestProtocolRequestValidationReturnsProtocolSpecificErrors(t *testing.T) {
+	env := newTestEnv(t)
+
+	cases := []struct {
+		name         string
+		path         string
+		body         map[string]any
+		checkMessage func(t *testing.T, payload map[string]any)
+	}{
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: map[string]any{"model": "demo-empty"},
+			checkMessage: func(t *testing.T, payload map[string]any) {
+				t.Helper()
+				if nestedPathString(payload, "error", "param") != "input" {
+					t.Fatalf("unexpected responses validation payload: %#v", payload)
+				}
+			},
+		},
+		{
+			name: "chat_completions",
+			path: "/v1/chat/completions",
+			body: map[string]any{"model": "demo-empty", "messages": []any{}},
+			checkMessage: func(t *testing.T, payload map[string]any) {
+				t.Helper()
+				if nestedPathString(payload, "error", "param") != "messages" {
+					t.Fatalf("unexpected chat validation payload: %#v", payload)
+				}
+			},
+		},
+		{
+			name: "anthropic_messages",
+			path: "/v1/messages",
+			body: map[string]any{"model": "demo-empty", "messages": []any{}},
+			checkMessage: func(t *testing.T, payload map[string]any) {
+				t.Helper()
+				if nestedPathString(payload, "type") != "error" || nestedPathString(payload, "error", "type") != "invalid_request_error" {
+					t.Fatalf("unexpected anthropic validation payload: %#v", payload)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, body := postExternalText(t, env.server.URL+tc.path, nil, tc.body)
+			if status != http.StatusBadRequest {
+				t.Fatalf("unexpected status: %d body=%s", status, body)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(body), &payload); err != nil {
+				t.Fatalf("decode payload: %v body=%s", err, body)
+			}
+			tc.checkMessage(t, payload)
+		})
+	}
+}
+
+func TestAnthropicAbortReturnsAnthropicErrorEnvelope(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/messages", map[string]any{
+		"model": "claude-abort",
+		"messages": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "text", "text": "anthropic abort 测试"},
+				},
+			},
+		},
+	})
+
+	conversation := env.waitForWaitingConversation(t, "anthropic abort 测试")
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/abort", map[string]any{
+		"error": "anthropic 人工中止",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	if nestedPathString(finalResp, "type") != "error" || nestedPathString(finalResp, "error", "message") != "anthropic 人工中止" {
+		t.Fatalf("unexpected anthropic abort payload: %#v", finalResp)
+	}
+}
+
 func TestDraftMarksConversationStreaming(t *testing.T) {
 	env := newTestEnv(t)
 

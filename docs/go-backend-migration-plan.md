@@ -912,6 +912,7 @@ ChatAPI 的 OpenAI Responses、Chat Completions、Anthropic Messages 三套协�
 - 支持 tools、tool choice、tool call、multimodal content、reasoning、response_format、usage、error 格式的双向映射。
 - 不依赖数据库、Web 框架、ChatAPI 用户体系、Turn Manager。
 - 只依赖标准库和少量 JSON/schema 工具，方便其他项目引用。
+- 当前 Go 重构分支已先把协议层错误输出收回 `internal/protocol`：模型兼容入口在创建 pending turn 之前会先做最小请求校验（例如 `stream` 必须为布尔值、请求里必须有至少一个用户输入 part），并按协议返回错误 envelope，而不是直接吐通用 `http.Error`。Responses / Chat Completions 当前统一返回 OpenAI 风格 `{error:{message,type,code,param}}`，Anthropic Messages 返回 `{type:"error", error:{type,message}}`。人工 abort 终态也会按原请求协议返回同一套错误外形。
 
 这个包可以同时被 ChatAPI 和 KirariNetwork 使用：ChatAPI 用它接收外部 Agent 请求并归一化为 pending turn，KirariNetwork 可用它把不同上游模型协议归一化为统一模型网关响应。
 

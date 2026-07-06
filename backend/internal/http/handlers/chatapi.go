@@ -33,7 +33,11 @@ func (h ChatAPIHandler) AnthropicMessages(w http.ResponseWriter, r *http.Request
 func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Request, requestFormat string) {
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, protocol.InvalidJSONError(requestFormat))
+		return
+	}
+	if err := protocol.ValidateRequest(requestFormat, body); err != nil {
+		writeJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
 		return
 	}
 
@@ -45,7 +49,7 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 
 	responseBody, err := h.Service.CreatePendingResponse(r.Context(), parsed, body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, protocol.BuildErrorBody(requestFormat, protocol.InternalError(err.Error())))
 		return
 	}
 	writeJSON(w, http.StatusOK, responseBody)
@@ -175,7 +179,7 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 
 	turn, conversation, err := h.Service.CreatePendingStream(r.Context(), request, body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, protocol.BuildErrorBody(request.Protocol.String(), protocol.InternalError(err.Error())))
 		return
 	}
 

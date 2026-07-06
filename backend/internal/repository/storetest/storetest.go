@@ -56,6 +56,13 @@ func RunAuditRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	})
 }
 
+func RunAutomationRepositoryTests(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	t.Run("automation_rules", func(t *testing.T) {
+		testAutomationRuleRepositoryReplacesByScope(t, newStore)
+	})
+}
+
 func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewStoreFunc) {
 	t.Helper()
 	ctx := context.Background()
@@ -221,6 +228,78 @@ func testAuditRepositoryCreatesFiltersAndLimitsLogs(t *testing.T, newStore NewSt
 	}
 	if len(limited) != 1 || limited[0].ID != "audit_3" {
 		t.Fatalf("unexpected limited audit logs: %#v", limited)
+	}
+}
+
+func testAutomationRuleRepositoryReplacesByScope(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+	initial, err := st.ReplaceAutomationRulesForUser(ctx, "user_rules", nil, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_a",
+			UserID:  "user_rules",
+			Enabled: true,
+			Payload: map[string]any{
+				"id":      "rule_a",
+				"enabled": true,
+				"name":    "Rule A",
+			},
+		},
+		{
+			ID:      "rule_b",
+			UserID:  "user_rules",
+			Enabled: false,
+			Payload: map[string]any{
+				"id":      "rule_b",
+				"enabled": false,
+				"name":    "Rule B",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("replace initial automation rules: %v", err)
+	}
+	if len(initial) != 2 {
+		t.Fatalf("expected two initial rules, got %#v", initial)
+	}
+
+	replaceIDs := map[string]struct{}{"rule_a": {}}
+	scoped, err := st.ReplaceAutomationRulesForUser(ctx, "user_rules", replaceIDs, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_a",
+			UserID:  "user_rules",
+			Enabled: false,
+			Payload: map[string]any{
+				"id":      "rule_a",
+				"enabled": false,
+				"name":    "Rule A2",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("replace scoped automation rule: %v", err)
+	}
+	if len(scoped) != 2 {
+		t.Fatalf("expected scoped replace to keep other rules, got %#v", scoped)
+	}
+	byID := map[string]store.AutomationRule{}
+	for _, item := range scoped {
+		byID[item.ID] = item
+	}
+	if byID["rule_a"].Payload["name"] != "Rule A2" || byID["rule_a"].Enabled {
+		t.Fatalf("expected rule_a to be replaced, got %#v", byID["rule_a"])
+	}
+	if byID["rule_b"].Payload["name"] != "Rule B" || byID["rule_b"].Enabled {
+		t.Fatalf("expected rule_b to remain disabled and unchanged, got %#v", byID["rule_b"])
+	}
+
+	otherUser, err := st.ListAutomationRulesByUser(ctx, "other_user")
+	if err != nil {
+		t.Fatalf("list other user automation rules: %v", err)
+	}
+	if len(otherUser) != 0 {
+		t.Fatalf("expected other user rules to remain isolated: %#v", otherUser)
 	}
 }
 

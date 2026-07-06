@@ -31,14 +31,6 @@ func (s *Store) GetRequest(context.Context, string) (store.Request, error) {
 	return store.Request{}, errNotImplemented
 }
 
-func (s *Store) ListAutomationRulesByUser(context.Context, string) ([]store.AutomationRule, error) {
-	return nil, errNotImplemented
-}
-
-func (s *Store) ReplaceAutomationRulesForUser(context.Context, string, map[string]struct{}, []store.UpsertAutomationRuleInput) ([]store.AutomationRule, error) {
-	return nil, errNotImplemented
-}
-
 func (s *Store) CreateUploadedImage(context.Context, store.CreateUploadedImageInput) (store.UploadedImage, error) {
 	return store.UploadedImage{}, errNotImplemented
 }

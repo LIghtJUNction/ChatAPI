@@ -94,6 +94,17 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 			PRIMARY KEY(user_id, key)
 		);
 
+		CREATE TABLE IF NOT EXISTS automation_rules (
+			id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			enabled BOOLEAN NOT NULL DEFAULT true,
+			rule_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY(user_id, id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_automation_rules_user_updated ON automation_rules(user_id, updated_at DESC, id);
+
 		CREATE TABLE IF NOT EXISTS user_app_api_keys (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL,

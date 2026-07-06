@@ -3771,6 +3771,16 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	}
 	headers := map[string]string{"Origin": env.server.URL}
 
+	schemaResp := env.getJSONWithCookie(t, "/api/admin/users/schema", adminCookie, http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 5 {
+		t.Fatalf("unexpected admin users schema response: %#v", schemaResp)
+	}
+	if nestedString(operations[0].(map[string]any), "name") != "list_users" || nestedString(operations[1].(map[string]any), "name") != "create_user" {
+		t.Fatalf("unexpected admin users schema operations: %#v", schemaResp)
+	}
+
 	createResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
 		"username": "managed",
 		"email":    "managed@example.com",
@@ -3924,6 +3934,16 @@ func TestAdminConfigManagement(t *testing.T) {
 	if numericValue(getResp["config"].(map[string]any)["runtime"].(map[string]any)["gogc"]) != 90 {
 		t.Fatalf("unexpected admin config get: %#v", getResp)
 	}
+
+	schemaResp := env.getJSONWithCookie(t, "/api/admin/config/schema", adminCookie, http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 2 {
+		t.Fatalf("unexpected admin config schema response: %#v", schemaResp)
+	}
+	if nestedString(operations[0].(map[string]any), "name") != "get_config" || nestedString(operations[1].(map[string]any), "name") != "set_config" {
+		t.Fatalf("unexpected admin config schema operations: %#v", schemaResp)
+	}
 	assertAuditCountForActor(t, env, "admin", "admin.config", "system_config", "", "update", "success", 1)
 
 	appKey := env.seedAppAPIKey(t, "admin-config-denied", []string{"statistics:read"}, nil)
@@ -3932,6 +3952,32 @@ func TestAdminConfigManagement(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key admin config rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/config/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key admin config schema rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestAdminUsersRejectsAPIKeys(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
+
+	status, body := env.getTextWithHeaders(t, "/api/admin/users", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key admin users rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/users/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key admin users schema rejection: status=%d body=%q", status, body)
 	}
 }
 

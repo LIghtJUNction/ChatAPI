@@ -18,6 +18,13 @@ type AdminUsersHandler struct {
 	Audit   *service.AuditService
 }
 
+func (h AdminUsersHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildAdminUsersSchema(),
+	})
+}
+
 func (h AdminUsersHandler) List(w http.ResponseWriter, r *http.Request) {
 	users, err := h.Users.List(r.Context())
 	if err != nil {

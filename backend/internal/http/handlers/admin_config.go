@@ -13,6 +13,13 @@ type AdminConfigHandler struct {
 	Audit   *service.AuditService
 }
 
+func (h AdminConfigHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildAdminConfigSchema(),
+	})
+}
+
 func (h AdminConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 	items, configMap, err := h.Service.List(r.Context())
 	if err != nil {

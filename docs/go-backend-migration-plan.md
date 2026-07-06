@@ -76,10 +76,12 @@
 - 密码哈希和本地 users 表登录基础已落地：新增 `internal/platform/password`，新密码使用 Argon2id PHC 风格格式，旧 `salt$sha256(salt+password)` 可验证并返回 `NeedsUpgrade`。serve 模式 `POST /api/auth/login` 会优先按 username/email 查询 `users` 表，验证本地密码，成功后建立同一类 session；旧 hash 登录成功后会自动升级为 Argon2id 并更新 `last_login_at`。`.env` 的 `CHATAPI_ADMIN_PASSWORD` 仍保留为 `admin` 用户恢复入口。
 - 管理员用户管理已落地最小接口：`GET /api/admin/users` 列出本地用户，`POST /api/admin/users` 创建本地用户并写入 Argon2id 密码 hash，`PUT /api/admin/users/{user_id}/password` 重置密码，`DELETE /api/admin/users/{user_id}` 当前实现为停用用户而非物理删除，保留历史请求、上传、API key 等 owner 归属；这些接口仅允许 admin session 访问，并写入 `admin.user` 审计事件。
 - 管理员用户历史最小接口已补上：`GET /api/admin/users/{user_id}/history?limit=30` 当前按会话 `metadata.owner_id` 聚合该用户最近消息，返回 `recent_messages` 供前端详情弹窗直接展示；首版先在 service 层复用 `ListConversations + ListMessages` 做排序截断，后续如果单用户消息量过大，再下推为 repository 级定制查询。
+- 管理员用户管理 schema 已开始显式暴露：`GET /api/admin/users/schema` 当前声明本地用户列表、创建、查看历史、重置密码、停用用户这些操作的路径、字段、默认值和“停用而非物理删除”的语义，避免前端或 CLI 再各自硬编码 `role` 枚举、`history.limit` 默认值和请求体字段。
 - 用户配置已落地最小接口：`GET /api/user/config` 返回当前 actor 的 `user_configs` 列表和聚合 config map，`POST /api/user/config` 按 key upsert JSON object 配置并写入 `user.config` 审计事件；Lab actor 和 serve session actor 都复用同一套 owner 隔离。
 - 系统配置已落地最小管理接口：`GET /api/admin/config` 返回 `config` 表列表和聚合 config map，`POST /api/admin/config` 按 key upsert JSON object 配置并写入 `admin.config` 审计事件；当前只负责持久化和管理，不会自动覆盖 `.env` 派生的运行时配置，后续各服务再逐步读取对应 key。
 - 面向当前前端系统设置面板的最小接口也已补上：`GET/POST /api/config/system` 当前要求 admin actor，读写 `config.system_settings` 单条 JSON，并把前端已使用的字段展平成固定响应结构；`realtime_*`、图片大小上限和 SMTP provider 选项会优先回显当前运行时配置，其他字段先作为可持久化设置保留，后续再逐步接入真实运行时行为。
 - 交互式配置 schema 已开始显式暴露：`GET /api/user/config/schema` 返回当前支持的用户偏好字段、默认值和保留前缀；`GET /api/config/system/schema` 返回系统设置字段、默认值、只读项和枚举/最小值等校验 metadata，避免前端和 CLI 继续硬编码这批设置键。原始 `GET/POST /api/admin/config` 目前仍保留为自由 JSON object 持久化接口，不额外伪造一层 schema。
+- 管理员自由系统配置 schema 已开始显式暴露：`GET /api/admin/config/schema` 当前声明 `GET/POST /api/admin/config` 的操作语义，明确 `POST` 既支持原始顶层对象也支持 `{config:{...}}` 包裹格式，同时要求每个顶层 value 必须是对象，避免外部程序误把标量/数组写入底层 `config` 表。
 - Tool Call 辅助上下文接口已落地最小版本：`GET /api/workspace/tool-call/assist-context` 当前要求交互式用户 actor，接受 `request_id` 或 `conversation_id`，返回当前用户可见的 `request`、解析后的 `parsed` 视图、`conversation`、`messages`、当前 `draft`，以及 `assist_schema`、`upstream_assistant_schema`、`upstream_protocol_templates`、`upstream_hints`、`upstream_input_hints`。其中 `parsed.normalized_tool_schemas` 会把不同协议/客户端风格的原始 `tool_schemas` 统一投影成稳定结构 `{name, description, parameters, type}`，减少前端继续手写协议差异适配。`assist_schema` 会显式描述浏览器端期望的大模型结构化输出 JSON Schema、confidence 枚举和前端校验规则；`upstream_assistant_schema` 会声明浏览器本地上游配置字段、敏感字段、默认配置、跨字段校验规则和稳定错误码；`upstream_protocol_templates` 会按 `responses` / `chat_completions` / `anthropic_messages` 提供默认 path、请求体形状占位符和构造提示，用于统一浏览器端上游请求拼装；`upstream_hints` 会返回当前实例可见 base URL 列表，并可结合可选 `candidate_base_url` 提前判断是否会递归打回当前 ChatAPI；`upstream_input_hints` 会给出默认 `max_input_messages`、推荐消息窗口、是否发生截断和构造规则，避免前端再次各自实现消息裁剪策略。
 - 管理员 SMTP 测试邮件接口已补上：`POST /api/admin/send-test-email` 当前直接读取 `.env` 派生的 SMTP 运行时配置发送测试邮件，不读取数据库里的 provider 凭据；配置缺失或 SMTP 禁用时返回 `400`，真实发送失败返回 `502`，并记录 `admin.email / send_test_email` 审计事件。这样前端系统设置页可以验证“当前进程实际生效的 SMTP 配置”，而不是仅验证持久化设置值。
 - 用户侧改密最小接口已补上：`POST /api/user/password` 当前按 actor 更新本地 `users.password_hash`，用于前端设置页的“重置密码”表单；这条链路只负责已登录用户的本地密码更新，不包含邮箱找回、验证码或 TOTP 二次确认，后续正式账号恢复流程再单独补齐。
@@ -1547,12 +1549,14 @@ Go 版首个可替换版本必须覆盖：
 - `DELETE /api/user/model-api-keys/{key_id}`
 - `GET /api/workspace/tool-call/assist-context`
 - `GET /api/admin/users`
+- `GET /api/admin/users/schema`
 - `GET /api/admin/users/{user_id}/history`
 - `POST /api/admin/users`
 - `DELETE /api/admin/users/{user_id}`
 - `PUT /api/admin/users/{user_id}/password`
 - `POST /api/admin/send-test-email`
 - `GET /api/admin/runtime/summary`
+- `GET /api/admin/config/schema`
 - `GET /api/admin/runtime/memory`
 - `GET /api/admin/runtime/connections`
 - `GET /api/admin/requests/schema`

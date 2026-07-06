@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -12,8 +13,9 @@ import (
 )
 
 type AdminUsersHandler struct {
-	Users *service.AdminUserService
-	Audit *service.AuditService
+	Users   *service.AdminUserService
+	History *service.AdminUserHistoryService
+	Audit   *service.AuditService
 }
 
 func (h AdminUsersHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +28,22 @@ func (h AdminUsersHandler) List(w http.ResponseWriter, r *http.Request) {
 		"ok":    true,
 		"count": len(users),
 		"items": users,
+		"users": users,
+	})
+}
+
+func (h AdminUsersHandler) HistoryList(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	userID := chi.URLParam(r, "userID")
+	user, messages, err := h.History.Get(r.Context(), userID, limit)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":              true,
+		"user":            user,
+		"recent_messages": messages,
 	})
 }
 

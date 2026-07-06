@@ -72,7 +72,11 @@ func NewRouter(
 	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor, Audit: auditService}
 	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}
 	adminAuditHandler := handlers.AdminAuditHandler{Audit: auditService}
-	adminUsersHandler := handlers.AdminUsersHandler{Users: service.NewAdminUserService(dataStore), Audit: auditService}
+	adminUsersHandler := handlers.AdminUsersHandler{
+		Users:   service.NewAdminUserService(dataStore),
+		History: service.NewAdminUserHistoryService(dataStore),
+		Audit:   auditService,
+	}
 	adminConfigHandler := handlers.AdminConfigHandler{Service: service.NewSystemConfigService(dataStore), Audit: auditService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
@@ -202,6 +206,7 @@ func NewRouter(
 	adminRouter.Post("/config", adminConfigHandler.Set)
 	adminRouter.Post("/send-test-email", adminEmailHandler.SendTestEmail)
 	adminRouter.Get("/users", adminUsersHandler.List)
+	adminRouter.Get("/users/{userID}/history", adminUsersHandler.HistoryList)
 	adminRouter.Post("/users", adminUsersHandler.Create)
 	adminRouter.Put("/users/{userID}/password", adminUsersHandler.ResetPassword)
 	adminRouter.Delete("/users/{userID}", adminUsersHandler.Delete)

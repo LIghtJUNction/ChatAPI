@@ -1955,6 +1955,68 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	if listResp["count"].(float64) < 1 || !responseItemsContainID(listResp, userID) {
 		t.Fatalf("expected created user in admin list: %#v", listResp)
 	}
+	if !responseUsersContainID(listResp, userID) {
+		t.Fatalf("expected created user in admin users alias: %#v", listResp)
+	}
+
+	firstConversation, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
+		ConversationID: "conv_history_one",
+		RequestID:      "req_history_one",
+		ResponseID:     "resp_history_one",
+		OwnerID:        userID,
+		RequestFormat:  "responses",
+		Model:          "history-model",
+		UserContent:    "first question",
+		RequestBody:    map[string]any{"model": "history-model"},
+	})
+	if err != nil {
+		t.Fatalf("seed first history conversation: %v", err)
+	}
+	if _, _, err := env.store.CompletePendingTurn(context.Background(), store.CompletePendingInput{
+		ConversationID: firstConversation.ID,
+		ResponseID:     "resp_history_one",
+		OutputText:     "first answer",
+		Mode:           "assistant_message",
+	}); err != nil {
+		t.Fatalf("complete first history conversation: %v", err)
+	}
+
+	secondConversation, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
+		ConversationID: "conv_history_two",
+		RequestID:      "req_history_two",
+		ResponseID:     "resp_history_two",
+		OwnerID:        userID,
+		RequestFormat:  "responses",
+		Model:          "history-model",
+		UserContent:    "second question",
+		RequestBody:    map[string]any{"model": "history-model"},
+	})
+	if err != nil {
+		t.Fatalf("seed second history conversation: %v", err)
+	}
+	if _, _, err := env.store.CompletePendingTurn(context.Background(), store.CompletePendingInput{
+		ConversationID: secondConversation.ID,
+		ResponseID:     "resp_history_two",
+		OutputText:     "second answer",
+		Mode:           "assistant_message",
+	}); err != nil {
+		t.Fatalf("complete second history conversation: %v", err)
+	}
+
+	historyResp := env.getJSONWithCookie(t, "/api/admin/users/"+userID+"/history?limit=3", adminCookie, http.StatusOK)
+	if nestedPathString(historyResp, "user", "id") != userID {
+		t.Fatalf("unexpected history user response: %#v", historyResp)
+	}
+	recentMessages, _ := historyResp["recent_messages"].([]any)
+	if len(recentMessages) != 3 {
+		t.Fatalf("expected 3 recent messages after limit applied: %#v", historyResp)
+	}
+	if nestedString(recentMessages[0].(map[string]any), "conversation_id") != "conv_history_two" {
+		t.Fatalf("expected latest conversation first in user history: %#v", historyResp)
+	}
+	if nestedString(recentMessages[0].(map[string]any), "conversation_title") != "second question" {
+		t.Fatalf("expected conversation title in user history: %#v", historyResp)
+	}
 
 	resetResp := env.putJSONWithCookieAndHeaders(t, "/api/admin/users/"+userID+"/password", map[string]any{
 		"password": "rotated-secret",
@@ -4815,6 +4877,17 @@ func nestedPathBool(record map[string]any, path ...string) bool {
 
 func responseItemsContainID(record map[string]any, id string) bool {
 	items, _ := record["items"].([]any)
+	for _, item := range items {
+		asMap, _ := item.(map[string]any)
+		if nestedString(asMap, "id") == id {
+			return true
+		}
+	}
+	return false
+}
+
+func responseUsersContainID(record map[string]any, id string) bool {
+	items, _ := record["users"].([]any)
 	for _, item := range items {
 		asMap, _ := item.(map[string]any)
 		if nestedString(asMap, "id") == id {

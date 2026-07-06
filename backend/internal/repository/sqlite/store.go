@@ -582,6 +582,198 @@ func (s *Store) RevokeModelAPIKey(ctx context.Context, id string, userID string)
 	return nil
 }
 
+func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (store.User, error) {
+	now := time.Now().UTC()
+	role := strings.TrimSpace(input.Role)
+	if role == "" {
+		role = "user"
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO users(
+			id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		input.ID,
+		strings.TrimSpace(input.Username),
+		strings.TrimSpace(input.Email),
+		input.PasswordHash,
+		role,
+		boolInt(input.IsActive),
+		boolInt(input.LocalAdmin),
+		formatTime(now),
+		formatTime(now),
+		nil,
+	); err != nil {
+		return store.User{}, err
+	}
+	return store.User{
+		ID:           input.ID,
+		Username:     strings.TrimSpace(input.Username),
+		Email:        strings.TrimSpace(input.Email),
+		PasswordHash: input.PasswordHash,
+		Role:         role,
+		IsActive:     input.IsActive,
+		LocalAdmin:   input.LocalAdmin,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}, nil
+}
+
+func (s *Store) UpdateUser(ctx context.Context, input store.UpdateUserInput) (store.User, error) {
+	now := time.Now().UTC()
+	role := strings.TrimSpace(input.Role)
+	if role == "" {
+		role = "user"
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE users
+		SET username = ?, email = ?, password_hash = ?, role = ?, is_active = ?, local_admin = ?, updated_at = ?, last_login_at = ?
+		WHERE id = ?
+	`,
+		strings.TrimSpace(input.Username),
+		strings.TrimSpace(input.Email),
+		input.PasswordHash,
+		role,
+		boolInt(input.IsActive),
+		boolInt(input.LocalAdmin),
+		formatTime(now),
+		formatNullableTime(input.LastLoginAt),
+		input.ID,
+	)
+	if err != nil {
+		return store.User{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return store.User{}, err
+	}
+	if affected == 0 {
+		return store.User{}, errNotFound
+	}
+	return s.GetUser(ctx, input.ID)
+}
+
+func (s *Store) GetUser(ctx context.Context, id string) (store.User, error) {
+	item, err := scanUser(s.db.QueryRowContext(ctx, `
+		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
+		FROM users
+		WHERE id = ?
+	`, id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.User{}, errNotFound
+		}
+		return store.User{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (store.User, error) {
+	item, err := scanUser(s.db.QueryRowContext(ctx, `
+		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
+		FROM users
+		WHERE email = ?
+	`, strings.TrimSpace(email)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.User{}, errNotFound
+		}
+		return store.User{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
+		FROM users
+		ORDER BY created_at DESC, id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.User, 0)
+	for rows.Next() {
+		item, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) UpsertUserIdentity(ctx context.Context, input store.UpsertUserIdentityInput) (store.UserIdentity, error) {
+	now := time.Now().UTC()
+	profile := ensureMap(input.Profile)
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO user_identities(
+			id, user_id, provider, subject, email, email_verified, profile_json, created_at, updated_at, last_login_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(provider, subject) DO UPDATE SET
+			user_id = excluded.user_id,
+			email = excluded.email,
+			email_verified = excluded.email_verified,
+			profile_json = excluded.profile_json,
+			updated_at = excluded.updated_at,
+			last_login_at = excluded.last_login_at
+	`,
+		input.ID,
+		input.UserID,
+		strings.TrimSpace(input.Provider),
+		strings.TrimSpace(input.Subject),
+		strings.TrimSpace(input.Email),
+		boolInt(input.EmailVerified),
+		mustJSON(profile),
+		formatTime(now),
+		formatTime(now),
+		formatNullableTime(input.LastLoginAt),
+	); err != nil {
+		return store.UserIdentity{}, err
+	}
+	return s.GetUserIdentity(ctx, strings.TrimSpace(input.Provider), strings.TrimSpace(input.Subject))
+}
+
+func (s *Store) GetUserIdentity(ctx context.Context, provider string, subject string) (store.UserIdentity, error) {
+	item, err := scanUserIdentity(s.db.QueryRowContext(ctx, `
+		SELECT id, user_id, provider, subject, email, email_verified, profile_json, created_at, updated_at, last_login_at
+		FROM user_identities
+		WHERE provider = ? AND subject = ?
+	`, strings.TrimSpace(provider), strings.TrimSpace(subject)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.UserIdentity{}, errNotFound
+		}
+		return store.UserIdentity{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]store.UserIdentity, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, user_id, provider, subject, email, email_verified, profile_json, created_at, updated_at, last_login_at
+		FROM user_identities
+		WHERE user_id = ?
+		ORDER BY provider ASC, created_at DESC, id DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.UserIdentity, 0)
+	for rows.Next() {
+		item, err := scanUserIdentity(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]store.AutomationRule, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, enabled, rule_json, created_at, updated_at
@@ -1415,6 +1607,14 @@ type modelAPIKeyScanner interface {
 	Scan(dest ...any) error
 }
 
+type userScanner interface {
+	Scan(dest ...any) error
+}
+
+type userIdentityScanner interface {
+	Scan(dest ...any) error
+}
+
 type automationRuleScanner interface {
 	Scan(dest ...any) error
 }
@@ -1557,6 +1757,70 @@ func scanModelAPIKey(scanner modelAPIKeyScanner) (store.ModelAPIKey, error) {
 	if revokedAt.Valid {
 		value := parseTime(revokedAt.String)
 		item.RevokedAt = &value
+	}
+	return item, nil
+}
+
+func scanUser(scanner userScanner) (store.User, error) {
+	var item store.User
+	var isActive int
+	var localAdmin int
+	var createdAt string
+	var updatedAt string
+	var lastLoginAt sql.NullString
+	if err := scanner.Scan(
+		&item.ID,
+		&item.Username,
+		&item.Email,
+		&item.PasswordHash,
+		&item.Role,
+		&isActive,
+		&localAdmin,
+		&createdAt,
+		&updatedAt,
+		&lastLoginAt,
+	); err != nil {
+		return store.User{}, err
+	}
+	item.IsActive = isActive != 0
+	item.LocalAdmin = localAdmin != 0
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
+	if lastLoginAt.Valid {
+		value := parseTime(lastLoginAt.String)
+		item.LastLoginAt = &value
+	}
+	return item, nil
+}
+
+func scanUserIdentity(scanner userIdentityScanner) (store.UserIdentity, error) {
+	var item store.UserIdentity
+	var emailVerified int
+	var profileJSON string
+	var createdAt string
+	var updatedAt string
+	var lastLoginAt sql.NullString
+	if err := scanner.Scan(
+		&item.ID,
+		&item.UserID,
+		&item.Provider,
+		&item.Subject,
+		&item.Email,
+		&emailVerified,
+		&profileJSON,
+		&createdAt,
+		&updatedAt,
+		&lastLoginAt,
+	); err != nil {
+		return store.UserIdentity{}, err
+	}
+	item.EmailVerified = emailVerified != 0
+	item.Profile = parseJSONMap(profileJSON)
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
+	if lastLoginAt.Valid {
+		value := parseTime(lastLoginAt.String)
+		item.LastLoginAt = &value
 	}
 	return item, nil
 }

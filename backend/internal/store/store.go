@@ -106,6 +106,32 @@ type ModelAPIKey struct {
 	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
 }
 
+type User struct {
+	ID           string     `json:"id"`
+	Username     string     `json:"username,omitempty"`
+	Email        string     `json:"email,omitempty"`
+	PasswordHash string     `json:"-"`
+	Role         string     `json:"role"`
+	IsActive     bool       `json:"is_active"`
+	LocalAdmin   bool       `json:"local_admin"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
+}
+
+type UserIdentity struct {
+	ID            string         `json:"id"`
+	UserID        string         `json:"user_id"`
+	Provider      string         `json:"provider"`
+	Subject       string         `json:"subject"`
+	Email         string         `json:"email,omitempty"`
+	EmailVerified bool           `json:"email_verified"`
+	Profile       map[string]any `json:"profile,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	LastLoginAt   *time.Time     `json:"last_login_at,omitempty"`
+}
+
 type AutomationRule struct {
 	ID        string         `json:"id"`
 	UserID    string         `json:"user_id"`
@@ -180,6 +206,38 @@ type CreateModelAPIKeyInput struct {
 	KeyCiphertext string
 	KeyPrefix     string
 	Model         string
+}
+
+type CreateUserInput struct {
+	ID           string
+	Username     string
+	Email        string
+	PasswordHash string
+	Role         string
+	IsActive     bool
+	LocalAdmin   bool
+}
+
+type UpdateUserInput struct {
+	ID           string
+	Username     string
+	Email        string
+	PasswordHash string
+	Role         string
+	IsActive     bool
+	LocalAdmin   bool
+	LastLoginAt  *time.Time
+}
+
+type UpsertUserIdentityInput struct {
+	ID            string
+	UserID        string
+	Provider      string
+	Subject       string
+	Email         string
+	EmailVerified bool
+	Profile       map[string]any
+	LastLoginAt   *time.Time
 }
 
 type UpsertAutomationRuleInput struct {
@@ -298,6 +356,14 @@ type Store interface {
 	GetModelAPIKeyByID(context.Context, string) (ModelAPIKey, error)
 	UpdateModelAPIKeyLastUsedAt(context.Context, string, time.Time) error
 	RevokeModelAPIKey(context.Context, string, string) error
+	CreateUser(context.Context, CreateUserInput) (User, error)
+	UpdateUser(context.Context, UpdateUserInput) (User, error)
+	GetUser(context.Context, string) (User, error)
+	GetUserByEmail(context.Context, string) (User, error)
+	ListUsers(context.Context) ([]User, error)
+	UpsertUserIdentity(context.Context, UpsertUserIdentityInput) (UserIdentity, error)
+	GetUserIdentity(context.Context, string, string) (UserIdentity, error)
+	ListUserIdentities(context.Context, string) ([]UserIdentity, error)
 	ListAutomationRulesByUser(context.Context, string) ([]AutomationRule, error)
 	ReplaceAutomationRulesForUser(context.Context, string, map[string]struct{}, []UpsertAutomationRuleInput) ([]AutomationRule, error)
 	CreateUploadedImage(context.Context, CreateUploadedImageInput) (UploadedImage, error)

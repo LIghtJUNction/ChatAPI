@@ -91,6 +91,7 @@ func BuildStreamDelta(meta ConversationMeta, deltaText string) []StreamEvent {
 }
 
 func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent {
+	usage := normalizeUsage(result.Usage)
 	switch meta.Protocol {
 	case ProtocolChatCompletions:
 		chunk := map[string]any{
@@ -140,6 +141,10 @@ func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent
 					"delta": map[string]any{
 						"stop_reason": stopReason,
 					},
+					"usage": map[string]any{
+						"input_tokens":  usage.InputTokens,
+						"output_tokens": usage.OutputTokens,
+					},
 				},
 			},
 			{
@@ -180,7 +185,12 @@ func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent
 					"object":      "response",
 					"status":      "completed",
 					"output_text": result.OutputText,
-					"output":      output,
+					"usage": map[string]any{
+						"input_tokens":  usage.InputTokens,
+						"output_tokens": usage.OutputTokens,
+						"total_tokens":  usage.TotalTokens,
+					},
+					"output": output,
 				},
 			},
 		}}

@@ -10,6 +10,7 @@ import (
 
 func BuildResponse(conversation store.Conversation, result TurnResult) map[string]any {
 	meta := ConversationMetaFromConversation(conversation)
+	usage := normalizeUsage(result.Usage)
 	switch meta.Protocol {
 	case ProtocolChatCompletions:
 		message := map[string]any{
@@ -30,10 +31,15 @@ func BuildResponse(conversation store.Conversation, result TurnResult) map[strin
 			}
 		}
 		return map[string]any{
-			"id":           stringValue(result.ResponseID, "chatcmpl_"+uuid.NewString()),
-			"object":       "chat.completion",
-			"model":        meta.Model,
-			"choices":      []map[string]any{{"index": 0, "message": message, "finish_reason": "stop"}},
+			"id":      stringValue(result.ResponseID, "chatcmpl_"+uuid.NewString()),
+			"object":  "chat.completion",
+			"model":   meta.Model,
+			"choices": []map[string]any{{"index": 0, "message": message, "finish_reason": "stop"}},
+			"usage": map[string]any{
+				"prompt_tokens":     usage.InputTokens,
+				"completion_tokens": usage.OutputTokens,
+				"total_tokens":      usage.TotalTokens,
+			},
 			"conversation": conversation,
 		}
 	case ProtocolAnthropicMessages:
@@ -47,11 +53,15 @@ func BuildResponse(conversation store.Conversation, result TurnResult) map[strin
 			}}
 		}
 		return map[string]any{
-			"id":           stringValue(result.ResponseID, "msg_"+uuid.NewString()),
-			"type":         "message",
-			"role":         "assistant",
-			"stop_reason":  "end_turn",
-			"content":      content,
+			"id":          stringValue(result.ResponseID, "msg_"+uuid.NewString()),
+			"type":        "message",
+			"role":        "assistant",
+			"stop_reason": "end_turn",
+			"content":     content,
+			"usage": map[string]any{
+				"input_tokens":  usage.InputTokens,
+				"output_tokens": usage.OutputTokens,
+			},
 			"conversation": conversation,
 		}
 	default:
@@ -82,7 +92,12 @@ func BuildResponse(conversation store.Conversation, result TurnResult) map[strin
 			"status":       "completed",
 			"conversation": conversation,
 			"output_text":  result.OutputText,
-			"output":       output,
+			"usage": map[string]any{
+				"input_tokens":  usage.InputTokens,
+				"output_tokens": usage.OutputTokens,
+				"total_tokens":  usage.TotalTokens,
+			},
+			"output": output,
 		}
 	}
 }
@@ -93,4 +108,17 @@ func parseJSONValue(raw string) any {
 		return raw
 	}
 	return value
+}
+
+func normalizeUsage(usage Usage) Usage {
+	if usage.InputTokens < 0 {
+		usage.InputTokens = 0
+	}
+	if usage.OutputTokens < 0 {
+		usage.OutputTokens = 0
+	}
+	if usage.TotalTokens <= 0 {
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+	}
+	return usage
 }

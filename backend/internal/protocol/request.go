@@ -15,11 +15,14 @@ const (
 )
 
 type TurnRequest struct {
-	Protocol    Protocol
-	Model       string
-	Stream      bool
-	UserContent string
-	ToolSchemas []any
+	Protocol       Protocol
+	Model          string
+	Stream         bool
+	UserContent    string
+	InputParts     []InputPart
+	ToolSchemas    []any
+	ToolChoice     ToolChoice
+	ResponseFormat ResponseFormat
 }
 
 type TurnResult struct {
@@ -29,6 +32,7 @@ type TurnResult struct {
 	ToolName   string
 	ToolCallID string
 	ToolOutput string
+	Usage      Usage
 }
 
 type ConversationMeta struct {
@@ -44,13 +48,41 @@ type PendingStreamEvent struct {
 	Result    TurnResult
 }
 
+type InputPart struct {
+	Type      string
+	Text      string
+	MediaType string
+	URL       string
+}
+
+type ToolChoice struct {
+	Type string
+	Name string
+}
+
+type ResponseFormat struct {
+	Type   string
+	Name   string
+	Schema map[string]any
+}
+
+type Usage struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+}
+
 func ParseRequest(protocolValue string, body map[string]any) TurnRequest {
+	inputParts := extractInputParts(body)
 	return TurnRequest{
-		Protocol:    ParseProtocol(protocolValue),
-		Model:       stringValue(body["model"], "chatapi-lab"),
-		Stream:      boolValue(body["stream"]),
-		UserContent: extractUserText(body),
-		ToolSchemas: extractToolSchemas(body),
+		Protocol:       ParseProtocol(protocolValue),
+		Model:          stringValue(body["model"], "chatapi-lab"),
+		Stream:         boolValue(body["stream"]),
+		UserContent:    joinInputPartText(inputParts),
+		InputParts:     inputParts,
+		ToolSchemas:    extractToolSchemas(body),
+		ToolChoice:     extractToolChoice(body),
+		ResponseFormat: extractResponseFormat(body),
 	}
 }
 
@@ -143,55 +175,157 @@ func stringValue(value any, fallback string) string {
 	return fallback
 }
 
-func extractUserText(body map[string]any) string {
-	if input, ok := body["input"].(string); ok && strings.TrimSpace(input) != "" {
-		return strings.TrimSpace(input)
-	}
-	if input, ok := body["input"].([]any); ok {
-		parts := make([]string, 0)
-		for _, item := range input {
-			record, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			contentItems, ok := record["content"].([]any)
-			if !ok {
-				continue
-			}
-			for _, contentItem := range contentItems {
-				contentRecord, ok := contentItem.(map[string]any)
-				if !ok {
-					continue
-				}
-				if text, ok := contentRecord["text"].(string); ok && strings.TrimSpace(text) != "" {
-					parts = append(parts, strings.TrimSpace(text))
-				}
-			}
-		}
-		if len(parts) > 0 {
-			return strings.Join(parts, "\n")
-		}
-	}
-	if messages, ok := body["messages"].([]any); ok {
-		for i := len(messages) - 1; i >= 0; i-- {
-			record, ok := messages[i].(map[string]any)
-			if !ok {
-				continue
-			}
-			if role, _ := record["role"].(string); role != "user" {
-				continue
-			}
-			if content, ok := record["content"].(string); ok && strings.TrimSpace(content) != "" {
-				return strings.TrimSpace(content)
-			}
-		}
-	}
-	return ""
-}
-
 func extractToolSchemas(body map[string]any) []any {
 	if tools, ok := body["tools"].([]any); ok {
 		return tools
 	}
 	return nil
+}
+
+func extractInputParts(body map[string]any) []InputPart {
+	if input, ok := body["input"].(string); ok && strings.TrimSpace(input) != "" {
+		return []InputPart{{Type: "text", Text: strings.TrimSpace(input)}}
+	}
+	if input, ok := body["input"].([]any); ok {
+		return extractPartsFromTurnInput(input)
+	}
+	if messages, ok := body["messages"].([]any); ok {
+		for i := len(messages) - 1; i >= 0; i-- {
+			record, ok := messages[i].(map[string]any)
+			if !ok || stringValue(record["role"], "") != "user" {
+				continue
+			}
+			return extractPartsFromMessageContent(record["content"])
+		}
+	}
+	return nil
+}
+
+func extractPartsFromTurnInput(input []any) []InputPart {
+	parts := make([]InputPart, 0)
+	for _, item := range input {
+		record, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if stringValue(record["role"], stringValue(record["type"], "")) == "user" || stringValue(record["type"], "") == "message" {
+			parts = append(parts, extractPartsFromMessageContent(record["content"])...)
+		}
+	}
+	return parts
+}
+
+func extractPartsFromMessageContent(content any) []InputPart {
+	switch typed := content.(type) {
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return nil
+		}
+		return []InputPart{{Type: "text", Text: strings.TrimSpace(typed)}}
+	case []any:
+		parts := make([]InputPart, 0, len(typed))
+		for _, item := range typed {
+			record, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			part := extractInputPart(record)
+			if part.Type != "" {
+				parts = append(parts, part)
+			}
+		}
+		return parts
+	default:
+		return nil
+	}
+}
+
+func extractInputPart(record map[string]any) InputPart {
+	partType := stringValue(record["type"], "")
+	text := firstNonEmptyText(
+		record["text"],
+		record["input_text"],
+		nestedStringValue(record, "text", "value"),
+	)
+	switch partType {
+	case "input_text", "output_text", "text":
+		if text == "" {
+			return InputPart{}
+		}
+		return InputPart{Type: "text", Text: text}
+	case "input_image", "image", "image_url":
+		return InputPart{
+			Type:      "image",
+			MediaType: firstNonEmptyText(record["media_type"], nestedStringValue(record, "source", "media_type")),
+			URL:       firstNonEmptyText(record["image_url"], nestedStringValue(record, "image_url", "url"), nestedStringValue(record, "source", "data"), nestedStringValue(record, "source", "url")),
+		}
+	default:
+		if text != "" {
+			return InputPart{Type: "text", Text: text}
+		}
+		return InputPart{}
+	}
+}
+
+func joinInputPartText(parts []InputPart) string {
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type == "text" && strings.TrimSpace(part.Text) != "" {
+			texts = append(texts, strings.TrimSpace(part.Text))
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
+func extractToolChoice(body map[string]any) ToolChoice {
+	switch typed := body["tool_choice"].(type) {
+	case string:
+		return ToolChoice{Type: strings.TrimSpace(typed)}
+	case map[string]any:
+		choice := ToolChoice{
+			Type: stringValue(typed["type"], ""),
+		}
+		choice.Name = firstNonEmptyText(typed["name"], nestedStringValue(typed, "function", "name"))
+		return choice
+	default:
+		return ToolChoice{}
+	}
+}
+
+func extractResponseFormat(body map[string]any) ResponseFormat {
+	record, ok := body["response_format"].(map[string]any)
+	if !ok {
+		return ResponseFormat{}
+	}
+	format := ResponseFormat{
+		Type: stringValue(record["type"], ""),
+	}
+	if schemaRecord, ok := record["json_schema"].(map[string]any); ok {
+		format.Name = stringValue(schemaRecord["name"], "")
+		if schema, ok := schemaRecord["schema"].(map[string]any); ok {
+			format.Schema = schema
+		}
+	}
+	return format
+}
+
+func nestedStringValue(record map[string]any, keys ...string) string {
+	current := any(record)
+	for _, key := range keys {
+		next, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = next[key]
+	}
+	return stringValue(current, "")
+}
+
+func firstNonEmptyText(values ...any) string {
+	for _, value := range values {
+		if text := stringValue(value, ""); text != "" {
+			return text
+		}
+	}
+	return ""
 }

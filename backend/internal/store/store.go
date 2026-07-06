@@ -386,6 +386,7 @@ type Store interface {
 	UpdateUser(context.Context, UpdateUserInput) (User, error)
 	GetUser(context.Context, string) (User, error)
 	GetUserByEmail(context.Context, string) (User, error)
+	GetUserByUsername(context.Context, string) (User, error)
 	ListUsers(context.Context) ([]User, error)
 	UpsertUserIdentity(context.Context, UpsertUserIdentityInput) (UserIdentity, error)
 	GetUserIdentity(context.Context, string, string) (UserIdentity, error)

@@ -683,6 +683,21 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (store.User, e
 	return item, nil
 }
 
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (store.User, error) {
+	item, err := scanUser(s.db.QueryRowContext(ctx, `
+		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
+		FROM users
+		WHERE username = ?
+	`, strings.TrimSpace(username)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.User{}, errNotFound
+		}
+		return store.User{}, err
+	}
+	return item, nil
+}
+
 func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at

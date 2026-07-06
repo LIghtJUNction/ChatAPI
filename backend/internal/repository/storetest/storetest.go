@@ -73,6 +73,13 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 	if byEmail.ID != alice.ID || byEmail.PasswordHash != "hash-1" {
 		t.Fatalf("unexpected user by email: %#v", byEmail)
 	}
+	byUsername, err := st.GetUserByUsername(ctx, "alice")
+	if err != nil {
+		t.Fatalf("get by username: %v", err)
+	}
+	if byUsername.ID != alice.ID || byUsername.Email != "alice@example.com" {
+		t.Fatalf("unexpected user by username: %#v", byUsername)
+	}
 
 	lastLogin := time.Date(2026, 7, 6, 1, 2, 3, 0, time.UTC)
 	updated, err := st.UpdateUser(ctx, store.UpdateUserInput{
@@ -105,6 +112,9 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 
 	if _, err := st.GetUser(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing user, got %v", err)
+	}
+	if _, err := st.GetUserByUsername(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing username, got %v", err)
 	}
 }
 

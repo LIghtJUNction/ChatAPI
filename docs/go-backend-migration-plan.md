@@ -59,6 +59,7 @@
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
 - SQLite bootstrap schema 已补齐用户体系基础表：`users`、`user_identities`、`user_configs`、`config`，并已补上 `users` / `user_identities` / `config` / `user_configs` 的 SQLite 仓储基础方法和 repository 测试。当前业务仍使用 Lab actor 和 `.env` admin session；这些表和仓储先作为后续 OIDC、本地用户、管理员用户管理、用户配置和系统配置的稳定落点。
+- 密码哈希基础能力已落地：新增 `internal/platform/password`，新密码使用 Argon2id PHC 风格格式，旧 `salt$sha256(salt+password)` 可验证并返回 `NeedsUpgrade`，用于后续本地用户登录成功后惰性升级密码 hash。SQLite users repository 已补上按 username 查询，方便后续把本地用户名密码登录切到 `users` 表。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
 - 本地管理员 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 校验 `admin` 用户，成功后用独立 `CHATAPI_SESSION_SECRET` 写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。`chatapi setup` 已生成 `CHATAPI_SESSION_SECRET`；如果老部署未配置，serve 启动会生成随机 session secret 并持久化到 `config` 表的 `security.session_secret`，Lab 使用进程内不安全默认值且不持久化。本地管理员登录已补上最小进程内失败限流，连续失败后返回 `429` 并写审计事件；后续多实例部署应迁移到 Redis 或数据库限流器。完整 users 表、注册、密码重置、TOTP 和 OIDC RP 登录仍是后续工作。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
@@ -575,6 +576,12 @@ CHATAPI_OIDC_AUTO_CREATE_USER=0
 
 - Argon2id：`golang.org/x/crypto/argon2`
 - TOTP：`github.com/pquerna/otp`
+
+当前 Go 重构分支已新增 `internal/platform/password`：
+
+- `Hash(plain)` 生成 Argon2id PHC 风格字符串。
+- `Verify(plain, encoded)` 支持 Argon2id 和旧 `salt$sha256(salt+plain)`，并在旧格式验证成功时返回 `NeedsUpgrade=true`。
+- 该包不记录明文密码，不暴露 salt 或 hash 以外的运行时状态。后续本地用户登录 service 应在旧 hash 登录成功后调用 `Hash` 生成新 hash，并通过 users repository 更新 `password_hash`。
 
 迁移策略：
 

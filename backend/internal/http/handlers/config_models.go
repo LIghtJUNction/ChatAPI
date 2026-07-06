@@ -131,7 +131,7 @@ func (h ConfigModelsHandler) recordAudit(r *http.Request, userID string, action 
 
 func writeConfigModelsError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrInvalidVirtualModel):
+	case errors.Is(err, service.ErrInvalidVirtualModel), errors.Is(err, service.ErrVirtualModelIDRequired), errors.Is(err, service.ErrVirtualModelNameRequired):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, store.ErrNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)

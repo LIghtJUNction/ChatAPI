@@ -13,6 +13,8 @@ import (
 const virtualModelsConfigKey = "virtual_models"
 
 var ErrInvalidVirtualModel = errors.New("invalid virtual model")
+var ErrVirtualModelIDRequired = errors.New("virtual model id is required")
+var ErrVirtualModelNameRequired = errors.New("virtual model name is required")
 
 type VirtualModel struct {
 	ID      string `json:"id"`
@@ -88,8 +90,11 @@ func (s *VirtualModelService) Upsert(ctx context.Context, userID string, input V
 	input.ID = strings.TrimSpace(input.ID)
 	input.Name = strings.TrimSpace(input.Name)
 	input.OwnedBy = strings.TrimSpace(input.OwnedBy)
-	if input.ID == "" || input.Name == "" {
-		return nil, ErrInvalidVirtualModel
+	if input.ID == "" {
+		return nil, ErrVirtualModelIDRequired
+	}
+	if input.Name == "" {
+		return nil, ErrVirtualModelNameRequired
 	}
 	if input.OwnedBy == "" {
 		input.OwnedBy = "chatapi"
@@ -184,8 +189,11 @@ func (s *VirtualModelService) OpenAIList(ctx context.Context, userID string) ([]
 func (s *VirtualModelService) persist(ctx context.Context, userID string, models []VirtualModel) error {
 	items := make([]map[string]any, 0, len(models))
 	for _, item := range models {
-		if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.Name) == "" {
-			return ErrInvalidVirtualModel
+		if strings.TrimSpace(item.ID) == "" {
+			return ErrVirtualModelIDRequired
+		}
+		if strings.TrimSpace(item.Name) == "" {
+			return ErrVirtualModelNameRequired
 		}
 		ownedBy := strings.TrimSpace(item.OwnedBy)
 		if ownedBy == "" {
@@ -231,8 +239,11 @@ func virtualModelsFromConfig(value map[string]any) ([]VirtualModel, error) {
 			Created: int64(virtualModelNumberValue(item["created"])),
 			Enabled: virtualModelBoolValue(item["enabled"], true),
 		}
-		if model.ID == "" || model.Name == "" {
-			return nil, ErrInvalidVirtualModel
+		if model.ID == "" {
+			return nil, ErrVirtualModelIDRequired
+		}
+		if model.Name == "" {
+			return nil, ErrVirtualModelNameRequired
 		}
 		if model.Created <= 0 {
 			model.Created = 0

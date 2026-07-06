@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -62,5 +63,29 @@ func TestVirtualModelServiceSchema(t *testing.T) {
 	}
 	if schema.CreateFields[1].Name != "name" || !schema.CreateFields[1].Required {
 		t.Fatalf("unexpected virtual model name field: %#v", schema.CreateFields)
+	}
+}
+
+func TestVirtualModelServiceUpsertRequiresIDAndName(t *testing.T) {
+	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := migrations.Bootstrap(context.Background(), st.DB()); err != nil {
+		t.Fatalf("bootstrap sqlite: %v", err)
+	}
+
+	svc := NewVirtualModelService(st)
+	ctx := context.Background()
+
+	_, err = svc.Upsert(ctx, "user_models", VirtualModel{Name: "Missing ID"})
+	if !errors.Is(err, ErrVirtualModelIDRequired) {
+		t.Fatalf("expected ErrVirtualModelIDRequired, got %v", err)
+	}
+
+	_, err = svc.Upsert(ctx, "user_models", VirtualModel{ID: "demo-model"})
+	if !errors.Is(err, ErrVirtualModelNameRequired) {
+		t.Fatalf("expected ErrVirtualModelNameRequired, got %v", err)
 	}
 }

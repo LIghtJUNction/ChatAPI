@@ -1324,6 +1324,24 @@ func TestConfigModelsRoutesAndModelsEndpoint(t *testing.T) {
 	assertAuditCount(t, env, "user.config", "virtual_model", "chatapi-demo", "delete", "success", 1)
 }
 
+func TestConfigModelsRejectMissingRequiredFields(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := env.postText(t, "/api/config/models", map[string]any{
+		"name": "Missing ID",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "virtual model id is required") {
+		t.Fatalf("expected missing id rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.postText(t, "/api/config/models", map[string]any{
+		"id": "demo-missing-name",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "virtual model name is required") {
+		t.Fatalf("expected missing name rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestConfigSystemRoutes(t *testing.T) {
 	env := newTestEnv(t)
 

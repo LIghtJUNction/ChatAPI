@@ -58,7 +58,7 @@
 - SMTP-only 邮件基础能力已落地最小版本：配置项只保留 `CHATAPI_SMTP_*`，`chatapi smtp test --dry-run` 可离线检查 SMTP 配置，`chatapi smtp test --connect-only` 可执行 SMTP 连接/TLS/Auth 握手但不发信，`chatapi smtp test --to user@example.com` 才会真实发送测试邮件；配置输出和诊断不会打印 SMTP password。
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
-- SQLite bootstrap schema 已补齐用户体系基础表：`users`、`user_identities`、`user_configs`、`config`，并已补上 `users` / `user_identities` 的 SQLite 仓储基础方法和 repository 测试。当前业务仍使用 Lab actor 和 `.env` admin session；这些表和仓储先作为后续 OIDC、本地用户、管理员用户管理、用户配置和系统配置的稳定落点。
+- SQLite bootstrap schema 已补齐用户体系基础表：`users`、`user_identities`、`user_configs`、`config`，并已补上 `users` / `user_identities` / `config` / `user_configs` 的 SQLite 仓储基础方法和 repository 测试。当前业务仍使用 Lab actor 和 `.env` admin session；这些表和仓储先作为后续 OIDC、本地用户、管理员用户管理、用户配置和系统配置的稳定落点。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
 - 本地管理员 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 校验 `admin` 用户，成功后写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。完整 users 表、注册、密码重置、TOTP 和 OIDC RP 登录仍是后续工作。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
@@ -661,7 +661,7 @@ Go 重构版新增表：
 
 首版不强制拆分这些 JSON 字段，避免破坏兼容性。
 
-`users`、`user_configs`、`config` 和 `user_identities` 已在 SQLite bootstrap schema 中创建。当前 Go 重构分支已先补齐 `users` / `user_identities` 的 SQLite repository 基础能力，包括创建/更新/查询用户、按 email 查询用户、列出用户、按 OIDC provider + subject upsert / 查询外部身份和列出用户身份。当前尚未把本地登录/OIDC 登录切到完整 `users` 表，仍保留 `.env` 管理员恢复入口和 Lab actor；这些表和仓储先保证后续用户体系、用户配置、系统配置和 OIDC 绑定有稳定迁移目标。
+`users`、`user_configs`、`config` 和 `user_identities` 已在 SQLite bootstrap schema 中创建。当前 Go 重构分支已先补齐 `users` / `user_identities` 的 SQLite repository 基础能力，包括创建/更新/查询用户、按 email 查询用户、列出用户、按 OIDC provider + subject upsert / 查询外部身份和列出用户身份；同时补齐 `config` / `user_configs` 的 JSON 值 CRUD 仓储，用于后续系统设置、用户设置和运行时配置持久化。当前尚未把本地登录/OIDC 登录切到完整 `users` 表，仍保留 `.env` 管理员恢复入口和 Lab actor；这些表和仓储先保证后续用户体系、用户配置、系统配置和 OIDC 绑定有稳定迁移目标。
 
 `user_identities` 是 Go 重构版为 OIDC 登录新增的表。首个 migration 应在不影响旧库登录的前提下创建该表；旧用户默认没有外部身份绑定，仍可使用本地密码登录。
 

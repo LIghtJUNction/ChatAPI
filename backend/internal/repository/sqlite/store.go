@@ -774,6 +774,125 @@ func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]store.
 	return items, rows.Err()
 }
 
+func (s *Store) GetSystemConfig(ctx context.Context, key string) (store.SystemConfig, error) {
+	item, err := scanSystemConfig(s.db.QueryRowContext(ctx, `
+		SELECT key, value_json, created_at, updated_at
+		FROM config
+		WHERE key = ?
+	`, strings.TrimSpace(key)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.SystemConfig{}, errNotFound
+		}
+		return store.SystemConfig{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) SetSystemConfig(ctx context.Context, input store.SetSystemConfigInput) (store.SystemConfig, error) {
+	now := time.Now().UTC()
+	key := strings.TrimSpace(input.Key)
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO config(key, value_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET
+			value_json = excluded.value_json,
+			updated_at = excluded.updated_at
+	`, key, mustJSON(ensureMap(input.Value)), formatTime(now), formatTime(now)); err != nil {
+		return store.SystemConfig{}, err
+	}
+	return s.GetSystemConfig(ctx, key)
+}
+
+func (s *Store) DeleteSystemConfig(ctx context.Context, key string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM config WHERE key = ?`, strings.TrimSpace(key))
+	return err
+}
+
+func (s *Store) ListSystemConfigs(ctx context.Context) ([]store.SystemConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT key, value_json, created_at, updated_at
+		FROM config
+		ORDER BY key ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.SystemConfig, 0)
+	for rows.Next() {
+		item, err := scanSystemConfig(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) GetUserConfig(ctx context.Context, userID string, key string) (store.UserConfig, error) {
+	item, err := scanUserConfig(s.db.QueryRowContext(ctx, `
+		SELECT user_id, key, value_json, created_at, updated_at
+		FROM user_configs
+		WHERE user_id = ? AND key = ?
+	`, strings.TrimSpace(userID), strings.TrimSpace(key)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.UserConfig{}, errNotFound
+		}
+		return store.UserConfig{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) SetUserConfig(ctx context.Context, input store.SetUserConfigInput) (store.UserConfig, error) {
+	now := time.Now().UTC()
+	userID := strings.TrimSpace(input.UserID)
+	key := strings.TrimSpace(input.Key)
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO user_configs(user_id, key, value_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(user_id, key) DO UPDATE SET
+			value_json = excluded.value_json,
+			updated_at = excluded.updated_at
+	`, userID, key, mustJSON(ensureMap(input.Value)), formatTime(now), formatTime(now)); err != nil {
+		return store.UserConfig{}, err
+	}
+	return s.GetUserConfig(ctx, userID, key)
+}
+
+func (s *Store) DeleteUserConfig(ctx context.Context, userID string, key string) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM user_configs
+		WHERE user_id = ? AND key = ?
+	`, strings.TrimSpace(userID), strings.TrimSpace(key))
+	return err
+}
+
+func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.UserConfig, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT user_id, key, value_json, created_at, updated_at
+		FROM user_configs
+		WHERE user_id = ?
+		ORDER BY key ASC
+	`, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.UserConfig, 0)
+	for rows.Next() {
+		item, err := scanUserConfig(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]store.AutomationRule, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, enabled, rule_json, created_at, updated_at
@@ -1615,6 +1734,14 @@ type userIdentityScanner interface {
 	Scan(dest ...any) error
 }
 
+type systemConfigScanner interface {
+	Scan(dest ...any) error
+}
+
+type userConfigScanner interface {
+	Scan(dest ...any) error
+}
+
 type automationRuleScanner interface {
 	Scan(dest ...any) error
 }
@@ -1822,6 +1949,34 @@ func scanUserIdentity(scanner userIdentityScanner) (store.UserIdentity, error) {
 		value := parseTime(lastLoginAt.String)
 		item.LastLoginAt = &value
 	}
+	return item, nil
+}
+
+func scanSystemConfig(scanner systemConfigScanner) (store.SystemConfig, error) {
+	var item store.SystemConfig
+	var valueJSON string
+	var createdAt string
+	var updatedAt string
+	if err := scanner.Scan(&item.Key, &valueJSON, &createdAt, &updatedAt); err != nil {
+		return store.SystemConfig{}, err
+	}
+	item.Value = parseJSONMap(valueJSON)
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
+	return item, nil
+}
+
+func scanUserConfig(scanner userConfigScanner) (store.UserConfig, error) {
+	var item store.UserConfig
+	var valueJSON string
+	var createdAt string
+	var updatedAt string
+	if err := scanner.Scan(&item.UserID, &item.Key, &valueJSON, &createdAt, &updatedAt); err != nil {
+		return store.UserConfig{}, err
+	}
+	item.Value = parseJSONMap(valueJSON)
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
 	return item, nil
 }
 

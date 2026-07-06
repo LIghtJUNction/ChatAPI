@@ -132,6 +132,21 @@ type UserIdentity struct {
 	LastLoginAt   *time.Time     `json:"last_login_at,omitempty"`
 }
 
+type SystemConfig struct {
+	Key       string         `json:"key"`
+	Value     map[string]any `json:"value"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+type UserConfig struct {
+	UserID    string         `json:"user_id"`
+	Key       string         `json:"key"`
+	Value     map[string]any `json:"value"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
 type AutomationRule struct {
 	ID        string         `json:"id"`
 	UserID    string         `json:"user_id"`
@@ -238,6 +253,17 @@ type UpsertUserIdentityInput struct {
 	EmailVerified bool
 	Profile       map[string]any
 	LastLoginAt   *time.Time
+}
+
+type SetSystemConfigInput struct {
+	Key   string
+	Value map[string]any
+}
+
+type SetUserConfigInput struct {
+	UserID string
+	Key    string
+	Value  map[string]any
 }
 
 type UpsertAutomationRuleInput struct {
@@ -364,6 +390,14 @@ type Store interface {
 	UpsertUserIdentity(context.Context, UpsertUserIdentityInput) (UserIdentity, error)
 	GetUserIdentity(context.Context, string, string) (UserIdentity, error)
 	ListUserIdentities(context.Context, string) ([]UserIdentity, error)
+	GetSystemConfig(context.Context, string) (SystemConfig, error)
+	SetSystemConfig(context.Context, SetSystemConfigInput) (SystemConfig, error)
+	DeleteSystemConfig(context.Context, string) error
+	ListSystemConfigs(context.Context) ([]SystemConfig, error)
+	GetUserConfig(context.Context, string, string) (UserConfig, error)
+	SetUserConfig(context.Context, SetUserConfigInput) (UserConfig, error)
+	DeleteUserConfig(context.Context, string, string) error
+	ListUserConfigs(context.Context, string) ([]UserConfig, error)
 	ListAutomationRulesByUser(context.Context, string) ([]AutomationRule, error)
 	ReplaceAutomationRulesForUser(context.Context, string, map[string]struct{}, []UpsertAutomationRuleInput) ([]AutomationRule, error)
 	CreateUploadedImage(context.Context, CreateUploadedImageInput) (UploadedImage, error)

@@ -164,6 +164,139 @@ func TestUserIdentityRepositoryUpsertsByProviderSubject(t *testing.T) {
 	}
 }
 
+func TestConfigRepositoryUpsertsListsAndDeletesSystemConfig(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+
+	item, err := st.SetSystemConfig(ctx, store.SetSystemConfigInput{
+		Key: "runtime.gc",
+		Value: map[string]any{
+			"gogc": 125,
+		},
+	})
+	if err != nil {
+		t.Fatalf("set system config: %v", err)
+	}
+	if item.Key != "runtime.gc" || item.Value["gogc"].(float64) != 125 {
+		t.Fatalf("unexpected system config: %#v", item)
+	}
+
+	updated, err := st.SetSystemConfig(ctx, store.SetSystemConfigInput{
+		Key: "runtime.gc",
+		Value: map[string]any{
+			"gogc":         80,
+			"memory_limit": "512MiB",
+		},
+	})
+	if err != nil {
+		t.Fatalf("update system config: %v", err)
+	}
+	if updated.Value["gogc"].(float64) != 80 || updated.Value["memory_limit"] != "512MiB" {
+		t.Fatalf("unexpected updated system config: %#v", updated)
+	}
+	if !updated.CreatedAt.Equal(item.CreatedAt) {
+		t.Fatalf("upsert should keep created_at, before=%s after=%s", item.CreatedAt, updated.CreatedAt)
+	}
+
+	if _, err := st.SetSystemConfig(ctx, store.SetSystemConfigInput{
+		Key: "storage.cleanup",
+		Value: map[string]any{
+			"enabled": true,
+		},
+	}); err != nil {
+		t.Fatalf("set second system config: %v", err)
+	}
+
+	items, err := st.ListSystemConfigs(ctx)
+	if err != nil {
+		t.Fatalf("list system configs: %v", err)
+	}
+	if len(items) != 2 || items[0].Key != "runtime.gc" || items[1].Key != "storage.cleanup" {
+		t.Fatalf("unexpected system config list: %#v", items)
+	}
+
+	if err := st.DeleteSystemConfig(ctx, "runtime.gc"); err != nil {
+		t.Fatalf("delete system config: %v", err)
+	}
+	if _, err := st.GetSystemConfig(ctx, "runtime.gc"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestConfigRepositoryUpsertsListsAndDeletesUserConfig(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+
+	if _, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+		UserID: "user_1",
+		Key:    "workspace",
+		Value: map[string]any{
+			"compact": true,
+		},
+	}); err != nil {
+		t.Fatalf("set user config: %v", err)
+	}
+	updated, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+		UserID: "user_1",
+		Key:    "workspace",
+		Value: map[string]any{
+			"compact": false,
+			"theme":   "dark",
+		},
+	})
+	if err != nil {
+		t.Fatalf("update user config: %v", err)
+	}
+	if updated.UserID != "user_1" || updated.Key != "workspace" {
+		t.Fatalf("unexpected user config identity: %#v", updated)
+	}
+	if updated.Value["compact"] != false || updated.Value["theme"] != "dark" {
+		t.Fatalf("unexpected user config value: %#v", updated)
+	}
+
+	if _, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+		UserID: "user_1",
+		Key:    "notifications",
+		Value: map[string]any{
+			"email": false,
+		},
+	}); err != nil {
+		t.Fatalf("set second user config: %v", err)
+	}
+	if _, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+		UserID: "user_2",
+		Key:    "workspace",
+		Value: map[string]any{
+			"compact": true,
+		},
+	}); err != nil {
+		t.Fatalf("set other user config: %v", err)
+	}
+
+	items, err := st.ListUserConfigs(ctx, "user_1")
+	if err != nil {
+		t.Fatalf("list user configs: %v", err)
+	}
+	if len(items) != 2 || items[0].Key != "notifications" || items[1].Key != "workspace" {
+		t.Fatalf("unexpected user config list: %#v", items)
+	}
+
+	if err := st.DeleteUserConfig(ctx, "user_1", "workspace"); err != nil {
+		t.Fatalf("delete user config: %v", err)
+	}
+	if _, err := st.GetUserConfig(ctx, "user_1", "workspace"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+
+	otherUserItem, err := st.GetUserConfig(ctx, "user_2", "workspace")
+	if err != nil {
+		t.Fatalf("other user config should remain: %v", err)
+	}
+	if otherUserItem.UserID != "user_2" {
+		t.Fatalf("unexpected other user item: %#v", otherUserItem)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	st, err := Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))

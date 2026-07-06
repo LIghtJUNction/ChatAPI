@@ -36,11 +36,12 @@ func (h WorkspaceToolCallHandler) AssistContext(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":           true,
-		"request":      contextPayload.Request,
-		"parsed":       requestParsedView(contextPayload.Request),
-		"conversation": contextPayload.Conversation,
-		"messages":     contextPayload.Messages,
+		"ok":            true,
+		"request":       contextPayload.Request,
+		"parsed":        requestParsedView(contextPayload.Request),
+		"conversation":  contextPayload.Conversation,
+		"messages":      contextPayload.Messages,
+		"assist_schema": h.Service.AssistSchema(),
 		"draft": map[string]any{
 			"text":   contextPayload.DraftText,
 			"length": contextPayload.DraftLength,

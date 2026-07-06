@@ -26,6 +26,10 @@ func NewWorkspaceToolCallService(dataStore store.Store) *WorkspaceToolCallServic
 	return &WorkspaceToolCallService{store: dataStore}
 }
 
+func (s *WorkspaceToolCallService) AssistSchema() ToolCallAssistSchema {
+	return BuildToolCallAssistSchema()
+}
+
 func (s *WorkspaceToolCallService) AssistContext(ctx context.Context, ownerID string, requestID string, conversationID string) (ToolCallAssistContext, error) {
 	if s == nil || s.store == nil {
 		return ToolCallAssistContext{}, ErrForbidden

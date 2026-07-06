@@ -1376,6 +1376,9 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	if nestedPathString(resp, "draft", "text") != "draft chunk" {
 		t.Fatalf("unexpected assist draft: %#v", resp)
 	}
+	if !containsStringValue(resp["assist_schema"].(map[string]any)["confidence_levels"], "medium") {
+		t.Fatalf("unexpected assist schema confidence levels: %#v", resp)
+	}
 
 	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
 		"text": "done",
@@ -1440,6 +1443,9 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	}
 	if nestedPathString(resp, "draft", "text") != "session draft" {
 		t.Fatalf("unexpected session assist draft: %#v", resp)
+	}
+	if !containsStringValue(resp["assist_schema"].(map[string]any)["notes"], "Do not auto-submit the draft tool call.") {
+		t.Fatalf("unexpected session assist schema notes: %#v", resp)
 	}
 
 	_, _ = env.postJSONWithCookieAndHeaders(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{

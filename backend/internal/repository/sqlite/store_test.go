@@ -16,6 +16,7 @@ func TestSQLiteRepositoryContracts(t *testing.T) {
 	storetest.RunAPIKeyRepositoryTests(t, openTestStore)
 	storetest.RunAuditRepositoryTests(t, openTestStore)
 	storetest.RunAutomationRepositoryTests(t, openTestStore)
+	storetest.RunStorageRepositoryTests(t, openTestStore)
 }
 
 func openTestStore(t *testing.T) store.Store {

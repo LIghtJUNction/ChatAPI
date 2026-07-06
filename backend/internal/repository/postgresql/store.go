@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -162,6 +163,38 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 			revoked_at TIMESTAMPTZ NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_id ON user_api_keys(user_id);
+
+		CREATE TABLE IF NOT EXISTS uploaded_images (
+			id TEXT PRIMARY KEY,
+			owner_id TEXT NOT NULL,
+			filename TEXT NOT NULL,
+			original_filename TEXT NOT NULL DEFAULT '',
+			content_type TEXT NOT NULL,
+			bytes BIGINT NOT NULL,
+			url TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_uploaded_images_filename ON uploaded_images(filename);
+		CREATE INDEX IF NOT EXISTS idx_uploaded_images_owner_created ON uploaded_images(owner_id, created_at DESC, id DESC);
+
+		CREATE TABLE IF NOT EXISTS storage_user_quotas (
+			owner_id TEXT PRIMARY KEY,
+			quota_bytes BIGINT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS storage_file_deletion_failures (
+			path TEXT PRIMARY KEY,
+			filename TEXT NOT NULL DEFAULT '',
+			owner_id TEXT NOT NULL DEFAULT '',
+			bytes BIGINT NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_storage_file_deletion_failures_updated ON storage_file_deletion_failures(updated_at ASC, path ASC);
 	`)
 	if err != nil {
 		return fmt.Errorf("bootstrap postgresql schema: %w", err)
@@ -558,6 +591,24 @@ func ensureMap(value map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return value
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func mustJSON(value any) string {

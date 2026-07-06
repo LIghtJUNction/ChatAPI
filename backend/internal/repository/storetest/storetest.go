@@ -63,6 +63,19 @@ func RunAutomationRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	})
 }
 
+func RunStorageRepositoryTests(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	t.Run("uploaded_images", func(t *testing.T) {
+		testStorageRepositoryCreatesListsAndDeletesUploadedImages(t, newStore)
+	})
+	t.Run("storage_file_deletion_failures", func(t *testing.T) {
+		testStorageRepositoryUpsertsListsAndDeletesDeletionFailures(t, newStore)
+	})
+	t.Run("storage_user_quotas", func(t *testing.T) {
+		testStorageRepositorySetsListsAndDeletesUserQuotas(t, newStore)
+	})
+}
+
 func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewStoreFunc) {
 	t.Helper()
 	ctx := context.Background()
@@ -690,5 +703,225 @@ func testConfigRepositoryUpsertsListsAndDeletesUserConfig(t *testing.T, newStore
 	}
 	if otherUserItem.UserID != "user_2" {
 		t.Fatalf("unexpected other user item: %#v", otherUserItem)
+	}
+}
+
+func testStorageRepositoryCreatesListsAndDeletesUploadedImages(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+
+	first, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+		ID:               "img_1",
+		OwnerID:          "user_a",
+		Filename:         "img-a.png",
+		OriginalFilename: "a.png",
+		ContentType:      "image/png",
+		Bytes:            123,
+		URL:              "/api/uploads/imgs/img-a.png",
+	})
+	if err != nil {
+		t.Fatalf("create first uploaded image: %v", err)
+	}
+	if first.ID != "img_1" || first.OwnerID != "user_a" || first.CreatedAt.IsZero() {
+		t.Fatalf("unexpected first uploaded image: %#v", first)
+	}
+
+	second, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+		ID:               "img_2",
+		OwnerID:          "user_a",
+		Filename:         "img-b.png",
+		OriginalFilename: "b.png",
+		ContentType:      "image/png",
+		Bytes:            456,
+		URL:              "/api/uploads/imgs/img-b.png",
+	})
+	if err != nil {
+		t.Fatalf("create second uploaded image: %v", err)
+	}
+
+	if _, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+		ID:               "img_3",
+		OwnerID:          "user_b",
+		Filename:         "img-c.png",
+		OriginalFilename: "c.png",
+		ContentType:      "image/png",
+		Bytes:            789,
+		URL:              "/api/uploads/imgs/img-c.png",
+	}); err != nil {
+		t.Fatalf("create third uploaded image: %v", err)
+	}
+
+	ownerImages, err := st.ListUploadedImagesByOwner(ctx, "user_a")
+	if err != nil {
+		t.Fatalf("list owner uploaded images: %v", err)
+	}
+	if len(ownerImages) != 2 || ownerImages[0].ID != second.ID || ownerImages[1].ID != first.ID {
+		t.Fatalf("unexpected owner uploaded images: %#v", ownerImages)
+	}
+
+	allImages, err := st.ListUploadedImages(ctx)
+	if err != nil {
+		t.Fatalf("list all uploaded images: %v", err)
+	}
+	if len(allImages) != 3 || allImages[0].ID != "img_3" || allImages[2].ID != "img_1" {
+		t.Fatalf("unexpected all uploaded images: %#v", allImages)
+	}
+
+	deleted, err := st.DeleteUploadedImagesByFilenames(ctx, []string{"img-a.png", "img-a.png", "  ", "missing.png"})
+	if err != nil {
+		t.Fatalf("delete uploaded images by filename: %v", err)
+	}
+	if deleted.DeletedImages != 1 {
+		t.Fatalf("unexpected deleted uploaded image count: %#v", deleted)
+	}
+
+	afterDelete, err := st.ListUploadedImagesByOwner(ctx, "user_a")
+	if err != nil {
+		t.Fatalf("list uploaded images after delete: %v", err)
+	}
+	if len(afterDelete) != 1 || afterDelete[0].Filename != "img-b.png" {
+		t.Fatalf("unexpected uploaded images after delete: %#v", afterDelete)
+	}
+
+	emptyDelete, err := st.DeleteUploadedImagesByFilenames(ctx, []string{"", "   "})
+	if err != nil {
+		t.Fatalf("delete empty uploaded image list: %v", err)
+	}
+	if emptyDelete.DeletedImages != 0 {
+		t.Fatalf("unexpected deleted count for empty delete: %#v", emptyDelete)
+	}
+}
+
+func testStorageRepositoryUpsertsListsAndDeletesDeletionFailures(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+
+	first, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+		Path:      "/tmp/img-a.png",
+		Filename:  "img-a.png",
+		OwnerID:   "user_a",
+		Bytes:     10,
+		LastError: "permission denied",
+	})
+	if err != nil {
+		t.Fatalf("create deletion failure: %v", err)
+	}
+	if first.Attempts != 1 || first.Path != "/tmp/img-a.png" || first.CreatedAt.IsZero() {
+		t.Fatalf("unexpected first deletion failure: %#v", first)
+	}
+
+	second, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+		Path:      "/tmp/img-b.png",
+		Filename:  "img-b.png",
+		OwnerID:   "user_b",
+		Bytes:     20,
+		LastError: "busy",
+	})
+	if err != nil {
+		t.Fatalf("create second deletion failure: %v", err)
+	}
+
+	updated, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+		Path:      "/tmp/img-a.png",
+		Filename:  "img-a.png",
+		OwnerID:   "user_a",
+		Bytes:     30,
+		LastError: "still busy",
+	})
+	if err != nil {
+		t.Fatalf("update deletion failure: %v", err)
+	}
+	if updated.Attempts != 2 || updated.Bytes != 30 || updated.LastError != "still busy" {
+		t.Fatalf("unexpected updated deletion failure: %#v", updated)
+	}
+
+	items, err := st.ListStorageFileDeletionFailures(ctx, 1)
+	if err != nil {
+		t.Fatalf("list deletion failures with limit: %v", err)
+	}
+	if len(items) != 1 || items[0].Path != second.Path {
+		t.Fatalf("unexpected limited deletion failures: %#v", items)
+	}
+
+	allItems, err := st.ListStorageFileDeletionFailures(ctx, 10)
+	if err != nil {
+		t.Fatalf("list all deletion failures: %v", err)
+	}
+	if len(allItems) != 2 || allItems[0].Path != second.Path || allItems[1].Path != updated.Path {
+		t.Fatalf("unexpected deletion failure ordering: %#v", allItems)
+	}
+
+	if err := st.DeleteStorageFileDeletionFailures(ctx, []string{"/tmp/img-b.png", "/tmp/img-b.png", "", "missing"}); err != nil {
+		t.Fatalf("delete deletion failures: %v", err)
+	}
+	remaining, err := st.ListStorageFileDeletionFailures(ctx, 10)
+	if err != nil {
+		t.Fatalf("list deletion failures after delete: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].Path != updated.Path {
+		t.Fatalf("unexpected deletion failures after delete: %#v", remaining)
+	}
+
+	if err := st.DeleteStorageFileDeletionFailures(ctx, []string{"", "   "}); err != nil {
+		t.Fatalf("delete empty deletion failure list: %v", err)
+	}
+}
+
+func testStorageRepositorySetsListsAndDeletesUserQuotas(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+
+	if _, err := st.GetStorageUserQuota(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing storage quota, got %v", err)
+	}
+
+	first, err := st.SetStorageUserQuota(ctx, "user_b", 2048)
+	if err != nil {
+		t.Fatalf("set first storage quota: %v", err)
+	}
+	if first.OwnerID != "user_b" || first.QuotaBytes != 2048 || first.CreatedAt.IsZero() {
+		t.Fatalf("unexpected first storage quota: %#v", first)
+	}
+
+	second, err := st.SetStorageUserQuota(ctx, "user_a", 1024)
+	if err != nil {
+		t.Fatalf("set second storage quota: %v", err)
+	}
+
+	updated, err := st.SetStorageUserQuota(ctx, "user_b", 4096)
+	if err != nil {
+		t.Fatalf("update storage quota: %v", err)
+	}
+	if updated.QuotaBytes != 4096 {
+		t.Fatalf("unexpected updated storage quota: %#v", updated)
+	}
+	if !updated.CreatedAt.Equal(first.CreatedAt) {
+		t.Fatalf("storage quota upsert should keep created_at, before=%s after=%s", first.CreatedAt, updated.CreatedAt)
+	}
+
+	items, err := st.ListStorageUserQuotas(ctx)
+	if err != nil {
+		t.Fatalf("list storage quotas: %v", err)
+	}
+	if len(items) != 2 || items[0].OwnerID != second.OwnerID || items[1].OwnerID != updated.OwnerID {
+		t.Fatalf("unexpected storage quota list: %#v", items)
+	}
+
+	got, err := st.GetStorageUserQuota(ctx, "user_b")
+	if err != nil {
+		t.Fatalf("get storage quota: %v", err)
+	}
+	if got.QuotaBytes != 4096 {
+		t.Fatalf("unexpected fetched storage quota: %#v", got)
+	}
+
+	if err := st.DeleteStorageUserQuota(ctx, "user_b"); err != nil {
+		t.Fatalf("delete storage quota: %v", err)
+	}
+	if _, err := st.GetStorageUserQuota(ctx, "user_b"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after deleting storage quota, got %v", err)
 	}
 }

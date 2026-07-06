@@ -59,6 +59,42 @@ func NewSystemSettingsService(dataStore store.Store, cfg config.Config) *SystemS
 	return &SystemSettingsService{store: dataStore, cfg: cfg}
 }
 
+func (s *SystemSettingsService) Schema() ConfigSchema {
+	defaults := defaultSystemSettings(s.cfg)
+	emailProviderValues := make([]string, 0, len(defaults.EmailProviderOptions))
+	for _, item := range defaults.EmailProviderOptions {
+		if strings.TrimSpace(item.Value) != "" {
+			emailProviderValues = append(emailProviderValues, strings.TrimSpace(item.Value))
+		}
+	}
+	return ConfigSchema{
+		Fields: []ConfigFieldSchema{
+			{Key: "public_statistics", ValueType: "boolean", DefaultValue: defaults.PublicStatistics, Public: true, AdminWriteOnly: true, Description: "Expose aggregate statistics to non-admin users."},
+			{Key: "title_enabled", ValueType: "boolean", DefaultValue: defaults.TitleEnabled, Public: true, AdminWriteOnly: true, Description: "Whether a custom title is shown in the UI."},
+			{Key: "title", ValueType: "string", DefaultValue: defaults.Title, Public: true, AdminWriteOnly: true, Description: "Custom UI title."},
+			{Key: "external_registration_enabled", ValueType: "boolean", DefaultValue: defaults.ExternalRegistrationEnabled, Public: true, AdminWriteOnly: true, Description: "Whether public registration is enabled."},
+			{Key: "email_verification_enabled", ValueType: "boolean", DefaultValue: defaults.EmailVerificationEnabled, Public: true, AdminWriteOnly: true, Description: "Whether registration and password reset require email verification."},
+			{Key: "email_provider", ValueType: "string", DefaultValue: defaults.EmailProvider, Public: true, AdminWriteOnly: true, Description: "Selected outbound email provider.", Validation: map[string]any{"allowed_values": emailProviderValues}},
+			{Key: "email_provider_options", ValueType: "object_array", DefaultValue: defaults.EmailProviderOptions, Public: true, AdminWriteOnly: true, ReadOnly: true, Description: "Providers available from current runtime configuration."},
+			{Key: "registration_email_domain_restriction_enabled", ValueType: "boolean", DefaultValue: defaults.RegistrationEmailDomainRestrictionEnabled, Public: true, AdminWriteOnly: true, Description: "Whether registration email domains are restricted."},
+			{Key: "registration_email_domains", ValueType: "string", DefaultValue: defaults.RegistrationEmailDomains, Public: true, AdminWriteOnly: true, Description: "Comma-separated email domains allowed for registration."},
+			{Key: "ntfy_private_url_policy", ValueType: "string", DefaultValue: defaults.NtfyPrivateURLPolicy, Public: true, AdminWriteOnly: true, Description: "Policy for private ntfy URLs.", Validation: map[string]any{"allowed_values": []string{"disabled", "admin", "all"}}},
+			{Key: "api_key_limit_per_user", ValueType: "integer", DefaultValue: defaults.APIKeyLimitPerUser, Public: true, AdminWriteOnly: true, Description: "Maximum number of API keys a user may hold.", Validation: map[string]any{"min": 0}},
+			{Key: "realtime_max_connections", ValueType: "integer", DefaultValue: defaults.RealtimeMaxConnections, Public: true, AdminWriteOnly: true, Description: "Global realtime connection cap.", Validation: map[string]any{"min": 0}},
+			{Key: "realtime_max_connections_per_user", ValueType: "integer", DefaultValue: defaults.RealtimeMaxConnectionsPerUser, Public: true, AdminWriteOnly: true, Description: "Per-user realtime connection cap.", Validation: map[string]any{"min": 0}},
+			{Key: "realtime_queue_size", ValueType: "integer", DefaultValue: defaults.RealtimeQueueSize, Public: true, AdminWriteOnly: true, Description: "Per-subscriber realtime event queue size.", Validation: map[string]any{"min": 1}},
+			{Key: "image_max_single_bytes", ValueType: "integer", DefaultValue: defaults.ImageMaxSingleBytes, Public: true, AdminWriteOnly: true, Description: "Maximum bytes for a single uploaded image.", Validation: map[string]any{"min": 0}},
+			{Key: "image_max_request_bytes", ValueType: "integer", DefaultValue: defaults.ImageMaxRequestBytes, Public: true, AdminWriteOnly: true, Description: "Maximum bytes accepted by one image upload request.", Validation: map[string]any{"min": 0}},
+			{Key: "image_max_total_bytes", ValueType: "integer", DefaultValue: defaults.ImageMaxTotalBytes, Public: true, AdminWriteOnly: true, Description: "Default total image storage quota per user.", Validation: map[string]any{"min": 0}},
+			{Key: "pending_max_per_user", ValueType: "integer", DefaultValue: defaults.PendingMaxPerUser, Public: true, AdminWriteOnly: true, Description: "Maximum active pending turns per user.", Validation: map[string]any{"min": 0}},
+			{Key: "pending_max_age_hours", ValueType: "integer", DefaultValue: defaults.PendingMaxAgeHours, Public: true, AdminWriteOnly: true, Description: "Maximum pending turn age before cleanup.", Validation: map[string]any{"min": 0}},
+			{Key: "pending_max_output_chars", ValueType: "integer", DefaultValue: defaults.PendingMaxOutputChars, Public: true, AdminWriteOnly: true, Description: "Maximum draft output length kept in memory.", Validation: map[string]any{"min": 0}},
+			{Key: "pending_auto_abort_message", ValueType: "string", DefaultValue: defaults.PendingAutoAbortMessage, Public: true, AdminWriteOnly: true, Description: "Abort message returned when a pending turn expires."},
+			{Key: "image_usage", ValueType: "object", DefaultValue: ImageUsageInfo{}, Public: true, AdminWriteOnly: true, ReadOnly: true, Description: "Current image storage usage summary."},
+		},
+	}
+}
+
 func (s *SystemSettingsService) Get(ctx context.Context) (SystemSettings, error) {
 	if s == nil || s.store == nil {
 		return SystemSettings{}, ErrInvalidSystemSettings

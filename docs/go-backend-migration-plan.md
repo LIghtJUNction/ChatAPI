@@ -75,6 +75,7 @@
 - 用户配置已落地最小接口：`GET /api/user/config` 返回当前 actor 的 `user_configs` 列表和聚合 config map，`POST /api/user/config` 按 key upsert JSON object 配置并写入 `user.config` 审计事件；Lab actor 和 serve session actor 都复用同一套 owner 隔离。
 - 系统配置已落地最小管理接口：`GET /api/admin/config` 返回 `config` 表列表和聚合 config map，`POST /api/admin/config` 按 key upsert JSON object 配置并写入 `admin.config` 审计事件；当前只负责持久化和管理，不会自动覆盖 `.env` 派生的运行时配置，后续各服务再逐步读取对应 key。
 - 面向当前前端系统设置面板的最小接口也已补上：`GET/POST /api/config/system` 当前要求 admin actor，读写 `config.system_settings` 单条 JSON，并把前端已使用的字段展平成固定响应结构；`realtime_*`、图片大小上限和 SMTP provider 选项会优先回显当前运行时配置，其他字段先作为可持久化设置保留，后续再逐步接入真实运行时行为。
+- 交互式配置 schema 已开始显式暴露：`GET /api/user/config/schema` 返回当前支持的用户偏好字段、默认值和保留前缀；`GET /api/config/system/schema` 返回系统设置字段、默认值、只读项和枚举/最小值等校验 metadata，避免前端和 CLI 继续硬编码这批设置键。原始 `GET/POST /api/admin/config` 目前仍保留为自由 JSON object 持久化接口，不额外伪造一层 schema。
 - 管理员 SMTP 测试邮件接口已补上：`POST /api/admin/send-test-email` 当前直接读取 `.env` 派生的 SMTP 运行时配置发送测试邮件，不读取数据库里的 provider 凭据；配置缺失或 SMTP 禁用时返回 `400`，真实发送失败返回 `502`，并记录 `admin.email / send_test_email` 审计事件。这样前端系统设置页可以验证“当前进程实际生效的 SMTP 配置”，而不是仅验证持久化设置值。
 - 用户侧改密最小接口已补上：`POST /api/user/password` 当前按 actor 更新本地 `users.password_hash`，用于前端设置页的“重置密码”表单；这条链路只负责已登录用户的本地密码更新，不包含邮箱找回、验证码或 TOTP 二次确认，后续正式账号恢复流程再单独补齐。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
@@ -1322,6 +1323,12 @@ Go 版需要增加配置 schema：
 
 避免 handler 里散落字符串 key 和类型转换。
 
+当前 Go 重构分支已先把这层能力落在交互式设置接口上：
+
+- `GET /api/user/config/schema`：返回用户偏好字段 schema，当前包含 `ntfy_url_enabled`、`ntfy_url`、`messages_per_minute_limit_enabled`、`messages_per_minute_limit`，并声明 `security.` 为保留前缀；仍允许未来追加未知普通 key，避免过早把用户偏好空间写死。
+- `GET /api/config/system/schema`：返回系统设置字段 schema，覆盖默认值、`admin_write_only`、`read_only`、枚举值和最小值约束；其中 `email_provider_options`、`image_usage` 明确标为只读。
+- 原始 `GET/POST /api/admin/config` 暂时继续作为底层 JSON object 持久化接口，用于承载尚未收敛成固定设置面的配置；后续当更多系统配置被产品化后，再逐步把它们提升到显式 schema。
+
 ### 6.11 应用 API Key 与自动化控制 API
 
 Go 重构版需要把 API Key 分成三类概念，避免混淆：
@@ -1502,6 +1509,7 @@ Go 版首个可替换版本必须覆盖：
 - `POST /api/auth/totp/confirm`
 - `POST /api/auth/totp/reset`
 - `GET /api/user/config`
+- `GET /api/user/config/schema`
 - `POST /api/user/config`
 - `POST /api/user/password`
 - `GET /api/user/app-api-keys`
@@ -1578,6 +1586,7 @@ Go 版首个可替换版本必须覆盖：
 - `GET /api/config/automation-rules`
 - `POST /api/config/automation-rules`
 - `GET /api/config/system`
+- `GET /api/config/system/schema`
 - `POST /api/config/system`
 - `GET /api/config/app-info`
 - `GET /api/uploads/imgs/{filename}`

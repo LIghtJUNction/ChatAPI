@@ -20,6 +20,50 @@ func NewUserConfigService(dataStore store.Store) *UserConfigService {
 	return &UserConfigService{store: dataStore}
 }
 
+func (s *UserConfigService) Schema() ConfigSchema {
+	return ConfigSchema{
+		Fields: []ConfigFieldSchema{
+			{
+				Key:            "ntfy_url_enabled",
+				ValueType:      "boolean",
+				DefaultValue:   false,
+				Public:         true,
+				AdminWriteOnly: false,
+				Description:    "Whether ntfy push forwarding is enabled for the current user.",
+			},
+			{
+				Key:            "ntfy_url",
+				ValueType:      "string",
+				DefaultValue:   "",
+				Public:         true,
+				AdminWriteOnly: false,
+				Description:    "Destination ntfy URL for push notifications.",
+			},
+			{
+				Key:            "messages_per_minute_limit_enabled",
+				ValueType:      "boolean",
+				DefaultValue:   false,
+				Public:         true,
+				AdminWriteOnly: false,
+				Description:    "Whether per-user request rate limiting is enabled.",
+			},
+			{
+				Key:            "messages_per_minute_limit",
+				ValueType:      "integer",
+				DefaultValue:   0,
+				Public:         true,
+				AdminWriteOnly: false,
+				Description:    "Per-user request limit in messages per minute.",
+				Validation: map[string]any{
+					"min": 0,
+				},
+			},
+		},
+		AllowUnknownKeys: true,
+		ReservedPrefixes: []string{reservedUserConfigPrefix},
+	}
+}
+
 func (s *UserConfigService) List(ctx context.Context, userID string) ([]store.UserConfig, map[string]any, error) {
 	if s == nil || s.store == nil {
 		return nil, nil, ErrInvalidUserConfig

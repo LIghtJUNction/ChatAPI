@@ -34,6 +34,18 @@ func (h UserConfigHandler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h UserConfigHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	userID, err := h.currentUserID(r)
+	if err != nil || userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": h.Service.Schema(),
+	})
+}
+
 func (h UserConfigHandler) Set(w http.ResponseWriter, r *http.Request) {
 	userID, err := h.currentUserID(r)
 	if err != nil {

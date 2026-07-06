@@ -27,6 +27,17 @@ func (h ConfigSystemHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeSystemSettingsResponse(w, settings)
 }
 
+func (h ConfigSystemHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	if !isAdminRequest(r) {
+		http.Error(w, "admin session required", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": h.Service.Schema(),
+	})
+}
+
 func (h ConfigSystemHandler) Post(w http.ResponseWriter, r *http.Request) {
 	if !isAdminRequest(r) {
 		http.Error(w, "admin session required", http.StatusUnauthorized)

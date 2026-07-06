@@ -1270,6 +1270,50 @@ func TestUserConfigManagementUsesSessionActor(t *testing.T) {
 	assertAuditCountForActor(t, env, "user_config_owner", "user.config", "user_config", "user_config_owner", "update", "success", 1)
 }
 
+func TestUserConfigSchemaRoute(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.getJSON(t, "/api/user/config/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if allowUnknown, ok := schema["allow_unknown_keys"].(bool); !ok || !allowUnknown {
+		t.Fatalf("expected allow_unknown_keys=true: %#v", resp)
+	}
+	if !containsMapItemWithStringField(schema["fields"], "key", "ntfy_url_enabled") {
+		t.Fatalf("unexpected user config schema fields: %#v", resp)
+	}
+}
+
+func TestUserConfigSchemaUsesSessionActor(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("schema-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_config_schema_owner",
+		Username:     "config-schema-owner",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed user config schema user: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "config-schema-owner",
+		"password": "schema-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing user session cookie: %#v", cookies)
+	}
+
+	resp := env.getJSONWithCookie(t, "/api/user/config/schema", sessionCookie, http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if !containsMapItemWithStringField(schema["fields"], "key", "messages_per_minute_limit") {
+		t.Fatalf("unexpected session user config schema response: %#v", resp)
+	}
+}
+
 func TestConfigModelsRoutesAndModelsEndpoint(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1374,6 +1418,19 @@ func TestConfigSystemRoutes(t *testing.T) {
 		t.Fatalf("unexpected persisted system config: %#v", getResp)
 	}
 	assertAuditCount(t, env, "admin.config", "system_settings", "", "update", "success", 1)
+}
+
+func TestConfigSystemSchemaRoute(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.getJSON(t, "/api/config/system/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if !containsMapItemWithStringField(schema["fields"], "key", "public_statistics") {
+		t.Fatalf("unexpected system settings schema fields: %#v", resp)
+	}
+	if !containsMapItemWithStringField(schema["fields"], "key", "image_usage") {
+		t.Fatalf("expected image_usage in system settings schema: %#v", resp)
+	}
 }
 
 func TestAdminSendTestEmailRouteRejectsInvalidSMTPConfig(t *testing.T) {

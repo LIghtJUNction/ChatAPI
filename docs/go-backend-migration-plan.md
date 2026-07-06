@@ -993,7 +993,7 @@ type Hub struct {
 - `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
 - `POST /api/admin/storage/cleanup`：必须显式传 `dry_run`；请求参数为 `owner_id`、`keep_recent_conversations`、`keep_recent_days`，返回候选会话数、候选消息数、估算可回收字节数和按 owner 聚合的计划。`dry_run:false` 会删除候选 conversations，并通过数据库外键级联删除 messages；候选算法会跳过 `waiting` / `streaming` 活跃请求，避免清理正在等待人工/自动化回复的 turn。
 - `POST /api/admin/storage/vacuum`：必须显式传 `dry_run`；`dry_run:true` 只返回当前 SQLite 主库/WAL 大小，`dry_run:false` 会执行 WAL checkpoint 和 SQLite `VACUUM`，返回执行前后数据库信息并写入审计日志。
-- 当前会话/消息清理执行已支持删除候选会话独占引用的 `/api/uploads/imgs/{filename}` 本地上传图片文件和 `uploaded_images` 元数据；如果同一图片仍被保留会话引用则不会删除。文件删除失败会进入 `storage_file_deletion_failures` 队列，后续每日存储维护会重试。后续必须补齐用户配额自动触发；定时任务和可选自动 vacuum 已先以环境变量方式落地。
+- 当前会话/消息清理执行已支持删除候选会话独占引用的 `/api/uploads/imgs/{filename}` 本地上传图片文件和 `uploaded_images` 元数据；如果同一图片仍被保留会话引用则不会删除。文件删除失败会进入 `storage_file_deletion_failures` 队列，后续每日存储维护会重试。每日存储维护已能按用户有效配额识别超额用户，并复用同一候选算法清理旧会话；后续可再补上传后即时触发和更细的保留策略 UI。
 
 GC 设置：
 
@@ -1017,12 +1017,11 @@ GC 设置：
 - 支持全局默认用户存储上限。当前 Go 重构分支已先通过 `CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 实现默认用户图片上传配额，值为 `0` 表示不限制；超过后 `POST /api/uploads/imgs` 返回 `507` 并写入失败审计。
 - 支持单用户覆盖上限。当前 Go 重构分支已通过 `storage_user_quotas` 和管理员 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 落地；上传校验会优先使用 override，否则回退全局默认值。
 - 支持超额策略：
-  - `block_new_uploads`：阻止新图片上传。
-  - `block_new_conversations`：阻止新会话。
-  - `auto_prune_old_conversations`：自动清理旧会话。
-- 自动清理必须优先删除最旧、最久未活跃的会话，并同步清理孤儿图片。
-- 清理前应保留最近 N 个会话或最近 N 天会话，避免误删用户当前工作内容。
-- 每次自动清理都要写审计日志，包括用户、释放空间、删除会话数、删除图片数和触发原因。
+  - `block_new_uploads`：阻止新图片上传。当前 Go 重构分支已实现。
+  - `auto_prune_old_conversations`：自动清理旧会话。当前 Go 重构分支已在每日存储维护中实现，按用户有效配额找出超额用户，并复用 `keep_recent_conversations` / `keep_recent_days` 保留策略删除旧会话。
+  - `block_new_conversations`：阻止新会话。当前尚未实现，需谨慎评估是否会破坏调试流程。
+- 自动清理必须优先删除最旧、最久未活跃的会话，并同步清理孤儿图片。当前 Go 重构分支按每用户最近活跃时间排序并保留最近 N 个或最近 N 天，孤儿图片清理由每日维护同批执行。
+- 每次自动清理都要写审计日志，包括用户、释放空间、删除会话数、删除图片数和触发原因。当前每日存储维护已记录 `scheduled_cleanup` 审计 metadata，后续可进一步拆出 per-user quota prune 审计事件。
 
 定时清理和空间回收：
 
@@ -1030,7 +1029,7 @@ GC 设置：
 - 定时任务应执行：
   - 过期 pending turn 清理。当前 Go 重构分支已先提供 `CHATAPI_PENDING_TURN_TTL`，按固定 ticker 清理超时的 `waiting` / `streaming` turn；后续再接管理员可视化配置。
   - 孤儿图片清理和上传删除失败重试。当前 Go 重构分支的每日存储维护 worker 已执行。
-  - 超配额用户旧会话清理。当前 Go 重构分支已先支持按全局保留策略清理旧会话，后续再按用户超配额触发。
+  - 超配额用户旧会话清理。当前 Go 重构分支已支持每日维护时按用户有效配额识别超额用户，并按配置的保留策略清理旧会话。
   - SQLite WAL checkpoint。
   - 可选 `VACUUM` 或 `VACUUM INTO`，仅在管理员显式开启时执行。当前 Go 重构分支支持 `CHATAPI_STORAGE_VACUUM_ENABLED=1` 后在每日存储维护中执行 SQLite `VACUUM`。
 - `VACUUM` 可能长时间锁库，默认不应每天自动执行；推荐先做 WAL checkpoint 和普通 prune，必要时由管理员手动执行空间回收。

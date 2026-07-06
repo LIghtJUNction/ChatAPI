@@ -1799,6 +1799,61 @@ func TestStorageFileDeletionFailureRetry(t *testing.T) {
 	}
 }
 
+func TestStoragePruneOverQuotaUsersKeepsRecentConversation(t *testing.T) {
+	env := newTestEnv(t)
+
+	oldCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-quota-prune-old",
+		"input": "quota prune old",
+	})
+	oldConversation := env.waitForWaitingConversation(t, "quota prune old")
+	env.postJSON(t, "/api/conversations/"+oldConversation["id"].(string)+"/respond", map[string]any{
+		"text": "old response with enough bytes",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-oldCh
+
+	newCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "storage-quota-prune-new",
+		"input": "quota prune new",
+	})
+	newConversation := env.waitForWaitingConversation(t, "quota prune new")
+	env.postJSON(t, "/api/conversations/"+newConversation["id"].(string)+"/respond", map[string]any{
+		"text": "new response with enough bytes",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-newCh
+
+	monitor := service.NewStorageMonitorService(config.Config{
+		DataDir:        env.dataDir,
+		DatabaseDriver: "sqlite",
+		DatabaseDSN:    filepath.Join(env.dataDir, "chatapi.sqlite3"),
+	}, env.store)
+	if _, err := monitor.SetUserQuota(context.Background(), "lab-user", 1); err != nil {
+		t.Fatalf("set quota: %v", err)
+	}
+
+	result, err := monitor.PruneOverQuotaUsers(context.Background(), service.StorageCleanupPreviewInput{
+		KeepRecentConversations: 1,
+		KeepRecentDays:          0,
+	})
+	if err != nil {
+		t.Fatalf("prune over quota users: %v", err)
+	}
+	if result.CheckedUsers != 1 || result.OverQuota != 1 || result.PrunedUsers != 1 || len(result.Results) != 1 {
+		t.Fatalf("unexpected quota prune result: %#v", result)
+	}
+	if result.Results[0].OwnerID != "lab-user" || result.Results[0].DeletedConversations != 1 {
+		t.Fatalf("unexpected quota cleanup detail: %#v", result.Results[0])
+	}
+	if _, err := env.store.GetConversation(context.Background(), oldConversation["id"].(string)); err == nil {
+		t.Fatalf("expected old conversation to be pruned")
+	}
+	if _, err := env.store.GetConversation(context.Background(), newConversation["id"].(string)); err != nil {
+		t.Fatalf("expected recent conversation to remain: %v", err)
+	}
+}
+
 func TestAdminStorageCleanupRejectsMissingDryRun(t *testing.T) {
 	env := newTestEnv(t)
 

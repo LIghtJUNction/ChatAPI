@@ -55,6 +55,14 @@ type StorageCleanupPreviewInput struct {
 	KeepRecentDays          int    `json:"keep_recent_days"`
 }
 
+type StorageQuotaPruneResult struct {
+	GeneratedAt  time.Time               `json:"generated_at"`
+	CheckedUsers int                     `json:"checked_users"`
+	OverQuota    int                     `json:"over_quota"`
+	PrunedUsers  int                     `json:"pruned_users"`
+	Results      []StorageCleanupPreview `json:"results"`
+}
+
 type StorageCleanupPreview struct {
 	GeneratedAt               time.Time                 `json:"generated_at"`
 	DryRun                    bool                      `json:"dry_run"`
@@ -255,6 +263,43 @@ func (s *StorageMonitorService) effectiveQuotaBytes(usage UserStorageUsage) int6
 func (s *StorageMonitorService) CleanupPreview(ctx context.Context, input StorageCleanupPreviewInput) (StorageCleanupPreview, error) {
 	preview, _, err := s.cleanupPlan(ctx, input)
 	return preview, err
+}
+
+func (s *StorageMonitorService) PruneOverQuotaUsers(ctx context.Context, input StorageCleanupPreviewInput) (StorageQuotaPruneResult, error) {
+	users, err := s.Users(ctx)
+	if err != nil {
+		return StorageQuotaPruneResult{}, err
+	}
+	sort.SliceStable(users, func(i, j int) bool {
+		return users[i].UserID < users[j].UserID
+	})
+	result := StorageQuotaPruneResult{
+		GeneratedAt:  time.Now().UTC(),
+		CheckedUsers: len(users),
+		Results:      []StorageCleanupPreview{},
+	}
+	for _, user := range users {
+		if !user.StorageOverQuota {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return StorageQuotaPruneResult{}, ctx.Err()
+		default:
+		}
+		result.OverQuota++
+		pruneInput := input
+		pruneInput.OwnerID = user.UserID
+		cleanup, err := s.DeleteCleanupCandidates(ctx, pruneInput)
+		if err != nil {
+			return StorageQuotaPruneResult{}, err
+		}
+		if cleanup.DeletedConversations > 0 || cleanup.DeletedImages > 0 || cleanup.ImageDeleteFailures > 0 {
+			result.PrunedUsers++
+		}
+		result.Results = append(result.Results, cleanup)
+	}
+	return result, nil
 }
 
 func (s *StorageMonitorService) DeleteCleanupCandidates(ctx context.Context, input StorageCleanupPreviewInput) (StorageCleanupPreview, error) {

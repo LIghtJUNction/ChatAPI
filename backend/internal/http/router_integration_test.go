@@ -2345,6 +2345,33 @@ func TestAdminStorageVacuum(t *testing.T) {
 	}
 	assertAuditCount(t, env, "admin.storage", "storage", "", "vacuum_preview", "success", 1)
 	assertAuditCount(t, env, "admin.storage", "storage", "", "vacuum", "success", 1)
+
+	var rawMetadata string
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT metadata_json
+		FROM audit_logs
+		WHERE actor_user_id = 'lab-user'
+			AND event_type = 'admin.storage'
+			AND resource_type = 'storage'
+			AND action = 'vacuum'
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`).Scan(&rawMetadata); err != nil {
+		t.Fatalf("select vacuum audit metadata: %v", err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
+		t.Fatalf("decode vacuum audit metadata: %v", err)
+	}
+	if nestedString(metadata, "database_driver") != "sqlite" {
+		t.Fatalf("unexpected vacuum audit metadata: %#v", metadata)
+	}
+	if _, ok := metadata["before"]; !ok {
+		t.Fatalf("expected vacuum audit metadata to include before snapshot: %#v", metadata)
+	}
+	if _, ok := metadata["after"]; !ok {
+		t.Fatalf("expected vacuum audit metadata to include after snapshot: %#v", metadata)
+	}
 }
 
 func TestAdminStorageRejectsAPIKeys(t *testing.T) {

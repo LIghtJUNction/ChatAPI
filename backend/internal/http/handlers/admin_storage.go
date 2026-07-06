@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -255,6 +256,10 @@ func (h AdminStorageHandler) Vacuum(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.Monitor.Vacuum(r.Context(), *input.DryRun)
 	if err != nil {
+		if errors.Is(err, service.ErrStorageVacuumUnsupported) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -270,9 +275,10 @@ func (h AdminStorageHandler) Vacuum(w http.ResponseWriter, r *http.Request) {
 		IPAddress:    clientIP(r),
 		UserAgent:    r.UserAgent(),
 		Metadata: map[string]any{
-			"dry_run":          result.DryRun,
-			"sqlite_bytes":     result.Before.SQLiteBytes,
-			"sqlite_wal_bytes": result.Before.SQLiteWALBytes,
+			"dry_run":         result.DryRun,
+			"database_driver": result.Before.Driver,
+			"before":          result.Before,
+			"after":           result.After,
 		},
 	})
 	writeJSON(w, http.StatusOK, map[string]any{

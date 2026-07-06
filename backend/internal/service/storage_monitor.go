@@ -15,6 +15,8 @@ import (
 	"github.com/zyf/chatapi/internal/store"
 )
 
+var ErrStorageVacuumUnsupported = errors.New("storage vacuum currently supports sqlite only")
+
 type StorageMonitorService struct {
 	cfg   config.Config
 	store store.Store
@@ -160,7 +162,7 @@ func (s *StorageMonitorService) Summary(ctx context.Context) (StorageSummary, er
 	}
 	return StorageSummary{
 		GeneratedAt:       time.Now().UTC(),
-		Database:          storageDatabaseInfo(s.cfg),
+		Database:          databaseInfoFromStore(s.cfg, s.store),
 		Uploads:           directoryInfo(filepath.Join(s.cfg.DataDir, "uploads")),
 		EstimatedUsers:    len(users),
 		EstimatedBytes:    estimatedBytes,
@@ -336,18 +338,18 @@ func (s *StorageMonitorService) Vacuum(ctx context.Context, dryRun bool) (Storag
 	result := StorageVacuumResult{
 		GeneratedAt: time.Now().UTC(),
 		DryRun:      dryRun,
-		Before:      storageDatabaseInfo(s.cfg),
+		Before:      databaseInfoFromStore(s.cfg, s.store),
 	}
 	if dryRun {
 		return result, nil
 	}
 	if s.cfg.DatabaseDriver != "sqlite" {
-		return StorageVacuumResult{}, errors.New("storage vacuum currently supports sqlite only")
+		return StorageVacuumResult{}, ErrStorageVacuumUnsupported
 	}
 	if err := s.store.Vacuum(ctx); err != nil {
 		return StorageVacuumResult{}, err
 	}
-	after := storageDatabaseInfo(s.cfg)
+	after := databaseInfoFromStore(s.cfg, s.store)
 	result.After = &after
 	return result, nil
 }
@@ -760,23 +762,6 @@ func isDirectChildPath(root string, path string) bool {
 		return false
 	}
 	return relative != "." && relative != ".." && filepath.Dir(relative) == "."
-}
-
-func storageDatabaseInfo(cfg config.Config) DatabaseInfo {
-	info := DatabaseInfo{Driver: cfg.DatabaseDriver}
-	if cfg.DatabaseDriver != "sqlite" {
-		return info
-	}
-	info.SQLitePath = cfg.DatabaseDSN
-	if stat, err := os.Stat(cfg.DatabaseDSN); err == nil {
-		info.SQLiteBytes = stat.Size()
-	}
-	walPath := cfg.DatabaseDSN + "-wal"
-	info.SQLiteWAL = walPath
-	if stat, err := os.Stat(walPath); err == nil {
-		info.SQLiteWALBytes = stat.Size()
-	}
-	return info
 }
 
 func directoryInfo(root string) DirectoryInfo {

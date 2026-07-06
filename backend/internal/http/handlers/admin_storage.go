@@ -8,12 +8,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/service"
 )
 
 type AdminStorageHandler struct {
+	Config  config.Config
 	Monitor *service.StorageMonitorService
 	Audit   *service.AuditService
+}
+
+func (h AdminStorageHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildAdminStorageSchema(h.Config),
+	})
 }
 
 func (h AdminStorageHandler) Summary(w http.ResponseWriter, r *http.Request) {

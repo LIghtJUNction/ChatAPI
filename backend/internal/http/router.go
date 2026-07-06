@@ -77,7 +77,7 @@ func NewRouter(
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
 	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
 	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)
-	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor, Audit: auditService}
+	adminStorageHandler := handlers.AdminStorageHandler{Config: cfg, Monitor: storageMonitor, Audit: auditService}
 	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}
 	adminAuditHandler := handlers.AdminAuditHandler{Audit: auditService}
 	adminUsersHandler := handlers.AdminUsersHandler{
@@ -230,6 +230,7 @@ func NewRouter(
 	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
 	adminRouter.Get("/storage/summary", adminStorageHandler.Summary)
 	adminRouter.Get("/storage/users", adminStorageHandler.Users)
+	adminRouter.Get("/storage/schema", adminStorageHandler.Schema)
 	adminRouter.Put("/storage/users/{ownerID}/quota", adminStorageHandler.SetUserQuota)
 	adminRouter.Delete("/storage/users/{ownerID}/quota", adminStorageHandler.DeleteUserQuota)
 	adminRouter.Get("/storage/orphans", adminStorageHandler.Orphans)

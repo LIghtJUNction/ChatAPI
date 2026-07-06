@@ -4046,6 +4046,18 @@ func TestAdminStorageVacuumWithPostgreSQL(t *testing.T) {
 	}
 }
 
+func TestAdminStorageSchema(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.getJSON(t, "/api/admin/storage/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if !containsMapItemWithStringField(schema["operations"], "name", "set_user_quota") ||
+		!containsMapItemWithStringField(schema["operations"], "name", "cleanup_preview_or_execute") ||
+		!containsMapItemWithStringField(schema["operations"], "name", "vacuum") {
+		t.Fatalf("unexpected admin storage schema operations: %#v", resp)
+	}
+}
+
 func TestAdminStorageOrphanImagesPreview(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -4587,6 +4599,13 @@ func TestAdminStorageRejectsAPIKeys(t *testing.T) {
 	status, body = env.appDeleteText(t, "/api/admin/storage/users/lab-user/quota", appKey)
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key storage quota delete rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/storage/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key storage schema rejection: status=%d body=%q", status, body)
 	}
 }
 

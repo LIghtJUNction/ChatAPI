@@ -65,6 +65,7 @@ func NewRouter(
 	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}
 	adminAuditHandler := handlers.AdminAuditHandler{Audit: auditService}
 	adminUsersHandler := handlers.AdminUsersHandler{Users: service.NewAdminUserService(dataStore), Audit: auditService}
+	adminConfigHandler := handlers.AdminConfigHandler{Service: service.NewSystemConfigService(dataStore), Audit: auditService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -176,6 +177,8 @@ func NewRouter(
 	adminRouter.Post("/storage/vacuum", adminStorageHandler.Vacuum)
 	adminRouter.Get("/requests/overview", adminRequestsHandler.Overview)
 	adminRouter.Get("/audit/logs", adminAuditHandler.List)
+	adminRouter.Get("/config", adminConfigHandler.Get)
+	adminRouter.Post("/config", adminConfigHandler.Set)
 	adminRouter.Get("/users", adminUsersHandler.List)
 	adminRouter.Post("/users", adminUsersHandler.Create)
 	adminRouter.Put("/users/{userID}/password", adminUsersHandler.ResetPassword)

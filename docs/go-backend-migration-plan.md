@@ -62,6 +62,7 @@
 - 密码哈希和本地 users 表登录基础已落地：新增 `internal/platform/password`，新密码使用 Argon2id PHC 风格格式，旧 `salt$sha256(salt+password)` 可验证并返回 `NeedsUpgrade`。serve 模式 `POST /api/auth/login` 会优先按 username/email 查询 `users` 表，验证本地密码，成功后建立同一类 session；旧 hash 登录成功后会自动升级为 Argon2id 并更新 `last_login_at`。`.env` 的 `CHATAPI_ADMIN_PASSWORD` 仍保留为 `admin` 用户恢复入口。
 - 管理员用户管理已落地最小接口：`GET /api/admin/users` 列出本地用户，`POST /api/admin/users` 创建本地用户并写入 Argon2id 密码 hash，`PUT /api/admin/users/{user_id}/password` 重置密码，`DELETE /api/admin/users/{user_id}` 当前实现为停用用户而非物理删除，保留历史请求、上传、API key 等 owner 归属；这些接口仅允许 admin session 访问，并写入 `admin.user` 审计事件。
 - 用户配置已落地最小接口：`GET /api/user/config` 返回当前 actor 的 `user_configs` 列表和聚合 config map，`POST /api/user/config` 按 key upsert JSON object 配置并写入 `user.config` 审计事件；Lab actor 和 serve session actor 都复用同一套 owner 隔离。
+- 系统配置已落地最小管理接口：`GET /api/admin/config` 返回 `config` 表列表和聚合 config map，`POST /api/admin/config` 按 key upsert JSON object 配置并写入 `admin.config` 审计事件；当前只负责持久化和管理，不会自动覆盖 `.env` 派生的运行时配置，后续各服务再逐步读取对应 key。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
 - 本地 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 优先验证 `users` 表本地账号，失败后允许 `admin` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 作为恢复入口，成功后用独立 `CHATAPI_SESSION_SECRET` 写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。`chatapi setup` 已生成 `CHATAPI_SESSION_SECRET`；如果老部署未配置，serve 启动会生成随机 session secret 并持久化到 `config` 表的 `security.session_secret`，Lab 使用进程内不安全默认值且不持久化。本地管理员登录已补上最小进程内失败限流，连续失败后返回 `429` 并写审计事件；后续多实例部署应迁移到 Redis 或数据库限流器。注册、密码重置、TOTP 和 OIDC RP 登录仍是后续工作。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
@@ -1253,6 +1254,11 @@ type UpstreamProvider interface {
 
 后台配置应继续落在 `config` 表，用户配置落在 `user_configs` 表。
 
+当前 Go 重构分支已提供最小表驱动接口：
+
+- `GET /api/admin/config` / `POST /api/admin/config`：仅 admin session 可访问，直接读写 `config` 表中的 JSON object 配置。首版只做持久化，不自动覆盖 env 派生运行时配置。
+- `GET /api/user/config` / `POST /api/user/config`：按当前 actor 的 `user_id` 读写 `user_configs`，用于普通用户偏好。不得保存上游模型 API Key 等浏览器本地私密凭据。
+
 Go 版需要增加配置 schema：
 
 - key
@@ -1618,11 +1624,12 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 - 已记录管理员手动 GC，包括 GC 后内存摘要。
 - 已记录管理员存储 cleanup dry-run 预览和实际执行，包括保留策略、候选会话数、候选消息数、估算可回收字节数，以及执行时的实际删除会话/消息数；已记录管理员设置/删除单用户存储配额覆盖和手动 SQLite vacuum。
 - 已记录用户普通配置更新，审计 metadata 只记录更新的配置 key，不记录完整配置值。
+- 已记录管理员系统配置更新，审计 metadata 只记录更新的配置 key，不记录完整配置值。
 - `GET /api/admin/audit/logs` 已提供通用审计日志查询，支持 `limit`、`event_type`、`actor_user_id` 基础过滤，仅允许 admin session actor 访问；默认查询范围是 `audit_logs`，传 `include_app_api=1` 时会把 `app_api_key_audit_logs` 映射为 `event_type=app_api.request` 的统一审计条目并合并返回。
 - 审计 metadata 会过滤包含 password、secret、token、authorization、key 的字段，避免误写敏感值。
 - 应用 API Key 请求当前仍写入 `app_api_key_audit_logs`，用于保留 key id、scope 拒绝和状态码等细节；管理员审计查询可通过 `include_app_api=1` 聚合查看这些请求，后续再扩展更细的分页游标和 source 过滤。
 
-仍待补齐的审计事件包括 OIDC 登录/绑定、系统配置变更、ntfy/email 发送失败和上游模型辅助调用；本地 session 登录/登出、管理员运行时/存储/用户操作、上传和 API Key 管理已开始写入 `audit_logs`。
+仍待补齐的审计事件包括 OIDC 登录/绑定、ntfy/email 发送失败和上游模型辅助调用；本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、用户配置、上传和 API Key 管理已开始写入 `audit_logs`。
 
 审计日志应独立于普通运行日志等级：即使 `CHATAPI_LOG_LEVEL=warn`，关键安全事件仍应写入 audit channel。审计日志只记录必要元数据和结果，不记录完整请求体、密钥、密码、OIDC token 或上游模型输出全文。
 
@@ -1997,7 +2004,7 @@ make release-snapshot
 工作：
 
 - 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出和 session；注册、密码重置、TOTP 和 OIDC RP 仍待补齐。
-- 用户配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前用户配置已先支持 `GET/POST /api/user/config` 按当前 actor 读写普通 JSON object 偏好；管理员用户管理已先支持列表、创建、重置密码和停用用户；用户详情历史、物理删除策略和 OIDC 绑定管理仍待补齐。
+- 用户配置、系统配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前用户配置已先支持 `GET/POST /api/user/config` 按当前 actor 读写普通 JSON object 偏好；系统配置已先支持 `GET/POST /api/admin/config` 做表驱动持久化；管理员用户管理已先支持列表、创建、重置密码和停用用户；用户详情历史、物理删除策略和 OIDC 绑定管理仍待补齐。
 - CSRF、CORS、Cookie 策略。当前已先落地 session mutation Origin/Referer 校验和 HttpOnly SameSite cookie。
 
 验收：

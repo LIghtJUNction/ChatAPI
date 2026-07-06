@@ -1586,6 +1586,57 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "deactivate", "success", 1)
 }
 
+func TestAdminConfigManagement(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.AdminPassword = "admin-secret"
+	})
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "admin",
+		"password": "admin-secret",
+	}, http.StatusOK)
+	adminCookie := findCookie(cookies, service.SessionCookieName)
+	if adminCookie == nil {
+		t.Fatalf("missing admin session cookie: %#v", cookies)
+	}
+
+	initial := env.getJSONWithCookie(t, "/api/admin/config", adminCookie, http.StatusOK)
+	if configMap := initial["config"].(map[string]any); len(configMap) != 0 {
+		t.Fatalf("expected empty system config: %#v", initial)
+	}
+
+	headers := map[string]string{"Origin": env.server.URL}
+	updateResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/config", map[string]any{
+		"config": map[string]any{
+			"runtime": map[string]any{
+				"gogc": float64(90),
+			},
+			"storage": map[string]any{
+				"cleanup_enabled": true,
+			},
+		},
+	}, adminCookie, headers, http.StatusOK)
+	if numericValue(updateResp["config"].(map[string]any)["runtime"].(map[string]any)["gogc"]) != 90 {
+		t.Fatalf("unexpected admin config update: %#v", updateResp)
+	}
+	if !nestedPathBool(updateResp, "config", "storage", "cleanup_enabled") {
+		t.Fatalf("missing storage cleanup config: %#v", updateResp)
+	}
+
+	getResp := env.getJSONWithCookie(t, "/api/admin/config", adminCookie, http.StatusOK)
+	if numericValue(getResp["config"].(map[string]any)["runtime"].(map[string]any)["gogc"]) != 90 {
+		t.Fatalf("unexpected admin config get: %#v", getResp)
+	}
+	assertAuditCountForActor(t, env, "admin", "admin.config", "system_config", "", "update", "success", 1)
+
+	appKey := env.seedAppAPIKey(t, "admin-config-denied", []string{"statistics:read"}, nil)
+	status, body := env.getTextWithHeaders(t, "/api/admin/config", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key admin config rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)

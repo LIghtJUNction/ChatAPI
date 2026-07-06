@@ -4077,6 +4077,70 @@ func TestOIDCLinkBindsIdentityToCurrentSessionUser(t *testing.T) {
 		t.Fatalf("unexpected linked identity owner: %#v", identity)
 	}
 	assertAuditCountForActor(t, env, "user_link_owner", "auth.session", "session", "user_link_owner", "oidc_link", "success", 1)
+	assertAuditCountForActor(t, env, "user_link_owner", "auth.session", "session", "user_link_owner", "oidc_link_start", "success", 1)
+}
+
+func TestOIDCLinkPromotesSessionUserAndRecordsRoleSync(t *testing.T) {
+	const state = "state-link-admin"
+	const nonce = "nonce-link-admin"
+	const pkce = "pkce-link-admin"
+	provider := newTestOIDCProvider(t, testOIDCProviderConfig{
+		IDTokenClaims: map[string]any{
+			"sub":   "oidc-link-admin-sub",
+			"nonce": nonce,
+		},
+		UserInfoClaims: map[string]any{
+			"sub":            "oidc-link-admin-sub",
+			"email":          "admin@example.com",
+			"email_verified": true,
+			"name":           "OIDC Admin Link",
+		},
+	})
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.OIDCEnabled = true
+		cfg.OIDCIssuerURL = provider.Issuer()
+		cfg.OIDCClientID = "chatapi"
+		cfg.OIDCClientSecret = "secret"
+		cfg.OIDCRedirectURL = "http://chat.example.com/api/auth/oidc/callback"
+		cfg.OIDCAdminEmails = []string{"admin@example.com"}
+	})
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_link_promote",
+		Username:     "link-promote",
+		Email:        "member@example.com",
+		PasswordHash: mustPasswordHash(t, "promote-secret"),
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed promote user: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "link-promote",
+		"password": "promote-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("expected session cookie after local login")
+	}
+
+	callbackResp, callbackCookies := env.getJSONAndCookiesWithCookies(t, "/api/auth/oidc/callback?code=success-code&state="+neturl.QueryEscape(state), []*http.Cookie{
+		sessionCookie,
+		{Name: "chatapi_oidc_state", Value: neturl.QueryEscape(state), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_nonce", Value: neturl.QueryEscape(nonce), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_pkce", Value: neturl.QueryEscape(pkce), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_intent", Value: neturl.QueryEscape("link"), Path: "/api/auth/oidc"},
+	}, http.StatusOK)
+	if nestedPathString(callbackResp, "user", "role") != "admin" {
+		t.Fatalf("expected promoted admin role after oidc link: %#v", callbackResp)
+	}
+	refreshedSession := findCookie(callbackCookies, service.SessionCookieName)
+	sessionResp := env.getJSONWithCookie(t, "/api/auth/session", refreshedSession, http.StatusOK)
+	if nestedPathString(sessionResp, "user", "role") != "admin" {
+		t.Fatalf("expected session role refresh after oidc link: %#v", sessionResp)
+	}
+	assertAuditCountForActor(t, env, "user_link_promote", "auth.session", "session", "user_link_promote", "oidc_role_sync", "success", 1)
 }
 
 func TestOIDCCallbackRejectsUserInfoSubjectMismatch(t *testing.T) {

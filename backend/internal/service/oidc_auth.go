@@ -37,6 +37,21 @@ type OIDCAuthService struct {
 	now   func() time.Time
 }
 
+type OIDCAuthResult struct {
+	Actor        RequestActor
+	User         store.User
+	Identity     store.UserIdentity
+	PreviousRole string
+	RoleChanged  bool
+}
+
+type OIDCBindResult struct {
+	User         store.User
+	Identity     store.UserIdentity
+	PreviousRole string
+	RoleChanged  bool
+}
+
 func NewOIDCAuthService(dataStore store.Store, cfg config.Config) *OIDCAuthService {
 	return &OIDCAuthService{
 		store: dataStore,
@@ -46,68 +61,77 @@ func NewOIDCAuthService(dataStore store.Store, cfg config.Config) *OIDCAuthServi
 }
 
 func (s *OIDCAuthService) Authenticate(ctx context.Context, claims OIDCClaims) (RequestActor, error) {
+	result, err := s.AuthenticateResult(ctx, claims)
+	if err != nil {
+		return RequestActor{}, err
+	}
+	return result.Actor, nil
+}
+
+func (s *OIDCAuthService) AuthenticateResult(ctx context.Context, claims OIDCClaims) (OIDCAuthResult, error) {
 	if s == nil || s.store == nil {
-		return RequestActor{}, ErrOIDCUserNotFound
+		return OIDCAuthResult{}, ErrOIDCUserNotFound
 	}
 	subject := strings.TrimSpace(claims.Subject)
 	if subject == "" {
-		return RequestActor{}, ErrOIDCSubjectIsMissing
+		return OIDCAuthResult{}, ErrOIDCSubjectIsMissing
 	}
 	email := normalizeEmail(claims.Email)
 	if !s.isAllowedEmail(email, claims.EmailVerified) {
-		return RequestActor{}, ErrOIDCAccessDenied
+		return OIDCAuthResult{}, ErrOIDCAccessDenied
 	}
 
 	identity, err := s.store.GetUserIdentity(ctx, "oidc", subject)
 	if err == nil {
 		user, err := s.store.GetUser(ctx, identity.UserID)
 		if err != nil {
-			return RequestActor{}, err
+			return OIDCAuthResult{}, err
 		}
 		return s.updateLogin(ctx, user, claims)
 	}
 	if !errors.Is(err, store.ErrNotFound) {
-		return RequestActor{}, err
+		return OIDCAuthResult{}, err
 	}
 
 	user, err := s.lookupOrCreateUser(ctx, claims)
 	if err != nil {
-		return RequestActor{}, err
+		return OIDCAuthResult{}, err
 	}
 	return s.updateLogin(ctx, user, claims)
 }
 
-func (s *OIDCAuthService) BindIdentity(ctx context.Context, userID string, claims OIDCClaims) (store.User, store.UserIdentity, error) {
+func (s *OIDCAuthService) BindIdentity(ctx context.Context, userID string, claims OIDCClaims) (OIDCBindResult, error) {
 	if s == nil || s.store == nil {
-		return store.User{}, store.UserIdentity{}, ErrOIDCUserNotFound
+		return OIDCBindResult{}, ErrOIDCUserNotFound
 	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
-		return store.User{}, store.UserIdentity{}, ErrOIDCUserNotFound
+		return OIDCBindResult{}, ErrOIDCUserNotFound
 	}
 	subject := strings.TrimSpace(claims.Subject)
 	if subject == "" {
-		return store.User{}, store.UserIdentity{}, ErrOIDCSubjectIsMissing
+		return OIDCBindResult{}, ErrOIDCSubjectIsMissing
 	}
 	email := normalizeEmail(claims.Email)
 	if !s.isAllowedEmail(email, claims.EmailVerified) {
-		return store.User{}, store.UserIdentity{}, ErrOIDCAccessDenied
+		return OIDCBindResult{}, ErrOIDCAccessDenied
 	}
 	user, err := s.store.GetUser(ctx, userID)
 	if err != nil {
-		return store.User{}, store.UserIdentity{}, err
+		return OIDCBindResult{}, err
 	}
 	if !user.IsActive {
-		return store.User{}, store.UserIdentity{}, ErrOIDCAccessDenied
+		return OIDCBindResult{}, ErrOIDCAccessDenied
 	}
 	identity, err := s.store.GetUserIdentity(ctx, "oidc", subject)
 	if err == nil && identity.UserID != user.ID {
-		return store.User{}, store.UserIdentity{}, ErrOIDCIdentityConflict
+		return OIDCBindResult{}, ErrOIDCIdentityConflict
 	}
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return store.User{}, store.UserIdentity{}, err
+		return OIDCBindResult{}, err
 	}
 
+	previousRole := userRole(user)
 	lastLoginAt := s.now().UTC()
 	updated, err := s.store.UpdateUser(ctx, store.UpdateUserInput{
 		ID:           user.ID,
@@ -120,7 +144,7 @@ func (s *OIDCAuthService) BindIdentity(ctx context.Context, userID string, claim
 		LastLoginAt:  &lastLoginAt,
 	})
 	if err != nil {
-		return store.User{}, store.UserIdentity{}, err
+		return OIDCBindResult{}, err
 	}
 	identity, err = s.store.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
 		ID:            identityID(identity),
@@ -133,9 +157,14 @@ func (s *OIDCAuthService) BindIdentity(ctx context.Context, userID string, claim
 		LastLoginAt:   &lastLoginAt,
 	})
 	if err != nil {
-		return store.User{}, store.UserIdentity{}, err
+		return OIDCBindResult{}, err
 	}
-	return updated, identity, nil
+	return OIDCBindResult{
+		User:         updated,
+		Identity:     identity,
+		PreviousRole: previousRole,
+		RoleChanged:  previousRole != userRole(updated),
+	}, nil
 }
 
 func (s *OIDCAuthService) lookupOrCreateUser(ctx context.Context, claims OIDCClaims) (store.User, error) {
@@ -168,11 +197,12 @@ func (s *OIDCAuthService) lookupOrCreateUser(ctx context.Context, claims OIDCCla
 	})
 }
 
-func (s *OIDCAuthService) updateLogin(ctx context.Context, user store.User, claims OIDCClaims) (RequestActor, error) {
+func (s *OIDCAuthService) updateLogin(ctx context.Context, user store.User, claims OIDCClaims) (OIDCAuthResult, error) {
 	if !user.IsActive {
-		return RequestActor{}, ErrOIDCAccessDenied
+		return OIDCAuthResult{}, ErrOIDCAccessDenied
 	}
 	email := normalizeEmail(claims.Email)
+	previousRole := userRole(user)
 	lastLoginAt := s.now().UTC()
 	updated, err := s.store.UpdateUser(ctx, store.UpdateUserInput{
 		ID:           user.ID,
@@ -185,9 +215,9 @@ func (s *OIDCAuthService) updateLogin(ctx context.Context, user store.User, clai
 		LastLoginAt:  &lastLoginAt,
 	})
 	if err != nil {
-		return RequestActor{}, err
+		return OIDCAuthResult{}, err
 	}
-	if _, err := s.store.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
+	identity, err := s.store.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
 		ID:            "identity_" + uuid.NewString(),
 		UserID:        updated.ID,
 		Provider:      "oidc",
@@ -196,14 +226,21 @@ func (s *OIDCAuthService) updateLogin(ctx context.Context, user store.User, clai
 		EmailVerified: claims.EmailVerified,
 		Profile:       claims.Profile,
 		LastLoginAt:   &lastLoginAt,
-	}); err != nil {
-		return RequestActor{}, err
+	})
+	if err != nil {
+		return OIDCAuthResult{}, err
 	}
-	return RequestActor{
-		UserID:   updated.ID,
-		Username: actorUsername(updated),
-		Role:     userRole(updated),
-		Source:   "oidc",
+	return OIDCAuthResult{
+		Actor: RequestActor{
+			UserID:   updated.ID,
+			Username: actorUsername(updated),
+			Role:     userRole(updated),
+			Source:   "oidc",
+		},
+		User:         updated,
+		Identity:     identity,
+		PreviousRole: previousRole,
+		RoleChanged:  previousRole != userRole(updated),
 	}, nil
 }
 

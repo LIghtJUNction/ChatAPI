@@ -278,6 +278,10 @@ func (h AuthHandler) OIDCLink(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", nonce, int((10*time.Minute).Seconds())))
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", pkceVerifier, int((10*time.Minute).Seconds())))
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_intent", oidcIntentLink, int((10*time.Minute).Seconds())))
+	h.recordAuthAuditWithMetadata(r.WithContext(service.WithRequestActor(r.Context(), actor)), "oidc_link_start", "success", map[string]any{
+		"provider": h.oidcProviderName(),
+		"intent":   oidcIntentLink,
+	})
 	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(pkceVerifier)), http.StatusFound)
 }
 
@@ -366,7 +370,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "session required", http.StatusUnauthorized)
 			return
 		}
-		user, identity, err := h.OIDCAuth.BindIdentity(r.Context(), currentActor.UserID, claims)
+		result, err := h.OIDCAuth.BindIdentity(r.Context(), currentActor.UserID, claims)
 		if err != nil {
 			h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), currentActor)), oidcBindFailureAction(err), "failure")
 			http.Error(w, oidcBindFailureMessage(err), oidcBindFailureStatus(err))
@@ -374,17 +378,31 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		}
 		clearOIDCCookies(w, r)
 		linkedActor := service.RequestActor{
-			UserID:   user.ID,
-			Username: authActorUsername(user.ID, user.Username, user.Email),
-			Role:     authUserRole(user.Role),
+			UserID:   result.User.ID,
+			Username: authActorUsername(result.User.ID, result.User.Username, result.User.Email),
+			Role:     authUserRole(result.User.Role),
 			Source:   currentActor.Source,
 		}
 		h.writeSessionActorCookie(w, r, linkedActor)
-		h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), linkedActor)), "oidc_link", "success")
+		h.recordAuthAuditWithMetadata(r.WithContext(service.WithRequestActor(r.Context(), linkedActor)), "oidc_link", "success", map[string]any{
+			"provider":      h.oidcProviderName(),
+			"identity_id":   result.Identity.ID,
+			"identity_sub":  result.Identity.Subject,
+			"previous_role": result.PreviousRole,
+			"current_role":  linkedActor.Role,
+		})
+		if result.RoleChanged {
+			h.recordAuthAuditWithMetadata(r.WithContext(service.WithRequestActor(r.Context(), linkedActor)), "oidc_role_sync", "success", map[string]any{
+				"provider":      h.oidcProviderName(),
+				"reason":        "oidc_link",
+				"previous_role": result.PreviousRole,
+				"current_role":  linkedActor.Role,
+			})
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":       true,
 			"linked":   true,
-			"identity": identity,
+			"identity": result.Identity,
 			"user": map[string]any{
 				"id":       linkedActor.UserID,
 				"username": linkedActor.Username,
@@ -393,14 +411,22 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	actor, err := h.OIDCAuth.Authenticate(r.Context(), claims)
+	result, err := h.OIDCAuth.AuthenticateResult(r.Context(), claims)
 	if err != nil {
 		h.recordAuthAudit(r, oidcFailureAction(err), "failure")
 		http.Error(w, oidcFailureMessage(err), http.StatusUnauthorized)
 		return
 	}
 	clearOIDCCookies(w, r)
-	h.writeLoginSuccess(w, r, actor, "")
+	if result.RoleChanged {
+		h.recordAuthAuditWithMetadata(r.WithContext(service.WithRequestActor(r.Context(), result.Actor)), "oidc_role_sync", "success", map[string]any{
+			"provider":      h.oidcProviderName(),
+			"reason":        "oidc_login",
+			"previous_role": result.PreviousRole,
+			"current_role":  result.Actor.Role,
+		})
+	}
+	h.writeLoginSuccess(w, r, result.Actor, "")
 }
 
 func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -649,6 +675,10 @@ func (h AuthHandler) validAdminPassword(username string, password string) bool {
 }
 
 func (h AuthHandler) recordAuthAudit(r *http.Request, action string, outcome string) {
+	h.recordAuthAuditWithMetadata(r, action, outcome, nil)
+}
+
+func (h AuthHandler) recordAuthAuditWithMetadata(r *http.Request, action string, outcome string, metadata map[string]any) {
 	if h.Audit == nil {
 		return
 	}
@@ -664,6 +694,7 @@ func (h AuthHandler) recordAuthAudit(r *http.Request, action string, outcome str
 		Outcome:      outcome,
 		IPAddress:    clientIP(r),
 		UserAgent:    r.UserAgent(),
+		Metadata:     metadata,
 	})
 }
 

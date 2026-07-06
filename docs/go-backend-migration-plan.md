@@ -1747,7 +1747,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 - 审计 metadata 会过滤包含 password、secret、token、authorization、key 的字段，避免误写敏感值。
 - 应用 API Key 请求当前仍写入 `app_api_key_audit_logs`，用于保留 key id、scope 拒绝和状态码等细节；管理员审计查询可通过 `include_app_api=1` 聚合查看这些请求，后续再扩展更细的分页游标和 source 过滤。
 
-仍待补齐的审计事件包括 OIDC 角色变更/绑定发起细节、ntfy/email 发送失败、上游模型辅助调用，以及自动化规则逐条规则级跳过等更细事件；OIDC 登录成功/失败、用户 OIDC 身份解绑、本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、用户配置、上传、API Key 管理，以及自动化规则自动完成命中/失败已开始写入 `audit_logs`。
+仍待补齐的审计事件包括 ntfy/email 发送失败、上游模型辅助调用，以及自动化规则逐条规则级跳过等更细事件；OIDC 登录成功/失败、绑定发起、绑定成功/失败、角色同步变化、用户 OIDC 身份解绑、本地 session 登录/登出、管理员运行时/存储/用户/系统配置操作、用户配置、上传、API Key 管理，以及自动化规则自动完成命中/失败已开始写入 `audit_logs`。
 
 审计日志应独立于普通运行日志等级：即使 `CHATAPI_LOG_LEVEL=warn`，关键安全事件仍应写入 audit channel。审计日志只记录必要元数据和结果，不记录完整请求体、密钥、密码、OIDC token 或上游模型输出全文。
 
@@ -2121,7 +2121,7 @@ make release-snapshot
 
 工作：
 
-- 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出、session、注册、邮箱验证码发送、密码重置、TOTP 最小闭环、OIDC RP 最小登录闭环和用户侧 OIDC 身份查看/解绑；GeeTest 校验、验证码后台清理任务和 OIDC 绑定发起流程仍待补齐。
+- 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出、session、注册、邮箱验证码发送、密码重置、TOTP 最小闭环、OIDC RP 登录/绑定闭环和用户侧 OIDC 身份查看/解绑；GeeTest 校验和验证码后台清理任务仍待补齐。
 - 用户配置、系统配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前用户配置已先支持 `GET/POST /api/user/config` 按当前 actor 读写普通 JSON object 偏好；系统配置已先支持 `GET/POST /api/admin/config` 做表驱动持久化；管理员用户管理已先支持列表、创建、重置密码和停用用户；用户详情历史、物理删除策略和 OIDC 身份管理后台仍待补齐。
 - 当前前端设置页仍有几处必须跟随 Go 契约一起调整：`/api/user/api-keys*` 需要切到 `/api/user/app-api-keys*` 并改成一次性展示明文 key；`/api/user/password`、`/api/admin/send-test-email` 仍待后端补齐或在前端切到新的配置/诊断流程。
 - CSRF、CORS、Cookie 策略。当前已先落地 session mutation Origin/Referer 校验和 HttpOnly SameSite cookie。

@@ -212,7 +212,7 @@ func TestOIDCAuthBindIdentityLinksCurrentUser(t *testing.T) {
 		t.Fatalf("create bind user: %v", err)
 	}
 
-	updated, identity, err := svc.BindIdentity(context.Background(), user.ID, OIDCClaims{
+	result, err := svc.BindIdentity(context.Background(), user.ID, OIDCClaims{
 		Subject:       "sub-bind",
 		Email:         "bind@example.com",
 		EmailVerified: true,
@@ -222,11 +222,11 @@ func TestOIDCAuthBindIdentityLinksCurrentUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind oidc identity: %v", err)
 	}
-	if updated.Email != "bind@example.com" || updated.LastLoginAt == nil {
-		t.Fatalf("unexpected updated user after bind: %#v", updated)
+	if result.User.Email != "bind@example.com" || result.User.LastLoginAt == nil {
+		t.Fatalf("unexpected updated user after bind: %#v", result.User)
 	}
-	if identity.UserID != user.ID || identity.Subject != "sub-bind" || !identity.EmailVerified {
-		t.Fatalf("unexpected identity after bind: %#v", identity)
+	if result.Identity.UserID != user.ID || result.Identity.Subject != "sub-bind" || !result.Identity.EmailVerified {
+		t.Fatalf("unexpected identity after bind: %#v", result.Identity)
 	}
 }
 
@@ -256,14 +256,14 @@ func TestOIDCAuthBindIdentityRejectsForeignLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second user: %v", err)
 	}
-	if _, _, err := svc.BindIdentity(context.Background(), firstUser.ID, OIDCClaims{
+	if _, err := svc.BindIdentity(context.Background(), firstUser.ID, OIDCClaims{
 		Subject:       "sub-shared",
 		Email:         "first@example.com",
 		EmailVerified: true,
 	}); err != nil {
 		t.Fatalf("seed first bind: %v", err)
 	}
-	if _, _, err := svc.BindIdentity(context.Background(), secondUser.ID, OIDCClaims{
+	if _, err := svc.BindIdentity(context.Background(), secondUser.ID, OIDCClaims{
 		Subject:       "sub-shared",
 		Email:         "second@example.com",
 		EmailVerified: true,

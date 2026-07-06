@@ -896,6 +896,52 @@ func TestConfigAutomationRulesRoutes(t *testing.T) {
 	assertAuditCount(t, env, "user.config", "automation_rule", "", "replace", "success", 1)
 }
 
+func TestAutomationRuleAutoCompletesResponsesRequest(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_auto_complete",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "auto hello"}},
+					"excludes": []map[string]any{},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "自动化命中回复",
+				},
+			},
+		},
+	}, http.StatusOK)
+
+	resp := postExternalJSON(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "demo-auto-rule",
+		"input": "auto hello from rule",
+	})
+	if nestedString(resp, "output_text") != "自动化命中回复" {
+		t.Fatalf("unexpected automation response payload: %#v", resp)
+	}
+
+	requests := env.getJSON(t, "/lab/requests", http.StatusOK)
+	items := requests["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("expected request item after automation completion: %#v", requests)
+	}
+	foundClosed := false
+	for _, item := range items {
+		record := item.(map[string]any)
+		if nestedString(record, "input_text") == "auto hello from rule" {
+			foundClosed = nestedString(record, "status") == "completed" || nestedString(record, "status") == "closed"
+			break
+		}
+	}
+	if !foundClosed {
+		t.Fatalf("expected automation-completed request in list: %#v", requests)
+	}
+}
+
 func TestUserPasswordRoute(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -5472,6 +5518,19 @@ func postExternalText(t *testing.T, url string, headers map[string]string, body 
 		t.Fatalf("read external response %s: %v", url, err)
 	}
 	return resp.StatusCode, string(data)
+}
+
+func postExternalJSON(t *testing.T, url string, headers map[string]string, body map[string]any) map[string]any {
+	t.Helper()
+	status, rawBody := postExternalText(t, url, headers, body)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(rawBody), &payload); err != nil {
+		t.Fatalf("decode external json response %s: %v body=%q", url, err, rawBody)
+	}
+	if status >= 400 {
+		t.Fatalf("unexpected external status for %s: %d payload=%#v", url, status, payload)
+	}
+	return payload
 }
 
 func startTextRequest(t *testing.T, url string, body map[string]any) <-chan string {

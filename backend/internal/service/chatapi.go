@@ -17,6 +17,7 @@ type ChatAPIService struct {
 	store    store.Store
 	pending  *PendingRegistry
 	realtime *RealtimeHub
+	auto     *AutomationRuleService
 }
 
 type ExpirePendingTurnsResult struct {
@@ -29,6 +30,7 @@ func NewChatAPIService(dataStore store.Store, pending *PendingRegistry, realtime
 		store:    dataStore,
 		pending:  pending,
 		realtime: realtime,
+		auto:     NewAutomationRuleService(dataStore),
 	}
 }
 
@@ -37,7 +39,7 @@ func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, request prot
 	if err != nil {
 		return nil, err
 	}
-	result, err := s.pending.Wait(ctx, turn.ConversationID)
+	result, err := s.pending.WaitTurn(ctx, turn)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +93,20 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 	}
 	s.pending.Add(turn)
 	s.realtime.PublishConversationUpsert(conversation, []store.Message{message})
+	s.tryAutomationComplete(ctx, parsed, conversationID, responseID)
 	return turn, conversation, message, nil
+}
+
+func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request protocol.TurnRequest, conversationID string, responseID string) {
+	if s == nil || s.auto == nil {
+		return
+	}
+	ownerID := OwnerIDFromContext(ctx)
+	match, err := s.auto.MatchTurn(ctx, ownerID, request, conversationID, responseID)
+	if err != nil || match == nil {
+		return
+	}
+	_, _ = s.CompleteConversation(ctx, match.Input)
 }
 
 func toStoreInputParts(parts []protocol.InputPart) []store.RequestInputPart {

@@ -955,6 +955,15 @@ type Hub struct {
 - 增加规则执行超时和最大输出长度限制。
 - 记录规则命中日志和指标。
 
+当前 Go 重构分支已先落地最小执行内核：
+
+- `AutomationRuleService` 不再只负责 CRUD，已开始提供基于结构化 `TurnRequest` 的规则匹配入口。
+- 当前已支持最小条件子集：`conditions.contains` / `conditions.excludes` 的 `substring` 与 `exact` 文本匹配，以及 `action.type=output_text` 的自动完成动作。
+- 规则匹配会复用协议层已经结构化的 `UserContent` / `InputParts`，而不是重新从原始 JSON body 做临时字符串解析。
+- 规则命中后，`ChatAPIService` 会在 pending turn 落库并进入 realtime 广播后，复用同一套 `CompleteConversation` 状态机直接自动完成请求；因此非流请求会直接返回自动结果，流式请求会在 SSE 起始事件后收到同样的完成事件，而不会走另一条旁路逻辑。
+- 当前自动执行是 best-effort：规则读取或匹配异常不会阻断主请求链路，只会退化为普通 pending turn。
+- 当前输出会受服务内最大长度限制截断；更细的规则执行超时、命中审计和命中指标仍待继续补齐。
+
 ### 6.5 Upload/Image Store
 
 要求：
@@ -1411,7 +1420,7 @@ user_app_api_keys
 - `DELETE /api/app/model-keys/{key_id}`：需要 `model_keys:delete`，只能删除当前用户自己的 key；如果配置了 `allowed_model_key_ids`，只能删除允许的 key。
 - `GET /api/app/statistics/summary`：需要 `statistics:read`，当前返回请求态势摘要；首版不返回 token、价格、平均耗时等需要额外计量的数据，避免给外部自动化暴露误导性指标。
 - 虚拟模型 key 使用 `sk-` 前缀和可解密密文保存；应用 API Key 使用 `ak-` 前缀和 hash 保存。两套鉴权中间件完全分离，`ak-` 不能访问模型兼容入口，`sk-` 不能访问 `/api/app/*`。
-- 自动化规则当前以 `automation_rules.rule_json` 保存完整规则 JSON，同时单独保存 `user_id`、`id`、`enabled`、`created_at`、`updated_at`；后续自动执行引擎、WebUI 配置接口和应用 API 都应复用同一张表与 service，避免规则格式分叉。
+- 自动化规则当前以 `automation_rules.rule_json` 保存完整规则 JSON，同时单独保存 `user_id`、`id`、`enabled`、`created_at`、`updated_at`；当前最小自动执行内核、WebUI 配置接口和应用 API 已开始复用同一张表与 `AutomationRuleService`，避免规则格式分叉。
 - 所有应用 API 响应都使用稳定 JSON，方便脚本调用。
 - `complete` 和 `abort` 与 Web 控制台操作共享同一个 Turn Manager 状态机，避免双写和竞态。
 

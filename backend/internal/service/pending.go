@@ -163,6 +163,13 @@ func (r *PendingRegistry) Wait(ctx context.Context, conversationID string) (Pend
 	if !ok {
 		return PendingResult{}, ErrPendingNotFound
 	}
+	return r.WaitTurn(ctx, turn)
+}
+
+func (r *PendingRegistry) WaitTurn(ctx context.Context, turn *PendingTurn) (PendingResult, error) {
+	if turn == nil {
+		return PendingResult{}, ErrPendingNotFound
+	}
 	select {
 	case <-ctx.Done():
 		return PendingResult{}, ctx.Err()

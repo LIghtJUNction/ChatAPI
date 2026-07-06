@@ -602,6 +602,11 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 		nestedString(operations[5].(map[string]any), "name") != "request_abort" {
 		t.Fatalf("unexpected app requests schema response: %#v", schemaResp)
 	}
+	if !containsMapItemWithStringField(schema["parsed_item_fields"], "key", "normalized_tool_schemas") ||
+		!containsMapItemWithStringField(schema["parsed_detail_fields"], "key", "replay") ||
+		!containsMapItemWithStringField(schema["replay_fields"], "key", "headers") {
+		t.Fatalf("unexpected app requests parsed/replay schema metadata: %#v", schemaResp)
+	}
 
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
 		"model": "demo-app-api",
@@ -1954,6 +1959,10 @@ func TestLabRequestsSchema(t *testing.T) {
 	operations := schema["operations"].([]any)
 	if len(operations) != 6 {
 		t.Fatalf("unexpected lab requests schema response: %#v", resp)
+	}
+	if !containsMapItemWithStringField(schema["parsed_detail_fields"], "key", "request_method") ||
+		!containsMapItemWithStringField(schema["replay_fields"], "key", "curl") {
+		t.Fatalf("unexpected lab parsed/replay schema metadata: %#v", resp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "list_requests" ||
 		nestedString(operations[2].(map[string]any), "name") != "copy_request_curl" ||

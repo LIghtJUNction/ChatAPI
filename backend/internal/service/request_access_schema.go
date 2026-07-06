@@ -1,7 +1,10 @@
 package service
 
 type RequestAccessSchema struct {
-	Operations []RequestAccessOperationSchema `json:"operations"`
+	Operations         []RequestAccessOperationSchema `json:"operations"`
+	ParsedItemFields   []ConfigFieldSchema            `json:"parsed_item_fields,omitempty"`
+	ParsedDetailFields []ConfigFieldSchema            `json:"parsed_detail_fields,omitempty"`
+	ReplayFields       []ConfigFieldSchema            `json:"replay_fields,omitempty"`
 }
 
 type RequestAccessOperationSchema struct {
@@ -46,6 +49,47 @@ func buildRequestAccessSchema(listPath string, detailPath string, controlBasePat
 		{Key: "reasoning_stream_mode", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional reasoning stream mode forwarded to the protocol encoder."},
 	}
 	return RequestAccessSchema{
+		ParsedItemFields: []ConfigFieldSchema{
+			{Key: "request_id", ValueType: "string", Public: true, Description: "Stable request id for request-level control and lookup."},
+			{Key: "request_format", ValueType: "string", Public: true, Description: "Normalized protocol name such as responses, chat_completions, or anthropic_messages."},
+			{Key: "model", ValueType: "string", Public: true, Description: "Virtual model name captured from the original request."},
+			{Key: "system_text", ValueType: "string", Public: true, Description: "Flattened system prompt text extracted from the request."},
+			{Key: "developer_text", ValueType: "string", Public: true, Description: "Flattened developer message text extracted from the request."},
+			{Key: "assistant_text", ValueType: "string", Public: true, Description: "Flattened assistant context text extracted from the request."},
+			{Key: "user_text", ValueType: "string", Public: true, Description: "Flattened latest user-visible input text."},
+			{Key: "input_part_types", ValueType: "array", Public: true, Description: "Ordered list of normalized input part types used by the request."},
+			{Key: "tool_choice", ValueType: "object", Public: true, Description: "Normalized tool_choice projection."},
+			{Key: "response_format", ValueType: "object", Public: true, Description: "Normalized response_format projection."},
+			{Key: "normalized_tool_schemas", ValueType: "array", Public: true, Description: "Stable tool schema projection for list/debug UIs."},
+			{Key: "request_body_keys", ValueType: "array", Public: true, Description: "Sorted top-level keys observed in the original request body."},
+		},
+		ParsedDetailFields: []ConfigFieldSchema{
+			{Key: "request_format", ValueType: "string", Public: true, Description: "Normalized protocol name such as responses, chat_completions, or anthropic_messages."},
+			{Key: "model", ValueType: "string", Public: true, Description: "Virtual model name captured from the original request."},
+			{Key: "system_text", ValueType: "string", Public: true, Description: "Flattened system prompt text extracted from the request."},
+			{Key: "developer_text", ValueType: "string", Public: true, Description: "Flattened developer message text extracted from the request."},
+			{Key: "assistant_text", ValueType: "string", Public: true, Description: "Flattened assistant context text extracted from the request."},
+			{Key: "user_text", ValueType: "string", Public: true, Description: "Flattened latest user-visible input text."},
+			{Key: "input_parts", ValueType: "array", Public: true, Description: "Normalized structured input parts extracted from the request."},
+			{Key: "tool_choice", ValueType: "object", Public: true, Description: "Normalized tool_choice projection."},
+			{Key: "tool_schemas", ValueType: "array", Public: true, Description: "Raw tool schema payload as captured from the original request."},
+			{Key: "normalized_tool_schemas", ValueType: "array", Public: true, Description: "Stable tool schema projection for frontend rendering and validation."},
+			{Key: "response_format", ValueType: "object", Public: true, Description: "Normalized response_format projection."},
+			{Key: "request_method", ValueType: "string", Public: true, Description: "Original HTTP method used by the client request."},
+			{Key: "request_path", ValueType: "string", Public: true, Description: "Original HTTP path used by the client request."},
+			{Key: "request_query", ValueType: "object", Public: true, Description: "Captured request query parameters after removing Lab secrets."},
+			{Key: "request_headers", ValueType: "object", Public: true, Description: "Captured request headers after filtering sensitive keys."},
+			{Key: "request_body_keys", ValueType: "array", Public: true, Description: "Sorted top-level keys observed in the original request body."},
+			{Key: "replay", ValueType: "object", Public: true, Description: "Replay/debug projection derived from the captured request snapshot."},
+		},
+		ReplayFields: []ConfigFieldSchema{
+			{Key: "method", ValueType: "string", Public: true, Description: "Replay HTTP method."},
+			{Key: "path", ValueType: "string", Public: true, Description: "Replay HTTP path without base URL."},
+			{Key: "query", ValueType: "object", Public: true, Description: "Replay query parameters."},
+			{Key: "headers", ValueType: "object", Public: true, Description: "Replay headers after filtering Authorization, Cookie, and key-bearing headers."},
+			{Key: "body", ValueType: "object", Public: true, Description: "Replay request body snapshot."},
+			{Key: "curl", ValueType: "string", Public: true, Description: "Replay curl command built against the current instance base URL."},
+		},
 		Operations: []RequestAccessOperationSchema{
 			{
 				Name:           "list_requests",

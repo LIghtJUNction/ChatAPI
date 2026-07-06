@@ -16,6 +16,7 @@ import (
 type ChatAPIHandler struct {
 	Service *service.ChatAPIService
 	Pending *service.PendingRegistry
+	Hub     *service.RealtimeHub
 }
 
 func (h ChatAPIHandler) Schema(w http.ResponseWriter, r *http.Request) {
@@ -51,9 +52,16 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	parsed := protocol.ParseRequest(requestFormat, body)
 	requestMeta := captureRequestMeta(r)
 	if parsed.Stream {
-		h.handleStreamRequest(w, r, parsed, body, requestMeta)
+		h.handleStreamRequest(w, r, requestFormat, parsed, body, requestMeta)
 		return
 	}
+
+	lease, err := h.acquireRealtimeLease(r, service.RealtimeConnectionAPI)
+	if err != nil {
+		writeJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
+		return
+	}
+	defer lease.Release()
 
 	responseBody, err := h.Service.CreatePendingResponse(r.Context(), parsed, body, requestMeta)
 	if err != nil {
@@ -178,12 +186,19 @@ func buildTurnControlCommand(kind service.TurnControlKind, body map[string]any, 
 	}, nil
 }
 
-func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, body map[string]any, requestMeta store.Request) {
+func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, requestFormat string, request protocol.TurnRequest, body map[string]any, requestMeta store.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
+
+	lease, err := h.acquireRealtimeLease(r, service.RealtimeConnectionSSE)
+	if err != nil {
+		writeJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
+		return
+	}
+	defer lease.Release()
 
 	turn, conversation, err := h.Service.CreatePendingStream(r.Context(), request, body, requestMeta)
 	if err != nil {
@@ -235,6 +250,23 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}
+}
+
+func (h ChatAPIHandler) acquireRealtimeLease(r *http.Request, kind service.RealtimeConnectionKind) (*service.RealtimeLease, error) {
+	if h.Hub == nil {
+		return &service.RealtimeLease{}, nil
+	}
+	lease, err := h.Hub.Acquire(r.Context(), service.RealtimeSubscribeOptions{
+		OwnerID: service.OwnerIDFromContext(r.Context()),
+		Kind:    kind,
+	})
+	if errors.Is(err, service.ErrRealtimeConnectionLimitExceeded) {
+		return nil, protocol.RateLimitError("realtime connection limit exceeded", "connection_limit_exceeded")
+	}
+	if err != nil {
+		return nil, protocol.WrapInternalError("acquire realtime lease", err)
+	}
+	return lease, nil
 }
 
 func writeSSEEvent(w http.ResponseWriter, event protocol.StreamEvent) error {

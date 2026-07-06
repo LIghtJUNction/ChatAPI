@@ -31,6 +31,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"github.com/gorilla/websocket"
 	"github.com/pquerna/otp/totp"
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
@@ -311,6 +312,62 @@ func TestDraftMarksConversationStreaming(t *testing.T) {
 		"mode":            "assistant_message",
 	}, http.StatusOK)
 	<-resultCh
+}
+
+func TestProtocolRequestsUseRealtimeConnectionLeases(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.RealtimeMaxConnectionsPerUser = 2
+		cfg.RealtimeWebUIReservedPerUser = 1
+	})
+
+	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-first-lease",
+		"input": "first lease request",
+	})
+	conversation := env.waitForWaitingConversation(t, "first lease request")
+
+	status, rawBody := postExternalText(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "demo-second-lease",
+		"input": "second lease request",
+	})
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("expected second long request to be rate limited: status=%d body=%q", status, rawBody)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(rawBody), &payload); err != nil {
+		t.Fatalf("decode rate limit payload: %v body=%q", err, rawBody)
+	}
+	if nestedPathString(payload, "error", "code") != "connection_limit_exceeded" {
+		t.Fatalf("unexpected rate limit payload: %#v", payload)
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(env.server.URL, "http") + "/api/ws"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		if resp != nil {
+			t.Fatalf("dial websocket: %v status=%d", err, resp.StatusCode)
+		}
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	var snapshot map[string]any
+	if err := conn.ReadJSON(&snapshot); err != nil {
+		t.Fatalf("read websocket snapshot: %v", err)
+	}
+	if nestedString(snapshot, "type") != "snapshot" {
+		t.Fatalf("unexpected websocket snapshot: %#v", snapshot)
+	}
+
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversation["id"],
+		"mode":            "assistant_message",
+		"text":            "lease completed",
+	}, http.StatusOK)
+	finalResp := <-firstCh
+	if got := nestedString(finalResp, "output_text"); got != "lease completed" {
+		t.Fatalf("unexpected first completion payload: %#v", finalResp)
+	}
 }
 
 func TestPendingTurnExpiration(t *testing.T) {
@@ -6229,7 +6286,11 @@ func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Co
 	}
 
 	pendingRegistry := service.NewPendingRegistry()
-	realtimeHub := service.NewRealtimeHub(sqliteStore)
+	realtimeHub := service.NewRealtimeHub(sqliteStore, service.NewRealtimeLimits(
+		cfg.RealtimeMaxConnections,
+		cfg.RealtimeMaxConnectionsPerUser,
+		cfg.RealtimeWebUIReservedPerUser,
+	))
 	chatService := service.NewChatAPIService(sqliteStore, pendingRegistry, realtimeHub)
 	appKeyService := service.NewAppAPIKeyService(sqliteStore)
 	modelKeyService := service.NewModelAPIKeyService(sqliteStore, cfg.MasterKey)
@@ -6290,7 +6351,11 @@ func newPostgresTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*c
 	}
 
 	pendingRegistry := service.NewPendingRegistry()
-	realtimeHub := service.NewRealtimeHub(pgStore)
+	realtimeHub := service.NewRealtimeHub(pgStore, service.NewRealtimeLimits(
+		cfg.RealtimeMaxConnections,
+		cfg.RealtimeMaxConnectionsPerUser,
+		cfg.RealtimeWebUIReservedPerUser,
+	))
 	chatService := service.NewChatAPIService(pgStore, pendingRegistry, realtimeHub)
 	appKeyService := service.NewAppAPIKeyService(pgStore)
 	modelKeyService := service.NewModelAPIKeyService(pgStore, cfg.MasterKey)

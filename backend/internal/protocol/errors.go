@@ -39,6 +39,15 @@ func InternalError(message string) *RequestError {
 	}
 }
 
+func RateLimitError(message string, code string) *RequestError {
+	return &RequestError{
+		StatusCode: 429,
+		Type:       "rate_limit_error",
+		Code:       code,
+		Message:    message,
+	}
+}
+
 func ValidateRequest(protocolValue string, body map[string]any) error {
 	if body == nil {
 		return InvalidRequest("request body must be a JSON object", "")

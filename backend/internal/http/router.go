@@ -86,7 +86,7 @@ func NewRouter(
 		Audit:   auditService,
 	}
 	adminConfigHandler := handlers.AdminConfigHandler{Service: service.NewSystemConfigService(dataStore), Audit: auditService}
-	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
+	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending, Hub: realtimeHub}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
 	router.Get("/api/health", healthHandler.ServeHTTP)

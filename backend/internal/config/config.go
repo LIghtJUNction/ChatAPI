@@ -325,7 +325,11 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if c.Port <= 0 || c.Port > 65535 {
+	if c.Mode == ModeLab {
+		if c.Port < 0 || c.Port > 65535 {
+			return errors.New("lab port must be within 0-65535")
+		}
+	} else if c.Port <= 0 || c.Port > 65535 {
 		return errors.New("port must be within 1-65535")
 	}
 	if strings.TrimSpace(c.Host) == "" {

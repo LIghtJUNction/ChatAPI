@@ -34,6 +34,43 @@ func TestParseSMTPTestOptionsConnectOnly(t *testing.T) {
 	}
 }
 
+func TestApplyLabOptionsSupportsPortZeroAndPassword(t *testing.T) {
+	cfg := config.Default(config.ModeLab, t.TempDir())
+	if err := applyRuntimeOptions(&cfg, []string{"--host", "0.0.0.0", "--port", "0", "--allow-remote-lab", "--password", "dev-password", "--no-open-browser"}); err != nil {
+		t.Fatalf("apply lab options: %v", err)
+	}
+	if cfg.Host != "0.0.0.0" || cfg.Port != 0 || !cfg.AllowRemoteLab {
+		t.Fatalf("unexpected lab option values: %#v", cfg)
+	}
+	if cfg.LabPassword != "dev-password" || cfg.LabToken != "" || cfg.OpenBrowser {
+		t.Fatalf("unexpected lab auth/browser options: %#v", cfg)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("lab config should validate with port zero: %v", err)
+	}
+}
+
+func TestApplyLabOptionsPasswordClearsToken(t *testing.T) {
+	cfg := config.Default(config.ModeLab, t.TempDir())
+	cfg.LabToken = "seed-token"
+	if err := applyRuntimeOptions(&cfg, []string{"--password", "dev-password"}); err != nil {
+		t.Fatalf("apply lab password option: %v", err)
+	}
+	if cfg.LabPassword != "dev-password" || cfg.LabToken != "" {
+		t.Fatalf("password mode should clear token: %#v", cfg)
+	}
+}
+
+func TestApplyServeOptionsOverridesListenAddr(t *testing.T) {
+	cfg := config.Default(config.ModeServe, t.TempDir())
+	if err := applyRuntimeOptions(&cfg, []string{"--host", "127.0.0.1", "--port", "8080", "--no-open-browser"}); err != nil {
+		t.Fatalf("apply serve options: %v", err)
+	}
+	if cfg.Host != "127.0.0.1" || cfg.Port != 8080 || cfg.OpenBrowser {
+		t.Fatalf("unexpected serve options: %#v", cfg)
+	}
+}
+
 func TestDurationUntilDailyRun(t *testing.T) {
 	now := time.Date(2026, 7, 6, 2, 30, 0, 0, time.UTC)
 	duration, err := durationUntilDailyRun(now, "03:00")

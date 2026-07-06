@@ -6,8 +6,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -85,9 +88,21 @@ func Run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := applyRuntimeOptions(&cfg, args[1:]); err != nil {
+		return err
+	}
+	if cfg.Mode == config.ModeLab && strings.TrimSpace(cfg.LabPassword) == "" && strings.TrimSpace(cfg.LabToken) == "" {
+		token, err := randomURLToken(24)
+		if err != nil {
+			return fmt.Errorf("generate lab token: %w", err)
+		}
+		cfg.LabToken = token
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 
 	logger := observability.NewLogger(cfg.LogLevel)
-	logger.Info("starting chatapi", slog.String("mode", string(cfg.Mode)), slog.String("addr", cfg.ListenAddr()))
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
@@ -116,6 +131,19 @@ func Run(ctx context.Context, args []string) error {
 		Handler:           httpapi.NewRouter(cfg, dataStore, chatService, realtimeHub, pendingRegistry),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	listener, err := net.Listen("tcp", cfg.ListenAddr())
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	if tcpAddr, ok := listener.Addr().(*net.TCPAddr); ok && tcpAddr.Port > 0 {
+		cfg.Port = tcpAddr.Port
+	}
+
+	logger.Info("starting chatapi", slog.String("mode", string(cfg.Mode)), slog.String("addr", cfg.ListenAddr()))
+	if cfg.Mode == config.ModeLab {
+		logger.Info("lab access ready", slog.String("url", buildLabURL(cfg)), slog.String("models_url", fmt.Sprintf("http://%s/models", cfg.ListenAddr())))
+	}
 
 	if cfg.OpenBrowser && cfg.Mode == config.ModeLab {
 		go func() {
@@ -129,7 +157,7 @@ func Run(ctx context.Context, args []string) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		err := server.ListenAndServe()
+		err := server.Serve(listener)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
@@ -1207,6 +1235,71 @@ func parseMode(args []string) (config.Mode, error) {
 	default:
 		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check, migrate, migrate-db, config print --redact, oidc test, smtp, setup, version", args[0])
 	}
+}
+
+func applyRuntimeOptions(cfg *config.Config, args []string) error {
+	if cfg == nil {
+		return errors.New("config is nil")
+	}
+	switch cfg.Mode {
+	case config.ModeLab:
+		return applyLabOptions(cfg, args)
+	case config.ModeServe:
+		return applyServeOptions(cfg, args)
+	default:
+		return nil
+	}
+}
+
+func applyServeOptions(cfg *config.Config, args []string) error {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	host := flags.String("host", cfg.Host, "")
+	port := flags.Int("port", cfg.Port, "")
+	dataDir := flags.String("data-dir", cfg.DataDir, "")
+	openBrowser := flags.Bool("open-browser", cfg.OpenBrowser, "")
+	noOpenBrowser := flags.Bool("no-open-browser", false, "")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	cfg.Host = strings.TrimSpace(*host)
+	cfg.Port = *port
+	cfg.DataDir = strings.TrimSpace(*dataDir)
+	cfg.OpenBrowser = *openBrowser
+	if *noOpenBrowser {
+		cfg.OpenBrowser = false
+	}
+	return nil
+}
+
+func applyLabOptions(cfg *config.Config, args []string) error {
+	flags := flag.NewFlagSet("lab", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	host := flags.String("host", cfg.Host, "")
+	port := flags.Int("port", cfg.Port, "")
+	dataDir := flags.String("data-dir", cfg.DataDir, "")
+	openBrowser := flags.Bool("open-browser", cfg.OpenBrowser, "")
+	noOpenBrowser := flags.Bool("no-open-browser", false, "")
+	allowRemote := flags.Bool("allow-remote-lab", cfg.AllowRemoteLab, "")
+	password := flags.String("password", cfg.LabPassword, "")
+	token := flags.String("token", cfg.LabToken, "")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	cfg.Host = strings.TrimSpace(*host)
+	cfg.Port = *port
+	cfg.DataDir = strings.TrimSpace(*dataDir)
+	cfg.OpenBrowser = *openBrowser
+	if *noOpenBrowser {
+		cfg.OpenBrowser = false
+	}
+	cfg.AllowRemoteLab = *allowRemote
+	cfg.LabPassword = strings.TrimSpace(*password)
+	cfg.LabToken = strings.TrimSpace(*token)
+	if cfg.LabPassword != "" {
+		cfg.LabToken = ""
+	}
+	return nil
 }
 
 func buildLabURL(cfg config.Config) string {

@@ -64,6 +64,17 @@ func BuildAdminUsersSchema() AdminUsersSchema {
 				},
 			},
 			{
+				Name:          "preview_user_purge",
+				Method:        "GET",
+				Path:          "/api/admin/users/{user_id}/delete-preview",
+				Description:   "Preview whether a user can be physically deleted and return dependency counts.",
+				RequiresAdmin: true,
+				Notes: []string{
+					"The response shape is {ok, user, preview}.",
+					"owned_conversations and owned_uploaded_images currently block physical deletion because their ownership history is preserved.",
+				},
+			},
+			{
 				Name:          "reset_user_password",
 				Method:        "PUT",
 				Path:          "/api/admin/users/{user_id}/password",
@@ -92,6 +103,18 @@ func BuildAdminUsersSchema() AdminUsersSchema {
 				RequiresAdmin: true,
 				Notes: []string{
 					"This endpoint marks is_active=false instead of physically deleting the user row.",
+				},
+			},
+			{
+				Name:          "purge_user",
+				Method:        "POST",
+				Path:          "/api/admin/users/{user_id}/purge",
+				Description:   "Physically delete a user account after a clean delete-preview with no history blockers.",
+				RequiresAdmin: true,
+				Notes: []string{
+					"This endpoint deletes identities, user configs, automation rules, app/model API keys and storage quota rows for the target user.",
+					"If preview.can_delete is false, the endpoint returns 409 together with the preview payload.",
+					"Audit logs are intentionally preserved for operations visibility.",
 				},
 			},
 		},

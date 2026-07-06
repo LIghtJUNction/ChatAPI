@@ -761,6 +761,107 @@ func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
 	return items, rows.Err()
 }
 
+func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (store.UserDeletionPreview, error) {
+	userID = strings.TrimSpace(userID)
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+
+	preview := store.UserDeletionPreview{
+		User:      user,
+		CanDelete: true,
+		PreserveRef: store.UserDeletionPreserveRef{
+			AuditLogs:     true,
+			Conversations: true,
+			Uploads:       true,
+		},
+	}
+	counts := &preview.Counts
+
+	if counts.Identities, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_identities WHERE user_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.UserConfigs, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_configs WHERE user_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AutomationRules, err = s.countInt(ctx, `SELECT COUNT(*) FROM automation_rules WHERE user_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AppAPIKeys, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AppAPIKeyAuditLogs, err = s.countInt(ctx, `SELECT COUNT(*) FROM app_api_key_audit_logs WHERE user_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.ModelAPIKeys, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_api_keys WHERE user_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.StorageUserQuotas, err = s.countInt(ctx, `SELECT COUNT(*) FROM storage_user_quotas WHERE owner_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.StorageDeletionFailures, err = s.countInt(ctx, `SELECT COUNT(*) FROM storage_file_deletion_failures WHERE owner_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.OwnedConversations, err = s.countInt(ctx, `SELECT COUNT(*) FROM conversations WHERE COALESCE(json_extract(metadata_json, '$.owner_id'), '') = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.OwnedUploadedImages, err = s.countInt(ctx, `SELECT COUNT(*) FROM uploaded_images WHERE owner_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AuditActorLogs, err = s.countInt(ctx, `SELECT COUNT(*) FROM audit_logs WHERE actor_user_id = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AuditMetadataUserReferences, err = s.countInt(ctx, `SELECT COUNT(*) FROM audit_logs WHERE COALESCE(json_extract(metadata_json, '$.user_id'), '') = ?`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+
+	if counts.OwnedConversations > 0 {
+		preview.CanDelete = false
+		preview.Blockers = append(preview.Blockers, "owned_conversations")
+	}
+	if counts.OwnedUploadedImages > 0 {
+		preview.CanDelete = false
+		preview.Blockers = append(preview.Blockers, "owned_uploaded_images")
+	}
+	return preview, nil
+}
+
+func (s *Store) DeleteUserAccount(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	preview, err := s.PreviewUserDeletion(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !preview.CanDelete {
+		return errConflict
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	statements := []string{
+		`DELETE FROM app_api_key_audit_logs WHERE user_id = ?`,
+		`DELETE FROM user_app_api_keys WHERE user_id = ?`,
+		`DELETE FROM user_api_keys WHERE user_id = ?`,
+		`DELETE FROM user_configs WHERE user_id = ?`,
+		`DELETE FROM automation_rules WHERE user_id = ?`,
+		`DELETE FROM storage_file_deletion_failures WHERE owner_id = ?`,
+		`DELETE FROM storage_user_quotas WHERE owner_id = ?`,
+		`DELETE FROM user_identities WHERE user_id = ?`,
+		`DELETE FROM users WHERE id = ?`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement, userID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) UpsertUserIdentity(ctx context.Context, input store.UpsertUserIdentityInput) (store.UserIdentity, error) {
 	now := time.Now().UTC()
 	profile := ensureMap(input.Profile)
@@ -846,6 +947,14 @@ func (s *Store) DeleteUserIdentity(ctx context.Context, id string, userID string
 		return errNotFound
 	}
 	return nil
+}
+
+func (s *Store) countInt(ctx context.Context, query string, args ...any) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (s *Store) GetSystemConfig(ctx context.Context, key string) (store.SystemConfig, error) {

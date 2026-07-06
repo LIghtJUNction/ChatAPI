@@ -87,6 +87,7 @@ func NewRouter(
 		Users:      service.NewAdminUserService(dataStore),
 		History:    service.NewAdminUserHistoryService(dataStore),
 		Identities: service.NewAdminUserIdentityService(dataStore),
+		Deletion:   service.NewAdminUserDeletionService(dataStore),
 		Audit:      auditService,
 	}
 	adminConfigHandler := handlers.AdminConfigHandler{Service: service.NewSystemConfigService(dataStore), Audit: auditService}
@@ -283,10 +284,12 @@ func NewRouter(
 	adminRouter.Get("/users", adminUsersHandler.List)
 	adminRouter.Get("/users/{userID}/history", adminUsersHandler.HistoryList)
 	adminRouter.Get("/users/{userID}/identities", adminUsersHandler.IdentityList)
+	adminRouter.Get("/users/{userID}/delete-preview", adminUsersHandler.DeletePreview)
 	adminRouter.Post("/users", adminUsersHandler.Create)
 	adminRouter.Put("/users/{userID}/password", adminUsersHandler.ResetPassword)
 	adminRouter.Delete("/users/{userID}/identities/{identityID}", adminUsersHandler.IdentityDelete)
 	adminRouter.Delete("/users/{userID}", adminUsersHandler.Delete)
+	adminRouter.Post("/users/{userID}/purge", adminUsersHandler.Purge)
 	adminRouter.Get("/config/schema", adminConfigHandler.Schema)
 	router.Mount("/api/admin", adminRouter)
 	router.Get("/api/conversations/schema", chatHandler.Schema)

@@ -147,6 +147,35 @@ type User struct {
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
 }
 
+type UserDeletionPreview struct {
+	User        User                      `json:"user"`
+	CanDelete   bool                      `json:"can_delete"`
+	Blockers    []string                  `json:"blockers,omitempty"`
+	Counts      UserDeletionPreviewCounts `json:"counts"`
+	PreserveRef UserDeletionPreserveRef   `json:"preserve_refs"`
+}
+
+type UserDeletionPreviewCounts struct {
+	Identities                  int `json:"identities"`
+	UserConfigs                 int `json:"user_configs"`
+	AutomationRules             int `json:"automation_rules"`
+	AppAPIKeys                  int `json:"app_api_keys"`
+	AppAPIKeyAuditLogs          int `json:"app_api_key_audit_logs"`
+	ModelAPIKeys                int `json:"model_api_keys"`
+	StorageUserQuotas           int `json:"storage_user_quotas"`
+	StorageDeletionFailures     int `json:"storage_deletion_failures"`
+	OwnedConversations          int `json:"owned_conversations"`
+	OwnedUploadedImages         int `json:"owned_uploaded_images"`
+	AuditActorLogs              int `json:"audit_actor_logs"`
+	AuditMetadataUserReferences int `json:"audit_metadata_user_references"`
+}
+
+type UserDeletionPreserveRef struct {
+	AuditLogs     bool `json:"audit_logs"`
+	Conversations bool `json:"conversations"`
+	Uploads       bool `json:"uploads"`
+}
+
 type UserIdentity struct {
 	ID            string         `json:"id"`
 	UserID        string         `json:"user_id"`
@@ -455,6 +484,8 @@ type Store interface {
 	GetUserByEmail(context.Context, string) (User, error)
 	GetUserByUsername(context.Context, string) (User, error)
 	ListUsers(context.Context) ([]User, error)
+	PreviewUserDeletion(context.Context, string) (UserDeletionPreview, error)
+	DeleteUserAccount(context.Context, string) error
 	UpsertUserIdentity(context.Context, UpsertUserIdentityInput) (UserIdentity, error)
 	GetUserIdentity(context.Context, string, string) (UserIdentity, error)
 	ListUserIdentities(context.Context, string) ([]UserIdentity, error)

@@ -21,6 +21,8 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+var errConflict = store.ErrTurnConflict
+
 const BootstrapVersion = "0001_bootstrap"
 const LatestVersion = "0004_postgresql_auth_verification_code_limits"
 
@@ -304,6 +306,107 @@ func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
 	return items, rows.Err()
 }
 
+func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (store.UserDeletionPreview, error) {
+	userID = strings.TrimSpace(userID)
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+
+	preview := store.UserDeletionPreview{
+		User:      user,
+		CanDelete: true,
+		PreserveRef: store.UserDeletionPreserveRef{
+			AuditLogs:     true,
+			Conversations: true,
+			Uploads:       true,
+		},
+	}
+	counts := &preview.Counts
+
+	if counts.Identities, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_identities WHERE user_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.UserConfigs, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_configs WHERE user_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AutomationRules, err = s.countInt(ctx, `SELECT COUNT(*) FROM automation_rules WHERE user_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AppAPIKeys, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AppAPIKeyAuditLogs, err = s.countInt(ctx, `SELECT COUNT(*) FROM app_api_key_audit_logs WHERE user_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.ModelAPIKeys, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_api_keys WHERE user_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.StorageUserQuotas, err = s.countInt(ctx, `SELECT COUNT(*) FROM storage_user_quotas WHERE owner_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.StorageDeletionFailures, err = s.countInt(ctx, `SELECT COUNT(*) FROM storage_file_deletion_failures WHERE owner_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.OwnedConversations, err = s.countInt(ctx, `SELECT COUNT(*) FROM conversations WHERE COALESCE(metadata_json->>'owner_id', '') = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.OwnedUploadedImages, err = s.countInt(ctx, `SELECT COUNT(*) FROM uploaded_images WHERE owner_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AuditActorLogs, err = s.countInt(ctx, `SELECT COUNT(*) FROM audit_logs WHERE actor_user_id = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+	if counts.AuditMetadataUserReferences, err = s.countInt(ctx, `SELECT COUNT(*) FROM audit_logs WHERE COALESCE(metadata_json->>'user_id', '') = $1`, userID); err != nil {
+		return store.UserDeletionPreview{}, err
+	}
+
+	if counts.OwnedConversations > 0 {
+		preview.CanDelete = false
+		preview.Blockers = append(preview.Blockers, "owned_conversations")
+	}
+	if counts.OwnedUploadedImages > 0 {
+		preview.CanDelete = false
+		preview.Blockers = append(preview.Blockers, "owned_uploaded_images")
+	}
+	return preview, nil
+}
+
+func (s *Store) DeleteUserAccount(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	preview, err := s.PreviewUserDeletion(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !preview.CanDelete {
+		return errConflict
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	statements := []string{
+		`DELETE FROM app_api_key_audit_logs WHERE user_id = $1`,
+		`DELETE FROM user_app_api_keys WHERE user_id = $1`,
+		`DELETE FROM user_api_keys WHERE user_id = $1`,
+		`DELETE FROM user_configs WHERE user_id = $1`,
+		`DELETE FROM automation_rules WHERE user_id = $1`,
+		`DELETE FROM storage_file_deletion_failures WHERE owner_id = $1`,
+		`DELETE FROM storage_user_quotas WHERE owner_id = $1`,
+		`DELETE FROM user_identities WHERE user_id = $1`,
+		`DELETE FROM users WHERE id = $1`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.Exec(ctx, statement, userID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *Store) UpsertUserIdentity(ctx context.Context, input store.UpsertUserIdentityInput) (store.UserIdentity, error) {
 	now := time.Now().UTC()
 	profileJSON := mustJSON(ensureMap(input.Profile))
@@ -549,6 +652,14 @@ func (s *Store) DeleteExpiredAuthVerificationCodes(ctx context.Context, before t
 
 type rowScanner interface {
 	Scan(dest ...any) error
+}
+
+func (s *Store) countInt(ctx context.Context, query string, args ...any) (int, error) {
+	var count int
+	if err := s.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func scanUser(row rowScanner) (store.User, error) {

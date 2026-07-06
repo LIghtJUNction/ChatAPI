@@ -4637,7 +4637,7 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	schemaResp := env.getJSONWithCookie(t, "/api/admin/users/schema", adminCookie, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 7 {
+	if len(operations) != 9 {
 		t.Fatalf("unexpected admin users schema response: %#v", schemaResp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "list_users" || nestedString(operations[1].(map[string]any), "name") != "create_user" {
@@ -4684,6 +4684,11 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	}
 	if nestedPathString(identityListResp["items"].([]any)[0].(map[string]any), "id") != identity.ID {
 		t.Fatalf("unexpected admin identity item: %#v", identityListResp)
+	}
+
+	previewBeforeHistoryResp := env.getJSONWithCookie(t, "/api/admin/users/"+userID+"/delete-preview", adminCookie, http.StatusOK)
+	if nestedPathBool(previewBeforeHistoryResp, "preview", "can_delete") != true {
+		t.Fatalf("expected initial delete preview to allow purge: %#v", previewBeforeHistoryResp)
 	}
 
 	firstConversation, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
@@ -4745,6 +4750,26 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 		t.Fatalf("expected conversation title in user history: %#v", historyResp)
 	}
 
+	previewResp := env.getJSONWithCookie(t, "/api/admin/users/"+userID+"/delete-preview", adminCookie, http.StatusOK)
+	if nestedPathString(previewResp, "user", "id") != userID {
+		t.Fatalf("unexpected delete preview user response: %#v", previewResp)
+	}
+	if nestedPathBool(previewResp, "preview", "can_delete") {
+		t.Fatalf("expected delete preview to be blocked by history: %#v", previewResp)
+	}
+	if numericNestedPathValue(previewResp, "preview", "counts", "owned_conversations") != 2 {
+		t.Fatalf("expected conversation count in delete preview: %#v", previewResp)
+	}
+	blockers, _ := nestedPath(previewResp, "preview", "blockers").([]any)
+	if len(blockers) != 1 || blockers[0] != "owned_conversations" {
+		t.Fatalf("unexpected delete preview blockers: %#v", previewResp)
+	}
+
+	purgeBlockedResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+userID+"/purge", map[string]any{}, adminCookie, headers, http.StatusConflict)
+	if purgeBlockedResp["ok"] != false || nestedPathBool(purgeBlockedResp, "preview", "can_delete") {
+		t.Fatalf("expected blocked purge response: %#v", purgeBlockedResp)
+	}
+
 	resetResp := env.putJSONWithCookieAndHeaders(t, "/api/admin/users/"+userID+"/password", map[string]any{
 		"password": "rotated-secret",
 	}, adminCookie, headers, http.StatusOK)
@@ -4787,6 +4812,109 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "reset_password", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "deactivate", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "admin.user_identity", "user_identity", identity.ID, "unlink", "success", 1)
+
+	purgeableResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
+		"username": "purgeable",
+		"email":    "purgeable@example.com",
+		"password": "purge-secret",
+		"role":     "user",
+	}, adminCookie, headers, http.StatusCreated)
+	purgeableUserID := nestedPathString(purgeableResp, "user", "id")
+	if purgeableUserID == "" {
+		t.Fatalf("missing purgeable user id: %#v", purgeableResp)
+	}
+	if _, err := env.store.UpsertUserIdentity(context.Background(), store.UpsertUserIdentityInput{
+		ID:       "identity_admin_purgeable",
+		UserID:   purgeableUserID,
+		Provider: "oidc",
+		Subject:  "admin-purgeable-sub",
+		Email:    "purgeable@example.com",
+	}); err != nil {
+		t.Fatalf("seed purgeable identity: %v", err)
+	}
+	if _, err := env.store.SetUserConfig(context.Background(), store.SetUserConfigInput{
+		UserID: purgeableUserID,
+		Key:    "workspace",
+		Value:  map[string]any{"compact": true},
+	}); err != nil {
+		t.Fatalf("seed purgeable config: %v", err)
+	}
+	if _, err := env.store.ReplaceAutomationRulesForUser(context.Background(), purgeableUserID, nil, []store.UpsertAutomationRuleInput{{
+		ID:      "rule_admin_purgeable",
+		Enabled: true,
+		Payload: map[string]any{"kind": "demo"},
+	}}); err != nil {
+		t.Fatalf("seed purgeable automation rules: %v", err)
+	}
+	if _, err := env.store.CreateAppAPIKey(context.Background(), store.CreateAppAPIKeyInput{
+		ID:        "app_key_admin_purgeable",
+		UserID:    purgeableUserID,
+		Name:      "purgeable-app",
+		KeyHash:   "hash",
+		KeyPrefix: "capi_purgeable",
+		Scopes:    []string{"requests:read"},
+	}); err != nil {
+		t.Fatalf("seed purgeable app key: %v", err)
+	}
+	if err := env.store.CreateAppAPIKeyAuditLog(context.Background(), store.AppAPIKeyAuditLog{
+		ID:          "app_audit_admin_purgeable",
+		AppAPIKeyID: "app_key_admin_purgeable",
+		UserID:      purgeableUserID,
+		Route:       "/api/app/requests",
+		StatusCode:  200,
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed purgeable app key audit log: %v", err)
+	}
+	if _, err := env.store.CreateModelAPIKey(context.Background(), store.CreateModelAPIKeyInput{
+		ID:            "model_key_admin_purgeable",
+		UserID:        purgeableUserID,
+		Name:          "purgeable-model",
+		KeyCiphertext: "ciphertext",
+		KeyPrefix:     "vk_purgeable",
+		Model:         "gpt-test",
+	}); err != nil {
+		t.Fatalf("seed purgeable model key: %v", err)
+	}
+	if _, err := env.store.SetStorageUserQuota(context.Background(), purgeableUserID, 4096); err != nil {
+		t.Fatalf("seed purgeable storage quota: %v", err)
+	}
+	if _, err := env.store.UpsertStorageFileDeletionFailure(context.Background(), store.UpsertStorageFileDeletionFailureInput{
+		Path:      "/tmp/purgeable.png",
+		Filename:  "purgeable.png",
+		OwnerID:   purgeableUserID,
+		Bytes:     64,
+		LastError: "busy",
+	}); err != nil {
+		t.Fatalf("seed purgeable storage failure: %v", err)
+	}
+
+	purgePreviewResp := env.getJSONWithCookie(t, "/api/admin/users/"+purgeableUserID+"/delete-preview", adminCookie, http.StatusOK)
+	if !nestedPathBool(purgePreviewResp, "preview", "can_delete") {
+		t.Fatalf("expected purgeable delete preview to allow purge: %#v", purgePreviewResp)
+	}
+	if numericNestedPathValue(purgePreviewResp, "preview", "counts", "identities") != 1 ||
+		numericNestedPathValue(purgePreviewResp, "preview", "counts", "user_configs") != 1 ||
+		numericNestedPathValue(purgePreviewResp, "preview", "counts", "automation_rules") != 1 ||
+		numericNestedPathValue(purgePreviewResp, "preview", "counts", "app_api_keys") != 1 ||
+		numericNestedPathValue(purgePreviewResp, "preview", "counts", "model_api_keys") != 1 {
+		t.Fatalf("unexpected purgeable delete preview counts: %#v", purgePreviewResp)
+	}
+
+	purgeResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+purgeableUserID+"/purge", map[string]any{}, adminCookie, headers, http.StatusOK)
+	if purgeResp["ok"] != true || purgeResp["deleted"] != true {
+		t.Fatalf("unexpected purge response: %#v", purgeResp)
+	}
+	if _, err := env.store.GetUser(context.Background(), purgeableUserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected purgeable user to be deleted, got %v", err)
+	}
+	if keys, err := env.store.ListAppAPIKeysByUser(context.Background(), purgeableUserID); err != nil || len(keys) != 0 {
+		t.Fatalf("expected purgeable app keys removed, keys=%#v err=%v", keys, err)
+	}
+	if keys, err := env.store.ListModelAPIKeysByUser(context.Background(), purgeableUserID); err != nil || len(keys) != 0 {
+		t.Fatalf("expected purgeable model keys removed, keys=%#v err=%v", keys, err)
+	}
+	assertAuditCountForActor(t, env, "admin", "admin.user", "user", purgeableUserID, "purge", "success", 1)
 }
 
 func TestAdminConfigManagement(t *testing.T) {
@@ -7982,31 +8110,31 @@ func nestedString(record map[string]any, key string) string {
 }
 
 func nestedPathString(record map[string]any, path ...string) string {
+	current := nestedPath(record, path...)
+	value, _ := current.(string)
+	return value
+}
+
+func nestedPath(record map[string]any, path ...string) any {
 	var current any = record
 	for _, key := range path {
 		nextMap, ok := current.(map[string]any)
 		if !ok {
-			return ""
+			return nil
 		}
 		current = nextMap[key]
 	}
-	if value, ok := current.(string); ok {
-		return value
-	}
-	return ""
+	return current
 }
 
 func nestedPathBool(record map[string]any, path ...string) bool {
-	var current any = record
-	for _, key := range path {
-		nextMap, ok := current.(map[string]any)
-		if !ok {
-			return false
-		}
-		current = nextMap[key]
-	}
+	current := nestedPath(record, path...)
 	value, _ := current.(bool)
 	return value
+}
+
+func numericNestedPathValue(record map[string]any, path ...string) int {
+	return numericValue(nestedPath(record, path...))
 }
 
 func responseItemsContainID(record map[string]any, id string) bool {

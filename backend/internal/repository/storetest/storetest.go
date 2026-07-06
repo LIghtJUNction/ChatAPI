@@ -21,6 +21,9 @@ func RunUserRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Run("users", func(t *testing.T) {
 		testUserRepositoryCreatesUpdatesAndListsUsers(t, newStore)
 	})
+	t.Run("user_delete_preview_and_purge", func(t *testing.T) {
+		testUserRepositoryPreviewsAndDeletesUserAccount(t, newStore)
+	})
 	t.Run("user_identities", func(t *testing.T) {
 		testUserIdentityRepositoryUpsertsByProviderSubject(t, newStore)
 	})
@@ -174,6 +177,203 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 	}
 	if _, err := st.GetUserByUsername(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing username, got %v", err)
+	}
+}
+
+func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+
+	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+		ID:           "user_delete_blocked",
+		Username:     "blocked",
+		Email:        "blocked@example.com",
+		PasswordHash: "hash-blocked",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("create blocked user: %v", err)
+	}
+	if _, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+		ConversationID: "conv_delete_blocked",
+		RequestID:      "req_delete_blocked",
+		ResponseID:     "resp_delete_blocked",
+		OwnerID:        "user_delete_blocked",
+		RequestFormat:  "responses",
+		Model:          "delete-test",
+		UserContent:    "blocked",
+		RequestBody:    map[string]any{"model": "delete-test"},
+	}); err != nil {
+		t.Fatalf("create blocked conversation: %v", err)
+	}
+
+	blockedPreview, err := st.PreviewUserDeletion(ctx, "user_delete_blocked")
+	if err != nil {
+		t.Fatalf("preview blocked user deletion: %v", err)
+	}
+	if blockedPreview.CanDelete || blockedPreview.Counts.OwnedConversations != 1 {
+		t.Fatalf("expected blocked preview with owned conversation: %#v", blockedPreview)
+	}
+	if err := st.DeleteUserAccount(ctx, "user_delete_blocked"); !errors.Is(err, store.ErrTurnConflict) {
+		t.Fatalf("expected blocked delete conflict, got %v", err)
+	}
+
+	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+		ID:           "user_delete_ready",
+		Username:     "ready",
+		Email:        "ready@example.com",
+		PasswordHash: "hash-ready",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("create ready user: %v", err)
+	}
+	if _, err := st.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
+		ID:       "identity_delete_ready",
+		UserID:   "user_delete_ready",
+		Provider: "oidc",
+		Subject:  "delete-ready",
+		Email:    "ready@example.com",
+	}); err != nil {
+		t.Fatalf("create ready identity: %v", err)
+	}
+	if _, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+		UserID: "user_delete_ready",
+		Key:    "workspace",
+		Value:  map[string]any{"theme": "dark"},
+	}); err != nil {
+		t.Fatalf("set ready config: %v", err)
+	}
+	if _, err := st.ReplaceAutomationRulesForUser(ctx, "user_delete_ready", nil, []store.UpsertAutomationRuleInput{{
+		ID:      "rule_delete_ready",
+		Enabled: true,
+		Payload: map[string]any{"match": "x"},
+	}}); err != nil {
+		t.Fatalf("set ready automation rule: %v", err)
+	}
+	if _, err := st.CreateAppAPIKey(ctx, store.CreateAppAPIKeyInput{
+		ID:        "app_key_delete_ready",
+		UserID:    "user_delete_ready",
+		Name:      "ready-app",
+		KeyHash:   "hash",
+		KeyPrefix: "capi_ready",
+		Scopes:    []string{"requests:read"},
+	}); err != nil {
+		t.Fatalf("create ready app api key: %v", err)
+	}
+	if err := st.CreateAppAPIKeyAuditLog(ctx, store.AppAPIKeyAuditLog{
+		ID:          "app_audit_delete_ready",
+		AppAPIKeyID: "app_key_delete_ready",
+		UserID:      "user_delete_ready",
+		Route:       "/api/app/requests",
+		StatusCode:  httpStatusOK,
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create ready app api key audit log: %v", err)
+	}
+	if _, err := st.CreateModelAPIKey(ctx, store.CreateModelAPIKeyInput{
+		ID:            "model_key_delete_ready",
+		UserID:        "user_delete_ready",
+		Name:          "ready-model",
+		KeyCiphertext: "ciphertext",
+		KeyPrefix:     "vk_ready",
+		Model:         "gpt-test",
+	}); err != nil {
+		t.Fatalf("create ready model api key: %v", err)
+	}
+	if _, err := st.SetStorageUserQuota(ctx, "user_delete_ready", 1024); err != nil {
+		t.Fatalf("set ready quota: %v", err)
+	}
+	if _, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+		Path:      "/tmp/ready.png",
+		Filename:  "ready.png",
+		OwnerID:   "user_delete_ready",
+		Bytes:     55,
+		LastError: "busy",
+	}); err != nil {
+		t.Fatalf("set ready deletion failure: %v", err)
+	}
+	if _, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+		ID:           "audit_delete_ready_actor",
+		ActorUserID:  "user_delete_ready",
+		ActorRole:    "user",
+		ActorSource:  "session",
+		EventType:    "user.action",
+		ResourceType: "user",
+		ResourceID:   "user_delete_ready",
+		Action:       "demo",
+		Outcome:      "success",
+		Metadata:     map[string]any{"user_id": "user_delete_ready"},
+	}); err != nil {
+		t.Fatalf("create ready actor audit log: %v", err)
+	}
+	if _, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+		ID:           "audit_delete_ready_ref",
+		ActorUserID:  "admin",
+		ActorRole:    "admin",
+		ActorSource:  "session",
+		EventType:    "admin.user",
+		ResourceType: "user",
+		ResourceID:   "user_delete_ready",
+		Action:       "review",
+		Outcome:      "success",
+		Metadata:     map[string]any{"user_id": "user_delete_ready"},
+	}); err != nil {
+		t.Fatalf("create ready metadata audit log: %v", err)
+	}
+
+	preview, err := st.PreviewUserDeletion(ctx, "user_delete_ready")
+	if err != nil {
+		t.Fatalf("preview ready user deletion: %v", err)
+	}
+	if !preview.CanDelete {
+		t.Fatalf("expected ready preview to allow deletion: %#v", preview)
+	}
+	if preview.Counts.Identities != 1 || preview.Counts.UserConfigs != 1 || preview.Counts.AutomationRules != 1 ||
+		preview.Counts.AppAPIKeys != 1 || preview.Counts.AppAPIKeyAuditLogs != 1 || preview.Counts.ModelAPIKeys != 1 ||
+		preview.Counts.StorageUserQuotas != 1 || preview.Counts.StorageDeletionFailures != 1 ||
+		preview.Counts.AuditActorLogs != 1 || preview.Counts.AuditMetadataUserReferences != 2 {
+		t.Fatalf("unexpected ready deletion preview counts: %#v", preview)
+	}
+
+	if err := st.DeleteUserAccount(ctx, "user_delete_ready"); err != nil {
+		t.Fatalf("delete ready user account: %v", err)
+	}
+	if _, err := st.GetUser(ctx, "user_delete_ready"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected deleted user to be missing, got %v", err)
+	}
+	if identities, err := st.ListUserIdentities(ctx, "user_delete_ready"); err != nil || len(identities) != 0 {
+		t.Fatalf("expected deleted identities to be gone, identities=%#v err=%v", identities, err)
+	}
+	if configs, err := st.ListUserConfigs(ctx, "user_delete_ready"); err != nil || len(configs) != 0 {
+		t.Fatalf("expected deleted user configs to be gone, configs=%#v err=%v", configs, err)
+	}
+	if rules, err := st.ListAutomationRulesByUser(ctx, "user_delete_ready"); err != nil || len(rules) != 0 {
+		t.Fatalf("expected deleted automation rules to be gone, rules=%#v err=%v", rules, err)
+	}
+	if keys, err := st.ListAppAPIKeysByUser(ctx, "user_delete_ready"); err != nil || len(keys) != 0 {
+		t.Fatalf("expected deleted app api keys to be gone, keys=%#v err=%v", keys, err)
+	}
+	if keys, err := st.ListModelAPIKeysByUser(ctx, "user_delete_ready"); err != nil || len(keys) != 0 {
+		t.Fatalf("expected deleted model api keys to be gone, keys=%#v err=%v", keys, err)
+	}
+	if _, err := st.GetStorageUserQuota(ctx, "user_delete_ready"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected deleted user quota to be missing, got %v", err)
+	}
+	failures, err := st.ListStorageFileDeletionFailures(ctx, 10)
+	if err != nil {
+		t.Fatalf("list storage deletion failures after delete: %v", err)
+	}
+	for _, item := range failures {
+		if item.OwnerID == "user_delete_ready" {
+			t.Fatalf("expected deletion failures for deleted user to be removed: %#v", failures)
+		}
+	}
+	auditCount, err := st.CountAuditLogs(ctx, store.CountAuditLogsInput{ActorUserID: "user_delete_ready"})
+	if err != nil {
+		t.Fatalf("count actor audit logs after delete: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("expected actor audit logs to be preserved, got %d", auditCount)
 	}
 }
 

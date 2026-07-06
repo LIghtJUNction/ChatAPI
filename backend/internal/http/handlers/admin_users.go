@@ -16,6 +16,7 @@ type AdminUsersHandler struct {
 	Users      *service.AdminUserService
 	History    *service.AdminUserHistoryService
 	Identities *service.AdminUserIdentityService
+	Deletion   *service.AdminUserDeletionService
 	Audit      *service.AuditService
 }
 
@@ -82,6 +83,49 @@ func (h AdminUsersHandler) IdentityDelete(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h AdminUsersHandler) DeletePreview(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	preview, err := h.Deletion.Preview(r.Context(), userID)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"user":    preview.User,
+		"preview": preview,
+	})
+}
+
+func (h AdminUsersHandler) Purge(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	preview, err := h.Deletion.Delete(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, service.ErrUserDeletionBlocked) {
+			h.recordWithMetadata(r, userID, "purge", "failure", map[string]any{
+				"blockers": preview.Blockers,
+				"counts":   preview.Counts,
+			})
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"ok":      false,
+				"error":   err.Error(),
+				"preview": preview,
+			})
+			return
+		}
+		writeAdminUserError(w, err)
+		return
+	}
+	h.recordWithMetadata(r, userID, "purge", "success", map[string]any{
+		"counts": preview.Counts,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"deleted": true,
+		"preview": preview,
+	})
+}
+
 func (h AdminUsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var input service.CreateAdminUserInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -139,6 +183,10 @@ func (h AdminUsersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AdminUsersHandler) record(r *http.Request, userID string, action string, outcome string) {
+	h.recordWithMetadata(r, userID, action, outcome, nil)
+}
+
+func (h AdminUsersHandler) recordWithMetadata(r *http.Request, userID string, action string, outcome string, metadata map[string]any) {
 	if h.Audit == nil {
 		return
 	}
@@ -150,6 +198,7 @@ func (h AdminUsersHandler) record(r *http.Request, userID string, action string,
 		Outcome:      outcome,
 		IPAddress:    clientIP(r),
 		UserAgent:    r.UserAgent(),
+		Metadata:     metadata,
 	})
 }
 
@@ -176,6 +225,8 @@ func writeAdminUserError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrInvalidUserInput):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, service.ErrLastLoginMethod):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, service.ErrUserDeletionBlocked):
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, store.ErrNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)

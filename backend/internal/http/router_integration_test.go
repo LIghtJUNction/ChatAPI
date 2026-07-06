@@ -1659,6 +1659,13 @@ func TestConfigSystemSchemaRoute(t *testing.T) {
 func TestAdminSendTestEmailRouteRejectsInvalidSMTPConfig(t *testing.T) {
 	env := newTestEnv(t)
 
+	schemaResp := env.getJSON(t, "/api/admin/send-test-email/schema", http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 1 || nestedString(operations[0].(map[string]any), "name") != "send_test_email" {
+		t.Fatalf("unexpected admin email schema response: %#v", schemaResp)
+	}
+
 	status, body := env.postText(t, "/api/admin/send-test-email", map[string]any{
 		"email": "admin@example.com",
 	})
@@ -1666,6 +1673,14 @@ func TestAdminSendTestEmailRouteRejectsInvalidSMTPConfig(t *testing.T) {
 		t.Fatalf("expected invalid smtp config error: status=%d body=%q", status, body)
 	}
 	assertAuditCount(t, env, "admin.email", "smtp", "", "send_test_email", "failure", 1)
+
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
+	status, body = env.getTextWithHeaders(t, "/api/admin/send-test-email/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key admin email schema rejection: status=%d body=%q", status, body)
+	}
 }
 
 func TestConfigAutomationRulesRoutes(t *testing.T) {
@@ -2252,6 +2267,13 @@ func TestUserIdentitiesListAndUnlink(t *testing.T) {
 		t.Fatalf("missing session cookie: %#v", cookies)
 	}
 
+	schemaResp := env.getJSONWithCookie(t, "/api/user/identities/schema", sessionCookie, http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 2 || nestedString(operations[0].(map[string]any), "name") != "list_identities" || nestedString(operations[1].(map[string]any), "name") != "unlink_identity" {
+		t.Fatalf("unexpected user identities schema response: %#v", schemaResp)
+	}
+
 	listResp := env.getJSONWithCookie(t, "/api/user/identities", sessionCookie, http.StatusOK)
 	if numericValue(listResp["count"]) != 1 || nestedPathString(listResp["items"].([]any)[0].(map[string]any), "id") != identity.ID {
 		t.Fatalf("unexpected identities list: %#v", listResp)
@@ -2271,6 +2293,14 @@ func TestUserIdentitiesListAndUnlink(t *testing.T) {
 		t.Fatalf("expected identity to be deleted, got %v", err)
 	}
 	assertAuditCountForActor(t, env, "user_identity_owner", "user.identity", "user_identity", identity.ID, "unlink", "success", 1)
+
+	appKey := env.seedAppAPIKey(t, "user_identity_owner", []string{"requests:read"}, nil)
+	status, body = env.getTextWithHeaders(t, "/api/user/identities/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected app api key user identities schema rejection: status=%d body=%q", status, body)
+	}
 }
 
 func TestUserIdentityUnlinkRejectsLastLoginMethod(t *testing.T) {

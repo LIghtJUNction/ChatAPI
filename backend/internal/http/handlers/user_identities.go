@@ -18,6 +18,13 @@ type UserIdentitiesHandler struct {
 	Audit   *service.AuditService
 }
 
+func (h UserIdentitiesHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildUserIdentitiesSchema(),
+	})
+}
+
 func (h UserIdentitiesHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.CurrentUserID(r)
 	if userID == "" {

@@ -14,6 +14,13 @@ type AdminEmailHandler struct {
 	Audit *service.AuditService
 }
 
+func (h AdminEmailHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildAdminEmailSchema(),
+	})
+}
+
 func (h AdminEmailHandler) SendTestEmail(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email string `json:"email"`

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/zyf/chatapi/internal/platform/apikey"
 	passwordhash "github.com/zyf/chatapi/internal/platform/password"
 	"github.com/zyf/chatapi/internal/repository/migrations"
+	pgstore "github.com/zyf/chatapi/internal/repository/postgresql"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
@@ -1117,7 +1119,7 @@ func TestHealthAndReadyEndpoints(t *testing.T) {
 
 func TestReadyEndpointRejectsDirtyMigration(t *testing.T) {
 	env := newTestEnv(t)
-	if _, err := env.store.DB().ExecContext(context.Background(), `UPDATE db_meta SET value = '1' WHERE key = 'migration_dirty'`); err != nil {
+	if _, err := env.rawDB.ExecContext(context.Background(), `UPDATE db_meta SET value = '1' WHERE key = 'migration_dirty'`); err != nil {
 		t.Fatalf("mark migration dirty: %v", err)
 	}
 
@@ -1167,6 +1169,37 @@ func TestMetricsEndpointWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointWhenEnabledWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.MetricsEnabled = true
+	})
+
+	env.getJSON(t, "/api/health", http.StatusOK)
+	status, body := env.getText(t, "/metrics")
+	if status != http.StatusOK {
+		t.Fatalf("expected metrics ok: status=%d body=%q", status, body)
+	}
+	for _, expected := range []string{
+		"# HELP chatapi_go_goroutines",
+		"chatapi_system_memory_total_bytes",
+		"chatapi_process_open_fds",
+		"chatapi_data_dir_disk_total_bytes",
+		"chatapi_pending_turns",
+		"chatapi_realtime_subscribers",
+		"chatapi_postgres_pool_max_conns",
+		"chatapi_postgres_pool_total_conns",
+		`chatapi_http_requests_total{method="GET",route="/api/health",status="200"} 1`,
+		`chatapi_http_request_duration_seconds_count{method="GET",route="/api/health",status="200"} 1`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("metrics missing %q in body:\n%s", expected, body)
+		}
+	}
+	if strings.Contains(body, "chatapi_sqlite_database_bytes") {
+		t.Fatalf("postgres metrics should not expose sqlite database bytes:\n%s", body)
+	}
+}
+
 func TestUploadsImageReadAndUsage(t *testing.T) {
 	env := newTestEnv(t)
 	uploadDir := filepath.Join(env.dataDir, "uploads", "imgs")
@@ -1213,7 +1246,7 @@ func TestUploadsImageCreate(t *testing.T) {
 	var contentType string
 	var bytes int
 	var url string
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT owner_id, original_filename, content_type, bytes, url
 		FROM uploaded_images
 		WHERE filename = ?
@@ -1225,7 +1258,7 @@ func TestUploadsImageCreate(t *testing.T) {
 	}
 
 	var auditCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM audit_logs
 		WHERE actor_user_id = 'lab-user'
@@ -1273,7 +1306,7 @@ func TestUploadsRejectsStorageQuotaExceeded(t *testing.T) {
 	}
 
 	var uploadCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM uploaded_images
 		WHERE owner_id = 'lab-user'
@@ -1285,7 +1318,7 @@ func TestUploadsRejectsStorageQuotaExceeded(t *testing.T) {
 	}
 
 	var failureAuditCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM audit_logs
 		WHERE actor_user_id = 'lab-user'
@@ -1385,7 +1418,7 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 		t.Fatalf("unexpected runtime gc response: %#v", gcResp)
 	}
 	var gcAuditCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM audit_logs
 		WHERE actor_user_id = 'lab-user'
@@ -1430,7 +1463,7 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 		t.Fatalf("unexpected updated runtime settings response: %#v", updateResp)
 	}
 	var settingsAuditCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM audit_logs
 		WHERE actor_user_id = 'lab-user'
@@ -1459,6 +1492,32 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	})
 	if status != http.StatusBadRequest || !strings.Contains(body, "gogc must be non-negative") {
 		t.Fatalf("expected runtime settings validation error: status=%d body=%q", status, body)
+	}
+}
+
+func TestAdminRuntimeEndpointsWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	summaryResp := env.getJSON(t, "/api/admin/runtime/summary", http.StatusOK)
+	summary := summaryResp["summary"].(map[string]any)
+	database := summary["database"].(map[string]any)
+	if nestedString(database, "driver") != "postgresql" {
+		t.Fatalf("unexpected postgres runtime database info: %#v", summaryResp)
+	}
+	if numericValue(database["postgres_max_conns"]) <= 0 {
+		t.Fatalf("expected postgres max conns in runtime summary: %#v", summaryResp)
+	}
+	if _, ok := database["sqlite_path"]; ok {
+		t.Fatalf("postgres runtime summary should not expose sqlite path: %#v", summaryResp)
+	}
+
+	connectionsResp := env.getJSON(t, "/api/admin/runtime/connections", http.StatusOK)
+	if connectionsResp["connections"] == nil {
+		t.Fatalf("unexpected runtime connections response: %#v", connectionsResp)
+	}
+	queueResp := env.getJSON(t, "/api/admin/runtime/queue", http.StatusOK)
+	if queueResp["queue"] == nil {
+		t.Fatalf("unexpected runtime queue response: %#v", queueResp)
 	}
 }
 
@@ -1882,6 +1941,52 @@ func TestAdminStorageEndpoints(t *testing.T) {
 	}
 }
 
+func TestAdminStorageSummaryWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	summaryResp := env.getJSON(t, "/api/admin/storage/summary", http.StatusOK)
+	summary := summaryResp["summary"].(map[string]any)
+	database := summary["database"].(map[string]any)
+	if nestedString(database, "driver") != "postgresql" {
+		t.Fatalf("unexpected storage database info: %#v", summaryResp)
+	}
+	if numericValue(database["postgres_max_conns"]) <= 0 {
+		t.Fatalf("expected postgres pool stats in storage summary: %#v", summaryResp)
+	}
+	if _, ok := database["sqlite_path"]; ok {
+		t.Fatalf("postgres storage summary should not expose sqlite path: %#v", summaryResp)
+	}
+	if nestedString(summary["uploads"].(map[string]any), "path") == "" {
+		t.Fatalf("expected uploads summary path: %#v", summaryResp)
+	}
+
+	usersResp := env.getJSON(t, "/api/admin/storage/users", http.StatusOK)
+	items := usersResp["items"].([]any)
+	if len(items) != 0 {
+		t.Fatalf("expected empty postgres storage users list in fresh env: %#v", usersResp)
+	}
+}
+
+func TestAdminStorageVacuumWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	dryRunResp := env.postJSON(t, "/api/admin/storage/vacuum", map[string]any{
+		"dry_run": true,
+	}, http.StatusOK)
+	dryRunResult := dryRunResp["result"].(map[string]any)
+	before := dryRunResult["before"].(map[string]any)
+	if nestedString(before, "driver") != "postgresql" || dryRunResult["after"] != nil {
+		t.Fatalf("unexpected postgres vacuum dry-run response: %#v", dryRunResp)
+	}
+
+	status, body := env.postText(t, "/api/admin/storage/vacuum", map[string]any{
+		"dry_run": false,
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "supports sqlite only") {
+		t.Fatalf("expected postgres vacuum unsupported response: status=%d body=%q", status, body)
+	}
+}
+
 func TestAdminStorageOrphanImagesPreview(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1994,7 +2099,7 @@ func TestAdminStorageCleanupPreview(t *testing.T) {
 		t.Fatalf("unexpected cleanup owner plan: %#v", previewResp)
 	}
 	var cleanupAuditCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM audit_logs
 		WHERE actor_user_id = 'lab-user'
@@ -2111,7 +2216,7 @@ func TestAdminStorageCleanupDeletesReferencedUploads(t *testing.T) {
 		t.Fatalf("expected uploaded image file to be removed, err=%v", err)
 	}
 	var uploadCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM uploaded_images
 		WHERE filename = ?
@@ -2175,7 +2280,7 @@ func TestAdminStorageCleanupKeepsUploadsReferencedByRetainedConversation(t *test
 		t.Fatalf("expected shared upload to remain: %v", err)
 	}
 	var uploadCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM uploaded_images
 		WHERE filename = ?
@@ -2242,7 +2347,7 @@ func TestStorageFileDeletionFailureRetry(t *testing.T) {
 		t.Fatalf("expected deletion failure queue to be empty: %#v", items)
 	}
 	var uploadCount int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM uploaded_images
 		WHERE filename = 'retry.png'
@@ -2347,7 +2452,7 @@ func TestAdminStorageVacuum(t *testing.T) {
 	assertAuditCount(t, env, "admin.storage", "storage", "", "vacuum", "success", 1)
 
 	var rawMetadata string
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT metadata_json
 		FROM audit_logs
 		WHERE actor_user_id = 'lab-user'
@@ -2537,7 +2642,7 @@ func TestAppAPIAuditLogWritten(t *testing.T) {
 	}
 
 	var count int
-	if err := env.store.DB().QueryRow(`SELECT COUNT(*) FROM app_api_key_audit_logs`).Scan(&count); err != nil {
+	if err := env.rawDB.QueryRow(`SELECT COUNT(*) FROM app_api_key_audit_logs`).Scan(&count); err != nil {
 		t.Fatalf("count audit logs: %v", err)
 	}
 	if count == 0 {
@@ -2594,7 +2699,7 @@ func TestAppAPIAuditLogWrittenForForbidden(t *testing.T) {
 	}
 
 	var forbiddenCount int
-	if err := env.store.DB().QueryRow(`SELECT COUNT(*) FROM app_api_key_audit_logs WHERE status_code = 403 AND error_code = 'forbidden'`).Scan(&forbiddenCount); err != nil {
+	if err := env.rawDB.QueryRow(`SELECT COUNT(*) FROM app_api_key_audit_logs WHERE status_code = 403 AND error_code = 'forbidden'`).Scan(&forbiddenCount); err != nil {
 		t.Fatalf("count forbidden audit logs: %v", err)
 	}
 	if forbiddenCount == 0 {
@@ -2639,7 +2744,7 @@ func TestAppAPIRateLimit(t *testing.T) {
 	}
 
 	var rateLimitedCount int
-	if err := env.store.DB().QueryRow(`
+	if err := env.rawDB.QueryRow(`
 		SELECT COUNT(*)
 		FROM app_api_key_audit_logs
 		WHERE status_code = 429
@@ -3186,7 +3291,9 @@ func TestAnthropicMessagesToolCallSSEStream(t *testing.T) {
 type testEnv struct {
 	server          *httptest.Server
 	client          *http.Client
-	store           *sqlitestore.Store
+	store           store.Store
+	sqliteStore     *sqlitestore.Store
+	rawDB           *sql.DB
 	chatService     *service.ChatAPIService
 	pendingRegistry *service.PendingRegistry
 	appKeyService   *service.AppAPIKeyService
@@ -3227,27 +3334,93 @@ func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Co
 		mutate(&cfg)
 	}
 
-	store, err := sqlitestore.Open(cfg.DatabaseDSN)
+	sqliteStore, err := sqlitestore.Open(cfg.DatabaseDSN)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := migrations.Bootstrap(context.Background(), store.DB()); err != nil {
+	if err := migrations.Bootstrap(context.Background(), sqliteStore.DB()); err != nil {
 		t.Fatalf("bootstrap migrations: %v", err)
 	}
 
 	pendingRegistry := service.NewPendingRegistry()
-	realtimeHub := service.NewRealtimeHub(store)
-	chatService := service.NewChatAPIService(store, pendingRegistry, realtimeHub)
-	appKeyService := service.NewAppAPIKeyService(store)
-	modelKeyService := service.NewModelAPIKeyService(store, cfg.MasterKey)
+	realtimeHub := service.NewRealtimeHub(sqliteStore)
+	chatService := service.NewChatAPIService(sqliteStore, pendingRegistry, realtimeHub)
+	appKeyService := service.NewAppAPIKeyService(sqliteStore)
+	modelKeyService := service.NewModelAPIKeyService(sqliteStore, cfg.MasterKey)
 
-	server := httptest.NewServer(httpapi.NewRouter(cfg, store, chatService, realtimeHub, pendingRegistry))
+	server := httptest.NewServer(httpapi.NewRouter(cfg, sqliteStore, chatService, realtimeHub, pendingRegistry))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { _ = sqliteStore.Close() })
+
+	return &testEnv{
+		server:          server,
+		client:          server.Client(),
+		store:           sqliteStore,
+		sqliteStore:     sqliteStore,
+		rawDB:           sqliteStore.DB(),
+		chatService:     chatService,
+		pendingRegistry: pendingRegistry,
+		appKeyService:   appKeyService,
+		modelKeyService: modelKeyService,
+		dataDir:         cfg.DataDir,
+	}
+}
+
+func newPostgresTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Config)) *testEnv {
+	t.Helper()
+
+	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
+	if dsn == "" {
+		t.Skip("CHATAPI_PG_TEST_DSN is not set")
+	}
+
+	tempDir := t.TempDir()
+	cfg := config.Config{
+		Mode:           mode,
+		Host:           "127.0.0.1",
+		Port:           0,
+		WebDistDir:     tempDir,
+		DataDir:        tempDir,
+		DatabaseDriver: "postgresql",
+		DatabaseDSN:    dsn,
+		AllowRemoteLab: false,
+		OpenBrowser:    false,
+		MasterKey:      "test-master-key",
+		SessionSecret:  "test-session-secret",
+		LogLevel:       "error",
+		CORSOrigins:    []string{"http://localhost"},
+	}
+	if mutate != nil {
+		mutate(&cfg)
+	}
+
+	pgStore, err := pgstore.Open(context.Background(), cfg.DatabaseDSN)
+	if err != nil {
+		t.Fatalf("open postgresql: %v", err)
+	}
+	t.Cleanup(pgStore.Close)
+	if err := pgstore.Reset(context.Background(), pgStore.Pool()); err != nil {
+		t.Fatalf("reset postgresql: %v", err)
+	}
+	if err := pgstore.Bootstrap(context.Background(), pgStore.Pool()); err != nil {
+		t.Fatalf("bootstrap postgresql: %v", err)
+	}
+
+	pendingRegistry := service.NewPendingRegistry()
+	realtimeHub := service.NewRealtimeHub(pgStore)
+	chatService := service.NewChatAPIService(pgStore, pendingRegistry, realtimeHub)
+	appKeyService := service.NewAppAPIKeyService(pgStore)
+	modelKeyService := service.NewModelAPIKeyService(pgStore, cfg.MasterKey)
+
+	server := httptest.NewServer(httpapi.NewRouter(cfg, pgStore, chatService, realtimeHub, pendingRegistry))
 	t.Cleanup(server.Close)
 
 	return &testEnv{
 		server:          server,
 		client:          server.Client(),
-		store:           store,
+		store:           pgStore,
+		sqliteStore:     nil,
+		rawDB:           nil,
 		chatService:     chatService,
 		pendingRegistry: pendingRegistry,
 		appKeyService:   appKeyService,
@@ -3799,7 +3972,7 @@ func assertAuditCount(t *testing.T, env *testEnv, eventType string, resourceType
 func assertAuditCountForActor(t *testing.T, env *testEnv, actorUserID string, eventType string, resourceType string, resourceID string, action string, outcome string, want int) {
 	t.Helper()
 	var count int
-	if err := env.store.DB().QueryRowContext(context.Background(), `
+	if err := env.rawDB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM audit_logs
 		WHERE actor_user_id = ?

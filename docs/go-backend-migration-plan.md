@@ -104,6 +104,7 @@
 - 注册与邮箱找回密码最小闭环已补上：`GET /api/auth/register/config` / `POST /api/auth/register/send-code` / `POST /api/auth/register` 和 `GET /api/auth/password/config` / `POST /api/auth/password/send-code` / `POST /api/auth/password/reset` 已可工作。当前系统会从 `config.system_settings` 读取 `external_registration_enabled`、`email_verification_enabled`、注册邮箱域名限制等配置；密码找回是否可用取决于当前进程 SMTP 配置是否有效。邮箱验证码当前通过新增 `auth_verification_codes` 表持久化，按 `email + purpose` upsert，验证码本体不落库，只保存基于 master key 的 hash；注册成功后创建本地 `users` 记录，找回密码成功后更新 `users.password_hash`。当前已先补上单邮箱/单用途 60 秒发送限流和 5 次错误尝试上限，超过后必须重新发码；后台每 15 分钟会批量清理过期验证码。GeeTest v4 也已接入登录、注册和找回密码发码链路，运行时从 `CHATAPI_GEETEST_CAPTCHA_ID`、`CHATAPI_GEETEST_CAPTCHA_KEY`、`CHATAPI_GEETEST_API_SERVER` 读取配置；当 GeeTest 校验请求失败或返回非 success 时会 fail-closed 拒绝请求，而不是绕过人机验证。
 - TOTP 双因素认证已补上最小闭环：`GET /api/auth/totp/setup` 生成新的 TOTP secret、otpauth URI 和二维码 PNG base64；`POST /api/auth/totp/confirm` 校验验证码后启用；`POST /api/auth/totp/reset` 删除当前用户的 TOTP 配置。启用后，本地账号和 `.env` 恢复管理员登录都会在密码正确后要求额外提交 `totp` 字段；缺失或错误时返回 `401` 和 `totp_required=true`，前端可直接切出验证码输入框。TOTP secret 当前使用服务端 master key 加密后保存在 `user_configs.security.totp`，而通用 `/api/user/config` 会过滤 `security.*` 保留键，避免敏感配置回显到普通设置接口。
 - OIDC RP 登录已落地最小闭环：新增 `GET /api/auth/oidc/config`、`GET /api/auth/oidc/login`、`GET /api/auth/oidc/link`、`GET /api/auth/oidc/callback`，使用 `golang.org/x/oauth2` 和 `github.com/coreos/go-oidc/v3/oidc` 走 Authorization Code Flow + PKCE，校验 state、nonce、ID Token issuer/audience/expiry/signature；callback 会在有 access token 时拉取 UserInfo 补充缺失 claims，并要求 UserInfo `sub` 与 ID Token `sub` 一致。`/api/auth/oidc/login` 会创建同一类 ChatAPI session；`/api/auth/oidc/link` 要求当前已有 session user，并在 callback 中把 OIDC subject 绑定到当前账号，若该 subject 已绑定其他账号则返回 `409`。当前按 `CHATAPI_OIDC_ALLOWED_DOMAINS` / `CHATAPI_OIDC_ALLOWED_EMAILS` 做 allowlist，allowlist 命中和自动关联已有本地邮箱都要求 `email_verified=true`；`CHATAPI_OIDC_AUTO_CREATE_USER=1` 时可自动创建本地用户并 upsert `user_identities`，命中 `CHATAPI_OIDC_ADMIN_EMAILS` 且 `email_verified=true` 时同步为 admin；管理员邮箱列表变化后，下次 OIDC 登录或显式绑定会按新列表刷新非本地显式管理员的角色。用户侧 OIDC 身份查看/解绑已落地：`GET /api/user/identities` 列出当前用户身份，`DELETE /api/user/identities/{identity_id}` 只能解绑当前用户自己的身份，并阻止无本地密码用户删除最后一个登录方式。当前 `httptest` 已补上 OIDC callback 成功链路、显式绑定链路和 UserInfo `sub` 不一致拒绝分支，覆盖本地测试 provider discovery、token exchange、JWKS 验签、UserInfo merge、管理员邮箱映射、OIDC 身份绑定冲突和 session 建立；OIDC 登录发起、OIDC 登录成功、显式绑定发起、绑定成功和角色同步当前也已开始写入 `auth.session` 审计事件，并带 provider / subject / role 变化 metadata，后续仍可继续补更细前端交互。
+- Kirari delegated LLM 基础 client 已开始独立沉淀到 `internal/platform/kirari`：当前已提供 OIDC discovery、issuer allowlist、authorization URL + PKCE、authorization code exchange、ID token 校验、UserInfo merge、refresh token、`/api/llm/meta` 和 `/api/llm/chat/completions` 原始调用能力，并带独立单元测试；当前还未接入 ChatAPI 用户级 Kirari 连接路由、token 加密入库和 delegated upstream 业务流，但底层可复用包边界已经成型，后续 ChatAPI 集成和抽独立仓库时不需要再从 HTTP handler 里拆逻辑。
 - 用户身份管理 schema 已开始显式暴露：`GET /api/user/identities/schema` 当前声明外部身份列表与解绑接口的路径和约束，明确它只允许交互式用户 actor 使用，并在“无本地密码且只剩最后一个登录方式”时返回 `409`，避免前端继续硬编码这条账号安全规则。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
 - `/api/user/*` 已开始收敛到统一的“交互式用户 actor”边界：当前只允许 `lab`、本地 session、OIDC session 访问；应用 API Key 与虚拟模型 API Key 即使携带同一 `user_id`，也不能直接调用用户设置、用户密钥、用户身份等交互式路由，避免程序化凭据越权复用 WebUI 用户接口。
@@ -1328,6 +1329,12 @@ type UpstreamProvider interface {
 - 包内默认不记录 prompt；调用方传入 logger 时也必须脱敏。
 
 这个包可以先在 ChatAPI 仓库内部 `internal/platform/kirari` 落地，接口稳定后再抽到独立仓库。
+
+当前 Go 重构分支已先落地第一版 `internal/platform/kirari`：
+
+- `Config`、`Client`、`DiscoveryDocument`、`AuthorizationSession`、`TokenSet`、`Identity` 和 `TokenStore` 接口已定义。
+- 已支持 discovery、issuer allowlist、Auth URL + PKCE、code exchange、refresh token、ID token + UserInfo 合并校验，以及 delegated `/api/llm/meta` / `/api/llm/chat/completions` 调用。
+- 当前仍未接入 ChatAPI 用户连接路由和数据库 token 加密存储；这部分在 ChatAPI 集成层继续实现，而不是塞回 client 包内。
 
 ### 6.10 Admin 和用户配置
 

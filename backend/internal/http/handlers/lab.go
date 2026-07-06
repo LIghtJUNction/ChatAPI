@@ -80,6 +80,24 @@ func (h LabHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h LabHandler) CopyRequestCurl(w http.ResponseWriter, r *http.Request) {
+	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
+	if requestID == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+	item, err := h.Service.GetRequest(r.Context(), requestID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"request_id": requestID,
+		"curl":       buildReplayCurl(requestBaseURL(r), item),
+	})
+}
+
 func (h LabHandler) RequestDelta(w http.ResponseWriter, r *http.Request) {
 	h.executeRequestTurnControl(w, r, service.TurnControlStreamDelta)
 }

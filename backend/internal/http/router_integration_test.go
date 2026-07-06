@@ -473,6 +473,10 @@ func TestLabRequestEndpointsByRequestID(t *testing.T) {
 		!strings.Contains(nestedString(replay, "curl"), "X-Debug: lab-request-id") {
 		t.Fatalf("unexpected lab replay curl: %#v", requestResp)
 	}
+	copyCurlResp := env.postJSON(t, "/lab/requests/"+requestID+"/copy-curl", map[string]any{}, http.StatusOK)
+	if nestedString(copyCurlResp, "request_id") != requestID || nestedString(copyCurlResp, "curl") != nestedString(replay, "curl") {
+		t.Fatalf("unexpected lab copy-curl response: %#v", copyCurlResp)
+	}
 
 	env.postJSON(t, "/lab/requests/"+requestID+"/delta", map[string]any{
 		"text": "通过 request_id 输出",
@@ -592,9 +596,10 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 	schemaResp := env.appGetJSON(t, "/api/app/requests/schema", appKey, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 5 ||
+	if len(operations) != 6 ||
 		nestedString(operations[0].(map[string]any), "name") != "list_requests" ||
-		nestedString(operations[4].(map[string]any), "name") != "request_abort" {
+		nestedString(operations[2].(map[string]any), "name") != "copy_request_curl" ||
+		nestedString(operations[5].(map[string]any), "name") != "request_abort" {
 		t.Fatalf("unexpected app requests schema response: %#v", schemaResp)
 	}
 
@@ -659,6 +664,10 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 		nestedPathString(detailResp, "parsed", "user_text") != "app api 测试" {
 		t.Fatalf("unexpected app api parsed request view: %#v", detailResp)
 	}
+	copyCurlResp := env.appPostJSON(t, "/api/app/requests/"+requestID+"/copy-curl", appKey, map[string]any{}, http.StatusOK)
+	if nestedString(copyCurlResp, "request_id") != requestID || !strings.Contains(nestedString(copyCurlResp, "curl"), "/v1/chat/completions") {
+		t.Fatalf("unexpected app request copy-curl response: %#v", copyCurlResp)
+	}
 
 	env.appPostJSON(t, "/api/app/requests/"+requestID+"/complete", appKey, map[string]any{
 		"text": "应用 API 完成",
@@ -721,6 +730,10 @@ func TestAppAPIRequestsResourceLimits(t *testing.T) {
 	if len(parsedItems) != 1 || nestedString(parsedItems[0].(map[string]any), "request_id") != allowedRequestID {
 		t.Fatalf("unexpected resource-limited parsed request list: %#v", listResp)
 	}
+	copyCurlResp := env.appPostJSON(t, "/api/app/requests/"+allowedRequestID+"/copy-curl", appKey, map[string]any{}, http.StatusOK)
+	if nestedString(copyCurlResp, "request_id") != allowedRequestID {
+		t.Fatalf("unexpected allowed request copy-curl payload: %#v", copyCurlResp)
+	}
 
 	allowedResp := env.appGetJSON(t, "/api/app/requests/"+allowedRequestID, appKey, http.StatusOK)
 	if nestedPathString(allowedResp, "request", "request_id") != allowedRequestID {
@@ -730,6 +743,10 @@ func TestAppAPIRequestsResourceLimits(t *testing.T) {
 	status, body := env.appGetText(t, "/api/app/requests/"+blockedRequestID, appKey)
 	if status != http.StatusForbidden || !strings.Contains(body, "forbidden") {
 		t.Fatalf("expected blocked request detail rejection: status=%d body=%q", status, body)
+	}
+	status, body = env.appPostText(t, "/api/app/requests/"+blockedRequestID+"/copy-curl", appKey, map[string]any{})
+	if status != http.StatusForbidden || !strings.Contains(body, "forbidden") {
+		t.Fatalf("expected blocked request copy-curl rejection: status=%d body=%q", status, body)
 	}
 
 	status, body = env.appPostText(t, "/api/app/requests/"+blockedRequestID+"/complete", appKey, map[string]any{
@@ -1935,11 +1952,12 @@ func TestLabRequestsSchema(t *testing.T) {
 	resp := env.getJSON(t, "/lab/requests/schema", http.StatusOK)
 	schema := resp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 5 {
+	if len(operations) != 6 {
 		t.Fatalf("unexpected lab requests schema response: %#v", resp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "list_requests" ||
-		nestedString(operations[4].(map[string]any), "name") != "request_abort" {
+		nestedString(operations[2].(map[string]any), "name") != "copy_request_curl" ||
+		nestedString(operations[5].(map[string]any), "name") != "request_abort" {
 		t.Fatalf("unexpected lab requests schema operations: %#v", resp)
 	}
 }

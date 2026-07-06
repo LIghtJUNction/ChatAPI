@@ -4,20 +4,22 @@ import "testing"
 
 func TestBuildLabRequestsSchema(t *testing.T) {
 	schema := BuildLabRequestsSchema()
-	if len(schema.Operations) != 5 {
+	if len(schema.Operations) != 6 {
 		t.Fatalf("unexpected lab requests schema operations: %#v", schema)
 	}
-	if schema.Operations[2].Name != "request_delta" || schema.Operations[4].Name != "request_abort" {
+	if schema.Operations[2].Name != "copy_request_curl" || schema.Operations[3].Name != "request_delta" || schema.Operations[5].Name != "request_abort" {
 		t.Fatalf("unexpected lab requests schema operations: %#v", schema)
 	}
 }
 
 func TestBuildAppRequestsSchema(t *testing.T) {
 	schema := BuildAppRequestsSchema()
-	if len(schema.Operations) != 5 {
+	if len(schema.Operations) != 6 {
 		t.Fatalf("unexpected app requests schema operations: %#v", schema)
 	}
-	if schema.Operations[0].Path != "/api/app/requests" || schema.Operations[3].Path != "/api/app/requests/{request_id}/complete" {
+	if schema.Operations[0].Path != "/api/app/requests" ||
+		schema.Operations[2].Path != "/api/app/requests/{request_id}/copy-curl" ||
+		schema.Operations[4].Path != "/api/app/requests/{request_id}/complete" {
 		t.Fatalf("unexpected app requests schema paths: %#v", schema)
 	}
 }

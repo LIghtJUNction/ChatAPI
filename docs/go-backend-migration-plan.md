@@ -33,9 +33,11 @@
 - pending turn 已补上最小状态机约束：`delta` 会把会话推进到 `streaming`，终态后的 `delta` / `complete` / `abort` 会返回 `409`，并用集成测试守护这些行为。
 - `backend/internal/service` 已开始收敛统一的 `TurnControlCommand`，把 WebUI 手工回复、后续应用 API 和自动化规则共享的 turn control 输入模型从 handler 中抽离出来。
 - 已补上 `request_id -> conversation_id -> TurnControlCommand` 的最小解析链路，并先用于 `lab` 路由；后续应用 API 的 `/api/app/requests/{request_id}/*` 将直接复用这层能力。
+- 应用 API 的 `POST /api/app/requests/{request_id}/delta|complete|abort` 当前也已切到同一条 `request_id -> conversation_id -> TurnControlCommand` 控制链路，避免 Lab 和 app API 各自维护一份 request resolver。
 - 已补上统一的 request 读取视图（列表 + 详情）并先用于 `GET /lab/requests`、`GET /lab/requests/{request_id}`；后续 `/api/app/requests` 应直接复用这套 request reader，而不是再单独拼查询结构。
 - Lab 与应用 API 的 request/conversation 读取契约已开始显式暴露：`GET /lab/requests/schema`、`GET /api/app/requests/schema` 和 `GET /api/app/conversations/schema` 当前统一声明请求列表/详情/回复、会话列表/消息查看这些操作的路径、scope、parsed 视图语义与资源限制说明，避免工作台和外部自动化再维护各自的手写查询字段表。
 - 请求详情的 parsed 视图当前也已开始补齐调试回放字段：`request_method`、`request_path`、`request_query`、脱敏后的 `request_headers`，以及基于当前实例 URL 构造的 `replay.curl`，用于 Lab 模式和工作台“一键复制 curl / 查看请求细节”能力；`Authorization`、`Cookie`、`X-ChatAPI-App-Key` 等敏感头不会落库。
+- `POST /lab/requests/{request_id}/copy-curl` 和 `POST /api/app/requests/{request_id}/copy-curl` 当前也已落地最小版本：服务端直接返回脱敏后的 replay curl 文本，便于 Lab 工作台和外部自动化工具复用同一份命令构造，而不是各自重新拼装 URL、headers 和 body。
 - 应用 API 概览契约也已开始显式暴露：`GET /api/app/me/schema` 和 `GET /api/app/statistics/schema` 当前统一声明 app API key 自描述与用户统计摘要的路径、scope 和返回语义，避免自动化脚本继续从示例响应里反推 `app_api_key`、`user`、`summary` 的字段结构。
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
 - 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。

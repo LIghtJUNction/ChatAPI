@@ -116,6 +116,29 @@ func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item, "parsed": requestParsedView(requestBaseURL(r), item)})
 }
 
+func (h AppAPIHandler) CopyRequestCurl(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
+	item, err := h.Service.GetRequestForOwner(r.Context(), requestID, principal.UserID)
+	if err != nil {
+		h.writeRequestError(w, err)
+		return
+	}
+	if !appAPIRequestAllowed(principal, item) {
+		h.writeRequestError(w, service.ErrForbidden)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"request_id": requestID,
+		"curl":       buildReplayCurl(requestBaseURL(r), item),
+	})
+}
+
 func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
 	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
 	if !ok {
@@ -372,7 +395,6 @@ func (h AppAPIHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.
 	body := decodeBodyOrEmpty(r)
 	command := service.TurnControlCommand{
 		Kind:                kind,
-		ConversationID:      request.ConversationID,
 		ResponseID:          stringValue(body["response_id"], ""),
 		OutputText:          stringValue(body["text"], ""),
 		Mode:                stringValue(body["mode"], "assistant_message"),
@@ -382,7 +404,7 @@ func (h AppAPIHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.
 		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
 		AbortReason:         stringValue(body["error"], ""),
 	}
-	result, err := h.Service.ExecuteTurnControl(r.Context(), command)
+	result, err := h.Service.ExecuteTurnControlByRequestID(r.Context(), requestID, command)
 	if err != nil {
 		if errors.Is(err, service.ErrPendingConflict) || errors.Is(err, store.ErrTurnConflict) {
 			http.Error(w, err.Error(), http.StatusConflict)

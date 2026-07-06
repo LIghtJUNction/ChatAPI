@@ -70,6 +70,17 @@ func buildRequestAccessSchema(listPath string, detailPath string, controlBasePat
 				},
 			},
 			{
+				Name:           "copy_request_curl",
+				Method:         "POST",
+				Path:           detailPath + "/copy-curl",
+				Description:    "Build a replayable curl command for one captured request.",
+				RequiredScopes: []string{"requests:read"},
+				Notes: []string{
+					"The response shape is {ok, request_id, curl}.",
+					"Sensitive headers such as Authorization, Cookie, and X-ChatAPI-App-Key are excluded from the generated curl command.",
+				},
+			},
+			{
 				Name:           "request_delta",
 				Method:         "POST",
 				Path:           controlBasePath + "/delta",

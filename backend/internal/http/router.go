@@ -148,6 +148,7 @@ func NewRouter(
 	router.Get("/lab/requests", labHandler.ListRequests)
 	router.Get("/lab/requests/schema", labHandler.RequestsSchema)
 	router.Get("/lab/requests/{requestID}", labHandler.GetRequest)
+	router.Post("/lab/requests/{requestID}/copy-curl", labHandler.CopyRequestCurl)
 	router.Post("/lab/requests/{requestID}/delta", labHandler.RequestDelta)
 	router.Post("/lab/requests/{requestID}/complete", labHandler.RequestComplete)
 	router.Post("/lab/requests/{requestID}/abort", labHandler.RequestAbort)
@@ -176,6 +177,10 @@ func NewRouter(
 		appAuth("requests:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/requests/{requestID}", appAPIHandler.GetRequest)
+	appRouter.With(
+		appAuth("requests:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Post("/requests/{requestID}/copy-curl", appAPIHandler.CopyRequestCurl)
 	appRouter.With(
 		appAuth("conversations:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),

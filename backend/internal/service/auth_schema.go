@@ -162,12 +162,22 @@ func BuildAuthSchema(cfg config.Config, settings AuthPublicSettings) AuthSchema 
 				},
 			},
 			{
+				Name:          "oidc_link",
+				Method:        "GET",
+				Path:          "/api/auth/oidc/link",
+				Description:   "Start an OIDC authorization code + PKCE flow for linking the provider account to the current session user.",
+				RequiresActor: "session_user",
+				Notes: []string{
+					"Writes short-lived state, nonce, PKCE verifier and intent cookies under /api/auth/oidc before redirecting to the identity provider.",
+				},
+			},
+			{
 				Name:        "oidc_callback",
 				Method:      "GET",
 				Path:        "/api/auth/oidc/callback",
-				Description: "Complete the OIDC authorization code flow and create a ChatAPI session.",
+				Description: "Complete the OIDC authorization code flow and either create a ChatAPI session or bind the provider identity to the current session user.",
 				Notes: []string{
-					"Consumes the state, nonce and PKCE cookies written by the login endpoint.",
+					"Consumes the state, nonce, PKCE and intent cookies written by the login/link endpoint.",
 				},
 			},
 		},

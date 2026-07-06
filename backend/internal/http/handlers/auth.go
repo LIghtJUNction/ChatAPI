@@ -20,6 +20,11 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const (
+	oidcIntentLogin = "login"
+	oidcIntentLink  = "link"
+)
+
 type AuthHandler struct {
 	Config       config.Config
 	Audit        *service.AuditService
@@ -209,6 +214,7 @@ func (h AuthHandler) OIDCConfig(w http.ResponseWriter, r *http.Request) {
 		"enabled":       h.Config.Mode != config.ModeLab && h.Config.OIDCEnabled,
 		"provider_name": h.oidcProviderName(),
 		"login_url":     "/api/auth/oidc/login",
+		"link_url":      "/api/auth/oidc/link",
 	})
 }
 
@@ -237,6 +243,41 @@ func (h AuthHandler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", state, int((10*time.Minute).Seconds())))
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", nonce, int((10*time.Minute).Seconds())))
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", pkceVerifier, int((10*time.Minute).Seconds())))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_intent", oidcIntentLogin, int((10*time.Minute).Seconds())))
+	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(pkceVerifier)), http.StatusFound)
+}
+
+func (h AuthHandler) OIDCLink(w http.ResponseWriter, r *http.Request) {
+	if h.Config.Mode == config.ModeLab || !h.Config.OIDCEnabled {
+		http.Error(w, "oidc is not enabled", http.StatusNotFound)
+		return
+	}
+	actor, ok := service.RequestActorFromContext(r.Context())
+	if !ok || strings.TrimSpace(actor.UserID) == "" {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	oauthCfg, _, err := h.oidcRuntime(r.Context())
+	if err != nil {
+		h.recordAuthAudit(r, "oidc_link", "failure")
+		http.Error(w, "oidc is not configured", http.StatusInternalServerError)
+		return
+	}
+	state, err := randomToken()
+	if err != nil {
+		http.Error(w, "failed to create oidc state", http.StatusInternalServerError)
+		return
+	}
+	nonce, err := randomToken()
+	if err != nil {
+		http.Error(w, "failed to create oidc nonce", http.StatusInternalServerError)
+		return
+	}
+	pkceVerifier := oauth2.GenerateVerifier()
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", state, int((10*time.Minute).Seconds())))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", nonce, int((10*time.Minute).Seconds())))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", pkceVerifier, int((10*time.Minute).Seconds())))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_intent", oidcIntentLink, int((10*time.Minute).Seconds())))
 	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(pkceVerifier)), http.StatusFound)
 }
 
@@ -250,20 +291,20 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errText, http.StatusUnauthorized)
 		return
 	}
-	stateCookie, err := r.Cookie("chatapi_oidc_state")
-	if err != nil || stateCookie.Value == "" || !subtleCompare(stateCookie.Value, r.URL.Query().Get("state")) {
+	stateValue, err := oidcCookieValue(r, "chatapi_oidc_state")
+	if err != nil || stateValue == "" || !subtleCompare(stateValue, r.URL.Query().Get("state")) {
 		h.recordAuthAudit(r, "oidc_state", "failure")
 		http.Error(w, "invalid oidc state", http.StatusUnauthorized)
 		return
 	}
-	nonceCookie, err := r.Cookie("chatapi_oidc_nonce")
-	if err != nil || nonceCookie.Value == "" {
+	nonceValue, err := oidcCookieValue(r, "chatapi_oidc_nonce")
+	if err != nil || nonceValue == "" {
 		h.recordAuthAudit(r, "oidc_nonce", "failure")
 		http.Error(w, "invalid oidc nonce", http.StatusUnauthorized)
 		return
 	}
-	pkceCookie, err := r.Cookie("chatapi_oidc_pkce")
-	if err != nil || pkceCookie.Value == "" {
+	pkceVerifier, err := oidcCookieValue(r, "chatapi_oidc_pkce")
+	if err != nil || pkceVerifier == "" {
 		h.recordAuthAudit(r, "oidc_pkce", "failure")
 		http.Error(w, "invalid oidc pkce verifier", http.StatusUnauthorized)
 		return
@@ -272,12 +313,6 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.recordAuthAudit(r, "oidc_callback", "failure")
 		http.Error(w, "oidc is not configured", http.StatusInternalServerError)
-		return
-	}
-	pkceVerifier, err := url.QueryUnescape(pkceCookie.Value)
-	if err != nil {
-		h.recordAuthAudit(r, "oidc_pkce", "failure")
-		http.Error(w, "invalid oidc pkce verifier", http.StatusUnauthorized)
 		return
 	}
 	token, err := oauthCfg.Exchange(r.Context(), strings.TrimSpace(r.URL.Query().Get("code")), oauth2.VerifierOption(pkceVerifier))
@@ -299,7 +334,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "oidc id_token verification failed", http.StatusUnauthorized)
 		return
 	}
-	if idToken.Nonce != nonceCookie.Value {
+	if idToken.Nonce != nonceValue {
 		h.recordAuthAudit(r, "oidc_nonce", "failure")
 		http.Error(w, "invalid oidc nonce", http.StatusUnauthorized)
 		return
@@ -315,9 +350,47 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "oidc userinfo claims are invalid", http.StatusUnauthorized)
 		return
 	}
+	intent := oidcIntentLogin
+	if value, err := oidcCookieValue(r, "chatapi_oidc_intent"); err == nil && strings.TrimSpace(value) == oidcIntentLink {
+		intent = oidcIntentLink
+	}
 	claims := claimsFromMap(rawClaims)
 	if h.OIDCAuth == nil {
 		http.Error(w, "oidc auth service is not configured", http.StatusInternalServerError)
+		return
+	}
+	if intent == oidcIntentLink {
+		currentActor, ok := service.RequestActorFromContext(r.Context())
+		if !ok || strings.TrimSpace(currentActor.UserID) == "" {
+			h.recordAuthAudit(r, "oidc_link", "failure")
+			http.Error(w, "session required", http.StatusUnauthorized)
+			return
+		}
+		user, identity, err := h.OIDCAuth.BindIdentity(r.Context(), currentActor.UserID, claims)
+		if err != nil {
+			h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), currentActor)), oidcBindFailureAction(err), "failure")
+			http.Error(w, oidcBindFailureMessage(err), oidcBindFailureStatus(err))
+			return
+		}
+		clearOIDCCookies(w, r)
+		linkedActor := service.RequestActor{
+			UserID:   user.ID,
+			Username: authActorUsername(user.ID, user.Username, user.Email),
+			Role:     authUserRole(user.Role),
+			Source:   currentActor.Source,
+		}
+		h.writeSessionActorCookie(w, r, linkedActor)
+		h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), linkedActor)), "oidc_link", "success")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":       true,
+			"linked":   true,
+			"identity": identity,
+			"user": map[string]any{
+				"id":       linkedActor.UserID,
+				"username": linkedActor.Username,
+				"role":     linkedActor.Role,
+			},
+		})
 		return
 	}
 	actor, err := h.OIDCAuth.Authenticate(r.Context(), claims)
@@ -326,9 +399,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, oidcFailureMessage(err), http.StatusUnauthorized)
 		return
 	}
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", "", -1))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", "", -1))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", "", -1))
+	clearOIDCCookies(w, r)
 	h.writeLoginSuccess(w, r, actor, "")
 }
 
@@ -485,13 +556,10 @@ func (h AuthHandler) writeLoginSuccess(w http.ResponseWriter, r *http.Request, a
 	if h.LoginLimiter != nil && limitKey != "" {
 		h.LoginLimiter.Reset(limitKey)
 	}
-	codec := service.NewSessionCodec(h.Config.SessionSecret)
-	sessionValue, err := codec.Encode(actor, service.DefaultSessionTTL)
-	if err != nil {
+	if err := h.writeSessionActorCookie(w, r, actor); err != nil {
 		http.Error(w, "session is not configured", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, sessionCookie(r, sessionValue, service.SessionMaxAge(service.DefaultSessionTTL)))
 	h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), actor)), "login", "success")
 	userPayload := map[string]any{"id": actor.UserID, "username": actor.Username, "role": actor.Role}
 	w.Header().Set("Content-Type", "application/json")
@@ -499,6 +567,16 @@ func (h AuthHandler) writeLoginSuccess(w http.ResponseWriter, r *http.Request, a
 		"ok":   true,
 		"user": userPayload,
 	})
+}
+
+func (h AuthHandler) writeSessionActorCookie(w http.ResponseWriter, r *http.Request, actor service.RequestActor) error {
+	codec := service.NewSessionCodec(h.Config.SessionSecret)
+	sessionValue, err := codec.Encode(actor, service.DefaultSessionTTL)
+	if err != nil {
+		return err
+	}
+	http.SetCookie(w, sessionCookie(r, sessionValue, service.SessionMaxAge(service.DefaultSessionTTL)))
+	return nil
 }
 
 func (h AuthHandler) oidcRuntime(ctx context.Context) (*oauth2.Config, *oidc.Provider, error) {
@@ -645,6 +723,21 @@ func oidcCookie(r *http.Request, name string, value string, maxAge int) *http.Co
 	}
 }
 
+func clearOIDCCookies(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", "", -1))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", "", -1))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", "", -1))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_intent", "", -1))
+}
+
+func oidcCookieValue(r *http.Request, name string) (string, error) {
+	cookie, err := r.Cookie(name)
+	if err != nil {
+		return "", err
+	}
+	return url.QueryUnescape(cookie.Value)
+}
+
 func randomToken() (string, error) {
 	var buf [32]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -697,6 +790,24 @@ func stringClaim(raw map[string]any, key string) string {
 	return ""
 }
 
+func authActorUsername(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return "user"
+}
+
+func authUserRole(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return "user"
+	}
+	return role
+}
+
 func boolClaim(raw map[string]any, key string) bool {
 	if value, ok := raw[key].(bool); ok {
 		return value
@@ -725,5 +836,43 @@ func oidcFailureMessage(err error) string {
 		return "oidc account is not linked"
 	default:
 		return "oidc login failed"
+	}
+}
+
+func oidcBindFailureAction(err error) string {
+	switch {
+	case errors.Is(err, service.ErrOIDCAccessDenied):
+		return "oidc_link_access_denied"
+	case errors.Is(err, service.ErrOIDCIdentityConflict):
+		return "oidc_link_conflict"
+	case errors.Is(err, service.ErrOIDCSubjectIsMissing):
+		return "oidc_link_subject"
+	default:
+		return "oidc_link"
+	}
+}
+
+func oidcBindFailureMessage(err error) string {
+	switch {
+	case errors.Is(err, service.ErrOIDCAccessDenied):
+		return "oidc account is not allowed"
+	case errors.Is(err, service.ErrOIDCIdentityConflict):
+		return "oidc account is already linked to another user"
+	case errors.Is(err, service.ErrOIDCSubjectIsMissing):
+		return "oidc subject is required"
+	default:
+		return "oidc link failed"
+	}
+}
+
+func oidcBindFailureStatus(err error) int {
+	switch {
+	case errors.Is(err, service.ErrOIDCAccessDenied),
+		errors.Is(err, service.ErrOIDCSubjectIsMissing):
+		return http.StatusUnauthorized
+	case errors.Is(err, service.ErrOIDCIdentityConflict):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
 	}
 }

@@ -2541,7 +2541,7 @@ func TestUserIdentitiesListAndUnlink(t *testing.T) {
 	schemaResp := env.getJSONWithCookie(t, "/api/user/identities/schema", sessionCookie, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 2 || nestedString(operations[0].(map[string]any), "name") != "list_identities" || nestedString(operations[1].(map[string]any), "name") != "unlink_identity" {
+	if len(operations) != 3 || nestedString(operations[0].(map[string]any), "name") != "list_identities" || nestedString(operations[1].(map[string]any), "name") != "link_identity" || nestedString(operations[2].(map[string]any), "name") != "unlink_identity" {
 		t.Fatalf("unexpected user identities schema response: %#v", schemaResp)
 	}
 
@@ -3848,12 +3848,13 @@ func TestAuthSchemaReflectsServeSettings(t *testing.T) {
 		t.Fatalf("unexpected auth schema capabilities: %#v", resp)
 	}
 	operations := schema["operations"].([]any)
-	if len(operations) != 15 {
+	if len(operations) != 16 {
 		t.Fatalf("unexpected auth schema operations: %#v", resp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "session" ||
 		nestedString(operations[1].(map[string]any), "name") != "login" ||
-		nestedString(operations[12].(map[string]any), "name") != "oidc_config" {
+		nestedString(operations[12].(map[string]any), "name") != "oidc_config" ||
+		nestedString(operations[14].(map[string]any), "name") != "oidc_link" {
 		t.Fatalf("unexpected auth schema operation ordering: %#v", resp)
 	}
 }
@@ -3885,7 +3886,7 @@ func TestOIDCConfigEndpointReflectsServeSettings(t *testing.T) {
 		cfg.OIDCRedirectURL = "http://chat.example.com/api/auth/oidc/callback"
 	})
 	enabled := enabledEnv.getJSON(t, "/api/auth/oidc/config", http.StatusOK)
-	if enabled["enabled"] != true || enabled["provider_name"] != "Kirari" || enabled["login_url"] != "/api/auth/oidc/login" {
+	if enabled["enabled"] != true || enabled["provider_name"] != "Kirari" || enabled["login_url"] != "/api/auth/oidc/login" || enabled["link_url"] != "/api/auth/oidc/link" {
 		t.Fatalf("unexpected enabled oidc config: %#v", enabled)
 	}
 }
@@ -3992,6 +3993,90 @@ func TestOIDCCallbackCreatesSessionFromVerifiedAdminEmail(t *testing.T) {
 		t.Fatalf("unexpected oidc identity after callback: %#v", identity)
 	}
 	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "login", "success", 1)
+}
+
+func TestOIDCLinkBindsIdentityToCurrentSessionUser(t *testing.T) {
+	const state = "state-link"
+	const nonce = "nonce-link"
+	const pkce = "pkce-link"
+	provider := newTestOIDCProvider(t, testOIDCProviderConfig{
+		IDTokenClaims: map[string]any{
+			"sub":   "oidc-link-sub",
+			"nonce": nonce,
+		},
+		UserInfoClaims: map[string]any{
+			"sub":            "oidc-link-sub",
+			"email":          "linked@example.com",
+			"email_verified": true,
+			"name":           "Linked User",
+		},
+	})
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.OIDCEnabled = true
+		cfg.OIDCIssuerURL = provider.Issuer()
+		cfg.OIDCClientID = "chatapi"
+		cfg.OIDCClientSecret = "secret"
+		cfg.OIDCRedirectURL = "http://chat.example.com/api/auth/oidc/callback"
+	})
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_link_owner",
+		Username:     "link-owner",
+		Email:        "",
+		PasswordHash: mustPasswordHash(t, "link-secret"),
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed link owner: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "link-owner",
+		"password": "link-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("expected session cookie after local login")
+	}
+
+	status, location, linkCookies := env.getRedirectWithCookies(t, "/api/auth/oidc/link", []*http.Cookie{sessionCookie})
+	if status != http.StatusFound || !strings.Contains(location, "code_challenge=") {
+		t.Fatalf("expected oidc link redirect, got status=%d location=%q", status, location)
+	}
+	intentCookie := findCookie(linkCookies, "chatapi_oidc_intent")
+	if findCookie(linkCookies, "chatapi_oidc_state") == nil ||
+		findCookie(linkCookies, "chatapi_oidc_nonce") == nil ||
+		findCookie(linkCookies, "chatapi_oidc_pkce") == nil ||
+		intentCookie == nil || neturl.QueryEscape("link") != intentCookie.Value {
+		t.Fatalf("expected oidc link cookies, got %#v", linkCookies)
+	}
+
+	callbackResp, callbackCookies := env.getJSONAndCookiesWithCookies(t, "/api/auth/oidc/callback?code=success-code&state="+neturl.QueryEscape(state), []*http.Cookie{
+		sessionCookie,
+		{Name: "chatapi_oidc_state", Value: neturl.QueryEscape(state), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_nonce", Value: neturl.QueryEscape(nonce), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_pkce", Value: neturl.QueryEscape(pkce), Path: "/api/auth/oidc"},
+		{Name: "chatapi_oidc_intent", Value: neturl.QueryEscape("link"), Path: "/api/auth/oidc"},
+	}, http.StatusOK)
+	if callbackResp["ok"] != true || callbackResp["linked"] != true || nestedPathString(callbackResp, "identity", "subject") != "oidc-link-sub" {
+		t.Fatalf("unexpected oidc link callback response: %#v", callbackResp)
+	}
+	refreshedSession := findCookie(callbackCookies, service.SessionCookieName)
+	if refreshedSession == nil || refreshedSession.Value == "" {
+		t.Fatalf("expected refreshed session cookie after oidc link, got %#v", callbackCookies)
+	}
+	listResp := env.getJSONWithCookie(t, "/api/user/identities", refreshedSession, http.StatusOK)
+	if numericValue(listResp["count"]) != 1 {
+		t.Fatalf("expected linked identity to appear in list: %#v", listResp)
+	}
+	identity, err := env.store.GetUserIdentity(context.Background(), "oidc", "oidc-link-sub")
+	if err != nil {
+		t.Fatalf("load linked oidc identity: %v", err)
+	}
+	if identity.UserID != "user_link_owner" {
+		t.Fatalf("unexpected linked identity owner: %#v", identity)
+	}
+	assertAuditCountForActor(t, env, "user_link_owner", "auth.session", "session", "user_link_owner", "oidc_link", "success", 1)
 }
 
 func TestOIDCCallbackRejectsUserInfoSubjectMismatch(t *testing.T) {
@@ -7211,6 +7296,33 @@ func (e *testEnv) getRedirect(t *testing.T, path string) (int, string, []*http.C
 	return resp.StatusCode, location, resp.Cookies()
 }
 
+func (e *testEnv) getRedirectWithCookies(t *testing.T, path string, cookies []*http.Cookie) (int, string, []*http.Cookie) {
+	t.Helper()
+	client := *e.client
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	req, err := http.NewRequest(http.MethodGet, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new redirect request %s: %v", path, err)
+	}
+	for _, cookie := range cookies {
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("get redirect with cookies %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	location := ""
+	if target, err := resp.Location(); err == nil {
+		location = target.String()
+	}
+	return resp.StatusCode, location, resp.Cookies()
+}
+
 func (e *testEnv) waitForWaitingConversation(t *testing.T, title string) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -7453,6 +7565,15 @@ func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
 		}
 	}
 	return nil
+}
+
+func mustPasswordHash(t *testing.T, password string) string {
+	t.Helper()
+	hash, err := passwordhash.Hash(password)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	return hash
 }
 
 type fakeSMTPServer struct {

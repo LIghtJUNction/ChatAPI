@@ -195,6 +195,83 @@ func TestOIDCAuthRequiresVerifiedEmailToLinkExistingUser(t *testing.T) {
 	}
 }
 
+func TestOIDCAuthBindIdentityLinksCurrentUser(t *testing.T) {
+	st := newOIDCTestStore(t)
+	cfg := config.Default(config.ModeServe, t.TempDir())
+	cfg.OIDCEnabled = true
+	svc := NewOIDCAuthService(st, cfg)
+
+	user, err := st.CreateUser(context.Background(), store.CreateUserInput{
+		ID:       "user_bind",
+		Username: "bind-user",
+		Email:    "",
+		Role:     "user",
+		IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create bind user: %v", err)
+	}
+
+	updated, identity, err := svc.BindIdentity(context.Background(), user.ID, OIDCClaims{
+		Subject:       "sub-bind",
+		Email:         "bind@example.com",
+		EmailVerified: true,
+		Name:          "Bind User",
+		Profile:       map[string]any{"sub": "sub-bind"},
+	})
+	if err != nil {
+		t.Fatalf("bind oidc identity: %v", err)
+	}
+	if updated.Email != "bind@example.com" || updated.LastLoginAt == nil {
+		t.Fatalf("unexpected updated user after bind: %#v", updated)
+	}
+	if identity.UserID != user.ID || identity.Subject != "sub-bind" || !identity.EmailVerified {
+		t.Fatalf("unexpected identity after bind: %#v", identity)
+	}
+}
+
+func TestOIDCAuthBindIdentityRejectsForeignLink(t *testing.T) {
+	st := newOIDCTestStore(t)
+	cfg := config.Default(config.ModeServe, t.TempDir())
+	cfg.OIDCEnabled = true
+	svc := NewOIDCAuthService(st, cfg)
+
+	firstUser, err := st.CreateUser(context.Background(), store.CreateUserInput{
+		ID:       "user_first",
+		Username: "first-user",
+		Email:    "first@example.com",
+		Role:     "user",
+		IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create first user: %v", err)
+	}
+	secondUser, err := st.CreateUser(context.Background(), store.CreateUserInput{
+		ID:       "user_second",
+		Username: "second-user",
+		Email:    "second@example.com",
+		Role:     "user",
+		IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create second user: %v", err)
+	}
+	if _, _, err := svc.BindIdentity(context.Background(), firstUser.ID, OIDCClaims{
+		Subject:       "sub-shared",
+		Email:         "first@example.com",
+		EmailVerified: true,
+	}); err != nil {
+		t.Fatalf("seed first bind: %v", err)
+	}
+	if _, _, err := svc.BindIdentity(context.Background(), secondUser.ID, OIDCClaims{
+		Subject:       "sub-shared",
+		Email:         "second@example.com",
+		EmailVerified: true,
+	}); !errors.Is(err, ErrOIDCIdentityConflict) {
+		t.Fatalf("expected foreign identity conflict, got %v", err)
+	}
+}
+
 func newOIDCTestStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "chatapi.sqlite3")

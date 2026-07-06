@@ -19,6 +19,7 @@ var (
 	ErrOIDCUserNotFound     = errors.New("oidc user not found")
 	ErrOIDCEmailUnverified  = errors.New("oidc email is not verified")
 	ErrOIDCSubjectIsMissing = errors.New("oidc subject is required")
+	ErrOIDCIdentityConflict = errors.New("oidc identity is already linked to another user")
 )
 
 type OIDCClaims struct {
@@ -76,6 +77,67 @@ func (s *OIDCAuthService) Authenticate(ctx context.Context, claims OIDCClaims) (
 	return s.updateLogin(ctx, user, claims)
 }
 
+func (s *OIDCAuthService) BindIdentity(ctx context.Context, userID string, claims OIDCClaims) (store.User, store.UserIdentity, error) {
+	if s == nil || s.store == nil {
+		return store.User{}, store.UserIdentity{}, ErrOIDCUserNotFound
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return store.User{}, store.UserIdentity{}, ErrOIDCUserNotFound
+	}
+	subject := strings.TrimSpace(claims.Subject)
+	if subject == "" {
+		return store.User{}, store.UserIdentity{}, ErrOIDCSubjectIsMissing
+	}
+	email := normalizeEmail(claims.Email)
+	if !s.isAllowedEmail(email, claims.EmailVerified) {
+		return store.User{}, store.UserIdentity{}, ErrOIDCAccessDenied
+	}
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return store.User{}, store.UserIdentity{}, err
+	}
+	if !user.IsActive {
+		return store.User{}, store.UserIdentity{}, ErrOIDCAccessDenied
+	}
+	identity, err := s.store.GetUserIdentity(ctx, "oidc", subject)
+	if err == nil && identity.UserID != user.ID {
+		return store.User{}, store.UserIdentity{}, ErrOIDCIdentityConflict
+	}
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return store.User{}, store.UserIdentity{}, err
+	}
+
+	lastLoginAt := s.now().UTC()
+	updated, err := s.store.UpdateUser(ctx, store.UpdateUserInput{
+		ID:           user.ID,
+		Username:     user.Username,
+		Email:        firstNonEmptyString(user.Email, email),
+		PasswordHash: user.PasswordHash,
+		Role:         s.nextRole(user, email, claims.EmailVerified),
+		IsActive:     user.IsActive,
+		LocalAdmin:   user.LocalAdmin,
+		LastLoginAt:  &lastLoginAt,
+	})
+	if err != nil {
+		return store.User{}, store.UserIdentity{}, err
+	}
+	identity, err = s.store.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
+		ID:            identityID(identity),
+		UserID:        updated.ID,
+		Provider:      "oidc",
+		Subject:       subject,
+		Email:         email,
+		EmailVerified: claims.EmailVerified,
+		Profile:       claims.Profile,
+		LastLoginAt:   &lastLoginAt,
+	})
+	if err != nil {
+		return store.User{}, store.UserIdentity{}, err
+	}
+	return updated, identity, nil
+}
+
 func (s *OIDCAuthService) lookupOrCreateUser(ctx context.Context, claims OIDCClaims) (store.User, error) {
 	email := normalizeEmail(claims.Email)
 	if email != "" {
@@ -111,19 +173,13 @@ func (s *OIDCAuthService) updateLogin(ctx context.Context, user store.User, clai
 		return RequestActor{}, ErrOIDCAccessDenied
 	}
 	email := normalizeEmail(claims.Email)
-	role := s.roleForEmail(email, claims.EmailVerified)
-	if user.LocalAdmin {
-		role = "admin"
-	} else if role == "" {
-		role = "user"
-	}
 	lastLoginAt := s.now().UTC()
 	updated, err := s.store.UpdateUser(ctx, store.UpdateUserInput{
 		ID:           user.ID,
 		Username:     user.Username,
 		Email:        firstNonEmptyString(user.Email, email),
 		PasswordHash: user.PasswordHash,
-		Role:         role,
+		Role:         s.nextRole(user, email, claims.EmailVerified),
 		IsActive:     user.IsActive,
 		LocalAdmin:   user.LocalAdmin,
 		LastLoginAt:  &lastLoginAt,
@@ -149,6 +205,27 @@ func (s *OIDCAuthService) updateLogin(ctx context.Context, user store.User, clai
 		Role:     userRole(updated),
 		Source:   "oidc",
 	}, nil
+}
+
+func (s *OIDCAuthService) nextRole(user store.User, email string, verified bool) string {
+	role := s.roleForEmail(email, verified)
+	if user.LocalAdmin {
+		return "admin"
+	}
+	if strings.TrimSpace(role) != "" {
+		return role
+	}
+	if strings.TrimSpace(user.Role) != "" {
+		return strings.TrimSpace(user.Role)
+	}
+	return "user"
+}
+
+func identityID(existing store.UserIdentity) string {
+	if strings.TrimSpace(existing.ID) != "" {
+		return strings.TrimSpace(existing.ID)
+	}
+	return "identity_" + uuid.NewString()
 }
 
 func (s *OIDCAuthService) isAllowedEmail(email string, verified bool) bool {

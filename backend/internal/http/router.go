@@ -109,6 +109,7 @@ func NewRouter(
 	router.Post("/api/auth/totp/reset", authHandler.TOTPReset)
 	router.Get("/api/auth/oidc/config", authHandler.OIDCConfig)
 	router.Get("/api/auth/oidc/login", authHandler.OIDCLogin)
+	router.With(middleware.RequireUserActor()).Get("/api/auth/oidc/link", authHandler.OIDCLink)
 	router.Get("/api/auth/oidc/callback", authHandler.OIDCCallback)
 	userRouter := chi.NewRouter()
 	userRouter.Use(middleware.RequireUserActor())

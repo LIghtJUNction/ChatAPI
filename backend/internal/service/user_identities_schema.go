@@ -28,6 +28,16 @@ func BuildUserIdentitiesSchema() UserIdentitiesSchema {
 				},
 			},
 			{
+				Name:         "link_identity",
+				Method:       "GET",
+				Path:         "/api/auth/oidc/link",
+				Description:  "Start an OIDC provider flow that links the provider account to the current interactive user.",
+				RequiresUser: true,
+				Notes: []string{
+					"Serve mode requires an existing session and redirects the browser to the configured OIDC provider.",
+				},
+			},
+			{
 				Name:         "unlink_identity",
 				Method:       "DELETE",
 				Path:         "/api/user/identities/{identity_id}",

@@ -12,7 +12,7 @@ func TestBuildAuthSchema(t *testing.T) {
 		EmailVerificationEnabled: true,
 		PasswordResetEnabled:     true,
 	})
-	if len(schema.Operations) != 15 {
+	if len(schema.Operations) != 16 {
 		t.Fatalf("unexpected auth schema operations: %#v", schema)
 	}
 	if schema.Capabilities["oidc_enabled"] != true || schema.Capabilities["oidc_provider_name"] != "Kirari" {
@@ -20,5 +20,8 @@ func TestBuildAuthSchema(t *testing.T) {
 	}
 	if schema.Operations[1].Name != "login" || len(schema.Operations[1].Fields) != 3 {
 		t.Fatalf("unexpected auth login schema: %#v", schema.Operations[1])
+	}
+	if schema.Operations[14].Name != "oidc_link" || schema.Operations[15].Name != "oidc_callback" {
+		t.Fatalf("unexpected oidc auth schema operations: %#v", schema.Operations)
 	}
 }

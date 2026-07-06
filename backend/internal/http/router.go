@@ -63,6 +63,7 @@ func NewRouter(
 	adminStorageHandler := handlers.AdminStorageHandler{Monitor: storageMonitor, Audit: auditService}
 	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}
 	adminAuditHandler := handlers.AdminAuditHandler{Audit: auditService}
+	adminUsersHandler := handlers.AdminUsersHandler{Users: service.NewAdminUserService(dataStore), Audit: auditService}
 	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending}
 	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
 
@@ -172,6 +173,10 @@ func NewRouter(
 	adminRouter.Post("/storage/vacuum", adminStorageHandler.Vacuum)
 	adminRouter.Get("/requests/overview", adminRequestsHandler.Overview)
 	adminRouter.Get("/audit/logs", adminAuditHandler.List)
+	adminRouter.Get("/users", adminUsersHandler.List)
+	adminRouter.Post("/users", adminUsersHandler.Create)
+	adminRouter.Put("/users/{userID}/password", adminUsersHandler.ResetPassword)
+	adminRouter.Delete("/users/{userID}", adminUsersHandler.Delete)
 	router.Mount("/api/admin", adminRouter)
 	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
 	router.Post("/api/conversations/{conversationID}/abort", chatHandler.AbortConversation)

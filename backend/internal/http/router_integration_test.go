@@ -1437,6 +1437,71 @@ func TestServeAdminLoginRateLimit(t *testing.T) {
 	}
 }
 
+func TestAdminUsersManageLocalUsers(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.AdminPassword = "admin-secret"
+	})
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "admin",
+		"password": "admin-secret",
+	}, http.StatusOK)
+	adminCookie := findCookie(cookies, service.SessionCookieName)
+	if adminCookie == nil {
+		t.Fatalf("missing admin session cookie: %#v", cookies)
+	}
+	headers := map[string]string{"Origin": env.server.URL}
+
+	createResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
+		"username": "managed",
+		"email":    "managed@example.com",
+		"password": "initial-secret",
+		"role":     "user",
+	}, adminCookie, headers, http.StatusCreated)
+	userID := nestedPathString(createResp, "user", "id")
+	if userID == "" || nestedPathString(createResp, "user", "username") != "managed" || nestedPathString(createResp, "user", "password_hash") != "" {
+		t.Fatalf("unexpected user create response: %#v", createResp)
+	}
+
+	listResp := env.getJSONWithCookie(t, "/api/admin/users", adminCookie, http.StatusOK)
+	if listResp["count"].(float64) < 1 || !responseItemsContainID(listResp, userID) {
+		t.Fatalf("expected created user in admin list: %#v", listResp)
+	}
+
+	resetResp := env.putJSONWithCookieAndHeaders(t, "/api/admin/users/"+userID+"/password", map[string]any{
+		"password": "rotated-secret",
+	}, adminCookie, headers, http.StatusOK)
+	if nestedPathString(resetResp, "user", "id") != userID {
+		t.Fatalf("unexpected password reset response: %#v", resetResp)
+	}
+
+	loginResp, userCookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "managed",
+		"password": "rotated-secret",
+	}, http.StatusOK)
+	if nestedPathString(loginResp, "user", "id") != userID {
+		t.Fatalf("expected managed user login after reset: %#v", loginResp)
+	}
+	if findCookie(userCookies, service.SessionCookieName) == nil {
+		t.Fatalf("expected managed user session cookie: %#v", userCookies)
+	}
+
+	deleteResp := env.deleteJSONWithCookieAndHeaders(t, "/api/admin/users/"+userID, adminCookie, headers, http.StatusOK)
+	if nestedPathBool(deleteResp, "user", "is_active") {
+		t.Fatalf("expected user to be deactivated: %#v", deleteResp)
+	}
+	status, body := env.postText(t, "/api/auth/login", map[string]any{
+		"username": "managed",
+		"password": "rotated-secret",
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "invalid username or password") {
+		t.Fatalf("expected deactivated user login rejection: status=%d body=%q", status, body)
+	}
+
+	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "create", "success", 1)
+	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "reset_password", "success", 1)
+	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "deactivate", "success", 1)
+}
+
 func TestAdminRuntimeRejectsAPIKeys(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
@@ -3071,6 +3136,38 @@ func (e *testEnv) putJSON(t *testing.T, path string, body map[string]any, wantSt
 	return payload
 }
 
+func (e *testEnv) putJSONWithCookieAndHeaders(t *testing.T, path string, body map[string]any, cookie *http.Cookie, headers map[string]string, wantStatus int) map[string]any {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do request %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response %s: %v", path, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
+	}
+	return payload
+}
+
 func (e *testEnv) putText(t *testing.T, path string, body map[string]any) (int, string) {
 	t.Helper()
 	rawBody, err := json.Marshal(body)
@@ -3124,6 +3221,33 @@ func (e *testEnv) deleteJSON(t *testing.T, path string, wantStatus int) map[stri
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
 		t.Fatalf("decode delete response %s: %v body=%q", path, err, body)
+	}
+	return payload
+}
+
+func (e *testEnv) deleteJSONWithCookieAndHeaders(t *testing.T, path string, cookie *http.Cookie, headers map[string]string, wantStatus int) map[string]any {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, e.server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do delete %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode delete response %s: %v", path, err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("unexpected delete status for %s: got %d want %d payload=%#v", path, resp.StatusCode, wantStatus, payload)
 	}
 	return payload
 }
@@ -3575,6 +3699,30 @@ func nestedPathString(record map[string]any, path ...string) string {
 		return value
 	}
 	return ""
+}
+
+func nestedPathBool(record map[string]any, path ...string) bool {
+	var current any = record
+	for _, key := range path {
+		nextMap, ok := current.(map[string]any)
+		if !ok {
+			return false
+		}
+		current = nextMap[key]
+	}
+	value, _ := current.(bool)
+	return value
+}
+
+func responseItemsContainID(record map[string]any, id string) bool {
+	items, _ := record["items"].([]any)
+	for _, item := range items {
+		asMap, _ := item.(map[string]any)
+		if nestedString(asMap, "id") == id {
+			return true
+		}
+	}
+	return false
 }
 
 func numericValue(value any) int {

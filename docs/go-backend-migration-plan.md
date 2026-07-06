@@ -60,6 +60,7 @@
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
 - SQLite bootstrap schema 已补齐用户体系基础表：`users`、`user_identities`、`user_configs`、`config`，并已补上 `users` / `user_identities` / `config` / `user_configs` 的 SQLite 仓储基础方法和 repository 测试。当前业务仍使用 Lab actor 和 `.env` admin session；这些表和仓储先作为后续 OIDC、本地用户、管理员用户管理、用户配置和系统配置的稳定落点。
 - 密码哈希和本地 users 表登录基础已落地：新增 `internal/platform/password`，新密码使用 Argon2id PHC 风格格式，旧 `salt$sha256(salt+password)` 可验证并返回 `NeedsUpgrade`。serve 模式 `POST /api/auth/login` 会优先按 username/email 查询 `users` 表，验证本地密码，成功后建立同一类 session；旧 hash 登录成功后会自动升级为 Argon2id 并更新 `last_login_at`。`.env` 的 `CHATAPI_ADMIN_PASSWORD` 仍保留为 `admin` 用户恢复入口。
+- 管理员用户管理已落地最小接口：`GET /api/admin/users` 列出本地用户，`POST /api/admin/users` 创建本地用户并写入 Argon2id 密码 hash，`PUT /api/admin/users/{user_id}/password` 重置密码，`DELETE /api/admin/users/{user_id}` 当前实现为停用用户而非物理删除，保留历史请求、上传、API key 等 owner 归属；这些接口仅允许 admin session 访问，并写入 `admin.user` 审计事件。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
 - 本地 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 优先验证 `users` 表本地账号，失败后允许 `admin` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 作为恢复入口，成功后用独立 `CHATAPI_SESSION_SECRET` 写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。`chatapi setup` 已生成 `CHATAPI_SESSION_SECRET`；如果老部署未配置，serve 启动会生成随机 session secret 并持久化到 `config` 表的 `security.session_secret`，Lab 使用进程内不安全默认值且不持久化。本地管理员登录已补上最小进程内失败限流，连续失败后返回 `429` 并写审计事件；后续多实例部署应迁移到 Redis 或数据库限流器。注册、密码重置、TOTP 和 OIDC RP 登录仍是后续工作。
 - `owner_id` 的来源已不再直接硬编码在业务层；当前通过统一的 `RequestActor` 上下文注入 Lab actor、app api principal 和 virtual model key principal，后续接 session、OIDC 用户时只需要继续往同一个 actor 上下文注入即可。
@@ -668,7 +669,7 @@ Go 重构版新增表：
 
 首版不强制拆分这些 JSON 字段，避免破坏兼容性。
 
-`users`、`user_configs`、`config` 和 `user_identities` 已在 SQLite bootstrap schema 中创建。当前 Go 重构分支已先补齐 `users` / `user_identities` 的 SQLite repository 基础能力，包括创建/更新/查询用户、按 email 查询用户、列出用户、按 OIDC provider + subject upsert / 查询外部身份和列出用户身份；同时补齐 `config` / `user_configs` 的 JSON 值 CRUD 仓储，用于后续系统设置、用户设置和运行时配置持久化。当前尚未把本地登录/OIDC 登录切到完整 `users` 表，仍保留 `.env` 管理员恢复入口和 Lab actor；这些表和仓储先保证后续用户体系、用户配置、系统配置和 OIDC 绑定有稳定迁移目标。
+`users`、`user_configs`、`config` 和 `user_identities` 已在 SQLite bootstrap schema 中创建。当前 Go 重构分支已先补齐 `users` / `user_identities` 的 SQLite repository 基础能力，包括创建/更新/查询用户、按 username/email 查询用户、列出用户、按 OIDC provider + subject upsert / 查询外部身份和列出用户身份；同时补齐 `config` / `user_configs` 的 JSON 值 CRUD 仓储，用于后续系统设置、用户设置和运行时配置持久化。本地用户名密码登录已开始使用 `users` 表，仍保留 `.env` 管理员恢复入口和 Lab actor；OIDC 登录绑定仍待后续接入 `user_identities`。
 
 `user_identities` 是 Go 重构版为 OIDC 登录新增的表。首个 migration 应在不影响旧库登录的前提下创建该表；旧用户默认没有外部身份绑定，仍可使用本地密码登录。
 
@@ -1541,7 +1542,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 
 - 老 SQLite 数据库启动 Go 服务后可登录。
 - 旧用户密码登录成功后可升级 hash。
-- 当前 Go 重构分支已先落地本地管理员签名 cookie session；OIDC 开启时仍需后续完成 authorization code 登录，创建或绑定本地用户，并建立同一类 ChatAPI session。
+- 当前 Go 重构分支已先落地本地 users 表登录和签名 cookie session；OIDC 开启时仍需后续完成 authorization code 登录，创建或绑定本地用户，并建立同一类 ChatAPI session。
 - OIDC 登录邮箱命中 `CHATAPI_OIDC_ADMIN_EMAILS` 且 `email_verified=true` 时可获得 admin role；未验证邮箱不能获得 admin。
 - OIDC 关闭时相关入口不泄露 provider 配置和 client secret。
 - 旧 API Key 可继续访问 `/v1/*`。
@@ -1618,7 +1619,7 @@ Lab 模式额外路由只在 `chatapi lab` 中注册，不能出现在生产 `se
 - 审计 metadata 会过滤包含 password、secret、token、authorization、key 的字段，避免误写敏感值。
 - 应用 API Key 请求当前仍写入 `app_api_key_audit_logs`，用于保留 key id、scope 拒绝和状态码等细节；管理员审计查询可通过 `include_app_api=1` 聚合查看这些请求，后续再扩展更细的分页游标和 source 过滤。
 
-仍待补齐的审计事件包括 OIDC 登录/绑定、系统配置变更、ntfy/email 发送失败和上游模型辅助调用；本地 session 登录/登出、管理员运行时/存储操作、上传和 API Key 管理已开始写入 `audit_logs`。
+仍待补齐的审计事件包括 OIDC 登录/绑定、系统配置变更、ntfy/email 发送失败和上游模型辅助调用；本地 session 登录/登出、管理员运行时/存储/用户操作、上传和 API Key 管理已开始写入 `audit_logs`。
 
 审计日志应独立于普通运行日志等级：即使 `CHATAPI_LOG_LEVEL=warn`，关键安全事件仍应写入 audit channel。审计日志只记录必要元数据和结果，不记录完整请求体、密钥、密码、OIDC token 或上游模型输出全文。
 
@@ -1992,8 +1993,8 @@ make release-snapshot
 
 工作：
 
-- 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出和 session；注册、密码重置、TOTP、OIDC RP 和管理员用户管理仍待补齐。
-- 用户配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。
+- 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出和 session；注册、密码重置、TOTP 和 OIDC RP 仍待补齐。
+- 用户配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前管理员用户管理已先支持列表、创建、重置密码和停用用户；用户详情历史、物理删除策略和 OIDC 绑定管理仍待补齐。
 - CSRF、CORS、Cookie 策略。当前已先落地 session mutation Origin/Referer 校验和 HttpOnly SameSite cookie。
 
 验收：

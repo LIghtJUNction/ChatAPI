@@ -17,6 +17,7 @@ import (
 
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
+	"github.com/zyf/chatapi/internal/migratedb"
 	"github.com/zyf/chatapi/internal/observability"
 	"github.com/zyf/chatapi/internal/platform/browser"
 	"github.com/zyf/chatapi/internal/platform/email"
@@ -56,6 +57,9 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if len(args) > 0 && args[0] == "migrate" {
 		return runMigrate(ctx, args[1:], backendRoot)
+	}
+	if len(args) > 0 && args[0] == "migrate-db" {
+		return runMigrateDB(ctx, args[1:])
 	}
 	if len(args) > 0 && args[0] == "config" {
 		return runConfig(args[1:], backendRoot)
@@ -917,6 +921,21 @@ type migrateOptions struct {
 	force   bool
 }
 
+type migrateDBOptions struct {
+	command  string
+	sqlite   string
+	postgres string
+}
+
+type migrateDBReport struct {
+	OK       bool             `json:"ok"`
+	Command  string           `json:"command"`
+	SQLite   string           `json:"sqlite"`
+	Postgres string           `json:"postgres"`
+	Result   migratedb.Report `json:"result"`
+	Error    string           `json:"error,omitempty"`
+}
+
 func parseMigrateOptions(args []string) (migrateOptions, error) {
 	options := migrateOptions{command: args[0]}
 	switch options.command {
@@ -940,6 +959,79 @@ func parseMigrateOptions(args []string) (migrateOptions, error) {
 		return migrateOptions{}, fmt.Errorf("unknown migrate command %q, supported: up, status, down --force", options.command)
 	}
 	return options, nil
+}
+
+func runMigrateDB(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("unknown migrate-db command, supported: sqlite-to-postgres --sqlite <path> --postgres <dsn>")
+	}
+	options, err := parseMigrateDBOptions(args)
+	if err != nil {
+		return err
+	}
+	report, err := migrateDBCommand(ctx, options)
+	if err != nil {
+		_ = writeJSONReport(os.Stdout, report)
+		return err
+	}
+	return writeJSONReport(os.Stdout, report)
+}
+
+func parseMigrateDBOptions(args []string) (migrateDBOptions, error) {
+	options := migrateDBOptions{command: strings.TrimSpace(args[0])}
+	if options.command != "sqlite-to-postgres" {
+		return migrateDBOptions{}, fmt.Errorf("unknown migrate-db command %q, supported: sqlite-to-postgres --sqlite <path> --postgres <dsn>", options.command)
+	}
+	for index := 1; index < len(args); index++ {
+		arg := strings.TrimSpace(args[index])
+		switch arg {
+		case "--sqlite":
+			index++
+			if index >= len(args) {
+				return migrateDBOptions{}, errors.New("--sqlite requires a path")
+			}
+			options.sqlite = strings.TrimSpace(args[index])
+		case "--postgres":
+			index++
+			if index >= len(args) {
+				return migrateDBOptions{}, errors.New("--postgres requires a dsn")
+			}
+			options.postgres = strings.TrimSpace(args[index])
+		default:
+			return migrateDBOptions{}, fmt.Errorf("unknown migrate-db option %q, supported: --sqlite, --postgres", arg)
+		}
+	}
+	if options.sqlite == "" {
+		return migrateDBOptions{}, errors.New("migrate-db sqlite-to-postgres requires --sqlite")
+	}
+	if options.postgres == "" {
+		return migrateDBOptions{}, errors.New("migrate-db sqlite-to-postgres requires --postgres")
+	}
+	return options, nil
+}
+
+func migrateDBCommand(ctx context.Context, options migrateDBOptions) (migrateDBReport, error) {
+	report := migrateDBReport{
+		OK:       true,
+		Command:  options.command,
+		SQLite:   options.sqlite,
+		Postgres: options.postgres,
+	}
+	switch options.command {
+	case "sqlite-to-postgres":
+		result, err := migratedb.SQLiteToPostgres(ctx, options.sqlite, options.postgres)
+		report.Result = result
+		if err != nil {
+			report.OK = false
+			report.Error = err.Error()
+			return report, err
+		}
+		return report, nil
+	default:
+		report.OK = false
+		report.Error = fmt.Sprintf("unsupported migrate-db command %q", options.command)
+		return report, errors.New(report.Error)
+	}
 }
 
 func migrateCommand(ctx context.Context, options migrateOptions, backendRoot string) (migrateReport, error) {
@@ -1113,7 +1205,7 @@ func parseMode(args []string) (config.Mode, error) {
 	case "lab":
 		return config.ModeLab, nil
 	default:
-		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check, migrate, config print --redact, oidc test, smtp, setup, version", args[0])
+		return "", fmt.Errorf("unknown command %q, supported: serve, lab, doctor, db check, migrate, migrate-db, config print --redact, oidc test, smtp, setup, version", args[0])
 	}
 }
 

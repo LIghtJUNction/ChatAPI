@@ -921,6 +921,7 @@ ChatAPI 的 OpenAI Responses、Chat Completions、Anthropic Messages 三套协�
 - 指令角色侧当前也已开始显式保留：`TurnRequest` 已新增 `SystemContent` / `DeveloperContent`，会从 Chat Completions / Responses 的 `role=system|developer` 消息，以及 Anthropic 的顶层 `system` 字段里提取文本。这样后续如果要做更完整的上游代理、调试上下文展示或策略校验，不需要再回退到原始 body 里自己翻 role。
 - assistant 上下文侧当前也已开始显式保留：`TurnRequest.AssistantContent` 会提取三套协议里历史 assistant 文本消息内容。这样后续如果要在浏览器端做“请求大模型”辅助、展示更完整的最近上下文，或在后端做更细的规则匹配，不需要只盯着最后一条 user/tool 输入。
 - 这些解析出来的上下文字段当前已继续下推到 pending turn `request_debug` 持久化：SQLite / PostgreSQL 在创建请求时都会把 `system_text`、`developer_text`、`assistant_text` 写进 message metadata，并在 `GetRequest/ListRequests` 读取路径回填到统一 `store.Request`。这样协议层新增信息不会只停留在解析阶段，后续管理端、Lab 模式和应用 API 读取请求详情时都能复用。
+- Lab 请求详情和应用 API 请求详情当前已能直接读到这些上下文字段；对应集成测试已开始覆盖 `GET /lab/requests/{requestID}` 和 `GET /api/app/requests/{requestID}` 的 `system_text` / `developer_text` / `assistant_text` 返回，确保 SQLite / PostgreSQL 两条后端路径下都不会在读取阶段丢字段。
 
 这个包可以同时被 ChatAPI 和 KirariNetwork 使用：ChatAPI 用它接收外部 Agent 请求并归一化为 pending turn，KirariNetwork 可用它把不同上游模型协议归一化为统一模型网关响应。
 

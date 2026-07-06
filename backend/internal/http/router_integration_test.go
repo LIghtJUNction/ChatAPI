@@ -392,16 +392,13 @@ func TestStreamDeltaPathEndpoint(t *testing.T) {
 func TestLabRequestEndpointsByRequestID(t *testing.T) {
 	env := newTestEnv(t)
 
-	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
 		"model": "demo-lab-request-id",
-		"input": []map[string]any{
-			{
-				"type": "message",
-				"role": "user",
-				"content": []map[string]any{
-					{"type": "input_text", "text": "lab request id 测试"},
-				},
-			},
+		"messages": []map[string]any{
+			{"role": "system", "content": "lab system policy"},
+			{"role": "developer", "content": "lab developer hint"},
+			{"role": "assistant", "content": "lab previous answer"},
+			{"role": "user", "content": "lab request id 测试"},
 		},
 	})
 
@@ -416,6 +413,11 @@ func TestLabRequestEndpointsByRequestID(t *testing.T) {
 	if nestedString(requestRecord, "request_id") != requestID || nestedString(requestRecord, "conversation_id") != conversation["id"].(string) {
 		t.Fatalf("unexpected lab request payload: %#v", requestResp)
 	}
+	if nestedString(requestRecord, "system_text") != "lab system policy" ||
+		nestedString(requestRecord, "developer_text") != "lab developer hint" ||
+		nestedString(requestRecord, "assistant_text") != "lab previous answer" {
+		t.Fatalf("unexpected lab request context fields: %#v", requestResp)
+	}
 
 	env.postJSON(t, "/lab/requests/"+requestID+"/delta", map[string]any{
 		"text": "通过 request_id 输出",
@@ -425,7 +427,16 @@ func TestLabRequestEndpointsByRequestID(t *testing.T) {
 	}, http.StatusOK)
 
 	finalResp := <-resultCh
-	if got := nestedString(finalResp, "output_text"); got != "通过 request_id 输出" {
+	if nestedString(finalResp, "object") != "chat.completion" {
+		t.Fatalf("unexpected final request-id object: %#v", finalResp)
+	}
+	choices, ok := finalResp["choices"].([]any)
+	if !ok || len(choices) != 1 {
+		t.Fatalf("unexpected final request-id choices: %#v", finalResp)
+	}
+	choice := choices[0].(map[string]any)
+	message := choice["message"].(map[string]any)
+	if nestedString(message, "content") != "通过 request_id 输出" {
 		t.Fatalf("unexpected final request-id output_text: %#v", finalResp)
 	}
 }
@@ -492,14 +503,13 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 		"allowed_request_actions": []string{"complete"},
 	})
 
-	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
 		"model": "demo-app-api",
-		"input": []map[string]any{
-			{
-				"type":    "message",
-				"role":    "user",
-				"content": []map[string]any{{"type": "input_text", "text": "app api 测试"}},
-			},
+		"messages": []map[string]any{
+			{"role": "system", "content": "app system policy"},
+			{"role": "developer", "content": "app developer hint"},
+			{"role": "assistant", "content": "previous app answer"},
+			{"role": "user", "content": "app api 测试"},
 		},
 	})
 
@@ -521,6 +531,11 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 	if nestedPathString(detailResp, "request", "request_id") != requestID {
 		t.Fatalf("unexpected app api request detail: %#v", detailResp)
 	}
+	if nestedPathString(detailResp, "request", "system_text") != "app system policy" ||
+		nestedPathString(detailResp, "request", "developer_text") != "app developer hint" ||
+		nestedPathString(detailResp, "request", "assistant_text") != "previous app answer" {
+		t.Fatalf("unexpected app api request context fields: %#v", detailResp)
+	}
 
 	env.appPostJSON(t, "/api/app/requests/"+requestID+"/complete", appKey, map[string]any{
 		"text": "应用 API 完成",
@@ -528,7 +543,13 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 	}, http.StatusOK)
 
 	finalResp := <-resultCh
-	if got := nestedString(finalResp, "output_text"); got != "应用 API 完成" {
+	choices, ok := finalResp["choices"].([]any)
+	if !ok || len(choices) != 1 {
+		t.Fatalf("unexpected app api final choices: %#v", finalResp)
+	}
+	choice := choices[0].(map[string]any)
+	message := choice["message"].(map[string]any)
+	if nestedString(message, "content") != "应用 API 完成" {
 		t.Fatalf("unexpected app api final response: %#v", finalResp)
 	}
 }

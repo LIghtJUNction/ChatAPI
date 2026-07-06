@@ -2897,6 +2897,145 @@ func TestAnthropicMessagesProtocolShape(t *testing.T) {
 	}
 }
 
+func TestResponsesDeltaAndCompleteWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-pg-responses",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "pg responses 顺序测试"},
+				},
+			},
+		},
+	})
+
+	conversationView := env.waitForWaitingConversation(t, "pg responses 顺序测试")
+	conversationID := conversationView["id"].(string)
+	env.postJSON(t, "/api/chat/output/delta", map[string]any{
+		"conversation_id": conversationID,
+		"text":            "PG 草稿输出",
+	}, http.StatusOK)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversationID,
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "object"); got != "response" {
+		t.Fatalf("unexpected responses object: %q", got)
+	}
+	if got := nestedString(finalResp, "output_text"); got != "PG 草稿输出" {
+		t.Fatalf("unexpected responses output_text: %#v", finalResp)
+	}
+
+	conversation, err := env.store.GetConversation(context.Background(), conversationID)
+	if err != nil {
+		t.Fatalf("get postgres conversation: %v", err)
+	}
+	if nestedString(conversation.Metadata, "realtime_status") != "closed" {
+		t.Fatalf("expected closed postgres conversation: %#v", conversation)
+	}
+	messages, err := env.store.ListMessages(context.Background(), conversationID)
+	if err != nil {
+		t.Fatalf("list postgres messages: %v", err)
+	}
+	if len(messages) < 2 || messages[len(messages)-1].Content != "PG 草稿输出" {
+		t.Fatalf("unexpected postgres persisted messages: %#v", messages)
+	}
+}
+
+func TestChatCompletionsProtocolShapeWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
+		"model": "demo-pg-chat",
+		"messages": []map[string]any{
+			{"role": "user", "content": "pg chat completions 测试"},
+		},
+	})
+
+	conversationView := env.waitForWaitingConversation(t, "pg chat completions 测试")
+	conversationID := conversationView["id"].(string)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversationID,
+		"text":            "pg chat completions 回复",
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "object"); got != "chat.completion" {
+		t.Fatalf("unexpected chat completion object: %q", got)
+	}
+	if got := nestedString(finalResp, "model"); got != "demo-pg-chat" {
+		t.Fatalf("unexpected chat completion model: %q", got)
+	}
+	choices, ok := finalResp["choices"].([]any)
+	if !ok || len(choices) != 1 {
+		t.Fatalf("unexpected chat completion choices: %#v", finalResp["choices"])
+	}
+	message := choices[0].(map[string]any)["message"].(map[string]any)
+	if got := nestedString(message, "content"); got != "pg chat completions 回复" {
+		t.Fatalf("unexpected chat completion message: %#v", message)
+	}
+
+	requestID := env.requestIDForConversation(t, conversationID)
+	requestResp := env.getJSON(t, "/lab/requests/"+requestID, http.StatusOK)
+	if nestedPathString(requestResp, "request", "request_format") != "chat_completions" {
+		t.Fatalf("unexpected postgres request format: %#v", requestResp)
+	}
+}
+
+func TestAnthropicMessagesProtocolShapeWithPostgreSQL(t *testing.T) {
+	env := newPostgresTestEnvWithConfig(t, config.ModeLab, nil)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/messages", map[string]any{
+		"model": "claude-pg-demo",
+		"messages": []map[string]any{
+			{"role": "user", "content": "pg anthropic messages 测试"},
+		},
+	})
+
+	conversationView := env.waitForWaitingConversation(t, "pg anthropic messages 测试")
+	conversationID := conversationView["id"].(string)
+	env.postJSON(t, "/api/chat/output/complete", map[string]any{
+		"conversation_id": conversationID,
+		"text":            "pg anthropic 回复",
+		"mode":            "assistant_message",
+	}, http.StatusOK)
+
+	finalResp := <-resultCh
+	if got := nestedString(finalResp, "type"); got != "message" {
+		t.Fatalf("unexpected anthropic type: %q", got)
+	}
+	if got := nestedString(finalResp, "role"); got != "assistant" {
+		t.Fatalf("unexpected anthropic role: %q", got)
+	}
+	content, ok := finalResp["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("unexpected anthropic content: %#v", finalResp["content"])
+	}
+	firstPart := content[0].(map[string]any)
+	if got := nestedString(firstPart, "text"); got != "pg anthropic 回复" {
+		t.Fatalf("unexpected anthropic text: %#v", firstPart)
+	}
+
+	messages, err := env.store.ListMessages(context.Background(), conversationID)
+	if err != nil {
+		t.Fatalf("list postgres anthropic messages: %v", err)
+	}
+	if len(messages) < 2 {
+		t.Fatalf("expected persisted postgres anthropic messages: %#v", messages)
+	}
+	last := messages[len(messages)-1]
+	if last.Content != "pg anthropic 回复" {
+		t.Fatalf("unexpected postgres anthropic persisted content: %#v", last)
+	}
+}
+
 func TestResponsesThinkingModePersistsThinkBlock(t *testing.T) {
 	env := newTestEnv(t)
 

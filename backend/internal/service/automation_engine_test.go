@@ -176,6 +176,75 @@ func TestAutomationRuleServiceMatchTurnReportsNoRules(t *testing.T) {
 	}
 }
 
+func TestAutomationRuleServiceMatchTurnSupportsTypedConditions(t *testing.T) {
+	st := newAutomationTestStore(t)
+	svc := NewAutomationRuleService(st)
+	if _, err := st.ReplaceAutomationRulesForUser(context.Background(), "user_auto", nil, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_typed",
+			UserID:  "user_auto",
+			Enabled: true,
+			Payload: map[string]any{
+				"id":      "rule_typed",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{
+						{"type": "text_contains", "value": "prepare"},
+						{"type": "model_is", "value": "demo-typed"},
+						{"type": "protocol_is", "value": "responses"},
+						{"type": "tool_choice_is", "name": "lookup_weather", "choice_type": "function"},
+						{"type": "response_format_is", "name": "tool_draft", "format_type": "json_schema"},
+						{"type": "input_part_type_is", "value": "image"},
+						{"type": "input_media_type_contains", "value": "png"},
+					},
+					"excludes": []map[string]any{
+						{"type": "input_url_contains", "value": "blocked.example"},
+					},
+				},
+				"action": map[string]any{"type": "output_text", "text": "类型化命中"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed automation rule: %v", err)
+	}
+
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		Protocol:    protocol.ProtocolResponses,
+		Model:       "demo-typed",
+		UserContent: "please prepare a tool draft",
+		InputParts: []protocol.InputPart{
+			{Type: "text", Text: "please prepare a tool draft"},
+			{Type: "image", MediaType: "image/png", URL: "https://example.com/ok.png"},
+		},
+		ToolChoice:     protocol.ToolChoice{Type: "function", Name: "lookup_weather"},
+		ResponseFormat: protocol.ResponseFormat{Type: "json_schema", Name: "tool_draft"},
+	}, "conv_typed", "resp_typed")
+	if err != nil {
+		t.Fatalf("match typed turn: %v", err)
+	}
+	if decision.Status != automationStatusMatched || decision.Match == nil || decision.Match.Input.OutputText != "类型化命中" {
+		t.Fatalf("unexpected typed condition match: %#v", decision)
+	}
+
+	miss, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		Protocol:    protocol.ProtocolResponses,
+		Model:       "demo-typed",
+		UserContent: "please prepare a tool draft",
+		InputParts: []protocol.InputPart{
+			{Type: "text", Text: "please prepare a tool draft"},
+			{Type: "image", MediaType: "image/png", URL: "https://blocked.example/nope.png"},
+		},
+		ToolChoice:     protocol.ToolChoice{Type: "function", Name: "lookup_weather"},
+		ResponseFormat: protocol.ResponseFormat{Type: "json_schema", Name: "tool_draft"},
+	}, "conv_typed_miss", "resp_typed_miss")
+	if err != nil {
+		t.Fatalf("match typed miss turn: %v", err)
+	}
+	if miss.Status != automationStatusNoMatch || miss.Match != nil {
+		t.Fatalf("expected typed exclude miss, got %#v", miss)
+	}
+}
+
 func newAutomationTestStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))

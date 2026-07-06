@@ -997,6 +997,65 @@ func TestAutomationRuleAutoCompletesStructuredResponsesRequest(t *testing.T) {
 	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_structured", "auto_complete", "success", 1)
 }
 
+func TestAutomationRuleAutoCompletesTypedStructuredResponsesRequest(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_auto_typed_structured",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{
+						{"type": "text_contains", "value": "tool draft"},
+						{"type": "model_is", "value": "demo-auto-typed"},
+						{"type": "protocol_is", "value": "responses"},
+						{"type": "tool_choice_is", "name": "lookup_weather", "choice_type": "function"},
+						{"type": "response_format_is", "name": "tool_draft", "format_type": "json_schema"},
+						{"type": "input_part_type_is", "value": "image"},
+						{"type": "input_media_type_contains", "value": "png"},
+					},
+					"excludes": []map[string]any{
+						{"type": "input_url_contains", "value": "blocked.example"},
+					},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "类型化结构命中回复",
+				},
+			},
+		},
+	}, http.StatusOK)
+
+	resp := postExternalJSON(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "demo-auto-typed",
+		"input": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "please prepare a tool draft"},
+					{"type": "input_image", "image_url": "https://example.com/demo.png", "media_type": "image/png"},
+				},
+			},
+		},
+		"tool_choice": map[string]any{
+			"type": "function",
+			"name": "lookup_weather",
+		},
+		"response_format": map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "tool_draft",
+				"schema": map[string]any{"type": "object"},
+			},
+		},
+	})
+	if nestedString(resp, "output_text") != "类型化结构命中回复" {
+		t.Fatalf("unexpected typed structured automation response payload: %#v", resp)
+	}
+	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_typed_structured", "auto_complete", "success", 1)
+}
+
 func TestUserPasswordRoute(t *testing.T) {
 	env := newTestEnv(t)
 

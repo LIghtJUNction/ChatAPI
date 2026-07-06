@@ -97,6 +97,9 @@ func matchesRuleConditions(payload map[string]any, request protocol.TurnRequest)
 }
 
 func requestMatchesPattern(request protocol.TurnRequest, matcher map[string]any) bool {
+	if conditionType := stringFromMap(matcher, "type"); conditionType != "" {
+		return requestMatchesTypedCondition(request, conditionType, matcher)
+	}
 	pattern := strings.TrimSpace(stringFromMap(matcher, "pattern"))
 	if pattern == "" {
 		return false
@@ -106,6 +109,75 @@ func requestMatchesPattern(request protocol.TurnRequest, matcher map[string]any)
 		matchType = "substring"
 	}
 	for _, value := range requestMatchCandidates(request, stringFromMap(matcher, "field")) {
+		if matchText(matchType, value, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func requestMatchesTypedCondition(request protocol.TurnRequest, conditionType string, matcher map[string]any) bool {
+	switch strings.TrimSpace(strings.ToLower(conditionType)) {
+	case "text_contains":
+		return matchesAutomationField(request, "text", "substring", firstNonEmptyAutomationValue(matcher, "value", "pattern"))
+	case "text_is":
+		return matchesAutomationField(request, "text", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern"))
+	case "user_content_contains":
+		return matchesAutomationField(request, "user_content", "substring", firstNonEmptyAutomationValue(matcher, "value", "pattern"))
+	case "user_content_is":
+		return matchesAutomationField(request, "user_content", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern"))
+	case "model_is":
+		return matchesAutomationField(request, "model", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern", "model"))
+	case "protocol_is":
+		return matchesAutomationField(request, "protocol", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern", "protocol"))
+	case "tool_choice_is":
+		name := firstNonEmptyAutomationValue(matcher, "name", "value", "pattern")
+		choiceType := firstNonEmptyAutomationValue(matcher, "choice_type", "tool_type")
+		if name != "" && !matchesAutomationField(request, "tool_choice_name", "exact", name) {
+			return false
+		}
+		if choiceType != "" && !matchesAutomationField(request, "tool_choice_type", "exact", choiceType) {
+			return false
+		}
+		return name != "" || choiceType != ""
+	case "response_format_is":
+		name := firstNonEmptyAutomationValue(matcher, "name", "value", "pattern")
+		formatType := firstNonEmptyAutomationValue(matcher, "format_type", "response_type")
+		if name != "" && !matchesAutomationField(request, "response_format_name", "exact", name) {
+			return false
+		}
+		if formatType != "" && !matchesAutomationField(request, "response_format_type", "exact", formatType) {
+			return false
+		}
+		return name != "" || formatType != ""
+	case "input_part_type_is":
+		return matchesAutomationField(request, "input_part_type", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern", "part_type"))
+	case "input_media_type_contains":
+		return matchesAutomationField(request, "input_part_media_type", "substring", firstNonEmptyAutomationValue(matcher, "value", "pattern", "media_type"))
+	case "input_media_type_is":
+		return matchesAutomationField(request, "input_part_media_type", "exact", firstNonEmptyAutomationValue(matcher, "value", "pattern", "media_type"))
+	case "input_url_contains":
+		return matchesAutomationField(request, "input_part_url", "substring", firstNonEmptyAutomationValue(matcher, "value", "pattern", "url"))
+	default:
+		return false
+	}
+}
+
+func firstNonEmptyAutomationValue(matcher map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := stringFromMap(matcher, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func matchesAutomationField(request protocol.TurnRequest, field string, matchType string, pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	for _, value := range requestMatchCandidates(request, field) {
 		if matchText(matchType, value, pattern) {
 			return true
 		}

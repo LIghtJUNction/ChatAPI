@@ -4460,7 +4460,7 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	schemaResp := env.getJSONWithCookie(t, "/api/admin/users/schema", adminCookie, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 5 {
+	if len(operations) != 7 {
 		t.Fatalf("unexpected admin users schema response: %#v", schemaResp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "list_users" || nestedString(operations[1].(map[string]any), "name") != "create_user" {
@@ -4484,6 +4484,29 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	}
 	if !responseUsersContainID(listResp, userID) {
 		t.Fatalf("expected created user in admin users alias: %#v", listResp)
+	}
+
+	identity, err := env.store.UpsertUserIdentity(context.Background(), store.UpsertUserIdentityInput{
+		ID:            "identity_admin_managed",
+		UserID:        userID,
+		Provider:      "oidc",
+		Subject:       "admin-managed-sub",
+		Email:         "managed@example.com",
+		EmailVerified: true,
+		Profile: map[string]any{
+			"name": "Managed User",
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed managed identity: %v", err)
+	}
+
+	identityListResp := env.getJSONWithCookie(t, "/api/admin/users/"+userID+"/identities", adminCookie, http.StatusOK)
+	if nestedPathString(identityListResp, "user", "id") != userID || numericValue(identityListResp["count"]) != 1 {
+		t.Fatalf("unexpected admin identity list response: %#v", identityListResp)
+	}
+	if nestedPathString(identityListResp["items"].([]any)[0].(map[string]any), "id") != identity.ID {
+		t.Fatalf("unexpected admin identity item: %#v", identityListResp)
 	}
 
 	firstConversation, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
@@ -4563,6 +4586,14 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 		t.Fatalf("expected managed user session cookie: %#v", userCookies)
 	}
 
+	deleteIdentityResp := env.deleteJSONWithCookieAndHeaders(t, "/api/admin/users/"+userID+"/identities/"+identity.ID, adminCookie, headers, http.StatusOK)
+	if deleteIdentityResp["ok"] != true {
+		t.Fatalf("unexpected admin identity delete response: %#v", deleteIdentityResp)
+	}
+	if _, err := env.store.GetUserIdentity(context.Background(), "oidc", "admin-managed-sub"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected admin-managed identity to be deleted, got %v", err)
+	}
+
 	deleteResp := env.deleteJSONWithCookieAndHeaders(t, "/api/admin/users/"+userID, adminCookie, headers, http.StatusOK)
 	if nestedPathBool(deleteResp, "user", "is_active") {
 		t.Fatalf("expected user to be deactivated: %#v", deleteResp)
@@ -4578,6 +4609,7 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "create", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "reset_password", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", userID, "deactivate", "success", 1)
+	assertAuditCountForActor(t, env, "admin", "admin.user_identity", "user_identity", identity.ID, "unlink", "success", 1)
 }
 
 func TestAdminConfigManagement(t *testing.T) {
@@ -4645,6 +4677,46 @@ func TestAdminConfigManagement(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key admin config schema rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestAdminUserIdentityUnlinkRejectsLastLoginMethod(t *testing.T) {
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.AdminPassword = "admin-secret"
+	})
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "admin",
+		"password": "admin-secret",
+	}, http.StatusOK)
+	adminCookie := findCookie(cookies, service.SessionCookieName)
+	if adminCookie == nil {
+		t.Fatalf("missing admin session cookie: %#v", cookies)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:       "admin_oidc_only",
+		Email:    "admin-oidc-only@example.com",
+		Role:     "user",
+		IsActive: true,
+	}); err != nil {
+		t.Fatalf("seed admin oidc-only user: %v", err)
+	}
+	identity, err := env.store.UpsertUserIdentity(context.Background(), store.UpsertUserIdentityInput{
+		ID:            "identity_admin_last",
+		UserID:        "admin_oidc_only",
+		Provider:      "oidc",
+		Subject:       "admin-last-sub",
+		Email:         "admin-oidc-only@example.com",
+		EmailVerified: true,
+	})
+	if err != nil {
+		t.Fatalf("seed admin oidc-only identity: %v", err)
+	}
+
+	status, body := env.deleteTextWithCookieAndHeaders(t, "/api/admin/users/admin_oidc_only/identities/"+identity.ID, adminCookie, map[string]string{
+		"Origin": env.server.URL,
+	})
+	if status != http.StatusConflict || !strings.Contains(body, "cannot unlink the last login method") {
+		t.Fatalf("expected last-login-method conflict: status=%d body=%q", status, body)
 	}
 }
 

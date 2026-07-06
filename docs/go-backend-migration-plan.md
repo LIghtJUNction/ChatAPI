@@ -86,7 +86,8 @@
 - 密码哈希和本地 users 表登录基础已落地：新增 `internal/platform/password`，新密码使用 Argon2id PHC 风格格式，旧 `salt$sha256(salt+password)` 可验证并返回 `NeedsUpgrade`。serve 模式 `POST /api/auth/login` 会优先按 username/email 查询 `users` 表，验证本地密码，成功后建立同一类 session；旧 hash 登录成功后会自动升级为 Argon2id 并更新 `last_login_at`。`.env` 的 `CHATAPI_ADMIN_PASSWORD` 仍保留为 `admin` 用户恢复入口。
 - 管理员用户管理已落地最小接口：`GET /api/admin/users` 列出本地用户，`POST /api/admin/users` 创建本地用户并写入 Argon2id 密码 hash，`PUT /api/admin/users/{user_id}/password` 重置密码，`DELETE /api/admin/users/{user_id}` 当前实现为停用用户而非物理删除，保留历史请求、上传、API key 等 owner 归属；这些接口仅允许 admin session 访问，并写入 `admin.user` 审计事件。
 - 管理员用户历史最小接口已补上：`GET /api/admin/users/{user_id}/history?limit=30` 当前按会话 `metadata.owner_id` 聚合该用户最近消息，返回 `recent_messages` 供前端详情弹窗直接展示；首版先在 service 层复用 `ListConversations + ListMessages` 做排序截断，后续如果单用户消息量过大，再下推为 repository 级定制查询。
-- 管理员用户管理 schema 已开始显式暴露：`GET /api/admin/users/schema` 当前声明本地用户列表、创建、查看历史、重置密码、停用用户这些操作的路径、字段、默认值和“停用而非物理删除”的语义，避免前端或 CLI 再各自硬编码 `role` 枚举、`history.limit` 默认值和请求体字段。
+- 管理员用户 OIDC 身份管理最小接口也已补上：`GET /api/admin/users/{user_id}/identities` 可查看指定用户已绑定的外部身份，`DELETE /api/admin/users/{user_id}/identities/{identity_id}` 可由管理员解绑指定身份；这条链路复用普通用户解绑时“不能删除最后一个登录方式”的约束，并把管理员操作写入 `admin.user_identity` 审计事件。
+- 管理员用户管理 schema 已开始显式暴露：`GET /api/admin/users/schema` 当前声明本地用户列表、创建、查看历史、查看已绑定身份、重置密码、解绑身份、停用用户这些操作的路径、字段、默认值和“停用而非物理删除”的语义，避免前端或 CLI 再各自硬编码 `role` 枚举、`history.limit` 默认值和请求体字段。
 - 用户配置已落地最小接口：`GET /api/user/config` 返回当前 actor 的 `user_configs` 列表和聚合 config map，`POST /api/user/config` 按 key upsert JSON object 配置并写入 `user.config` 审计事件；Lab actor 和 serve session actor 都复用同一套 owner 隔离。
 - 系统配置已落地最小管理接口：`GET /api/admin/config` 返回 `config` 表列表和聚合 config map，`POST /api/admin/config` 按 key upsert JSON object 配置并写入 `admin.config` 审计事件；当前只负责持久化和管理，不会自动覆盖 `.env` 派生的运行时配置，后续各服务再逐步读取对应 key。
 - 面向当前前端系统设置面板的最小接口也已补上：`GET/POST /api/config/system` 当前要求 admin actor，读写 `config.system_settings` 单条 JSON，并把前端已使用的字段展平成固定响应结构；`realtime_*`、图片大小上限和 SMTP provider 选项会优先回显当前运行时配置，其他字段先作为可持久化设置保留，后续再逐步接入真实运行时行为。
@@ -2122,8 +2123,8 @@ make release-snapshot
 工作：
 
 - 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出、session、注册、邮箱验证码发送、密码重置、TOTP 最小闭环、OIDC RP 登录/绑定闭环、用户侧 OIDC 身份查看/解绑，以及验证码后台过期清理任务和 GeeTest v4 校验链路。
-- 用户配置、系统配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前用户配置已先支持 `GET/POST /api/user/config` 按当前 actor 读写普通 JSON object 偏好；系统配置已先支持 `GET/POST /api/admin/config` 做表驱动持久化；管理员用户管理已先支持列表、创建、重置密码和停用用户；用户详情历史、物理删除策略和 OIDC 身份管理后台仍待补齐。
-- 当前前端设置页仍有几处必须跟随 Go 契约一起调整：`/api/user/api-keys*` 需要切到 `/api/user/app-api-keys*` 并改成一次性展示明文 key；`/api/user/password`、`/api/admin/send-test-email` 仍待后端补齐或在前端切到新的配置/诊断流程。
+- 用户配置、系统配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前用户配置已先支持 `GET/POST /api/user/config` 按当前 actor 读写普通 JSON object 偏好；系统配置已先支持 `GET/POST /api/admin/config` 做表驱动持久化；管理员用户管理已先支持列表、创建、查看历史、查看/解绑 OIDC 身份、重置密码和停用用户；物理删除策略仍待补齐。
+- 当前前端设置页仍有几处必须跟随 Go 契约一起调整：`/api/user/api-keys*` 需要切到 `/api/user/app-api-keys*` 并改成一次性展示明文 key；用户设置页和管理员系统设置页也应开始直接消费 `/api/user/password`、`/api/admin/send-test-email` 和对应 schema，而不是继续假设旧接口缺失。
 - CSRF、CORS、Cookie 策略。当前已先落地 session mutation Origin/Referer 校验和 HttpOnly SameSite cookie。
 
 验收：

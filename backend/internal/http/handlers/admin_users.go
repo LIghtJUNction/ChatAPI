@@ -13,9 +13,10 @@ import (
 )
 
 type AdminUsersHandler struct {
-	Users   *service.AdminUserService
-	History *service.AdminUserHistoryService
-	Audit   *service.AuditService
+	Users      *service.AdminUserService
+	History    *service.AdminUserHistoryService
+	Identities *service.AdminUserIdentityService
+	Audit      *service.AuditService
 }
 
 func (h AdminUsersHandler) Schema(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,33 @@ func (h AdminUsersHandler) HistoryList(w http.ResponseWriter, r *http.Request) {
 		"user":            user,
 		"recent_messages": messages,
 	})
+}
+
+func (h AdminUsersHandler) IdentityList(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	user, identities, err := h.Identities.List(r.Context(), userID)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"user":  user,
+		"count": len(identities),
+		"items": identities,
+	})
+}
+
+func (h AdminUsersHandler) IdentityDelete(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	identityID := chi.URLParam(r, "identityID")
+	if err := h.Identities.Unlink(r.Context(), userID, identityID); err != nil {
+		h.recordIdentity(r, userID, identityID, "unlink", "failure")
+		writeAdminUserError(w, err)
+		return
+	}
+	h.recordIdentity(r, userID, identityID, "unlink", "success")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AdminUsersHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -125,10 +153,30 @@ func (h AdminUsersHandler) record(r *http.Request, userID string, action string,
 	})
 }
 
+func (h AdminUsersHandler) recordIdentity(r *http.Request, userID string, identityID string, action string, outcome string) {
+	if h.Audit == nil {
+		return
+	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "admin.user_identity",
+		ResourceType: "user_identity",
+		ResourceID:   identityID,
+		Action:       action,
+		Outcome:      outcome,
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata: map[string]any{
+			"user_id": userID,
+		},
+	})
+}
+
 func writeAdminUserError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidUserInput):
 		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, service.ErrLastLoginMethod):
+		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, store.ErrNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case errors.Is(err, service.ErrForbidden):

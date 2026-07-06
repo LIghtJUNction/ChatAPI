@@ -54,6 +54,16 @@ func BuildAdminUsersSchema() AdminUsersSchema {
 				},
 			},
 			{
+				Name:          "list_user_identities",
+				Method:        "GET",
+				Path:          "/api/admin/users/{user_id}/identities",
+				Description:   "List external identities linked to a specific user.",
+				RequiresAdmin: true,
+				Notes: []string{
+					"The response shape is {ok, user, count, items}.",
+				},
+			},
+			{
 				Name:          "reset_user_password",
 				Method:        "PUT",
 				Path:          "/api/admin/users/{user_id}/password",
@@ -61,6 +71,17 @@ func BuildAdminUsersSchema() AdminUsersSchema {
 				RequiresAdmin: true,
 				Fields: []ConfigFieldSchema{
 					{Key: "password", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "New password to hash and store for the target user."},
+				},
+			},
+			{
+				Name:          "unlink_user_identity",
+				Method:        "DELETE",
+				Path:          "/api/admin/users/{user_id}/identities/{identity_id}",
+				Description:   "Unlink one external identity from a specific user.",
+				RequiresAdmin: true,
+				Notes: []string{
+					"Serve mode requires a valid same-origin session mutation request.",
+					"If the target account has no local password and this is the last login method, the endpoint returns 409.",
 				},
 			},
 			{

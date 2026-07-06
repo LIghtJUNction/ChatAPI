@@ -20,9 +20,9 @@ type UserAppAPIKeysHandler struct {
 }
 
 func (h UserAppAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID(r)
+	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotImplemented)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 	items, err := h.AppAPIKeys.ListKeysForUser(r.Context(), userID)
@@ -34,9 +34,9 @@ func (h UserAppAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserAppAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID(r)
+	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotImplemented)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 	var body map[string]any
@@ -80,9 +80,9 @@ func (h UserAppAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserAppAPIKeysHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID(r)
+	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotImplemented)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 	keyID := strings.TrimSpace(chi.URLParam(r, "keyID"))
@@ -116,16 +116,6 @@ func (h UserAppAPIKeysHandler) recordAudit(r *http.Request, action string, outco
 		UserAgent:    r.UserAgent(),
 		Metadata:     metadata,
 	})
-}
-
-func (h UserAppAPIKeysHandler) currentUserID(r *http.Request) (string, error) {
-	if actor, ok := service.RequestActorFromContext(r.Context()); ok && strings.TrimSpace(actor.UserID) != "" {
-		return strings.TrimSpace(actor.UserID), nil
-	}
-	if h.Config.Mode == config.ModeLab {
-		return "", errors.New("lab request actor is missing")
-	}
-	return "", errors.New("session-backed app api key management is not implemented yet")
 }
 
 func stringSlice(value any) []string {

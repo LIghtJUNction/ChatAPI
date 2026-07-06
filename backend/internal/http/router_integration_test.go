@@ -620,6 +620,54 @@ func TestUserAppAPIKeysManagement(t *testing.T) {
 	}
 }
 
+func TestUserAppAPIKeysManagementUsesSessionActor(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("app-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_app_owner",
+		Username:     "app-owner",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed app owner: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "app-owner",
+		"password": "app-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing user session cookie: %#v", cookies)
+	}
+
+	headers := map[string]string{"Origin": env.server.URL}
+	createResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/user/app-api-keys", map[string]any{
+		"name":   "session-managed-app-key",
+		"scopes": []string{"requests:read"},
+	}, sessionCookie, headers, http.StatusOK)
+	keyID := nestedPathString(createResp, "item", "id")
+	if keyID == "" || !strings.HasPrefix(nestedString(createResp, "raw_key"), "ak-") {
+		t.Fatalf("unexpected session app key create response: %#v", createResp)
+	}
+
+	listResp := env.getJSONWithCookie(t, "/api/user/app-api-keys", sessionCookie, http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) != 1 || nestedString(items[0].(map[string]any), "id") != keyID {
+		t.Fatalf("unexpected session app api key list: %#v", listResp)
+	}
+
+	status, body := env.deleteTextWithCookieAndHeaders(t, "/api/user/app-api-keys/"+keyID, sessionCookie, headers)
+	if status != http.StatusOK || !strings.Contains(body, "\"ok\":true") {
+		t.Fatalf("unexpected session app api key delete response: status=%d body=%q", status, body)
+	}
+	assertAuditCountForActor(t, env, "user_app_owner", "user.app_api_key", "app_api_key", keyID, "create", "success", 1)
+	assertAuditCountForActor(t, env, "user_app_owner", "user.app_api_key", "app_api_key", keyID, "delete", "success", 1)
+}
+
 func TestUserConfigManagementInLab(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1310,6 +1358,55 @@ func TestUserModelAPIKeysManagement(t *testing.T) {
 	if status != http.StatusUnauthorized || !strings.Contains(body, "model api key unauthorized") {
 		t.Fatalf("revoked model key should be unauthorized: status=%d body=%q", status, body)
 	}
+}
+
+func TestUserModelAPIKeysManagementUsesSessionActor(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("model-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_model_owner",
+		Username:     "model-owner",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed model owner: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "model-owner",
+		"password": "model-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing user session cookie: %#v", cookies)
+	}
+
+	headers := map[string]string{"Origin": env.server.URL}
+	createResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/user/model-api-keys", map[string]any{
+		"name":  "session-managed-model-key",
+		"model": "demo-session-model",
+	}, sessionCookie, headers, http.StatusOK)
+	keyID := nestedPathString(createResp, "item", "id")
+	rawKey := nestedString(createResp, "raw_key")
+	if keyID == "" || !strings.HasPrefix(rawKey, "sk-") {
+		t.Fatalf("unexpected session model key create response: %#v", createResp)
+	}
+
+	listResp := env.getJSONWithCookie(t, "/api/user/model-api-keys", sessionCookie, http.StatusOK)
+	items := listResp["items"].([]any)
+	if len(items) != 1 || nestedString(items[0].(map[string]any), "id") != keyID || nestedString(items[0].(map[string]any), "raw_key") != rawKey {
+		t.Fatalf("unexpected session model api key list: %#v", listResp)
+	}
+
+	status, body := env.deleteTextWithCookieAndHeaders(t, "/api/user/model-api-keys/"+keyID, sessionCookie, headers)
+	if status != http.StatusOK || !strings.Contains(body, "\"ok\":true") {
+		t.Fatalf("unexpected session model api key delete response: status=%d body=%q", status, body)
+	}
+	assertAuditCountForActor(t, env, "user_model_owner", "user.model_api_key", "model_api_key", keyID, "create", "success", 1)
+	assertAuditCountForActor(t, env, "user_model_owner", "user.model_api_key", "model_api_key", keyID, "delete", "success", 1)
 }
 
 func TestModelAPIKeyOwnsProtocolRequests(t *testing.T) {

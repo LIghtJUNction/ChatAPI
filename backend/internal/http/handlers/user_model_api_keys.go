@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -19,9 +18,9 @@ type UserModelAPIKeysHandler struct {
 }
 
 func (h UserModelAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID(r)
+	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotImplemented)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 	items, err := h.ModelAPIKeys.ListKeysForUser(r.Context(), userID)
@@ -33,9 +32,9 @@ func (h UserModelAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserModelAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID(r)
+	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotImplemented)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 	var body map[string]any
@@ -65,9 +64,9 @@ func (h UserModelAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h UserModelAPIKeysHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	userID, err := h.currentUserID(r)
+	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotImplemented)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 	keyID := strings.TrimSpace(chi.URLParam(r, "keyID"))
@@ -97,14 +96,4 @@ func (h UserModelAPIKeysHandler) recordAudit(r *http.Request, action string, out
 		UserAgent:    r.UserAgent(),
 		Metadata:     metadata,
 	})
-}
-
-func (h UserModelAPIKeysHandler) currentUserID(r *http.Request) (string, error) {
-	if actor, ok := service.RequestActorFromContext(r.Context()); ok && strings.TrimSpace(actor.UserID) != "" {
-		return strings.TrimSpace(actor.UserID), nil
-	}
-	if h.Config.Mode == config.ModeLab {
-		return "", errors.New("lab request actor is missing")
-	}
-	return "", errors.New("session-backed model api key management is not implemented yet")
 }

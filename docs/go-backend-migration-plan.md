@@ -34,10 +34,10 @@
 - 已补上 `request_id -> conversation_id -> TurnControlCommand` 的最小解析链路，并先用于 `lab` 路由；后续应用 API 的 `/api/app/requests/{request_id}/*` 将直接复用这层能力。
 - 已补上统一的 request 读取视图（列表 + 详情）并先用于 `GET /lab/requests`、`GET /lab/requests/{request_id}`；后续 `/api/app/requests` 应直接复用这套 request reader，而不是再单独拼查询结构。
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
-- 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在当前 lab 用户语境下工作，`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
+- 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
 - 当前旧前端 `ApiKeyManagementPanel` 仍请求 `/api/user/api-keys*` 并假设服务端可再次返回完整明文 key；这与 Go 重构版“应用 API Key 只存 hash、明文只在创建时返回一次”的安全边界冲突，因此不应继续为旧接口补明文兼容，后续前端应改接 `/api/user/app-api-keys` 并调整为“一次性展示 + 前缀/元数据列表”模型。
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
-- 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 可在当前 lab 用户语境下工作；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
+- 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
 - 用户侧虚拟模型配置已补上最小接口：`GET/POST/DELETE /api/config/models` 当前按 actor 读写 `user_configs.virtual_models`，用于保存当前用户自己的虚拟模型列表；`GET /models` / `GET /v1/models` 也已开始优先返回当前 actor 的已启用虚拟模型，而不是硬编码单个 `chatapi-lab`。若当前用户没有配置模型，则回退到默认 `chatapi-lab`。
 - 为兼容当前前端设置面板，`/api/config/models` 当前同时返回 `models: string[]` 和 `items`；前端仍按简单字符串列表工作，后续前端改造时再逐步切到更完整的模型对象结构。
 - 为兼容当前前端自动规则面板，`GET/POST /api/config/automation-rules` 已补上用户侧兼容接口，直接按当前 actor 读写自己的自动规则列表，响应格式对齐前端使用中的 `{ ok, rules }`；底层复用与应用 API 同一套 `automation_rules` 存储与校验逻辑，后续前端切到应用 API 时不需要再迁移数据结构。
@@ -1428,7 +1428,7 @@ user_app_api_keys
 - 先完成 `user_app_api_keys` 存储、`ak-` 前缀密钥哈希校验、scope 校验和 `allowed_request_actions` 校验。
 - 先打通 `/api/app/requests*` 这一组最关键的自动化调试接口。
 - 先在当前单用户 Lab 语境下通过 `owner_id` 做 owner 隔离验证，后续接入正式 session / 用户体系后沿用相同 owner 约束。
-- 会话侧的应用 API Key 管理接口（`/api/user/app-api-keys`）已先以当前 lab 用户语境落地最小版本；完整 session 用户体系、审计查询页、频率限制、resource limits 细项 UI 仍待继续补齐。
+- 会话侧的应用 API Key 管理接口（`/api/user/app-api-keys`）已可复用统一 session actor；后续仍需继续补审计查询页、频率限制和 resource limits 细项 UI。
 
 ## 8. API 兼容计划
 

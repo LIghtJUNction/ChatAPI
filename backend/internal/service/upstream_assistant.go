@@ -16,6 +16,13 @@ type UpstreamAssistantSchema struct {
 	Storage         map[string]any      `json:"storage"`
 }
 
+type UpstreamProtocolTemplate struct {
+	Protocol         string         `json:"protocol"`
+	DefaultPath      string         `json:"default_path"`
+	RequestShape     map[string]any `json:"request_shape"`
+	ConstructionTips []string       `json:"construction_tips"`
+}
+
 type UpstreamAssistantHints struct {
 	CurrentInstanceURLs []string `json:"current_instance_urls"`
 	CandidateBaseURL    string   `json:"candidate_base_url,omitempty"`
@@ -50,6 +57,66 @@ func BuildUpstreamAssistantSchema() UpstreamAssistantSchema {
 		Storage: map[string]any{
 			"mode":                 "browser_local_only",
 			"allow_server_storage": false,
+		},
+	}
+}
+
+func BuildUpstreamProtocolTemplates() []UpstreamProtocolTemplate {
+	return []UpstreamProtocolTemplate{
+		{
+			Protocol:    "responses",
+			DefaultPath: "/v1/responses",
+			RequestShape: map[string]any{
+				"model":             "$config.model",
+				"input":             "$recommended_messages",
+				"tools":             "$parsed.normalized_tool_schemas",
+				"response_format":   "$assist_schema.output_json_schema",
+				"instructions":      "$optional.explanation_prompt",
+				"max_output_tokens": "$optional.max_output_tokens",
+				"stream":            false,
+			},
+			ConstructionTips: []string{
+				"Map recommended_messages into Responses input message items.",
+				"Pass normalized tool schemas directly as tools when the upstream supports OpenAI-style function tools.",
+				"Keep stream=false for the first browser-side assistant implementation.",
+			},
+		},
+		{
+			Protocol:    "chat_completions",
+			DefaultPath: "/v1/chat/completions",
+			RequestShape: map[string]any{
+				"model":       "$config.model",
+				"messages":    "$recommended_messages",
+				"tools":       "$parsed.normalized_tool_schemas",
+				"tool_choice": "auto",
+				"response_format": map[string]any{
+					"type":        "json_schema",
+					"json_schema": "$assist_schema.output_json_schema",
+				},
+				"stream": false,
+			},
+			ConstructionTips: []string{
+				"Convert recommended_messages into Chat Completions messages preserving role and content order.",
+				"Inject the explanation/JSON output instruction as a system or developer message if the upstream requires explicit prompting.",
+				"Use normalized_tool_schemas as the source of tools instead of raw request tool payloads.",
+			},
+		},
+		{
+			Protocol:    "anthropic_messages",
+			DefaultPath: "/messages",
+			RequestShape: map[string]any{
+				"model":      "$config.model",
+				"messages":   "$recommended_messages",
+				"tools":      "$parsed.normalized_tool_schemas",
+				"system":     "$optional.explanation_prompt",
+				"max_tokens": "$optional.max_output_tokens",
+				"stream":     false,
+			},
+			ConstructionTips: []string{
+				"Convert recommended_messages into Anthropic messages with text blocks.",
+				"Translate normalized_tool_schemas into Anthropic tool definitions with input_schema.",
+				"Ask the upstream to emit explanation text plus JSON in plain assistant output, then validate against assist_schema client-side.",
+			},
 		},
 	}
 }

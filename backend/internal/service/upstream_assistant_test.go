@@ -20,6 +20,19 @@ func TestBuildUpstreamAssistantSchema(t *testing.T) {
 	}
 }
 
+func TestBuildUpstreamProtocolTemplates(t *testing.T) {
+	templates := BuildUpstreamProtocolTemplates()
+	if len(templates) != 3 {
+		t.Fatalf("unexpected protocol template count: %#v", templates)
+	}
+	if templates[0].Protocol != "responses" || templates[0].DefaultPath != "/v1/responses" {
+		t.Fatalf("unexpected responses template: %#v", templates[0])
+	}
+	if templates[2].Protocol != "anthropic_messages" || len(templates[2].ConstructionTips) == 0 {
+		t.Fatalf("unexpected anthropic template: %#v", templates[2])
+	}
+}
+
 func TestBuildUpstreamAssistantHintsDetectsRecursiveBaseURL(t *testing.T) {
 	cfg := config.Config{Host: "0.0.0.0", Port: 5000, BaseURL: "https://chatapi.example.com"}
 	hints := BuildUpstreamAssistantHints(cfg, "", "https://chatapi.example.com/v1")

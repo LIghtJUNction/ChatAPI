@@ -1385,6 +1385,11 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	if !containsMapItemWithStringField(resp["upstream_assistant_schema"].(map[string]any)["fields"], "key", "base_url") {
 		t.Fatalf("unexpected upstream assistant schema: %#v", resp)
 	}
+	if !containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "responses") ||
+		!containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "chat_completions") ||
+		!containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "anthropic_messages") {
+		t.Fatalf("unexpected upstream protocol templates: %#v", resp)
+	}
 	if !nestedPathBool(resp, "upstream_hints", "candidate_recursive") {
 		t.Fatalf("expected recursive upstream hint: %#v", resp)
 	}
@@ -1484,6 +1489,9 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	}
 	if !containsStringValue(resp["upstream_assistant_schema"].(map[string]any)["sensitive_fields"], "api_key") {
 		t.Fatalf("unexpected upstream assistant sensitive fields: %#v", resp)
+	}
+	if !containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "responses") {
+		t.Fatalf("unexpected session upstream protocol templates: %#v", resp)
 	}
 	if nestedPathBool(resp, "upstream_hints", "candidate_recursive") {
 		t.Fatalf("did not expect recursive upstream hint: %#v", resp)

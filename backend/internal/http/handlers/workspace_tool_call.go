@@ -39,15 +39,16 @@ func (h WorkspaceToolCallHandler) AssistContext(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":                        true,
-		"request":                   contextPayload.Request,
-		"parsed":                    requestParsedView(contextPayload.Request),
-		"conversation":              contextPayload.Conversation,
-		"messages":                  contextPayload.Messages,
-		"assist_schema":             h.Service.AssistSchema(),
-		"upstream_assistant_schema": service.BuildUpstreamAssistantSchema(),
-		"upstream_hints":            service.BuildUpstreamAssistantHints(h.Config, requestBaseURL(r), strings.TrimSpace(r.URL.Query().Get("candidate_base_url"))),
-		"upstream_input_hints":      service.BuildUpstreamInputHints(contextPayload.Messages, contextPayload.DraftText, 20),
+		"ok":                          true,
+		"request":                     contextPayload.Request,
+		"parsed":                      requestParsedView(contextPayload.Request),
+		"conversation":                contextPayload.Conversation,
+		"messages":                    contextPayload.Messages,
+		"assist_schema":               h.Service.AssistSchema(),
+		"upstream_assistant_schema":   service.BuildUpstreamAssistantSchema(),
+		"upstream_protocol_templates": service.BuildUpstreamProtocolTemplates(),
+		"upstream_hints":              service.BuildUpstreamAssistantHints(h.Config, requestBaseURL(r), strings.TrimSpace(r.URL.Query().Get("candidate_base_url"))),
+		"upstream_input_hints":        service.BuildUpstreamInputHints(contextPayload.Messages, contextPayload.DraftText, 20),
 		"draft": map[string]any{
 			"text":   contextPayload.DraftText,
 			"length": contextPayload.DraftLength,

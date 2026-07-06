@@ -536,6 +536,17 @@ func (s *Store) DeleteAuthVerificationCode(ctx context.Context, email string, pu
 	return nil
 }
 
+func (s *Store) DeleteExpiredAuthVerificationCodes(ctx context.Context, before time.Time) (int, error) {
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM auth_verification_codes
+		WHERE expires_at <= $1
+	`, before.UTC())
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

@@ -137,6 +137,13 @@ func (s *EmailCodeService) VerifyCode(ctx context.Context, email string, purpose
 	return nil
 }
 
+func (s *EmailCodeService) CleanupExpired(ctx context.Context, now time.Time) (int, error) {
+	if s == nil || s.store == nil {
+		return 0, nil
+	}
+	return s.store.DeleteExpiredAuthVerificationCodes(ctx, now.UTC())
+}
+
 func (s *EmailCodeService) hash(email string, purpose string, code string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(strings.ToLower(email)) + "|" + strings.TrimSpace(purpose) + "|" + strings.TrimSpace(code) + "|" + s.masterKey))
 	return hex.EncodeToString(sum[:])

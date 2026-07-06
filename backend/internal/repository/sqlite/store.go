@@ -1009,6 +1009,21 @@ func (s *Store) DeleteAuthVerificationCode(ctx context.Context, email string, pu
 	return err
 }
 
+func (s *Store) DeleteExpiredAuthVerificationCodes(ctx context.Context, before time.Time) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM auth_verification_codes
+		WHERE expires_at <= ?
+	`, formatTime(before.UTC()))
+	if err != nil {
+		return 0, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(rows), nil
+}
+
 func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]store.AutomationRule, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, enabled, rule_json, created_at, updated_at

@@ -36,6 +36,13 @@ func RunConfigRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	})
 }
 
+func RunAuthRepositoryTests(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	t.Run("auth_verification_codes", func(t *testing.T) {
+		testAuthVerificationCodeRepositoryDeletesExpiredCodes(t, newStore)
+	})
+}
+
 func RunAPIKeyRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Helper()
 	t.Run("app_api_keys", func(t *testing.T) {
@@ -320,6 +327,74 @@ func testAutomationRuleRepositoryReplacesByScope(t *testing.T, newStore NewStore
 	}
 	if len(otherUser) != 0 {
 		t.Fatalf("expected other user rules to remain isolated: %#v", otherUser)
+	}
+}
+
+func testAuthVerificationCodeRepositoryDeletesExpiredCodes(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+	now := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
+
+	if _, err := st.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+		Email:          "expired-a@example.com",
+		Purpose:        "register",
+		CodeHash:       "hash-expired-a",
+		FailedAttempts: 0,
+		ExpiresAt:      now.Add(-2 * time.Hour),
+		LastSentAt:     now.Add(-3 * time.Hour),
+	}); err != nil {
+		t.Fatalf("create expired code A: %v", err)
+	}
+	if _, err := st.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+		Email:          "expired-b@example.com",
+		Purpose:        "password_reset",
+		CodeHash:       "hash-expired-b",
+		FailedAttempts: 1,
+		ExpiresAt:      now,
+		LastSentAt:     now.Add(-30 * time.Minute),
+	}); err != nil {
+		t.Fatalf("create expired code B: %v", err)
+	}
+	if _, err := st.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+		Email:          "active@example.com",
+		Purpose:        "register",
+		CodeHash:       "hash-active",
+		FailedAttempts: 0,
+		ExpiresAt:      now.Add(30 * time.Minute),
+		LastSentAt:     now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("create active code: %v", err)
+	}
+
+	deleted, err := st.DeleteExpiredAuthVerificationCodes(ctx, now)
+	if err != nil {
+		t.Fatalf("delete expired verification codes: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected to delete 2 expired codes, got %d", deleted)
+	}
+
+	if _, err := st.GetAuthVerificationCode(ctx, "expired-a@example.com", "register"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected expired code A to be deleted, got %v", err)
+	}
+	if _, err := st.GetAuthVerificationCode(ctx, "expired-b@example.com", "password_reset"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected expired code B to be deleted, got %v", err)
+	}
+	active, err := st.GetAuthVerificationCode(ctx, "active@example.com", "register")
+	if err != nil {
+		t.Fatalf("load active code: %v", err)
+	}
+	if active.CodeHash != "hash-active" {
+		t.Fatalf("unexpected active code after cleanup: %#v", active)
+	}
+
+	deleted, err = st.DeleteExpiredAuthVerificationCodes(ctx, now)
+	if err != nil {
+		t.Fatalf("repeat delete expired verification codes: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("expected second cleanup to delete nothing, got %d", deleted)
 	}
 }
 

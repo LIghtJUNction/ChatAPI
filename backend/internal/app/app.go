@@ -123,7 +123,9 @@ func Run(ctx context.Context, args []string) error {
 		cfg.RealtimeWebUIReservedPerUser,
 	))
 	chatService := service.NewChatAPIService(dataStore, pendingRegistry, realtimeHub)
+	emailCodeService := service.NewEmailCodeService(dataStore, cfg.MasterKey, email.SMTPConfigFromConfig(cfg), nil)
 	startPendingExpirationWorker(ctx, cfg, chatService, logger)
+	startEmailCodeCleanupWorker(ctx, emailCodeService, logger)
 	startStorageMaintenanceWorker(ctx, cfg, dataStore, logger)
 
 	server := &http.Server{
@@ -364,6 +366,32 @@ func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataS
 				slog.Bool("checkpointed", checkpointed),
 				slog.Bool("vacuumed", vacuumed),
 			)
+		}
+	}()
+}
+
+func startEmailCodeCleanupWorker(ctx context.Context, emailCodeService *service.EmailCodeService, logger *slog.Logger) {
+	if emailCodeService == nil {
+		return
+	}
+	const interval = 15 * time.Minute
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				deleted, err := emailCodeService.CleanupExpired(ctx, time.Now().UTC())
+				if err != nil {
+					logger.Warn("cleanup expired auth verification codes failed", slog.String("error", err.Error()))
+					continue
+				}
+				if deleted > 0 {
+					logger.Info("cleaned expired auth verification codes", slog.Int("deleted", deleted))
+				}
+			}
 		}
 	}()
 }

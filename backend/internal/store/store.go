@@ -470,6 +470,7 @@ type Store interface {
 	GetAuthVerificationCode(context.Context, string, string) (AuthVerificationCode, error)
 	UpsertAuthVerificationCode(context.Context, UpsertAuthVerificationCodeInput) (AuthVerificationCode, error)
 	DeleteAuthVerificationCode(context.Context, string, string) error
+	DeleteExpiredAuthVerificationCodes(context.Context, time.Time) (int, error)
 	ListAutomationRulesByUser(context.Context, string) ([]AutomationRule, error)
 	ReplaceAutomationRulesForUser(context.Context, string, map[string]struct{}, []UpsertAutomationRuleInput) ([]AutomationRule, error)
 	CreateUploadedImage(context.Context, CreateUploadedImageInput) (UploadedImage, error)

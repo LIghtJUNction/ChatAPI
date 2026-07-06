@@ -59,6 +59,7 @@
 - 健康检查已补齐部署探针分层：`GET /api/health` 保持轻量 DB ping，`GET /api/ready` 检查数据库和 migration 状态；当数据库不可用或 `migration_dirty=true` 时 ready 返回 `503`。
 - `/metrics` 已落地最小 Prometheus 文本端点，默认关闭；仅当 `CHATAPI_METRICS_ENABLED=1` 时注册，当前输出 HTTP 请求数/状态码/耗时、Go runtime、pending turn、realtime 队列和 SQLite 文件大小等基础指标。
 - SQLite bootstrap schema 已补齐用户体系基础表：`users`、`user_identities`、`user_configs`、`config`，并已补上 `users` / `user_identities` / `config` / `user_configs` 的 SQLite 仓储基础方法和 repository 测试。当前业务仍使用 Lab actor 和 `.env` admin session；这些表和仓储先作为后续 OIDC、本地用户、管理员用户管理、用户配置和系统配置的稳定落点。
+- PostgreSQL repository 已落地第一批基础骨架：新增 `internal/repository/postgresql`，使用 `github.com/jackc/pgx/v5/pgxpool`，并为 `users`、`user_identities`、`config`、`user_configs` 提供真实实现和可选 contract tests；测试通过 `CHATAPI_PG_TEST_DSN` 启用，未配置时跳过。当前 PostgreSQL 运行时尚未开放给 `chatapi serve`，因为 conversations/messages/API keys/uploads/pending turn 等业务表方法仍是明确的未实现 stub，后续必须逐步替换并纳入同一套 contract tests。
 - 密码哈希和本地 users 表登录基础已落地：新增 `internal/platform/password`，新密码使用 Argon2id PHC 风格格式，旧 `salt$sha256(salt+password)` 可验证并返回 `NeedsUpgrade`。serve 模式 `POST /api/auth/login` 会优先按 username/email 查询 `users` 表，验证本地密码，成功后建立同一类 session；旧 hash 登录成功后会自动升级为 Argon2id 并更新 `last_login_at`。`.env` 的 `CHATAPI_ADMIN_PASSWORD` 仍保留为 `admin` 用户恢复入口。
 - 管理员用户管理已落地最小接口：`GET /api/admin/users` 列出本地用户，`POST /api/admin/users` 创建本地用户并写入 Argon2id 密码 hash，`PUT /api/admin/users/{user_id}/password` 重置密码，`DELETE /api/admin/users/{user_id}` 当前实现为停用用户而非物理删除，保留历史请求、上传、API key 等 owner 归属；这些接口仅允许 admin session 访问，并写入 `admin.user` 审计事件。
 - 用户配置已落地最小接口：`GET /api/user/config` 返回当前 actor 的 `user_configs` 列表和聚合 config map，`POST /api/user/config` 按 key upsert JSON object 配置并写入 `user.config` 审计事件；Lab actor 和 serve session actor 都复用同一套 owner 隔离。
@@ -763,7 +764,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 - 单元测试必须对 SQLite 和 PostgreSQL repository 跑同一套 contract tests。
 - CI 至少跑 SQLite；PostgreSQL 使用 service container 跑集成测试。
 
-当前 Go 重构分支已新增 `internal/repository/storetest` 作为 repository contract test 的复用入口；SQLite repository 已开始复用这套 contract 覆盖 users、user_identities、config 和 user_configs。后续 PostgreSQL repository 落地时必须直接挂同一套 contract tests，再补 PostgreSQL 专属连接池、事务和 migration 测试。
+当前 Go 重构分支已新增 `internal/repository/storetest` 作为 repository contract test 的复用入口；SQLite repository 已开始复用这套 contract 覆盖 users、user_identities、config 和 user_configs。PostgreSQL repository 已挂载同一套 contract tests，使用 `CHATAPI_PG_TEST_DSN` 可选启用；当前先覆盖 users、user_identities、config 和 user_configs，后续继续补 PostgreSQL 专属 migration、事务和业务表 contract 测试。
 
 SQLite 到 PostgreSQL 迁移：
 
@@ -1706,7 +1707,7 @@ chatapi version
 - 当前 `doctor` 尚不连接数据库，不检查 migration dirty、schema version、SQLite WAL、PostgreSQL 连接池和 uploads 归属；数据库状态由 `chatapi db check` 负责。
 - `chatapi config print --redact`：打印最终配置，敏感字段脱敏。当前 Go 重构分支已支持可选模式参数 `serve|lab`，默认按 `serve` 解析；敏感字段仅显示 `<redacted>` 或空字符串。
 - `chatapi db check`：检查数据库连接、schema version、migration 历史、SQLite WAL 状态或 PostgreSQL 连接池配置。
-- 当前 Go 重构分支的 `chatapi db check` 支持 SQLite，输出 JSON，包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at`、`applied` migration 列表，以及 `sqlite.database`、`sqlite.wal`、`sqlite.shm` 的 path / exists / bytes；如果 dirty 为 true 或数据库不可打开，命令以非零状态退出。PostgreSQL repository 尚未落地，因此 postgres DSN 会返回明确错误。
+- 当前 Go 重构分支的 `chatapi db check` 支持 SQLite，输出 JSON，包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at`、`applied` migration 列表，以及 `sqlite.database`、`sqlite.wal`、`sqlite.shm` 的 path / exists / bytes；如果 dirty 为 true 或数据库不可打开，命令以非零状态退出。PostgreSQL repository 已有基础骨架，但 `db check` 和运行时启动尚未接入 PostgreSQL，因此 postgres DSN 仍会返回明确错误。
 - `chatapi migrate up`：当前对 SQLite 执行幂等 bootstrap migration，创建/补齐当前 Go schema 和 `db_meta` / `schema_migrations` 元数据，并输出 JSON status。
 - `chatapi migrate status`：当前只读取 SQLite migration status，不执行 bootstrap；如果 schema 尚未初始化或 dirty 为 true，以非零状态退出。
 - `chatapi migrate down --force`：当前 SQLite 版本会删除 bootstrap 管理的所有表，属于测试/本地重置用危险操作；不带 `--force` 会拒绝执行。后续引入正式 migration 文件后再支持按版本回滚。

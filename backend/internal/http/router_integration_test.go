@@ -823,6 +823,50 @@ func TestConfigAutomationRulesRoutes(t *testing.T) {
 	assertAuditCount(t, env, "user.config", "automation_rule", "", "replace", "success", 1)
 }
 
+func TestUserPasswordRoute(t *testing.T) {
+	env := newTestEnv(t)
+
+	beforeHash, err := passwordhash.Hash("old-secret-password")
+	if err != nil {
+		t.Fatalf("hash old password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "lab-user",
+		Username:     "lab-user",
+		Email:        "lab@example.com",
+		PasswordHash: beforeHash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed lab user: %v", err)
+	}
+
+	before, err := env.store.GetUser(context.Background(), "lab-user")
+	if err != nil {
+		t.Fatalf("get lab user before password update: %v", err)
+	}
+	if before.PasswordHash == "" {
+		t.Fatal("expected seeded lab user password hash")
+	}
+
+	env.postJSON(t, "/api/user/password", map[string]any{
+		"password": "new-secret-password",
+	}, http.StatusOK)
+
+	after, err := env.store.GetUser(context.Background(), "lab-user")
+	if err != nil {
+		t.Fatalf("get lab user after password update: %v", err)
+	}
+	if after.PasswordHash == before.PasswordHash {
+		t.Fatal("expected password hash to change")
+	}
+	result, err := passwordhash.Verify("new-secret-password", after.PasswordHash)
+	if err != nil || !result.OK {
+		t.Fatalf("verify updated password hash: ok=%v err=%v", result.OK, err)
+	}
+	assertAuditCount(t, env, "user.password", "user", "lab-user", "update", "success", 1)
+}
+
 func TestUserIdentitiesListAndUnlink(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("identity-secret")

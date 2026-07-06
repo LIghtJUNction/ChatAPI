@@ -35,6 +35,7 @@
 - 已补上统一的 request 读取视图（列表 + 详情）并先用于 `GET /lab/requests`、`GET /lab/requests/{request_id}`；后续 `/api/app/requests` 应直接复用这套 request reader，而不是再单独拼查询结构。
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
 - 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在当前 lab 用户语境下工作，`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
+- 当前旧前端 `ApiKeyManagementPanel` 仍请求 `/api/user/api-keys*` 并假设服务端可再次返回完整明文 key；这与 Go 重构版“应用 API Key 只存 hash、明文只在创建时返回一次”的安全边界冲突，因此不应继续为旧接口补明文兼容，后续前端应改接 `/api/user/app-api-keys` 并调整为“一次性展示 + 前缀/元数据列表”模型。
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
 - 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 可在当前 lab 用户语境下工作；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
 - 用户侧虚拟模型配置已补上最小接口：`GET/POST/DELETE /api/config/models` 当前按 actor 读写 `user_configs.virtual_models`，用于保存当前用户自己的虚拟模型列表；`GET /models` / `GET /v1/models` 也已开始优先返回当前 actor 的已启用虚拟模型，而不是硬编码单个 `chatapi-lab`。若当前用户没有配置模型，则回退到默认 `chatapi-lab`。
@@ -68,6 +69,7 @@
 - 用户配置已落地最小接口：`GET /api/user/config` 返回当前 actor 的 `user_configs` 列表和聚合 config map，`POST /api/user/config` 按 key upsert JSON object 配置并写入 `user.config` 审计事件；Lab actor 和 serve session actor 都复用同一套 owner 隔离。
 - 系统配置已落地最小管理接口：`GET /api/admin/config` 返回 `config` 表列表和聚合 config map，`POST /api/admin/config` 按 key upsert JSON object 配置并写入 `admin.config` 审计事件；当前只负责持久化和管理，不会自动覆盖 `.env` 派生的运行时配置，后续各服务再逐步读取对应 key。
 - 面向当前前端系统设置面板的最小接口也已补上：`GET/POST /api/config/system` 当前要求 admin actor，读写 `config.system_settings` 单条 JSON，并把前端已使用的字段展平成固定响应结构；`realtime_*`、图片大小上限和 SMTP provider 选项会优先回显当前运行时配置，其他字段先作为可持久化设置保留，后续再逐步接入真实运行时行为。
+- 用户侧改密最小接口已补上：`POST /api/user/password` 当前按 actor 更新本地 `users.password_hash`，用于前端设置页的“重置密码”表单；这条链路只负责已登录用户的本地密码更新，不包含邮箱找回、验证码或 TOTP 二次确认，后续正式账号恢复流程再单独补齐。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
 - 本地 session 已落地最小版本：serve 模式下 `POST /api/auth/login` 优先验证 `users` 表本地账号，失败后允许 `admin` 使用 `.env` 的 `CHATAPI_ADMIN_PASSWORD` 作为恢复入口，成功后用独立 `CHATAPI_SESSION_SECRET` 写入 HMAC 签名 HttpOnly cookie；`GET /api/auth/session` 可读取当前 actor，`POST /api/auth/logout` 会清除 cookie；管理员接口已可通过 session actor 访问，应用 API Key 和虚拟模型 API Key 仍不能访问管理员后台。session 认证的非 GET `/api/*` 请求已执行 Origin/Referer 同源校验，Lab actor 和 API Key 请求不走 CSRF。`chatapi setup` 已生成 `CHATAPI_SESSION_SECRET`；如果老部署未配置，serve 启动会生成随机 session secret 并持久化到 `config` 表的 `security.session_secret`，Lab 使用进程内不安全默认值且不持久化。本地管理员登录已补上最小进程内失败限流，连续失败后返回 `429` 并写审计事件；后续多实例部署应迁移到 Redis 或数据库限流器。注册、密码重置和 TOTP 仍是后续工作。
 - OIDC RP 登录已落地最小闭环：新增 `GET /api/auth/oidc/config`、`GET /api/auth/oidc/login`、`GET /api/auth/oidc/callback`，使用 `golang.org/x/oauth2` 和 `github.com/coreos/go-oidc/v3/oidc` 走 Authorization Code Flow + PKCE，校验 state、nonce、ID Token issuer/audience/expiry/signature；callback 会在有 access token 时拉取 UserInfo 补充缺失 claims，并要求 UserInfo `sub` 与 ID Token `sub` 一致；登录成功后创建同一类 ChatAPI session。当前按 `CHATAPI_OIDC_ALLOWED_DOMAINS` / `CHATAPI_OIDC_ALLOWED_EMAILS` 做 allowlist，allowlist 命中和自动关联已有本地邮箱都要求 `email_verified=true`；`CHATAPI_OIDC_AUTO_CREATE_USER=1` 时可自动创建本地用户并 upsert `user_identities`，命中 `CHATAPI_OIDC_ADMIN_EMAILS` 且 `email_verified=true` 时同步为 admin；管理员邮箱列表变化后，下次 OIDC 登录会降级非本地显式管理员。用户侧 OIDC 身份查看/解绑已落地：`GET /api/user/identities` 列出当前用户身份，`DELETE /api/user/identities/{identity_id}` 只能解绑当前用户自己的身份，并阻止无本地密码用户删除最后一个登录方式。后续仍需补绑定发起流程、完整 token callback 集成测试和更细审计 metadata。
@@ -1449,10 +1451,6 @@ Go 版首个可替换版本必须覆盖：
 - `GET /api/user/config`
 - `POST /api/user/config`
 - `POST /api/user/password`
-- `GET /api/user/api-keys`
-- `POST /api/user/api-keys`
-- `DELETE /api/user/api-keys/{key_id}`
-- `GET /api/user/api-keys/generate`
 - `GET /api/user/app-api-keys`
 - `POST /api/user/app-api-keys`
 - `DELETE /api/user/app-api-keys/{key_id}`
@@ -1486,6 +1484,11 @@ Go 版首个可替换版本必须覆盖：
 - `GET /api/admin/runtime/summary`
 - `GET /api/admin/runtime/memory`
 - `GET /api/admin/runtime/connections`
+
+说明：
+
+- 旧 `/api/user/api-keys*` 路由不再作为 Go 版目标兼容面。核心原因不是路径命名，而是旧前端要求服务端可重复展示完整明文 key，这与应用 API Key 必须 hash 存储、只在创建时返回一次的长期安全模型直接冲突。
+- WebUI 后续应统一改接 `/api/user/app-api-keys*`，列表只展示名称、前缀、scope、资源限制、创建/使用时间；原“生成 key”按钮可以保留，但应作为创建表单的本地辅助，而不是独立服务端接口。
 - `GET /api/admin/runtime/queue`
 - `GET /api/admin/runtime/settings`
 - `PUT /api/admin/runtime/settings`
@@ -2014,6 +2017,7 @@ make release-snapshot
 
 - 登录、登出、session、注册、密码重置、TOTP、OIDC RP 登录。当前已先落地本地 users 表登录、`.env` admin 恢复登录、登出、session、OIDC RP 最小登录闭环和用户侧 OIDC 身份查看/解绑；注册、密码重置、TOTP、OIDC 绑定发起流程仍待补齐。
 - 用户配置、系统配置、虚拟模型 API Key、应用 API Key、上游模型辅助的浏览器本地配置、KirariNetwork 连接、管理员用户管理。当前用户配置已先支持 `GET/POST /api/user/config` 按当前 actor 读写普通 JSON object 偏好；系统配置已先支持 `GET/POST /api/admin/config` 做表驱动持久化；管理员用户管理已先支持列表、创建、重置密码和停用用户；用户详情历史、物理删除策略和 OIDC 身份管理后台仍待补齐。
+- 当前前端设置页仍有几处必须跟随 Go 契约一起调整：`/api/user/api-keys*` 需要切到 `/api/user/app-api-keys*` 并改成一次性展示明文 key；`/api/user/password`、`/api/admin/send-test-email` 仍待后端补齐或在前端切到新的配置/诊断流程。
 - CSRF、CORS、Cookie 策略。当前已先落地 session mutation Origin/Referer 校验和 HttpOnly SameSite cookie。
 
 验收：

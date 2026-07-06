@@ -66,7 +66,7 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
 	userPasswordHandler := handlers.UserPasswordHandler{Config: cfg, Password: service.NewUserPasswordService(dataStore), Audit: auditService}
-	workspaceToolCallHandler := handlers.WorkspaceToolCallHandler{Service: service.NewWorkspaceToolCallService(dataStore)}
+	workspaceToolCallHandler := handlers.WorkspaceToolCallHandler{Config: cfg, Service: service.NewWorkspaceToolCallService(dataStore)}
 	configAutomationRulesHandler := handlers.ConfigAutomationRulesHandler{Config: cfg, Service: automationRuleService, Audit: auditService}
 	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
 	configSystemHandler := handlers.ConfigSystemHandler{Config: cfg, Service: service.NewSystemSettingsService(dataStore, cfg), Audit: auditService}

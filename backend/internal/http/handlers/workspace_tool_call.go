@@ -3,13 +3,16 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
+	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
 )
 
 type WorkspaceToolCallHandler struct {
+	Config  config.Config
 	Service *service.WorkspaceToolCallService
 }
 
@@ -36,15 +39,35 @@ func (h WorkspaceToolCallHandler) AssistContext(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":            true,
-		"request":       contextPayload.Request,
-		"parsed":        requestParsedView(contextPayload.Request),
-		"conversation":  contextPayload.Conversation,
-		"messages":      contextPayload.Messages,
-		"assist_schema": h.Service.AssistSchema(),
+		"ok":                        true,
+		"request":                   contextPayload.Request,
+		"parsed":                    requestParsedView(contextPayload.Request),
+		"conversation":              contextPayload.Conversation,
+		"messages":                  contextPayload.Messages,
+		"assist_schema":             h.Service.AssistSchema(),
+		"upstream_assistant_schema": service.BuildUpstreamAssistantSchema(),
+		"upstream_hints":            service.BuildUpstreamAssistantHints(h.Config, requestBaseURL(r), strings.TrimSpace(r.URL.Query().Get("candidate_base_url"))),
 		"draft": map[string]any{
 			"text":   contextPayload.DraftText,
 			"length": contextPayload.DraftLength,
 		},
 	})
+}
+
+func requestBaseURL(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded != "" {
+		scheme = forwarded
+	}
+	host := strings.TrimSpace(r.Host)
+	if host == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: scheme, Host: host}).String()
 }

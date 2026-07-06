@@ -1361,7 +1361,7 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 		"text":            "draft chunk",
 	}, http.StatusOK)
 
-	resp := env.getJSON(t, "/api/workspace/tool-call/assist-context?request_id="+requestID, http.StatusOK)
+	resp := env.getJSON(t, "/api/workspace/tool-call/assist-context?request_id="+requestID+"&candidate_base_url="+neturl.QueryEscape(env.server.URL+"/v1"), http.StatusOK)
 	if nestedPathString(resp, "request", "request_id") != requestID {
 		t.Fatalf("unexpected assist request: %#v", resp)
 	}
@@ -1381,6 +1381,12 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	}
 	if !containsStringValue(resp["assist_schema"].(map[string]any)["confidence_levels"], "medium") {
 		t.Fatalf("unexpected assist schema confidence levels: %#v", resp)
+	}
+	if !containsMapItemWithStringField(resp["upstream_assistant_schema"].(map[string]any)["fields"], "key", "base_url") {
+		t.Fatalf("unexpected upstream assistant schema: %#v", resp)
+	}
+	if !nestedPathBool(resp, "upstream_hints", "candidate_recursive") {
+		t.Fatalf("expected recursive upstream hint: %#v", resp)
 	}
 
 	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
@@ -1464,6 +1470,12 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	}
 	if !containsStringValue(resp["assist_schema"].(map[string]any)["notes"], "Do not auto-submit the draft tool call.") {
 		t.Fatalf("unexpected session assist schema notes: %#v", resp)
+	}
+	if !containsStringValue(resp["upstream_assistant_schema"].(map[string]any)["sensitive_fields"], "api_key") {
+		t.Fatalf("unexpected upstream assistant sensitive fields: %#v", resp)
+	}
+	if nestedPathBool(resp, "upstream_hints", "candidate_recursive") {
+		t.Fatalf("did not expect recursive upstream hint: %#v", resp)
 	}
 
 	_, _ = env.postJSONWithCookieAndHeaders(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{

@@ -917,6 +917,7 @@ ChatAPI 的 OpenAI Responses、Chat Completions、Anthropic Messages 三套协�
 - 协议编码侧当前也已开始从“直接拼 map”收口到可复用 encoder：Responses/Chat Completions/Anthropic 的 tool call、tool result、usage、tool-use block 已抽到共享 helper，`BuildResponseForMeta(meta, result)` 可在不依赖 `store.Conversation` 的情况下直接输出最终响应 JSON，便于后续把协议包拆出去给 KirariNetwork 或独立代理复用。
 - 协议测试侧当前也已开始补 fixture/golden 风格覆盖：同一个 `TurnResult` 会分别走 Responses / Chat Completions / Anthropic Messages 的非流和流式编码断言，尤其固定 assistant message、tool call、tool result、usage 等关键字段，降低后续继续补 reasoning、多模态或独立拆包时的回归风险。
 - 输入归一化侧当前已继续补齐两类常见多模态变体：OpenAI Responses 风格的 `input` 现在不仅支持 message 数组，也支持直接给 `input_text` / `input_image` content part 数组；Anthropic `image` block 的 `source.media_type` / `source.data|url` 也已通过协议测试固化。这样后续浏览器端辅助或外部 SDK 直接复用 protocol 包时，不需要额外再套一层“伪 message” 包装。
+- 工具结果输入侧当前也已开始归一化：OpenAI Responses `function_call_output`、Chat Completions `role=tool` 消息，以及 Anthropic `tool_result` block 都会统一映射成 `InputPart{Type:"tool_result", Text:"..."}`，并参与 `UserContent` 拼接。这样自动化规则、后续上游辅助和调试界面读取请求上下文时，可以直接看到工具返回文本，而不需要分别理解三套协议的工具结果外形。
 
 这个包可以同时被 ChatAPI 和 KirariNetwork 使用：ChatAPI 用它接收外部 Agent 请求并归一化为 pending turn，KirariNetwork 可用它把不同上游模型协议归一化为统一模型网关响应。
 

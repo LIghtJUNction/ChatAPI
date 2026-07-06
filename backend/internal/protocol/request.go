@@ -192,10 +192,16 @@ func extractInputParts(body map[string]any) []InputPart {
 	if messages, ok := body["messages"].([]any); ok {
 		for i := len(messages) - 1; i >= 0; i-- {
 			record, ok := messages[i].(map[string]any)
-			if !ok || stringValue(record["role"], "") != "user" {
+			if !ok {
 				continue
 			}
-			return extractPartsFromMessageContent(record["content"])
+			role := stringValue(record["role"], "")
+			switch role {
+			case "user":
+				return extractPartsFromMessageContent(record["content"])
+			case "tool":
+				return extractToolResultParts(record["content"])
+			}
 		}
 	}
 	return nil
@@ -213,8 +219,16 @@ func extractPartsFromTurnInput(input []any) []InputPart {
 			parts = append(parts, part)
 			continue
 		}
-		if stringValue(record["role"], stringValue(record["type"], "")) == "user" || stringValue(record["type"], "") == "message" {
+		role := stringValue(record["role"], stringValue(record["type"], ""))
+		switch role {
+		case "user":
 			parts = append(parts, extractPartsFromMessageContent(record["content"])...)
+		case "tool":
+			parts = append(parts, extractToolResultParts(record["content"])...)
+		default:
+			if stringValue(record["type"], "") == "message" {
+				parts = append(parts, extractPartsFromMessageContent(record["content"])...)
+			}
 		}
 	}
 	return parts
@@ -264,6 +278,12 @@ func extractInputPart(record map[string]any) InputPart {
 			MediaType: firstNonEmptyText(record["media_type"], nestedStringValue(record, "source", "media_type")),
 			URL:       firstNonEmptyText(record["image_url"], nestedStringValue(record, "image_url", "url"), nestedStringValue(record, "source", "data"), nestedStringValue(record, "source", "url")),
 		}
+	case "function_call_output", "tool_result":
+		text = firstNonEmptyText(record["output"], text, flattenToolResultContent(record["content"]))
+		if text == "" {
+			return InputPart{}
+		}
+		return InputPart{Type: "tool_result", Text: text}
 	default:
 		if text != "" {
 			return InputPart{Type: "text", Text: text}
@@ -275,11 +295,53 @@ func extractInputPart(record map[string]any) InputPart {
 func joinInputPartText(parts []InputPart) string {
 	texts := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if part.Type == "text" && strings.TrimSpace(part.Text) != "" {
+		if (part.Type == "text" || part.Type == "tool_result") && strings.TrimSpace(part.Text) != "" {
 			texts = append(texts, strings.TrimSpace(part.Text))
 		}
 	}
 	return strings.Join(texts, "\n")
+}
+
+func extractToolResultParts(content any) []InputPart {
+	text := flattenToolResultContent(content)
+	if text == "" {
+		return nil
+	}
+	return []InputPart{{Type: "tool_result", Text: text}}
+}
+
+func flattenToolResultContent(content any) string {
+	switch typed := content.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			record, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			text := firstNonEmptyText(
+				record["text"],
+				record["output"],
+				record["input_text"],
+				nestedStringValue(record, "text", "value"),
+			)
+			if strings.TrimSpace(text) != "" {
+				parts = append(parts, strings.TrimSpace(text))
+			}
+		}
+		return strings.Join(parts, "\n")
+	case map[string]any:
+		return strings.TrimSpace(firstNonEmptyText(
+			typed["text"],
+			typed["output"],
+			typed["input_text"],
+			nestedStringValue(typed, "text", "value"),
+		))
+	default:
+		return ""
+	}
 }
 
 func extractToolChoice(body map[string]any) ToolChoice {

@@ -119,6 +119,64 @@ func TestParseRequestSupportsAnthropicImageSourceBlocks(t *testing.T) {
 	}
 }
 
+func TestParseRequestSupportsResponsesFunctionCallOutputInput(t *testing.T) {
+	request := ParseRequest("responses", map[string]any{
+		"model": "gpt-test",
+		"input": []any{
+			map[string]any{"type": "function_call_output", "output": "{\"ok\":true}"},
+		},
+	})
+	if request.UserContent != "{\"ok\":true}" {
+		t.Fatalf("unexpected user content: %#v", request.UserContent)
+	}
+	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" || request.InputParts[0].Text != "{\"ok\":true}" {
+		t.Fatalf("unexpected function_call_output parsing: %#v", request.InputParts)
+	}
+}
+
+func TestParseRequestSupportsChatCompletionsToolMessage(t *testing.T) {
+	request := ParseRequest("chat_completions", map[string]any{
+		"model": "gpt-test",
+		"messages": []any{
+			map[string]any{"role": "assistant", "content": "calling tool"},
+			map[string]any{"role": "tool", "content": "{\"ok\":true}"},
+		},
+	})
+	if request.UserContent != "{\"ok\":true}" {
+		t.Fatalf("unexpected tool message user content: %#v", request.UserContent)
+	}
+	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" {
+		t.Fatalf("unexpected tool message input parts: %#v", request.InputParts)
+	}
+}
+
+func TestParseRequestSupportsAnthropicToolResultBlocks(t *testing.T) {
+	request := ParseRequest("anthropic_messages", map[string]any{
+		"model": "claude-test",
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type":        "tool_result",
+						"tool_use_id": "toolu_1",
+						"content": []any{
+							map[string]any{"type": "text", "text": "weather is sunny"},
+							map[string]any{"type": "text", "text": "temperature 25C"},
+						},
+					},
+				},
+			},
+		},
+	})
+	if request.UserContent != "weather is sunny\ntemperature 25C" {
+		t.Fatalf("unexpected anthropic tool result content: %#v", request.UserContent)
+	}
+	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" {
+		t.Fatalf("unexpected anthropic tool result parts: %#v", request.InputParts)
+	}
+}
+
 func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
 	conversation := store.Conversation{
 		ResponseID: "resp_1",

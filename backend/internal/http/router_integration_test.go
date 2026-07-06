@@ -611,6 +611,90 @@ func TestUserAppAPIKeysManagement(t *testing.T) {
 	}
 }
 
+func TestUserConfigManagementInLab(t *testing.T) {
+	env := newTestEnv(t)
+
+	initial := env.getJSON(t, "/api/user/config", http.StatusOK)
+	if initial["count"] != nil {
+		t.Fatalf("unexpected legacy count field: %#v", initial)
+	}
+	if configMap := initial["config"].(map[string]any); len(configMap) != 0 {
+		t.Fatalf("expected empty initial config: %#v", initial)
+	}
+
+	updateResp := env.postJSON(t, "/api/user/config", map[string]any{
+		"config": map[string]any{
+			"workspace": map[string]any{
+				"theme":   "dark",
+				"compact": true,
+			},
+			"notifications": map[string]any{
+				"email": false,
+			},
+		},
+	}, http.StatusOK)
+	if nestedPathString(updateResp, "config", "workspace", "theme") != "dark" {
+		t.Fatalf("unexpected user config update response: %#v", updateResp)
+	}
+	if !nestedPathBool(updateResp, "config", "workspace", "compact") {
+		t.Fatalf("missing compact config: %#v", updateResp)
+	}
+
+	getResp := env.getJSON(t, "/api/user/config", http.StatusOK)
+	if nestedPathString(getResp, "config", "workspace", "theme") != "dark" {
+		t.Fatalf("unexpected user config get response: %#v", getResp)
+	}
+	assertAuditCount(t, env, "user.config", "user_config", "lab-user", "update", "success", 1)
+}
+
+func TestUserConfigManagementUsesSessionActor(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("config-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_config_owner",
+		Username:     "config-owner",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed config user: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "config-owner",
+		"password": "config-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing user session cookie: %#v", cookies)
+	}
+
+	headers := map[string]string{"Origin": env.server.URL}
+	updateResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/user/config", map[string]any{
+		"workspace": map[string]any{
+			"layout": "dense",
+		},
+	}, sessionCookie, headers, http.StatusOK)
+	if nestedPathString(updateResp, "config", "workspace", "layout") != "dense" {
+		t.Fatalf("unexpected session user config update: %#v", updateResp)
+	}
+	getResp := env.getJSONWithCookie(t, "/api/user/config", sessionCookie, http.StatusOK)
+	if nestedPathString(getResp, "config", "workspace", "layout") != "dense" {
+		t.Fatalf("unexpected session user config get: %#v", getResp)
+	}
+
+	items, err := env.store.ListUserConfigs(context.Background(), "user_config_owner")
+	if err != nil {
+		t.Fatalf("list stored user configs: %v", err)
+	}
+	if len(items) != 1 || items[0].Key != "workspace" || items[0].Value["layout"] != "dense" {
+		t.Fatalf("unexpected stored user configs: %#v", items)
+	}
+	assertAuditCountForActor(t, env, "user_config_owner", "user.config", "user_config", "user_config_owner", "update", "success", 1)
+}
+
 func TestExpiredAppAPIKeyRejected(t *testing.T) {
 	env := newTestEnv(t)
 	expiredAt := time.Now().UTC().Add(-time.Hour)

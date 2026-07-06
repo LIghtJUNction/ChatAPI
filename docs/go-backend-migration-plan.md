@@ -751,6 +751,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 - 单元测试必须对 SQLite 和 PostgreSQL repository 跑同一套 contract tests。
 - CI 至少跑 SQLite；PostgreSQL 使用 service container 跑集成测试。
 
+当前 Go 重构分支已新增 `internal/repository/storetest` 作为 repository contract test 的复用入口；SQLite repository 已开始复用这套 contract 覆盖 users、user_identities、config 和 user_configs。后续 PostgreSQL repository 落地时必须直接挂同一套 contract tests，再补 PostgreSQL 专属连接池、事务和 migration 测试。
+
 SQLite 到 PostgreSQL 迁移：
 
 - 老用户可以先用 SQLite 启动 Go 版完成旧 Flask 数据接管。
@@ -1869,7 +1871,7 @@ make release-snapshot
 - auth/session/csrf/OIDC
 - Kirari OIDC token exchange、refresh、ID token 校验、token store 接口
 - repository migration
-- repository contract tests for SQLite and PostgreSQL
+- repository contract tests for SQLite and PostgreSQL。当前已新增 `internal/repository/storetest`，SQLite 先覆盖 users、user_identities、config、user_configs；后续继续把 conversations、messages、uploads、API keys、pending turn 状态转换纳入同一套契约。
 - URL safety
 - upload path safety
 - config validation

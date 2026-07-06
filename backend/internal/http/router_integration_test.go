@@ -2069,6 +2069,7 @@ func TestMetricsEndpointWhenEnabled(t *testing.T) {
 		"chatapi_automation_no_match_total",
 		"chatapi_automation_no_rules_total 1",
 		"chatapi_automation_no_match_total 1",
+		`chatapi_automation_rule_skips_total{reason="contains_miss"} 1`,
 		"chatapi_pending_turns",
 		"chatapi_realtime_subscribers",
 		"chatapi_sqlite_database_bytes",
@@ -2348,6 +2349,10 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	automation := summary["automation"].(map[string]any)
 	if numericValue(automation["no_rules"]) != 1 || numericValue(automation["no_match"]) != 1 {
 		t.Fatalf("unexpected runtime automation summary: %#v", summaryResp)
+	}
+	skipByReason := automation["skip_by_reason"].(map[string]any)
+	if numericValue(skipByReason["contains_miss"]) != 1 {
+		t.Fatalf("unexpected runtime automation skip summary: %#v", summaryResp)
 	}
 	system := summary["system"].(map[string]any)
 	if nestedString(system, "os") == "" || numericValue(system["num_cpu"]) <= 0 || numericValue(system["process_open_fds"]) <= 0 {

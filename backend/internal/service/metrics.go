@@ -98,6 +98,7 @@ func (s *MetricsService) PrometheusText() string {
 	writeMetric(&builder, "chatapi_automation_failures_total", "Failed automation rule auto-completions.", "counter", float64(summary.Automation.Failures))
 	writeMetric(&builder, "chatapi_automation_no_rules_total", "Requests observed with no enabled automation rules.", "counter", float64(summary.Automation.NoRules))
 	writeMetric(&builder, "chatapi_automation_no_match_total", "Requests observed with enabled automation rules but no match.", "counter", float64(summary.Automation.NoMatch))
+	writeLabeledCounters(&builder, "chatapi_automation_rule_skips_total", "Automation rule skips grouped by reason.", "reason", summary.Automation.SkipByReason)
 	writeMetric(&builder, "chatapi_pending_turns", "Current pending turns.", "gauge", float64(summary.Pending.Active))
 	writeMetric(&builder, "chatapi_realtime_subscribers", "Current realtime subscribers.", "gauge", float64(summary.Realtime.Subscribers))
 	writeMetric(&builder, "chatapi_realtime_webui_subscribers", "Current WebUI realtime subscribers.", "gauge", float64(summary.Realtime.WebUISubscribers))
@@ -146,5 +147,21 @@ func writeHTTPMetrics(builder *strings.Builder, items []HTTPMetricSample) {
 	builder.WriteString("# TYPE chatapi_http_request_duration_seconds_count counter\n")
 	for _, item := range items {
 		fmt.Fprintf(builder, "chatapi_http_request_duration_seconds_count{method=%q,route=%q,status=%q} %d\n", item.Key.Method, item.Key.Route, fmt.Sprintf("%d", item.Key.Status), item.Value.Count)
+	}
+}
+
+func writeLabeledCounters(builder *strings.Builder, name string, help string, label string, items map[string]int) {
+	builder.WriteString(fmt.Sprintf("# HELP %s %s\n", name, help))
+	builder.WriteString(fmt.Sprintf("# TYPE %s counter\n", name))
+	if len(items) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Fprintf(builder, "%s{%s=%q} %d\n", name, label, key, items[key])
 	}
 }

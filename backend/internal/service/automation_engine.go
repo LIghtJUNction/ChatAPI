@@ -16,8 +16,9 @@ type AutomationMatch struct {
 }
 
 type AutomationDecision struct {
-	Status string
-	Match  *AutomationMatch
+	Status      string
+	Match       *AutomationMatch
+	SkipReasons []string
 }
 
 const (
@@ -35,40 +36,45 @@ func (s *AutomationRuleService) MatchTurn(ctx context.Context, userID string, re
 		return AutomationDecision{}, err
 	}
 	enabledRules := 0
+	skipReasons := make([]string, 0, len(items))
 	for _, item := range items {
 		if item.Enabled {
 			enabledRules++
 		}
 	}
 	for _, item := range items {
-		match, ok := matchAutomationRule(item, request, conversationID, responseID)
+		match, reason, ok := matchAutomationRule(item, request, conversationID, responseID)
 		if ok {
 			return AutomationDecision{Status: automationStatusMatched, Match: match}, nil
+		}
+		if reason != "" {
+			skipReasons = append(skipReasons, reason)
 		}
 	}
 	if enabledRules == 0 {
 		return AutomationDecision{Status: automationStatusNoRules}, nil
 	}
-	return AutomationDecision{Status: automationStatusNoMatch}, nil
+	return AutomationDecision{Status: automationStatusNoMatch, SkipReasons: skipReasons}, nil
 }
 
-func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest, conversationID string, responseID string) (*AutomationMatch, bool) {
+func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest, conversationID string, responseID string) (*AutomationMatch, string, bool) {
 	if !item.Enabled {
-		return nil, false
+		return nil, "", false
 	}
 	rule, err := ParseAutomationRulePayload(item.Payload)
 	if err != nil {
-		return nil, false
+		return nil, "parse_invalid", false
 	}
 	if rule.Action.Type != "output_text" {
-		return nil, false
+		return nil, "action_invalid", false
 	}
 	outputText := strings.TrimSpace(rule.Action.Text)
 	if outputText == "" {
-		return nil, false
+		return nil, "empty_output", false
 	}
-	if !matchesRuleConditions(rule.Conditions, request) {
-		return nil, false
+	matched, reason := matchesRuleConditions(rule.Conditions, request)
+	if !matched {
+		return nil, reason, false
 	}
 	return &AutomationMatch{
 		RuleID: item.ID,
@@ -78,24 +84,24 @@ func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest
 			OutputText:     truncateRunes(outputText, automationMaxOutputLength),
 			Mode:           "assistant_message",
 		},
-	}, true
+	}, "", true
 }
 
-func matchesRuleConditions(conditions AutomationConditions, request protocol.TurnRequest) bool {
+func matchesRuleConditions(conditions AutomationConditions, request protocol.TurnRequest) (bool, string) {
 	if len(conditions.Contains) == 0 && len(conditions.Excludes) == 0 {
-		return true
+		return true, ""
 	}
 	for _, matcher := range conditions.Contains {
 		if !requestMatchesCondition(request, matcher) {
-			return false
+			return false, "contains_miss"
 		}
 	}
 	for _, matcher := range conditions.Excludes {
 		if requestMatchesCondition(request, matcher) {
-			return false
+			return false, "excluded"
 		}
 	}
-	return true
+	return true, ""
 }
 
 func requestMatchesCondition(request protocol.TurnRequest, matcher AutomationCondition) bool {

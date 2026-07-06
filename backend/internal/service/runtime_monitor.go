@@ -43,10 +43,11 @@ type RuntimeSummary struct {
 }
 
 type AutomationSnapshot struct {
-	Hits     int `json:"hits"`
-	Failures int `json:"failures"`
-	NoRules  int `json:"no_rules"`
-	NoMatch  int `json:"no_match"`
+	Hits         int            `json:"hits"`
+	Failures     int            `json:"failures"`
+	NoRules      int            `json:"no_rules"`
+	NoMatch      int            `json:"no_match"`
+	SkipByReason map[string]int `json:"skip_by_reason,omitempty"`
 }
 
 type ConnectionSnapshot struct {
@@ -195,6 +196,7 @@ func (s *RuntimeMonitorService) Automation() AutomationSnapshot {
 		observed := s.automation.Snapshot()
 		snapshot.NoRules = observed.NoRules
 		snapshot.NoMatch = observed.NoMatch
+		snapshot.SkipByReason = observed.SkipByReason
 	}
 	count, err := s.store.CountAuditLogs(context.Background(), store.CountAuditLogsInput{
 		EventType: "automation.rule",

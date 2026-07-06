@@ -11,7 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/store"
 )
 
 const defaultRuntimeGOGC = 100
@@ -19,6 +22,7 @@ const unlimitedMemoryLimitBytes = int64(^uint64(0) >> 1)
 
 type RuntimeMonitorService struct {
 	cfg              config.Config
+	store            store.Store
 	realtime         *RealtimeHub
 	pending          *PendingRegistry
 	settingsMu       sync.Mutex
@@ -95,11 +99,18 @@ type MemorySnapshot struct {
 }
 
 type DatabaseInfo struct {
-	Driver         string `json:"driver"`
-	SQLitePath     string `json:"sqlite_path,omitempty"`
-	SQLiteBytes    int64  `json:"sqlite_bytes,omitempty"`
-	SQLiteWAL      string `json:"sqlite_wal,omitempty"`
-	SQLiteWALBytes int64  `json:"sqlite_wal_bytes,omitempty"`
+	Driver                       string `json:"driver"`
+	SQLitePath                   string `json:"sqlite_path,omitempty"`
+	SQLiteBytes                  int64  `json:"sqlite_bytes,omitempty"`
+	SQLiteWAL                    string `json:"sqlite_wal,omitempty"`
+	SQLiteWALBytes               int64  `json:"sqlite_wal_bytes,omitempty"`
+	PostgresMaxConns             int32  `json:"postgres_max_conns,omitempty"`
+	PostgresTotalConns           int32  `json:"postgres_total_conns,omitempty"`
+	PostgresAcquiredConns        int32  `json:"postgres_acquired_conns,omitempty"`
+	PostgresIdleConns            int32  `json:"postgres_idle_conns,omitempty"`
+	PostgresConstructingConns    int32  `json:"postgres_constructing_conns,omitempty"`
+	PostgresEmptyAcquireCount    int64  `json:"postgres_empty_acquire_count,omitempty"`
+	PostgresCanceledAcquireCount int64  `json:"postgres_canceled_acquire_count,omitempty"`
 }
 
 type RuntimeSettings struct {
@@ -112,9 +123,10 @@ type UpdateRuntimeSettingsInput struct {
 	MemoryLimitBytes *int64 `json:"memory_limit_bytes,omitempty"`
 }
 
-func NewRuntimeMonitorService(cfg config.Config, realtime *RealtimeHub, pending *PendingRegistry) *RuntimeMonitorService {
+func NewRuntimeMonitorService(cfg config.Config, dataStore store.Store, realtime *RealtimeHub, pending *PendingRegistry) *RuntimeMonitorService {
 	service := &RuntimeMonitorService{
 		cfg:              cfg,
+		store:            dataStore,
 		realtime:         realtime,
 		pending:          pending,
 		gogc:             cfg.RuntimeGOGC,
@@ -362,17 +374,29 @@ func goRuntimeInfo() GoRuntimeInfo {
 
 func (s *RuntimeMonitorService) databaseInfo() DatabaseInfo {
 	info := DatabaseInfo{Driver: s.cfg.DatabaseDriver}
-	if s.cfg.DatabaseDriver != "sqlite" {
+	if strings.EqualFold(strings.TrimSpace(s.cfg.DatabaseDriver), "sqlite") {
+		info.SQLitePath = s.cfg.DatabaseDSN
+		if stat, err := os.Stat(s.cfg.DatabaseDSN); err == nil {
+			info.SQLiteBytes = stat.Size()
+		}
+		walPath := s.cfg.DatabaseDSN + "-wal"
+		info.SQLiteWAL = walPath
+		if stat, err := os.Stat(walPath); err == nil {
+			info.SQLiteWALBytes = stat.Size()
+		}
 		return info
 	}
-	info.SQLitePath = s.cfg.DatabaseDSN
-	if stat, err := os.Stat(s.cfg.DatabaseDSN); err == nil {
-		info.SQLiteBytes = stat.Size()
+	poolProvider, ok := s.store.(interface{ Pool() *pgxpool.Pool })
+	if !ok || poolProvider.Pool() == nil {
+		return info
 	}
-	walPath := s.cfg.DatabaseDSN + "-wal"
-	info.SQLiteWAL = walPath
-	if stat, err := os.Stat(walPath); err == nil {
-		info.SQLiteWALBytes = stat.Size()
-	}
+	stats := poolProvider.Pool().Stat()
+	info.PostgresMaxConns = stats.MaxConns()
+	info.PostgresTotalConns = stats.TotalConns()
+	info.PostgresAcquiredConns = stats.AcquiredConns()
+	info.PostgresIdleConns = stats.IdleConns()
+	info.PostgresConstructingConns = stats.ConstructingConns()
+	info.PostgresEmptyAcquireCount = stats.EmptyAcquireCount()
+	info.PostgresCanceledAcquireCount = stats.CanceledAcquireCount()
 	return info
 }

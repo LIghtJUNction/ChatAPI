@@ -15,6 +15,7 @@ import (
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	pgstore "github.com/zyf/chatapi/internal/repository/postgresql"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
+	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -69,6 +70,30 @@ func TestShouldRunStorageDBMaintenance(t *testing.T) {
 	cfg.DatabaseDriver = "PoStGrEs"
 	if shouldRunStorageDBMaintenance(cfg) {
 		t.Fatal("postgres alias should skip sqlite-specific scheduled db maintenance")
+	}
+}
+
+func TestRuntimeMonitorSQLiteDatabaseInfo(t *testing.T) {
+	tempDir := t.TempDir()
+	dsn := filepath.Join(tempDir, "chatapi.sqlite3")
+	st, err := sqlitestore.Open(dsn)
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := migrations.Bootstrap(context.Background(), st.DB()); err != nil {
+		t.Fatalf("bootstrap sqlite store: %v", err)
+	}
+	cfg := config.Default(config.ModeServe, tempDir)
+	cfg.DatabaseDriver = "sqlite"
+	cfg.DatabaseDSN = dsn
+	monitor := service.NewRuntimeMonitorService(cfg, st, service.NewRealtimeHub(st), service.NewPendingRegistry())
+	info := monitor.Summary().Database
+	if info.Driver != "sqlite" {
+		t.Fatalf("unexpected driver: %#v", info)
+	}
+	if info.SQLitePath == "" {
+		t.Fatalf("expected sqlite path in database info: %#v", info)
 	}
 }
 

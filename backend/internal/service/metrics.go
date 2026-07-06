@@ -108,6 +108,14 @@ func (s *MetricsService) PrometheusText() string {
 	if summary.Database.Driver == "sqlite" {
 		writeMetric(&builder, "chatapi_sqlite_database_bytes", "SQLite database file bytes.", "gauge", float64(summary.Database.SQLiteBytes))
 		writeMetric(&builder, "chatapi_sqlite_wal_bytes", "SQLite WAL file bytes.", "gauge", float64(summary.Database.SQLiteWALBytes))
+	} else if summary.Database.Driver == "postgres" || summary.Database.Driver == "postgresql" {
+		writeMetric(&builder, "chatapi_postgres_pool_max_conns", "PostgreSQL pool max connections.", "gauge", float64(summary.Database.PostgresMaxConns))
+		writeMetric(&builder, "chatapi_postgres_pool_total_conns", "PostgreSQL pool total connections.", "gauge", float64(summary.Database.PostgresTotalConns))
+		writeMetric(&builder, "chatapi_postgres_pool_acquired_conns", "PostgreSQL pool acquired connections.", "gauge", float64(summary.Database.PostgresAcquiredConns))
+		writeMetric(&builder, "chatapi_postgres_pool_idle_conns", "PostgreSQL pool idle connections.", "gauge", float64(summary.Database.PostgresIdleConns))
+		writeMetric(&builder, "chatapi_postgres_pool_constructing_conns", "PostgreSQL pool constructing connections.", "gauge", float64(summary.Database.PostgresConstructingConns))
+		writeMetric(&builder, "chatapi_postgres_pool_empty_acquire_total", "PostgreSQL pool empty acquire count.", "counter", float64(summary.Database.PostgresEmptyAcquireCount))
+		writeMetric(&builder, "chatapi_postgres_pool_canceled_acquire_total", "PostgreSQL pool canceled acquire count.", "counter", float64(summary.Database.PostgresCanceledAcquireCount))
 	}
 	writeHTTPMetrics(&builder, s.http.Snapshot())
 	return builder.String()

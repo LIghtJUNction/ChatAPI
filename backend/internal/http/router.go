@@ -59,7 +59,7 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
 	userIdentitiesHandler := handlers.UserIdentitiesHandler{Service: service.NewUserIdentityService(dataStore), Audit: auditService}
-	runtimeMonitor := service.NewRuntimeMonitorService(cfg, realtimeHub, pending)
+	runtimeMonitor := service.NewRuntimeMonitorService(cfg, dataStore, realtimeHub, pending)
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
 	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
 	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)

@@ -269,6 +269,10 @@ func (h AuthHandler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", nonce, int((10*time.Minute).Seconds())))
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", pkceVerifier, int((10*time.Minute).Seconds())))
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_intent", oidcIntentLogin, int((10*time.Minute).Seconds())))
+	h.recordAuthAuditWithMetadata(r, "oidc_login_start", "success", map[string]any{
+		"provider": h.oidcProviderName(),
+		"intent":   oidcIntentLogin,
+	})
 	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(pkceVerifier)), http.StatusFound)
 }
 
@@ -451,7 +455,18 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			"current_role":  result.Actor.Role,
 		})
 	}
-	h.writeLoginSuccess(w, r, result.Actor, "")
+	h.recordAuthAuditWithMetadata(r.WithContext(service.WithRequestActor(r.Context(), result.Actor)), "oidc_login", "success", map[string]any{
+		"provider":      h.oidcProviderName(),
+		"identity_id":   result.Identity.ID,
+		"identity_sub":  result.Identity.Subject,
+		"previous_role": result.PreviousRole,
+		"current_role":  result.Actor.Role,
+	})
+	h.writeLoginSuccess(w, r, result.Actor, "", "oidc", map[string]any{
+		"provider":     h.oidcProviderName(),
+		"identity_id":  result.Identity.ID,
+		"identity_sub": result.Identity.Subject,
+	})
 }
 
 func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -489,7 +504,9 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	limitKey := loginLimitKey(username, r)
 	if h.LoginLimiter != nil && !h.LoginLimiter.Allow(limitKey) {
-		h.recordAuthAudit(r, "login_rate_limited", "failure")
+		h.recordAuthAuditWithMetadata(r, "login_rate_limited", "failure", map[string]any{
+			"username": username,
+		})
 		http.Error(w, "too many failed login attempts", http.StatusTooManyRequests)
 		return
 	}
@@ -497,7 +514,9 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		if h.requireTOTP(w, r, actor, input.TOTP) {
 			return
 		}
-		h.writeLoginSuccess(w, r, actor, limitKey)
+		h.writeLoginSuccess(w, r, actor, limitKey, "local_password", map[string]any{
+			"username": username,
+		})
 		return
 	}
 	if h.validAdminPassword(username, input.Password) {
@@ -510,13 +529,17 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		if h.requireTOTP(w, r, actor, input.TOTP) {
 			return
 		}
-		h.writeLoginSuccess(w, r, actor, limitKey)
+		h.writeLoginSuccess(w, r, actor, limitKey, "admin_recovery", map[string]any{
+			"username": username,
+		})
 		return
 	}
 	if h.LoginLimiter != nil {
 		h.LoginLimiter.RecordFailure(limitKey)
 	}
-	h.recordAuthAudit(r, "login", "failure")
+	h.recordAuthAuditWithMetadata(r, "login", "failure", map[string]any{
+		"username": username,
+	})
 	http.Error(w, "invalid username or password", http.StatusUnauthorized)
 }
 
@@ -609,7 +632,7 @@ func (h AuthHandler) authenticateLocalUser(ctx context.Context, username string,
 	return h.LocalAuth.Authenticate(ctx, username, password)
 }
 
-func (h AuthHandler) writeLoginSuccess(w http.ResponseWriter, r *http.Request, actor service.RequestActor, limitKey string) {
+func (h AuthHandler) writeLoginSuccess(w http.ResponseWriter, r *http.Request, actor service.RequestActor, limitKey string, authMethod string, metadata map[string]any) {
 	if h.LoginLimiter != nil && limitKey != "" {
 		h.LoginLimiter.Reset(limitKey)
 	}
@@ -617,7 +640,13 @@ func (h AuthHandler) writeLoginSuccess(w http.ResponseWriter, r *http.Request, a
 		http.Error(w, "session is not configured", http.StatusInternalServerError)
 		return
 	}
-	h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), actor)), "login", "success")
+	payload := map[string]any{
+		"auth_method": strings.TrimSpace(authMethod),
+	}
+	for key, value := range metadata {
+		payload[key] = value
+	}
+	h.recordAuthAuditWithMetadata(r.WithContext(service.WithRequestActor(r.Context(), actor)), "login", "success", payload)
 	userPayload := map[string]any{"id": actor.UserID, "username": actor.Username, "role": actor.Role}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -689,7 +718,12 @@ func directRemoteIP(r *http.Request) string {
 
 func (h AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, sessionCookie(r, "", service.ExpiredSessionMaxAge()))
-	h.recordAuthAudit(r, "logout", "success")
+	metadata := map[string]any{}
+	if actor, ok := service.RequestActorFromContext(r.Context()); ok {
+		metadata["auth_source"] = actor.Source
+		metadata["role"] = actor.Role
+	}
+	h.recordAuthAuditWithMetadata(r, "logout", "success", metadata)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }

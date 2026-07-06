@@ -4104,6 +4104,14 @@ func TestServeAdminSessionLoginAndLogout(t *testing.T) {
 	}
 	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "login", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "logout", "success", 1)
+	loginMetadata := latestAuditMetadataForActorAction(t, env, "admin", "auth.session", "login", "success")
+	if nestedString(loginMetadata, "auth_method") != "admin_recovery" || nestedString(loginMetadata, "username") != "admin" {
+		t.Fatalf("unexpected admin login audit metadata: %#v", loginMetadata)
+	}
+	logoutMetadata := latestAuditMetadataForActorAction(t, env, "admin", "auth.session", "logout", "success")
+	if nestedString(logoutMetadata, "auth_source") != "session" || nestedString(logoutMetadata, "role") != "admin" {
+		t.Fatalf("unexpected logout audit metadata: %#v", logoutMetadata)
+	}
 }
 
 func TestAuthSchemaReflectsServeSettings(t *testing.T) {
@@ -4279,6 +4287,7 @@ func TestOIDCLoginRedirectUsesPKCE(t *testing.T) {
 		findCookie(cookies, "chatapi_oidc_pkce") == nil {
 		t.Fatalf("expected state, nonce and pkce cookies, got %#v", cookies)
 	}
+	assertAuditCountForActor(t, env, "", "auth.session", "session", "admin", "oidc_login_start", "success", 1)
 }
 
 func TestOIDCCallbackCreatesSessionFromVerifiedAdminEmail(t *testing.T) {
@@ -4340,6 +4349,15 @@ func TestOIDCCallbackCreatesSessionFromVerifiedAdminEmail(t *testing.T) {
 		t.Fatalf("unexpected oidc identity after callback: %#v", identity)
 	}
 	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "login", "success", 1)
+	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "oidc_login", "success", 1)
+	oidcLoginMetadata := latestAuditMetadataForActorAction(t, env, user.ID, "auth.session", "oidc_login", "success")
+	if nestedString(oidcLoginMetadata, "provider") != "OIDC" || nestedString(oidcLoginMetadata, "identity_sub") != "oidc-admin-sub" {
+		t.Fatalf("unexpected oidc login audit metadata: %#v", oidcLoginMetadata)
+	}
+	loginMetadata := latestAuditMetadataForActorAction(t, env, user.ID, "auth.session", "login", "success")
+	if nestedString(loginMetadata, "auth_method") != "oidc" || nestedString(loginMetadata, "identity_sub") != "oidc-admin-sub" {
+		t.Fatalf("unexpected oidc session login audit metadata: %#v", loginMetadata)
+	}
 }
 
 func TestOIDCLinkBindsIdentityToCurrentSessionUser(t *testing.T) {
@@ -4562,6 +4580,10 @@ func TestServeLocalUserLoginFromUsersTable(t *testing.T) {
 	sessionResp := env.getJSONWithCookie(t, "/api/auth/session", sessionCookie, http.StatusOK)
 	if sessionResp["authenticated"] != true || nestedPathString(sessionResp, "user", "id") != "user_alice" {
 		t.Fatalf("expected authenticated local user session: %#v", sessionResp)
+	}
+	loginMetadata := latestAuditMetadataForActorAction(t, env, "user_alice", "auth.session", "login", "success")
+	if nestedString(loginMetadata, "auth_method") != "local_password" || nestedString(loginMetadata, "username") != "alice" {
+		t.Fatalf("unexpected local login audit metadata: %#v", loginMetadata)
 	}
 }
 
@@ -7889,6 +7911,28 @@ func assertAuditCountForActor(t *testing.T, env *testEnv, actorUserID string, ev
 	if count != want {
 		t.Fatalf("expected %s/%s audit count %d, got %d", eventType, action, want, count)
 	}
+}
+
+func latestAuditMetadataForActorAction(t *testing.T, env *testEnv, actorUserID string, eventType string, action string, outcome string) map[string]any {
+	t.Helper()
+	var metadataJSON string
+	if err := env.rawDB.QueryRowContext(context.Background(), `
+		SELECT metadata_json
+		FROM audit_logs
+		WHERE actor_user_id = ?
+			AND event_type = ?
+			AND action = ?
+			AND outcome = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, actorUserID, eventType, action, outcome).Scan(&metadataJSON); err != nil {
+		t.Fatalf("load latest audit metadata: %v", err)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		t.Fatalf("decode audit metadata: %v json=%q", err, metadataJSON)
+	}
+	return metadata
 }
 
 func containsStringValue(value any, want string) bool {

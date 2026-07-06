@@ -18,6 +18,7 @@ type ChatAPIService struct {
 	pending  *PendingRegistry
 	realtime *RealtimeHub
 	auto     *AutomationRuleService
+	autoObs  *AutomationObserver
 }
 
 type ExpirePendingTurnsResult struct {
@@ -31,7 +32,15 @@ func NewChatAPIService(dataStore store.Store, pending *PendingRegistry, realtime
 		pending:  pending,
 		realtime: realtime,
 		auto:     NewAutomationRuleService(dataStore),
+		autoObs:  NewAutomationObserver(),
 	}
+}
+
+func (s *ChatAPIService) AutomationObserver() *AutomationObserver {
+	if s == nil {
+		return nil
+	}
+	return s.autoObs
 }
 
 func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, request protocol.TurnRequest, body map[string]any) (map[string]any, error) {
@@ -102,21 +111,61 @@ func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request prot
 		return
 	}
 	ownerID := OwnerIDFromContext(ctx)
-	match, err := s.auto.MatchTurn(ctx, ownerID, request, conversationID, responseID)
-	if err != nil || match == nil {
-		return
-	}
-	if _, err := s.CompleteConversation(ctx, match.Input); err == nil {
+	decision, err := s.auto.MatchTurn(ctx, ownerID, request, conversationID, responseID)
+	if err != nil {
 		NewAuditService(s.store).Record(ctx, AuditEventInput{
 			EventType:    "automation.rule",
 			ResourceType: "automation_rule",
-			ResourceID:   match.RuleID,
+			Action:       "auto_complete",
+			Outcome:      "failure",
+			Metadata: map[string]any{
+				"conversation_id": conversationID,
+				"request_format":  request.Protocol.String(),
+				"model":           request.Model,
+				"reason":          "list_rules_failed",
+				"error":           err.Error(),
+			},
+		})
+		return
+	}
+	switch decision.Status {
+	case automationStatusNoRules:
+		s.autoObs.RecordNoRules()
+		return
+	case automationStatusNoMatch:
+		s.autoObs.RecordNoMatch()
+		return
+	}
+	if decision.Match == nil {
+		return
+	}
+	if _, err := s.CompleteConversation(ctx, decision.Match.Input); err == nil {
+		NewAuditService(s.store).Record(ctx, AuditEventInput{
+			EventType:    "automation.rule",
+			ResourceType: "automation_rule",
+			ResourceID:   decision.Match.RuleID,
 			Action:       "auto_complete",
 			Outcome:      "success",
 			Metadata: map[string]any{
 				"conversation_id": conversationID,
 				"request_format":  request.Protocol.String(),
 				"model":           request.Model,
+			},
+		})
+		return
+	} else {
+		NewAuditService(s.store).Record(ctx, AuditEventInput{
+			EventType:    "automation.rule",
+			ResourceType: "automation_rule",
+			ResourceID:   decision.Match.RuleID,
+			Action:       "auto_complete",
+			Outcome:      "failure",
+			Metadata: map[string]any{
+				"conversation_id": conversationID,
+				"request_format":  request.Protocol.String(),
+				"model":           request.Model,
+				"reason":          "complete_pending_failed",
+				"error":           err.Error(),
 			},
 		})
 	}

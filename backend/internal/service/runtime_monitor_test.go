@@ -57,10 +57,17 @@ func TestMetricsServiceIncludesSQLiteDatabaseMetrics(t *testing.T) {
 	cfg.DatabaseDSN = dsn
 
 	monitor := NewRuntimeMonitorService(cfg, st, NewRealtimeHub(st), NewPendingRegistry())
+	observer := NewAutomationObserver()
+	observer.RecordNoRules()
+	observer.RecordNoMatch()
+	monitor.SetAutomationObserver(observer)
 	metrics := NewMetricsService(monitor, NewHTTPMetricsRegistry()).PrometheusText()
 	for _, expected := range []string{
 		"chatapi_sqlite_database_bytes",
 		"chatapi_sqlite_wal_bytes",
+		"chatapi_automation_failures_total",
+		"chatapi_automation_no_rules_total",
+		"chatapi_automation_no_match_total",
 	} {
 		if !strings.Contains(metrics, expected) {
 			t.Fatalf("expected sqlite metrics %q in body:\n%s", expected, metrics)
@@ -120,12 +127,16 @@ func TestMetricsServiceIncludesPostgreSQLPoolMetrics(t *testing.T) {
 	cfg.DatabaseDSN = dsn
 
 	monitor := NewRuntimeMonitorService(cfg, st, NewRealtimeHub(st), NewPendingRegistry())
+	observer := NewAutomationObserver()
+	observer.RecordNoRules()
+	monitor.SetAutomationObserver(observer)
 	metrics := NewMetricsService(monitor, NewHTTPMetricsRegistry()).PrometheusText()
 	for _, expected := range []string{
 		"chatapi_postgres_pool_max_conns",
 		"chatapi_postgres_pool_total_conns",
 		"chatapi_postgres_pool_acquired_conns",
 		"chatapi_postgres_pool_idle_conns",
+		"chatapi_automation_no_rules_total",
 	} {
 		if !strings.Contains(metrics, expected) {
 			t.Fatalf("expected postgres metric %q in body:\n%s", expected, metrics)

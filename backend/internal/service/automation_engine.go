@@ -15,21 +15,41 @@ type AutomationMatch struct {
 	Input  store.CompletePendingInput
 }
 
-func (s *AutomationRuleService) MatchTurn(ctx context.Context, userID string, request protocol.TurnRequest, conversationID string, responseID string) (*AutomationMatch, error) {
+type AutomationDecision struct {
+	Status string
+	Match  *AutomationMatch
+}
+
+const (
+	automationStatusNoRules = "no_rules"
+	automationStatusNoMatch = "no_match"
+	automationStatusMatched = "matched"
+)
+
+func (s *AutomationRuleService) MatchTurn(ctx context.Context, userID string, request protocol.TurnRequest, conversationID string, responseID string) (AutomationDecision, error) {
 	if s == nil || s.store == nil || strings.TrimSpace(userID) == "" {
-		return nil, nil
+		return AutomationDecision{Status: automationStatusNoRules}, nil
 	}
 	items, err := s.store.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
 	if err != nil {
-		return nil, err
+		return AutomationDecision{}, err
+	}
+	enabledRules := 0
+	for _, item := range items {
+		if item.Enabled {
+			enabledRules++
+		}
 	}
 	for _, item := range items {
 		match, ok := matchAutomationRule(item, request, conversationID, responseID)
 		if ok {
-			return match, nil
+			return AutomationDecision{Status: automationStatusMatched, Match: match}, nil
 		}
 	}
-	return nil, nil
+	if enabledRules == 0 {
+		return AutomationDecision{Status: automationStatusNoRules}, nil
+	}
+	return AutomationDecision{Status: automationStatusNoMatch}, nil
 }
 
 func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest, conversationID string, responseID string) (*AutomationMatch, bool) {

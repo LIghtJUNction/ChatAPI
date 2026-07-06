@@ -72,6 +72,7 @@ func NewRouter(
 	userIdentitiesHandler := handlers.UserIdentitiesHandler{Service: service.NewUserIdentityService(dataStore), Audit: auditService}
 	adminEmailHandler := handlers.AdminEmailHandler{Email: service.NewAdminEmailService(email.SMTPConfigFromConfig(cfg), nil), Audit: auditService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, dataStore, realtimeHub, pending)
+	runtimeMonitor.SetAutomationObserver(chatService.AutomationObserver())
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
 	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
 	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)

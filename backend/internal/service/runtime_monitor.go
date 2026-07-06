@@ -24,6 +24,7 @@ type RuntimeMonitorService struct {
 	store            store.Store
 	realtime         *RealtimeHub
 	pending          *PendingRegistry
+	automation       *AutomationObserver
 	settingsMu       sync.Mutex
 	gogc             int
 	memoryLimitBytes int64
@@ -42,7 +43,10 @@ type RuntimeSummary struct {
 }
 
 type AutomationSnapshot struct {
-	Hits int `json:"hits"`
+	Hits     int `json:"hits"`
+	Failures int `json:"failures"`
+	NoRules  int `json:"no_rules"`
+	NoMatch  int `json:"no_match"`
 }
 
 type ConnectionSnapshot struct {
@@ -133,11 +137,19 @@ func NewRuntimeMonitorService(cfg config.Config, dataStore store.Store, realtime
 		store:            dataStore,
 		realtime:         realtime,
 		pending:          pending,
+		automation:       NewAutomationObserver(),
 		gogc:             cfg.RuntimeGOGC,
 		memoryLimitBytes: cfg.RuntimeMemoryLimitBytes,
 	}
 	service.ApplyConfiguredSettings()
 	return service
+}
+
+func (s *RuntimeMonitorService) SetAutomationObserver(observer *AutomationObserver) {
+	if s == nil || observer == nil {
+		return
+	}
+	s.automation = observer
 }
 
 func (s *RuntimeMonitorService) Summary() RuntimeSummary {
@@ -178,15 +190,30 @@ func (s *RuntimeMonitorService) Automation() AutomationSnapshot {
 	if s == nil || s.store == nil {
 		return AutomationSnapshot{}
 	}
+	snapshot := AutomationSnapshot{}
+	if s.automation != nil {
+		observed := s.automation.Snapshot()
+		snapshot.NoRules = observed.NoRules
+		snapshot.NoMatch = observed.NoMatch
+	}
 	count, err := s.store.CountAuditLogs(context.Background(), store.CountAuditLogsInput{
 		EventType: "automation.rule",
 		Action:    "auto_complete",
 		Outcome:   "success",
 	})
 	if err != nil {
-		return AutomationSnapshot{}
+		return snapshot
 	}
-	return AutomationSnapshot{Hits: count}
+	snapshot.Hits = count
+	failures, err := s.store.CountAuditLogs(context.Background(), store.CountAuditLogsInput{
+		EventType: "automation.rule",
+		Action:    "auto_complete",
+		Outcome:   "failure",
+	})
+	if err == nil {
+		snapshot.Failures = failures
+	}
+	return snapshot
 }
 
 func ReadSystemSnapshot(dataDir string) SystemSnapshot {

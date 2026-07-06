@@ -33,7 +33,7 @@ func TestAutomationRuleServiceMatchTurnMatchesContainsAndExcludes(t *testing.T) 
 		t.Fatalf("seed automation rule: %v", err)
 	}
 
-	match, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
 		UserContent: "hello automation",
 		InputParts: []protocol.InputPart{
 			{Type: "text", Text: "hello automation"},
@@ -42,8 +42,12 @@ func TestAutomationRuleServiceMatchTurnMatchesContainsAndExcludes(t *testing.T) 
 	if err != nil {
 		t.Fatalf("match turn: %v", err)
 	}
+	match := decision.Match
 	if match == nil || match.RuleID != "rule_skip" || match.Input.OutputText != "自动回复" {
 		t.Fatalf("unexpected automation match: %#v", match)
+	}
+	if decision.Status != automationStatusMatched {
+		t.Fatalf("unexpected automation decision: %#v", decision)
 	}
 
 	blocked, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
@@ -55,7 +59,7 @@ func TestAutomationRuleServiceMatchTurnMatchesContainsAndExcludes(t *testing.T) 
 	if err != nil {
 		t.Fatalf("match blocked turn: %v", err)
 	}
-	if blocked != nil {
+	if blocked.Match != nil || blocked.Status != automationStatusNoMatch {
 		t.Fatalf("expected blocked turn to skip automation match: %#v", blocked)
 	}
 }
@@ -81,12 +85,13 @@ func TestAutomationRuleServiceMatchTurnTruncatesLongOutput(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed automation rule: %v", err)
 	}
-	match, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
 		UserContent: "anything",
 	}, "conv_1", "resp_1")
 	if err != nil {
 		t.Fatalf("match long output turn: %v", err)
 	}
+	match := decision.Match
 	if match == nil || len([]rune(match.Input.OutputText)) != automationMaxOutputLength {
 		t.Fatalf("unexpected truncated automation output: %#v", match)
 	}
@@ -120,7 +125,7 @@ func TestAutomationRuleServiceMatchTurnMatchesStructuredFields(t *testing.T) {
 		t.Fatalf("seed automation rule: %v", err)
 	}
 
-	match, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
 		Protocol: protocol.ProtocolResponses,
 		Model:    "demo-structured",
 		InputParts: []protocol.InputPart{
@@ -133,8 +138,12 @@ func TestAutomationRuleServiceMatchTurnMatchesStructuredFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("match structured turn: %v", err)
 	}
+	match := decision.Match
 	if match == nil || match.RuleID != "rule_structured" || match.Input.OutputText != "结构化命中" {
 		t.Fatalf("unexpected structured automation match: %#v", match)
+	}
+	if decision.Status != automationStatusMatched {
+		t.Fatalf("unexpected structured automation decision: %#v", decision)
 	}
 
 	miss, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
@@ -147,8 +156,23 @@ func TestAutomationRuleServiceMatchTurnMatchesStructuredFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("match structured miss turn: %v", err)
 	}
-	if miss != nil {
+	if miss.Match != nil || miss.Status != automationStatusNoMatch {
 		t.Fatalf("expected structured matcher miss: %#v", miss)
+	}
+}
+
+func TestAutomationRuleServiceMatchTurnReportsNoRules(t *testing.T) {
+	st := newAutomationTestStore(t)
+	svc := NewAutomationRuleService(st)
+
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		UserContent: "hello",
+	}, "conv_none", "resp_none")
+	if err != nil {
+		t.Fatalf("match no-rules turn: %v", err)
+	}
+	if decision.Match != nil || decision.Status != automationStatusNoRules {
+		t.Fatalf("expected no-rules decision, got %#v", decision)
 	}
 }
 

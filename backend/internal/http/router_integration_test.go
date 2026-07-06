@@ -1860,8 +1860,49 @@ func TestMetricsEndpointWhenEnabled(t *testing.T) {
 		cfg.MetricsEnabled = true
 	})
 
+	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "metrics-no-rules",
+		"input": "metrics no rules",
+	})
+	firstConversation := env.waitForWaitingConversation(t, "metrics no rules")
+	status, body := env.postText(t, "/api/conversations/"+firstConversation["id"].(string)+"/abort", map[string]any{
+		"error": "cleanup",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("expected abort ok for metrics no rules request: status=%d body=%q", status, body)
+	}
+	<-firstCh
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "metrics_rule_never_match",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "never-hit"}},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "never",
+				},
+			},
+		},
+	}, http.StatusOK)
+	secondCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "metrics-no-match",
+		"input": "metrics no match",
+	})
+	secondConversation := env.waitForWaitingConversation(t, "metrics no match")
+	status, body = env.postText(t, "/api/conversations/"+secondConversation["id"].(string)+"/abort", map[string]any{
+		"error": "cleanup",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("expected abort ok for metrics no match request: status=%d body=%q", status, body)
+	}
+	<-secondCh
+
 	env.getJSON(t, "/api/health", http.StatusOK)
-	status, body := env.getText(t, "/metrics")
+	status, body = env.getText(t, "/metrics")
 	if status != http.StatusOK {
 		t.Fatalf("expected metrics ok: status=%d body=%q", status, body)
 	}
@@ -1870,6 +1911,11 @@ func TestMetricsEndpointWhenEnabled(t *testing.T) {
 		"chatapi_system_memory_total_bytes",
 		"chatapi_process_open_fds",
 		"chatapi_data_dir_disk_total_bytes",
+		"chatapi_automation_failures_total",
+		"chatapi_automation_no_rules_total",
+		"chatapi_automation_no_match_total",
+		"chatapi_automation_no_rules_total 1",
+		"chatapi_automation_no_match_total 1",
 		"chatapi_pending_turns",
 		"chatapi_realtime_subscribers",
 		"chatapi_sqlite_database_bytes",
@@ -2100,10 +2146,55 @@ func TestUploadsRejectsUnsafePath(t *testing.T) {
 func TestAdminRuntimeEndpoints(t *testing.T) {
 	env := newTestEnv(t)
 
+	firstCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "runtime-no-rules",
+		"input": "runtime no rules",
+	})
+	firstConversation := env.waitForWaitingConversation(t, "runtime no rules")
+	status, body := env.postText(t, "/api/conversations/"+firstConversation["id"].(string)+"/abort", map[string]any{
+		"error": "cleanup",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("expected abort ok for runtime no rules request: status=%d body=%q", status, body)
+	}
+	<-firstCh
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "runtime_rule_never_match",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "will-not-match"}},
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "never",
+				},
+			},
+		},
+	}, http.StatusOK)
+	secondCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "runtime-no-match",
+		"input": "runtime no match",
+	})
+	secondConversation := env.waitForWaitingConversation(t, "runtime no match")
+	status, body = env.postText(t, "/api/conversations/"+secondConversation["id"].(string)+"/abort", map[string]any{
+		"error": "cleanup",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("expected abort ok for runtime no match request: status=%d body=%q", status, body)
+	}
+	<-secondCh
+
 	summaryResp := env.getJSON(t, "/api/admin/runtime/summary", http.StatusOK)
 	summary := summaryResp["summary"].(map[string]any)
 	if nestedPathString(summary, "go", "version") == "" || summary["system"] == nil || summary["memory"] == nil || summary["pending"] == nil || summary["realtime"] == nil {
 		t.Fatalf("unexpected runtime summary response: %#v", summaryResp)
+	}
+	automation := summary["automation"].(map[string]any)
+	if numericValue(automation["no_rules"]) != 1 || numericValue(automation["no_match"]) != 1 {
+		t.Fatalf("unexpected runtime automation summary: %#v", summaryResp)
 	}
 	system := summary["system"].(map[string]any)
 	if nestedString(system, "os") == "" || numericValue(system["num_cpu"]) <= 0 || numericValue(system["process_open_fds"]) <= 0 {
@@ -2200,7 +2291,7 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 		t.Fatalf("unexpected reset runtime settings response: %#v", resetResp)
 	}
 
-	status, body := env.putText(t, "/api/admin/runtime/settings", map[string]any{
+	status, body = env.putText(t, "/api/admin/runtime/settings", map[string]any{
 		"gogc": -1,
 	})
 	if status != http.StatusBadRequest || !strings.Contains(body, "gogc must be non-negative") {

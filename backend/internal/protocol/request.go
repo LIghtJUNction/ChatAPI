@@ -15,14 +15,16 @@ const (
 )
 
 type TurnRequest struct {
-	Protocol       Protocol
-	Model          string
-	Stream         bool
-	UserContent    string
-	InputParts     []InputPart
-	ToolSchemas    []any
-	ToolChoice     ToolChoice
-	ResponseFormat ResponseFormat
+	Protocol         Protocol
+	Model            string
+	Stream           bool
+	SystemContent    string
+	DeveloperContent string
+	UserContent      string
+	InputParts       []InputPart
+	ToolSchemas      []any
+	ToolChoice       ToolChoice
+	ResponseFormat   ResponseFormat
 }
 
 type TurnResult struct {
@@ -75,14 +77,16 @@ type Usage struct {
 func ParseRequest(protocolValue string, body map[string]any) TurnRequest {
 	inputParts := extractInputParts(body)
 	return TurnRequest{
-		Protocol:       ParseProtocol(protocolValue),
-		Model:          stringValue(body["model"], "chatapi-lab"),
-		Stream:         boolValue(body["stream"]),
-		UserContent:    joinInputPartText(inputParts),
-		InputParts:     inputParts,
-		ToolSchemas:    extractToolSchemas(body),
-		ToolChoice:     extractToolChoice(body),
-		ResponseFormat: extractResponseFormat(body),
+		Protocol:         ParseProtocol(protocolValue),
+		Model:            stringValue(body["model"], "chatapi-lab"),
+		Stream:           boolValue(body["stream"]),
+		SystemContent:    extractRoleContent(body, "system"),
+		DeveloperContent: extractRoleContent(body, "developer"),
+		UserContent:      joinInputPartText(inputParts),
+		InputParts:       inputParts,
+		ToolSchemas:      extractToolSchemas(body),
+		ToolChoice:       extractToolChoice(body),
+		ResponseFormat:   extractResponseFormat(body),
 	}
 }
 
@@ -207,6 +211,42 @@ func extractInputParts(body map[string]any) []InputPart {
 	return nil
 }
 
+func extractRoleContent(body map[string]any, role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return ""
+	}
+	if role == "system" {
+		if direct := flattenMessageContent(body["system"]); direct != "" {
+			return direct
+		}
+	}
+	items := make([]string, 0)
+	if input, ok := body["input"].([]any); ok {
+		for _, item := range input {
+			record, ok := item.(map[string]any)
+			if !ok || stringValue(record["role"], "") != role {
+				continue
+			}
+			if content := flattenMessageContent(record["content"]); content != "" {
+				items = append(items, content)
+			}
+		}
+	}
+	if messages, ok := body["messages"].([]any); ok {
+		for _, item := range messages {
+			record, ok := item.(map[string]any)
+			if !ok || stringValue(record["role"], "") != role {
+				continue
+			}
+			if content := flattenMessageContent(record["content"]); content != "" {
+				items = append(items, content)
+			}
+		}
+	}
+	return strings.Join(items, "\n")
+}
+
 func extractPartsFromTurnInput(input []any) []InputPart {
 	parts := make([]InputPart, 0)
 	for _, item := range input {
@@ -256,6 +296,37 @@ func extractPartsFromMessageContent(content any) []InputPart {
 		return parts
 	default:
 		return nil
+	}
+}
+
+func flattenMessageContent(content any) string {
+	switch typed := content.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			record, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			part := extractInputPart(record)
+			if part.Type == "text" && strings.TrimSpace(part.Text) != "" {
+				parts = append(parts, strings.TrimSpace(part.Text))
+				continue
+			}
+			text := firstNonEmptyText(
+				record["text"],
+				record["input_text"],
+				nestedStringValue(record, "text", "value"),
+			)
+			if strings.TrimSpace(text) != "" {
+				parts = append(parts, strings.TrimSpace(text))
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
 	}
 }
 

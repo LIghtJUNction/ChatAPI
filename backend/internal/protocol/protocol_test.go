@@ -177,6 +177,44 @@ func TestParseRequestSupportsAnthropicToolResultBlocks(t *testing.T) {
 	}
 }
 
+func TestParseRequestCapturesSystemAndDeveloperContent(t *testing.T) {
+	request := ParseRequest("chat_completions", map[string]any{
+		"model": "gpt-test",
+		"messages": []any{
+			map[string]any{"role": "system", "content": "system policy"},
+			map[string]any{"role": "developer", "content": []any{
+				map[string]any{"type": "text", "text": "developer note"},
+			}},
+			map[string]any{"role": "user", "content": "hello"},
+		},
+	})
+	if request.SystemContent != "system policy" {
+		t.Fatalf("unexpected system content: %#v", request.SystemContent)
+	}
+	if request.DeveloperContent != "developer note" {
+		t.Fatalf("unexpected developer content: %#v", request.DeveloperContent)
+	}
+	if request.UserContent != "hello" {
+		t.Fatalf("unexpected user content: %#v", request.UserContent)
+	}
+}
+
+func TestParseRequestCapturesAnthropicTopLevelSystem(t *testing.T) {
+	request := ParseRequest("anthropic_messages", map[string]any{
+		"model":  "claude-test",
+		"system": []any{map[string]any{"type": "text", "text": "follow policy"}},
+		"messages": []any{
+			map[string]any{"role": "user", "content": "hello"},
+		},
+	})
+	if request.SystemContent != "follow policy" {
+		t.Fatalf("unexpected top-level anthropic system content: %#v", request.SystemContent)
+	}
+	if request.UserContent != "hello" {
+		t.Fatalf("unexpected user content: %#v", request.UserContent)
+	}
+}
+
 func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
 	conversation := store.Conversation{
 		ResponseID: "resp_1",

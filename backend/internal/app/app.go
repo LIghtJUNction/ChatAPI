@@ -423,7 +423,20 @@ type dbCheckReport struct {
 	Driver string            `json:"driver"`
 	DSN    string            `json:"dsn"`
 	Status migrations.Status `json:"status,omitempty"`
+	SQLite sqliteDBInfo      `json:"sqlite,omitempty"`
 	Error  string            `json:"error,omitempty"`
+}
+
+type sqliteDBInfo struct {
+	Database sqliteFileInfo `json:"database"`
+	WAL      sqliteFileInfo `json:"wal"`
+	SHM      sqliteFileInfo `json:"shm"`
+}
+
+type sqliteFileInfo struct {
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"`
+	Bytes  int64  `json:"bytes"`
 }
 
 type migrateReport struct {
@@ -811,30 +824,61 @@ func runDB(args []string, backendRoot string) error {
 	if len(args) == 0 || args[0] != "check" {
 		return fmt.Errorf("unknown db command, supported: check")
 	}
+	report, err := dbCheckCommand(backendRoot)
+	if writeErr := writeJSONReport(os.Stdout, report); writeErr != nil {
+		return writeErr
+	}
+	return err
+}
+
+func dbCheckCommand(backendRoot string) (dbCheckReport, error) {
 	cfg, err := config.FromEnvUnchecked(config.ModeServe, backendRoot)
 	if err != nil {
-		return err
+		return dbCheckReport{OK: false, Error: err.Error()}, err
 	}
 	report := dbCheckReport{
 		OK:     true,
 		Driver: cfg.DatabaseDriver,
 		DSN:    cfg.DatabaseDSN,
 	}
+	if cfg.DatabaseDriver == "sqlite" {
+		report.SQLite = sqliteDBFileInfo(cfg.DatabaseDSN)
+	}
 	status, err := sqliteMigrationStatus(context.Background(), cfg, true)
 	if err != nil {
 		report.OK = false
 		report.Error = err.Error()
-		_ = writeJSONReport(os.Stdout, report)
-		return err
+		return report, err
 	}
 	report.Status = status
 	if status.MigrationDirty {
 		report.OK = false
 		report.Error = "migration dirty"
-		_ = writeJSONReport(os.Stdout, report)
-		return errors.New(report.Error)
+		return report, errors.New(report.Error)
 	}
-	return writeJSONReport(os.Stdout, report)
+	if cfg.DatabaseDriver == "sqlite" {
+		report.SQLite = sqliteDBFileInfo(cfg.DatabaseDSN)
+	}
+	return report, nil
+}
+
+func sqliteDBFileInfo(dsn string) sqliteDBInfo {
+	return sqliteDBInfo{
+		Database: sqliteFileStat(dsn),
+		WAL:      sqliteFileStat(dsn + "-wal"),
+		SHM:      sqliteFileStat(dsn + "-shm"),
+	}
+}
+
+func sqliteFileStat(path string) sqliteFileInfo {
+	info := sqliteFileInfo{Path: path}
+	stat, err := os.Stat(path)
+	if err != nil {
+		return info
+	}
+	info.Exists = true
+	info.Bytes = stat.Size()
+	return info
 }
 
 func runMigrate(ctx context.Context, args []string, backendRoot string) error {

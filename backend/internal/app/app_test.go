@@ -290,6 +290,28 @@ func TestMigrateCommandUpBootstrapsSQLite(t *testing.T) {
 	}
 }
 
+func TestDBCheckCommandReportsSQLiteFiles(t *testing.T) {
+	backendRoot := t.TempDir()
+	dbPath := filepath.Join(backendRoot, "data", "chatapi.sqlite3")
+	t.Setenv("CHATAPI_DB_DRIVER", "sqlite")
+	t.Setenv("CHATAPI_DB_DSN", dbPath)
+	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
+
+	report, err := dbCheckCommand(backendRoot)
+	if err != nil {
+		t.Fatalf("db check: %v report=%#v", err, report)
+	}
+	if !report.OK || report.Status.SchemaVersion != migrations.BootstrapVersion {
+		t.Fatalf("unexpected db check report: %#v", report)
+	}
+	if report.SQLite.Database.Path != dbPath || !report.SQLite.Database.Exists || report.SQLite.Database.Bytes <= 0 {
+		t.Fatalf("unexpected sqlite database info: %#v", report.SQLite)
+	}
+	if report.SQLite.WAL.Path != dbPath+"-wal" || report.SQLite.SHM.Path != dbPath+"-shm" {
+		t.Fatalf("unexpected sqlite sidecar paths: %#v", report.SQLite)
+	}
+}
+
 func TestMigrateCommandStatusDoesNotBootstrapSQLite(t *testing.T) {
 	backendRoot := t.TempDir()
 	t.Setenv("CHATAPI_DB_DRIVER", "sqlite")

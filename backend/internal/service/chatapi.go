@@ -65,8 +65,15 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 		RequestFormat:  parsed.Protocol.String(),
 		Model:          parsed.Model,
 		UserContent:    parsed.UserContent,
+		InputParts:     toStoreInputParts(parsed.InputParts),
 		RequestBody:    body,
 		ToolSchemas:    parsed.ToolSchemas,
+		ToolChoice:     store.RequestToolChoice{Type: parsed.ToolChoice.Type, Name: parsed.ToolChoice.Name},
+		ResponseFormat: store.RequestResponseFormat{
+			Type:   parsed.ResponseFormat.Type,
+			Name:   parsed.ResponseFormat.Name,
+			Schema: parsed.ResponseFormat.Schema,
+		},
 	})
 	if err != nil {
 		return nil, store.Conversation{}, store.Message{}, err
@@ -85,6 +92,22 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 	s.pending.Add(turn)
 	s.realtime.PublishConversationUpsert(conversation, []store.Message{message})
 	return turn, conversation, message, nil
+}
+
+func toStoreInputParts(parts []protocol.InputPart) []store.RequestInputPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	items := make([]store.RequestInputPart, 0, len(parts))
+	for _, part := range parts {
+		items = append(items, store.RequestInputPart{
+			Type:      part.Type,
+			Text:      part.Text,
+			MediaType: part.MediaType,
+			URL:       part.URL,
+		})
+	}
+	return items
 }
 
 func (s *ChatAPIService) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {

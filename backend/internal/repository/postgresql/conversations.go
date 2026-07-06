@@ -222,14 +222,17 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		"request_format": strings.TrimSpace(input.RequestFormat),
 		"model":          strings.TrimSpace(input.Model),
 		"request_debug": map[string]any{
-			"request_id":     strings.TrimSpace(input.RequestID),
-			"response_id":    strings.TrimSpace(input.ResponseID),
-			"model":          strings.TrimSpace(input.Model),
-			"request_format": strings.TrimSpace(input.RequestFormat),
-			"request_keys":   keysOf(input.RequestBody),
-			"input_text":     input.UserContent,
-			"request_body":   input.RequestBody,
-			"tool_schemas":   input.ToolSchemas,
+			"request_id":      strings.TrimSpace(input.RequestID),
+			"response_id":     strings.TrimSpace(input.ResponseID),
+			"model":           strings.TrimSpace(input.Model),
+			"request_format":  strings.TrimSpace(input.RequestFormat),
+			"request_keys":    keysOf(input.RequestBody),
+			"input_text":      input.UserContent,
+			"input_parts":     input.InputParts,
+			"request_body":    input.RequestBody,
+			"tool_schemas":    input.ToolSchemas,
+			"tool_choice":     input.ToolChoice,
+			"response_format": input.ResponseFormat,
 		},
 	}
 	conversation := store.Conversation{
@@ -520,7 +523,49 @@ func scanRequestRow(scanner rowScanner) (store.Request, error) {
 	item.Metadata = messageMetadata
 	item.RequestBody, _ = requestDebug["request_body"].(map[string]any)
 	item.ToolSchemas, _ = requestDebug["tool_schemas"].([]any)
+	item.InputParts = parseRequestInputParts(requestDebug["input_parts"])
+	item.ToolChoice = parseRequestToolChoice(requestDebug["tool_choice"])
+	item.ResponseFormat = parseRequestResponseFormat(requestDebug["response_format"])
 	return item, nil
+}
+
+func parseRequestInputParts(value any) []store.RequestInputPart {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	parts := make([]store.RequestInputPart, 0, len(items))
+	for _, item := range items {
+		record, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		parts = append(parts, store.RequestInputPart{
+			Type:      metadataString(record, "type", ""),
+			Text:      metadataString(record, "text", ""),
+			MediaType: metadataString(record, "media_type", ""),
+			URL:       metadataString(record, "url", ""),
+		})
+	}
+	return parts
+}
+
+func parseRequestToolChoice(value any) store.RequestToolChoice {
+	record, _ := value.(map[string]any)
+	return store.RequestToolChoice{
+		Type: metadataString(record, "type", ""),
+		Name: metadataString(record, "name", ""),
+	}
+}
+
+func parseRequestResponseFormat(value any) store.RequestResponseFormat {
+	record, _ := value.(map[string]any)
+	format := store.RequestResponseFormat{
+		Type: metadataString(record, "type", ""),
+		Name: metadataString(record, "name", ""),
+	}
+	format.Schema, _ = record["schema"].(map[string]any)
+	return format
 }
 
 func scanMessage(row rowScanner) (store.Message, error) {

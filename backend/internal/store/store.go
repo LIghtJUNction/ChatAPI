@@ -33,19 +33,40 @@ type Message struct {
 }
 
 type Request struct {
-	RequestID      string         `json:"request_id"`
-	OwnerID        string         `json:"owner_id,omitempty"`
-	ConversationID string         `json:"conversation_id"`
-	ResponseID     string         `json:"response_id,omitempty"`
-	RequestFormat  string         `json:"request_format,omitempty"`
-	Model          string         `json:"model,omitempty"`
-	InputText      string         `json:"input_text,omitempty"`
-	Status         string         `json:"status,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	RequestBody    map[string]any `json:"request_body,omitempty"`
-	ToolSchemas    []any          `json:"tool_schemas,omitempty"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
+	RequestID      string                `json:"request_id"`
+	OwnerID        string                `json:"owner_id,omitempty"`
+	ConversationID string                `json:"conversation_id"`
+	ResponseID     string                `json:"response_id,omitempty"`
+	RequestFormat  string                `json:"request_format,omitempty"`
+	Model          string                `json:"model,omitempty"`
+	InputText      string                `json:"input_text,omitempty"`
+	InputParts     []RequestInputPart    `json:"input_parts,omitempty"`
+	Status         string                `json:"status,omitempty"`
+	CreatedAt      time.Time             `json:"created_at"`
+	UpdatedAt      time.Time             `json:"updated_at"`
+	RequestBody    map[string]any        `json:"request_body,omitempty"`
+	ToolSchemas    []any                 `json:"tool_schemas,omitempty"`
+	ToolChoice     RequestToolChoice     `json:"tool_choice,omitempty"`
+	ResponseFormat RequestResponseFormat `json:"response_format,omitempty"`
+	Metadata       map[string]any        `json:"metadata,omitempty"`
+}
+
+type RequestInputPart struct {
+	Type      string `json:"type,omitempty"`
+	Text      string `json:"text,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+	URL       string `json:"url,omitempty"`
+}
+
+type RequestToolChoice struct {
+	Type string `json:"type,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+type RequestResponseFormat struct {
+	Type   string         `json:"type,omitempty"`
+	Name   string         `json:"name,omitempty"`
+	Schema map[string]any `json:"schema,omitempty"`
 }
 
 type AppAPIKey struct {
@@ -340,8 +361,11 @@ type CreatePendingInput struct {
 	RequestFormat  string
 	Model          string
 	UserContent    string
+	InputParts     []RequestInputPart
 	RequestBody    map[string]any
 	ToolSchemas    []any
+	ToolChoice     RequestToolChoice
+	ResponseFormat RequestResponseFormat
 }
 
 type CompletePendingInput struct {

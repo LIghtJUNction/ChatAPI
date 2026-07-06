@@ -946,12 +946,27 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		RequestFormat:  "responses",
 		Model:          "gpt-test",
 		UserContent:    "First question for waiting turn",
+		InputParts: []store.RequestInputPart{
+			{Type: "text", Text: "First question for waiting turn"},
+			{Type: "image", URL: "https://example.com/tool.png", MediaType: "image/png"},
+		},
 		RequestBody: map[string]any{
 			"model": "gpt-test",
 			"input": "First question for waiting turn",
 		},
 		ToolSchemas: []any{
 			map[string]any{"name": "tool_a"},
+		},
+		ToolChoice: store.RequestToolChoice{
+			Type: "function",
+			Name: "tool_a",
+		},
+		ResponseFormat: store.RequestResponseFormat{
+			Type: "json_schema",
+			Name: "answer",
+			Schema: map[string]any{
+				"type": "object",
+			},
 		},
 	})
 	if err != nil {
@@ -1009,6 +1024,15 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	}
 	if len(firstRequest.ToolSchemas) != 1 {
 		t.Fatalf("unexpected tool schemas: %#v", firstRequest.ToolSchemas)
+	}
+	if len(firstRequest.InputParts) != 2 || firstRequest.InputParts[1].Type != "image" {
+		t.Fatalf("unexpected input parts: %#v", firstRequest.InputParts)
+	}
+	if firstRequest.ToolChoice.Type != "function" || firstRequest.ToolChoice.Name != "tool_a" {
+		t.Fatalf("unexpected tool choice: %#v", firstRequest.ToolChoice)
+	}
+	if firstRequest.ResponseFormat.Type != "json_schema" || firstRequest.ResponseFormat.Name != "answer" {
+		t.Fatalf("unexpected response format: %#v", firstRequest.ResponseFormat)
 	}
 
 	requests, err := st.ListRequests(ctx)

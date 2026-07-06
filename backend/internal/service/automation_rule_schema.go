@@ -33,6 +33,19 @@ type AutomationAction struct {
 	Text string
 }
 
+type AutomationRuleSchema struct {
+	ActionTypes         []string                        `json:"action_types"`
+	LegacyMatchTypes    []string                        `json:"legacy_match_types"`
+	LegacyFields        []string                        `json:"legacy_fields"`
+	TypedConditionTypes []AutomationConditionTypeSchema `json:"typed_condition_types"`
+}
+
+type AutomationConditionTypeSchema struct {
+	Type        string   `json:"type"`
+	Description string   `json:"description,omitempty"`
+	Fields      []string `json:"fields,omitempty"`
+}
+
 func ParseAutomationRulePayload(payload map[string]any) (AutomationRuleDocument, error) {
 	if payload == nil {
 		return AutomationRuleDocument{}, ErrInvalidAutomationRule
@@ -69,6 +82,41 @@ func ParseAutomationRulePayload(payload map[string]any) (AutomationRuleDocument,
 		return AutomationRuleDocument{}, err
 	}
 	return rule, nil
+}
+
+func BuildAutomationRuleSchema() AutomationRuleSchema {
+	return AutomationRuleSchema{
+		ActionTypes:      []string{"output_text"},
+		LegacyMatchTypes: []string{"substring", "exact"},
+		LegacyFields: []string{
+			"text",
+			"user_content",
+			"input_part.text",
+			"input_part.type",
+			"input_part.media_type",
+			"input_part.url",
+			"tool_choice.type",
+			"tool_choice.name",
+			"response_format.type",
+			"response_format.name",
+			"model",
+			"protocol",
+		},
+		TypedConditionTypes: []AutomationConditionTypeSchema{
+			{Type: "text_contains", Description: "Case-insensitive substring match against combined request text.", Fields: []string{"value"}},
+			{Type: "text_is", Description: "Exact match against combined request text.", Fields: []string{"value"}},
+			{Type: "user_content_contains", Description: "Case-insensitive substring match against normalized user_content.", Fields: []string{"value"}},
+			{Type: "user_content_is", Description: "Exact match against normalized user_content.", Fields: []string{"value"}},
+			{Type: "model_is", Description: "Exact match against request model.", Fields: []string{"value"}},
+			{Type: "protocol_is", Description: "Exact match against normalized protocol name.", Fields: []string{"value"}},
+			{Type: "tool_choice_is", Description: "Exact match against tool choice name and/or type.", Fields: []string{"name", "choice_type"}},
+			{Type: "response_format_is", Description: "Exact match against response format name and/or type.", Fields: []string{"name", "format_type"}},
+			{Type: "input_part_type_is", Description: "Exact match against any input part type.", Fields: []string{"value"}},
+			{Type: "input_media_type_contains", Description: "Case-insensitive substring match against any input part media type.", Fields: []string{"value"}},
+			{Type: "input_media_type_is", Description: "Exact match against any input part media type.", Fields: []string{"value"}},
+			{Type: "input_url_contains", Description: "Case-insensitive substring match against any input part URL.", Fields: []string{"value"}},
+		},
+	}
 }
 
 func parseAutomationConditions(value any) ([]AutomationCondition, error) {

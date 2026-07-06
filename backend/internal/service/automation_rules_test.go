@@ -80,6 +80,26 @@ func TestParseAutomationRulePayloadRejectsUnknownConditionType(t *testing.T) {
 	}
 }
 
+func TestAutomationRuleServiceSchemaIncludesTypedConditions(t *testing.T) {
+	schema := NewAutomationRuleService(nil).Schema()
+	if len(schema.ActionTypes) != 1 || schema.ActionTypes[0] != "output_text" {
+		t.Fatalf("unexpected action types: %#v", schema)
+	}
+	if len(schema.LegacyFields) == 0 || len(schema.TypedConditionTypes) == 0 {
+		t.Fatalf("unexpected automation schema: %#v", schema)
+	}
+	foundToolChoice := false
+	for _, item := range schema.TypedConditionTypes {
+		if item.Type == "tool_choice_is" {
+			foundToolChoice = true
+			break
+		}
+	}
+	if !foundToolChoice {
+		t.Fatalf("expected tool_choice_is typed condition in schema: %#v", schema)
+	}
+}
+
 func nestedMap(t *testing.T, value map[string]any, key string) map[string]any {
 	t.Helper()
 	item, ok := value[key].(map[string]any)

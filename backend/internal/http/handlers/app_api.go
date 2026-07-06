@@ -212,6 +212,15 @@ func (h AppAPIHandler) ListAutomationRules(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": rules})
 }
 
+func (h AppAPIHandler) AutomationRuleSchema(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.UserID) == "" {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "schema": h.AutomationRules.Schema()})
+}
+
 func (h AppAPIHandler) PutAutomationRules(w http.ResponseWriter, r *http.Request) {
 	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
 	if !ok {

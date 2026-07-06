@@ -41,6 +41,7 @@
 - 用户侧虚拟模型配置已补上最小接口：`GET/POST/DELETE /api/config/models` 当前按 actor 读写 `user_configs.virtual_models`，用于保存当前用户自己的虚拟模型列表；`GET /models` / `GET /v1/models` 也已开始优先返回当前 actor 的已启用虚拟模型，而不是硬编码单个 `chatapi-lab`。若当前用户没有配置模型，则回退到默认 `chatapi-lab`。
 - 为兼容当前前端设置面板，`/api/config/models` 当前同时返回 `models: string[]` 和 `items`；前端仍按简单字符串列表工作，后续前端改造时再逐步切到更完整的模型对象结构。
 - 为兼容当前前端自动规则面板，`GET/POST /api/config/automation-rules` 已补上用户侧兼容接口，直接按当前 actor 读写自己的自动规则列表，响应格式对齐前端使用中的 `{ ok, rules }`；底层复用与应用 API 同一套 `automation_rules` 存储与校验逻辑，后续前端切到应用 API 时不需要再迁移数据结构。
+- 自动化规则 schema metadata 已开始对外暴露：`GET /api/config/automation-rules/schema` 和 `GET /api/app/automation-rules/schema` 当前返回 action 类型、legacy matcher 支持的 `field` / `match_type`，以及 typed condition 列表，供前端和外部程序做前置校验；规则读写接口本身的 JSON 形状本轮保持不变。
 - 应用 API 当前已开始覆盖 `model_keys:read` / `model_keys:write` / `model_keys:delete`：`/api/app/model-keys` 可按 scope 和 `allowed_virtual_models` / `allowed_model_key_ids` 管理当前用户自己的虚拟模型 API Key。
 - 应用 API 创建虚拟模型 API Key 时已开始支持 `max_model_keys`：按当前用户未撤销虚拟模型 key 数量限制创建，达到上限返回 `403`。
 - 应用 API 当前已开始覆盖 `automation:read` / `automation:write`：`GET/PUT /api/app/automation-rules` 可读写当前用户自己的自动化规则，并支持 `allowed_automation_rule_ids` 限制外部程序只能管理指定规则。
@@ -1418,6 +1419,7 @@ user_app_api_keys
 当前 Go 重构分支已落地的最小接口形状：
 
 - `GET /api/app/automation-rules`：需要 `automation:read`，返回当前用户自己的规则数组；如果配置了 `allowed_automation_rule_ids`，只返回允许的规则。
+- `GET /api/app/automation-rules/schema`：需要 `automation:read`，返回当前后端支持的自动化规则 schema metadata，供外部程序做表单/配置校验。
 - `PUT /api/app/automation-rules`：需要 `automation:write`，请求体为 `{ "rules": [...] }`。未配置 `allowed_automation_rule_ids` 时替换当前用户全部规则；配置后只允许替换指定规则，提交未授权规则 id 返回 `403`。
 - `max_requests_per_minute`：当前已按应用 API Key 在单 Go 进程内实现 1 分钟窗口限流；值为空或 `0` 表示不限流。超限请求返回 `429 app api key rate limited`，并记录 `error_code=rate_limited`。后续多实例部署需要迁移到 Redis 或数据库限流器。
 - `allowed_source_ips`：当前已在应用 API 鉴权后、scope 校验前执行。未配置时不限制；配置后请求来源 IP 不匹配则返回 `403 app api key source ip forbidden`，并记录 `error_code=source_ip_forbidden`。

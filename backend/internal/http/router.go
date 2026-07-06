@@ -123,6 +123,7 @@ func NewRouter(
 	userRouter.Delete("/identities/{identityID}", userIdentitiesHandler.Delete)
 	router.Mount("/api/user", userRouter)
 	router.Get("/api/config/automation-rules", configAutomationRulesHandler.Get)
+	router.Get("/api/config/automation-rules/schema", configAutomationRulesHandler.Schema)
 	router.Post("/api/config/automation-rules", configAutomationRulesHandler.Post)
 	router.Get("/api/config/models", configModelsHandler.Get)
 	router.Post("/api/config/models", configModelsHandler.Post)
@@ -168,6 +169,10 @@ func NewRouter(
 		appAuth("automation:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/automation-rules", appAPIHandler.ListAutomationRules)
+	appRouter.With(
+		appAuth("automation:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/automation-rules/schema", appAPIHandler.AutomationRuleSchema)
 	appRouter.With(
 		appAuth("automation:write"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),

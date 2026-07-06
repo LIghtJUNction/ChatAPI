@@ -921,6 +921,20 @@ func TestConfigAutomationRulesRejectInvalidTypedCondition(t *testing.T) {
 	}
 }
 
+func TestConfigAutomationRulesSchemaRoute(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.getJSON(t, "/api/config/automation-rules/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	typed := schema["typed_condition_types"].([]any)
+	if len(typed) == 0 || nestedString(typed[0].(map[string]any), "type") == "" {
+		t.Fatalf("unexpected automation schema response: %#v", resp)
+	}
+	if !containsStringValue(schema["action_types"], "output_text") || !containsStringValue(schema["legacy_fields"], "tool_choice.name") {
+		t.Fatalf("unexpected automation schema response: %#v", resp)
+	}
+}
+
 func TestAutomationRuleAutoCompletesResponsesRequest(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -1848,6 +1862,27 @@ func TestAppAPIAutomationRulesRejectInvalidTypedCondition(t *testing.T) {
 	})
 	if status != http.StatusBadRequest || !strings.Contains(body, "invalid automation rule") {
 		t.Fatalf("expected invalid typed automation rule rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestAppAPIAutomationRulesSchema(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"automation:read"}, nil)
+
+	resp := env.appGetJSON(t, "/api/app/automation-rules/schema", appKey, http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if !containsStringValue(schema["action_types"], "output_text") || !containsStringValue(schema["legacy_match_types"], "substring") {
+		t.Fatalf("unexpected automation schema response: %#v", resp)
+	}
+}
+
+func TestAppAPIAutomationRulesSchemaRejectsMissingScope(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
+
+	status, body := env.appGetText(t, "/api/app/automation-rules/schema", appKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("expected automation schema scope rejection: status=%d body=%q", status, body)
 	}
 }
 
@@ -5625,6 +5660,24 @@ func assertAuditCountForActor(t *testing.T, env *testEnv, actorUserID string, ev
 	if count != want {
 		t.Fatalf("expected %s/%s audit count %d, got %d", eventType, action, want, count)
 	}
+}
+
+func containsStringValue(value any, want string) bool {
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			if text, ok := item.(string); ok && text == want {
+				return true
+			}
+		}
+	case []string:
+		for _, item := range typed {
+			if item == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (e *testEnv) requestIDForConversation(t *testing.T, conversationID string) string {

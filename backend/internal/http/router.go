@@ -158,6 +158,10 @@ func NewRouter(
 	appRouter.With(
 		appAuth("requests:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/me/schema", appAPIHandler.MeSchema)
+	appRouter.With(
+		appAuth("requests:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/me", appAPIHandler.Me)
 	appRouter.With(
 		appAuth("requests:read"),
@@ -195,6 +199,10 @@ func NewRouter(
 		appAuth("automation:write"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Put("/automation-rules", appAPIHandler.PutAutomationRules)
+	appRouter.With(
+		appAuth("statistics:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/statistics/schema", appAPIHandler.StatisticsSchema)
 	appRouter.With(
 		appAuth("statistics:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),

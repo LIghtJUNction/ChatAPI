@@ -558,6 +558,13 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 		"allowed_request_actions": []string{"complete"},
 	})
 
+	meSchemaResp := env.appGetJSON(t, "/api/app/me/schema", appKey, http.StatusOK)
+	meSchema := meSchemaResp["schema"].(map[string]any)
+	meOperations := meSchema["operations"].([]any)
+	if len(meOperations) != 2 || nestedString(meOperations[0].(map[string]any), "name") != "me" {
+		t.Fatalf("unexpected app overview schema response: %#v", meSchemaResp)
+	}
+
 	schemaResp := env.appGetJSON(t, "/api/app/requests/schema", appKey, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
@@ -2890,6 +2897,13 @@ func TestAppAPIStatisticsSummary(t *testing.T) {
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
 	otherKey := env.seedAppAPIKey(t, "other-user", []string{"statistics:read"}, nil)
 
+	schemaResp := env.appGetJSON(t, "/api/app/statistics/schema", appKey, http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 2 || nestedString(operations[1].(map[string]any), "name") != "statistics_summary" {
+		t.Fatalf("unexpected app statistics schema response: %#v", schemaResp)
+	}
+
 	env.postJSON(t, "/api/config/automation-rules", map[string]any{
 		"rules": []map[string]any{
 			{
@@ -2961,6 +2975,17 @@ func TestAppAPIStatisticsSummaryRejectsMissingScope(t *testing.T) {
 	status, body := env.appGetText(t, "/api/app/statistics/summary", appKey)
 	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
 		t.Fatalf("expected statistics scope rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.appGetText(t, "/api/app/statistics/schema", appKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("expected statistics schema scope rejection: status=%d body=%q", status, body)
+	}
+
+	statisticsOnly := env.seedAppAPIKey(t, "lab-user", []string{"statistics:read"}, nil)
+	status, body = env.appGetText(t, "/api/app/me/schema", statisticsOnly)
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("expected me schema scope rejection: status=%d body=%q", status, body)
 	}
 }
 

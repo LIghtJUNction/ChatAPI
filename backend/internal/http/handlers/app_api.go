@@ -19,6 +19,24 @@ type AppAPIHandler struct {
 	AutomationRules *service.AutomationRuleService
 }
 
+func (h AppAPIHandler) MeSchema(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.UserID) == "" {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "schema": service.BuildAppOverviewSchema()})
+}
+
+func (h AppAPIHandler) StatisticsSchema(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.UserID) == "" {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "schema": service.BuildAppOverviewSchema()})
+}
+
 func (h AppAPIHandler) RequestsSchema(w http.ResponseWriter, r *http.Request) {
 	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {

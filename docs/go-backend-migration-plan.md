@@ -35,6 +35,7 @@
 - 已补上 `request_id -> conversation_id -> TurnControlCommand` 的最小解析链路，并先用于 `lab` 路由；后续应用 API 的 `/api/app/requests/{request_id}/*` 将直接复用这层能力。
 - 已补上统一的 request 读取视图（列表 + 详情）并先用于 `GET /lab/requests`、`GET /lab/requests/{request_id}`；后续 `/api/app/requests` 应直接复用这套 request reader，而不是再单独拼查询结构。
 - Lab 与应用 API 的 request/conversation 读取契约已开始显式暴露：`GET /lab/requests/schema`、`GET /api/app/requests/schema` 和 `GET /api/app/conversations/schema` 当前统一声明请求列表/详情/回复、会话列表/消息查看这些操作的路径、scope、parsed 视图语义与资源限制说明，避免工作台和外部自动化再维护各自的手写查询字段表。
+- 应用 API 概览契约也已开始显式暴露：`GET /api/app/me/schema` 和 `GET /api/app/statistics/schema` 当前统一声明 app API key 自描述与用户统计摘要的路径、scope 和返回语义，避免自动化脚本继续从示例响应里反推 `app_api_key`、`user`、`summary` 的字段结构。
 - 已新增 `user_app_api_keys` 的最小存储、哈希校验和应用 API 鉴权中间件；当前已打通 `GET /api/app/me`、`GET /api/app/requests`、`GET /api/app/requests/{request_id}`、`POST /api/app/requests/{request_id}/delta|complete|abort` 的最小链路，并对 scope、`allowed_request_actions`、owner 隔离做了集成测试。
 - 已补上应用 API key 的最小管理与审计基础：`GET/POST/DELETE /api/user/app-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`app_api_key_audit_logs` 已开始记录 `/api/app/*` 请求结果，`last_used_at` 也已做最小节流更新。
 - 应用 API Key 创建当前已开始做服务端白名单校验：scope 必须来自后端支持集合，且至少选择一个；`resource_limits` 只接受已知 key、已知类型和值域，未知 key/类型会返回 `400`；同时还会校验 resource limit 与 scopes 的语义匹配，例如 `allowed_request_actions` 必须伴随 `requests:respond`，`allowed_request_ids` 必须伴随 `requests:read|requests:respond`，`max_model_keys` 必须伴随 `model_keys:write`，避免生成永远不会生效或语义自相矛盾的 key 配置。
@@ -1537,6 +1538,7 @@ Go 版首个可替换版本必须覆盖：
 - `POST /api/user/upstream-assistant/config`
 - `DELETE /api/user/upstream-assistant/config`
 - `POST /api/workspace/tool-call/assist`
+- `GET /api/app/me/schema`
 - `GET /api/app/me`
 - `GET /api/app/requests/schema`
 - `GET /api/app/requests`
@@ -1552,6 +1554,7 @@ Go 版首个可替换版本必须覆盖：
 - `GET /api/app/model-keys`
 - `POST /api/app/model-keys`
 - `DELETE /api/app/model-keys/{key_id}`
+- `GET /api/app/statistics/schema`
 - `GET /api/app/statistics/summary`
 - `GET /api/user/model-api-keys`
 - `POST /api/user/model-api-keys`

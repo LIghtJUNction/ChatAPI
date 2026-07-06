@@ -18,6 +18,13 @@ type LabHandler struct {
 	Service *service.ChatAPIService
 }
 
+func (h LabHandler) RequestsSchema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildLabRequestsSchema(),
+	})
+}
+
 func (h LabHandler) Workspace(w http.ResponseWriter, r *http.Request) {
 	items, err := h.Store.ListConversations(r.Context())
 	if err != nil {

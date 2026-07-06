@@ -145,6 +145,7 @@ func NewRouter(
 	router.Get("/api/uploads/imgs/usage", uploadsHandler.Usage)
 	router.Get("/api/uploads/imgs/{filename}", uploadsHandler.Image)
 	router.Get("/lab/requests", labHandler.ListRequests)
+	router.Get("/lab/requests/schema", labHandler.RequestsSchema)
 	router.Get("/lab/requests/{requestID}", labHandler.GetRequest)
 	router.Post("/lab/requests/{requestID}/delta", labHandler.RequestDelta)
 	router.Post("/lab/requests/{requestID}/complete", labHandler.RequestComplete)
@@ -161,11 +162,19 @@ func NewRouter(
 	appRouter.With(
 		appAuth("requests:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/requests/schema", appAPIHandler.RequestsSchema)
+	appRouter.With(
+		appAuth("requests:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/requests", appAPIHandler.ListRequests)
 	appRouter.With(
 		appAuth("requests:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/requests/{requestID}", appAPIHandler.GetRequest)
+	appRouter.With(
+		appAuth("conversations:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/conversations/schema", appAPIHandler.ConversationsSchema)
 	appRouter.With(
 		appAuth("conversations:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),

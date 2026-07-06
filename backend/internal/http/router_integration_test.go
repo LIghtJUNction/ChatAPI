@@ -558,6 +558,15 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 		"allowed_request_actions": []string{"complete"},
 	})
 
+	schemaResp := env.appGetJSON(t, "/api/app/requests/schema", appKey, http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 5 ||
+		nestedString(operations[0].(map[string]any), "name") != "list_requests" ||
+		nestedString(operations[4].(map[string]any), "name") != "request_abort" {
+		t.Fatalf("unexpected app requests schema response: %#v", schemaResp)
+	}
+
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
 		"model": "demo-app-api",
 		"messages": []map[string]any{
@@ -743,6 +752,11 @@ func TestAppAPIRejectsMissingRespondScope(t *testing.T) {
 		t.Fatalf("unexpected app api scope rejection: status=%d body=%q", status, body)
 	}
 
+	status, body = env.appGetText(t, "/api/app/requests/schema", env.seedAppAPIKey(t, "lab-user", []string{"conversations:read"}, nil))
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("unexpected app requests schema scope rejection: status=%d body=%q", status, body)
+	}
+
 	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
 		"text": "fallback",
 		"mode": "assistant_message",
@@ -821,6 +835,15 @@ func TestAppAPIOwnerIsolation(t *testing.T) {
 func TestAppAPIConversationsRead(t *testing.T) {
 	env := newTestEnv(t)
 	appKey := env.seedAppAPIKey(t, "lab-user", []string{"conversations:read"}, nil)
+
+	schemaResp := env.appGetJSON(t, "/api/app/conversations/schema", appKey, http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 2 ||
+		nestedString(operations[0].(map[string]any), "name") != "list_conversations" ||
+		nestedString(operations[1].(map[string]any), "name") != "list_conversation_messages" {
+		t.Fatalf("unexpected app conversations schema response: %#v", schemaResp)
+	}
 
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
 		"model": "demo-app-conversations",
@@ -953,6 +976,16 @@ func TestAppAPIConversationsOwnerIsolation(t *testing.T) {
 		"mode": "assistant_message",
 	}, http.StatusOK)
 	<-resultCh
+}
+
+func TestAppAPIConversationsSchemaRejectsWrongScope(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"requests:read"}, nil)
+
+	status, body := env.appGetText(t, "/api/app/conversations/schema", appKey)
+	if status != http.StatusForbidden || !strings.Contains(body, "app api key forbidden") {
+		t.Fatalf("unexpected app conversations schema scope rejection: status=%d body=%q", status, body)
+	}
 }
 
 func TestUserAppAPIKeysManagement(t *testing.T) {
@@ -1835,6 +1868,21 @@ func TestAutomationRuleAutoCompletesResponsesRequest(t *testing.T) {
 		t.Fatalf("expected automation-completed request in list: %#v", requests)
 	}
 	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_complete", "auto_complete", "success", 1)
+}
+
+func TestLabRequestsSchema(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.getJSON(t, "/lab/requests/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 5 {
+		t.Fatalf("unexpected lab requests schema response: %#v", resp)
+	}
+	if nestedString(operations[0].(map[string]any), "name") != "list_requests" ||
+		nestedString(operations[4].(map[string]any), "name") != "request_abort" {
+		t.Fatalf("unexpected lab requests schema operations: %#v", resp)
+	}
 }
 
 func TestAutomationRuleAutoCompletesStructuredResponsesRequest(t *testing.T) {

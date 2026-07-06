@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pquerna/otp/totp"
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
 	"github.com/zyf/chatapi/internal/platform/apikey"
@@ -877,6 +878,98 @@ func TestUserPasswordRoute(t *testing.T) {
 		t.Fatalf("verify updated password hash: ok=%v err=%v", result.OK, err)
 	}
 	assertAuditCount(t, env, "user.password", "user", "lab-user", "update", "success", 1)
+}
+
+func TestTOTPSetupConfirmLoginAndReset(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+
+	hash, err := passwordhash.Hash("totp-secret")
+	if err != nil {
+		t.Fatalf("hash totp password: %v", err)
+	}
+	user, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "totp-user",
+		Username:     "totp-user",
+		Email:        "totp@example.com",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	})
+	if err != nil {
+		t.Fatalf("seed totp user: %v", err)
+	}
+
+	loginResp, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": user.Username,
+		"password": "totp-secret",
+	}, http.StatusOK)
+	if nestedPathString(loginResp, "user", "id") != user.ID {
+		t.Fatalf("unexpected initial login response: %#v", loginResp)
+	}
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing session cookie after initial login: %#v", cookies)
+	}
+
+	setupResp := env.getJSONWithCookie(t, "/api/auth/totp/setup", sessionCookie, http.StatusOK)
+	secret := nestedPathString(setupResp, "secret")
+	if secret == "" || nestedPathString(setupResp, "uri") == "" || nestedPathString(setupResp, "qr_base64") == "" {
+		t.Fatalf("unexpected totp setup response: %#v", setupResp)
+	}
+
+	configResp := env.getJSONWithCookie(t, "/api/user/config", sessionCookie, http.StatusOK)
+	if _, exists := configResp["security.totp"]; exists {
+		t.Fatalf("sensitive totp config leaked to user config response: %#v", configResp)
+	}
+
+	code, err := totp.GenerateCode(secret, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("generate totp code: %v", err)
+	}
+	_, _ = env.postJSONWithCookieAndHeaders(t, "/api/auth/totp/confirm", map[string]any{
+		"secret": secret,
+		"code":   code,
+	}, sessionCookie, map[string]string{"Origin": env.server.URL}, http.StatusOK)
+
+	sessionResp := env.getJSONWithCookie(t, "/api/auth/session", sessionCookie, http.StatusOK)
+	if !nestedPathBool(sessionResp, "totp_enabled") {
+		t.Fatalf("expected session totp_enabled after confirm: %#v", sessionResp)
+	}
+
+	status, body := env.postText(t, "/api/auth/login", map[string]any{
+		"username": user.Username,
+		"password": "totp-secret",
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "totp code is required") || !strings.Contains(body, "totp_required") {
+		t.Fatalf("expected totp login challenge: status=%d body=%q", status, body)
+	}
+
+	loginCode, err := totp.GenerateCode(secret, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("generate second totp code: %v", err)
+	}
+	challengedLoginResp, challengedCookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": user.Username,
+		"password": "totp-secret",
+		"totp":     loginCode,
+	}, http.StatusOK)
+	if nestedPathString(challengedLoginResp, "user", "id") != user.ID {
+		t.Fatalf("unexpected totp login response: %#v", challengedLoginResp)
+	}
+	totpSessionCookie := findCookie(challengedCookies, service.SessionCookieName)
+	if totpSessionCookie == nil {
+		t.Fatalf("missing session cookie after totp login: %#v", challengedCookies)
+	}
+
+	_, _ = env.postJSONWithCookieAndHeaders(t, "/api/auth/totp/reset", map[string]any{}, totpSessionCookie, map[string]string{"Origin": env.server.URL}, http.StatusOK)
+	sessionAfterReset := env.getJSONWithCookie(t, "/api/auth/session", totpSessionCookie, http.StatusOK)
+	if nestedPathBool(sessionAfterReset, "totp_enabled") {
+		t.Fatalf("expected totp to be disabled after reset: %#v", sessionAfterReset)
+	}
+
+	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "totp_setup", "success", 1)
+	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "totp_confirm", "success", 1)
+	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "totp_reset", "success", 1)
 }
 
 func TestUserIdentitiesListAndUnlink(t *testing.T) {

@@ -49,6 +49,7 @@ func NewRouter(
 		Audit:        auditService,
 		LocalAuth:    service.NewLocalAuthService(dataStore),
 		OIDCAuth:     service.NewOIDCAuthService(dataStore, cfg),
+		TOTP:         service.NewTOTPService(dataStore, cfg.MasterKey, "ChatAPI"),
 		LoginLimiter: service.NewLoginRateLimiter(5, time.Minute),
 	}
 	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore), Audit: auditService}
@@ -89,6 +90,9 @@ func NewRouter(
 	router.Get("/api/auth/session", authHandler.Session)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)
+	router.Get("/api/auth/totp/setup", authHandler.TOTPSetup)
+	router.Post("/api/auth/totp/confirm", authHandler.TOTPConfirm)
+	router.Post("/api/auth/totp/reset", authHandler.TOTPReset)
 	router.Get("/api/auth/oidc/config", authHandler.OIDCConfig)
 	router.Get("/api/auth/oidc/login", authHandler.OIDCLogin)
 	router.Get("/api/auth/oidc/callback", authHandler.OIDCCallback)

@@ -25,6 +25,7 @@ type AuthHandler struct {
 	Audit        *service.AuditService
 	LocalAuth    *service.LocalAuthService
 	OIDCAuth     *service.OIDCAuthService
+	TOTP         *service.TOTPService
 	LoginLimiter *service.LoginRateLimiter
 }
 
@@ -62,6 +63,9 @@ func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 	if actor, ok := service.RequestActorFromContext(r.Context()); ok {
 		payload.Authenticated = true
 		payload.User = &user{ID: actor.UserID, Username: actor.Username, Role: actor.Role}
+		if h.TOTP != nil {
+			payload.TOTPEnabled = h.TOTP.IsEnabled(r.Context(), actor.UserID)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
@@ -213,6 +217,7 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		TOTP     string `json:"totp"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid login request", http.StatusBadRequest)
@@ -229,6 +234,9 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if actor, err := h.authenticateLocalUser(r.Context(), username, input.Password); err == nil {
+		if h.requireTOTP(w, r, actor, input.TOTP) {
+			return
+		}
 		h.writeLoginSuccess(w, r, actor, limitKey)
 		return
 	}
@@ -239,6 +247,9 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			Role:     "admin",
 			Source:   "session",
 		}
+		if h.requireTOTP(w, r, actor, input.TOTP) {
+			return
+		}
 		h.writeLoginSuccess(w, r, actor, limitKey)
 		return
 	}
@@ -247,6 +258,88 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	h.recordAuthAudit(r, "login", "failure")
 	http.Error(w, "invalid username or password", http.StatusUnauthorized)
+}
+
+func (h AuthHandler) TOTPSetup(w http.ResponseWriter, r *http.Request) {
+	actor, ok := service.RequestActorFromContext(r.Context())
+	if !ok || strings.TrimSpace(actor.UserID) == "" {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	setup, err := h.TOTP.Setup(r.Context(), actor.UserID, actor.Username)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), actor)), "totp_setup", "success")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"secret":    setup.Secret,
+		"uri":       setup.URI,
+		"qr_base64": setup.QRBase64,
+	})
+}
+
+func (h AuthHandler) TOTPConfirm(w http.ResponseWriter, r *http.Request) {
+	actor, ok := service.RequestActorFromContext(r.Context())
+	if !ok || strings.TrimSpace(actor.UserID) == "" {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	var input struct {
+		Secret string `json:"secret"`
+		Code   string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid totp confirm request", http.StatusBadRequest)
+		return
+	}
+	if err := h.TOTP.Confirm(r.Context(), actor.UserID, input.Secret, input.Code); err != nil {
+		switch {
+		case errors.Is(err, service.ErrTOTPCodeInvalid), errors.Is(err, service.ErrInvalidTOTPInput), errors.Is(err, service.ErrTOTPNotConfigured):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), actor)), "totp_confirm", "success")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h AuthHandler) TOTPReset(w http.ResponseWriter, r *http.Request) {
+	actor, ok := service.RequestActorFromContext(r.Context())
+	if !ok || strings.TrimSpace(actor.UserID) == "" {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	if err := h.TOTP.Reset(r.Context(), actor.UserID); err != nil {
+		if errors.Is(err, service.ErrInvalidTOTPInput) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), actor)), "totp_reset", "success")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h AuthHandler) requireTOTP(w http.ResponseWriter, r *http.Request, actor service.RequestActor, code string) bool {
+	if h.TOTP == nil || !h.TOTP.IsEnabled(r.Context(), actor.UserID) {
+		return false
+	}
+	if err := h.TOTP.ValidateLoginCode(r.Context(), actor.UserID, code); err == nil {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":         "totp code is required",
+		"totp_required": true,
+	})
+	h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), actor)), "login_totp", "failure")
+	return true
 }
 
 func (h AuthHandler) authenticateLocalUser(ctx context.Context, username string, password string) (service.RequestActor, error) {

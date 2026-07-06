@@ -10,6 +10,8 @@ import (
 
 var ErrInvalidUserConfig = errors.New("invalid user config")
 
+const reservedUserConfigPrefix = "security."
+
 type UserConfigService struct {
 	store store.Store
 }
@@ -30,7 +32,8 @@ func (s *UserConfigService) List(ctx context.Context, userID string) ([]store.Us
 	if err != nil {
 		return nil, nil, err
 	}
-	return items, aggregateUserConfigs(items), nil
+	filtered := filterVisibleUserConfigs(items)
+	return filtered, aggregateUserConfigs(filtered), nil
 }
 
 func (s *UserConfigService) SetMany(ctx context.Context, userID string, values map[string]any) ([]store.UserConfig, map[string]any, error) {
@@ -44,6 +47,9 @@ func (s *UserConfigService) SetMany(ctx context.Context, userID string, values m
 	for key, value := range values {
 		key = strings.TrimSpace(key)
 		if key == "" {
+			return nil, nil, ErrInvalidUserConfig
+		}
+		if isReservedUserConfigKey(key) {
 			return nil, nil, ErrInvalidUserConfig
 		}
 		valueMap, ok := value.(map[string]any)
@@ -67,4 +73,19 @@ func aggregateUserConfigs(items []store.UserConfig) map[string]any {
 		out[item.Key] = item.Value
 	}
 	return out
+}
+
+func filterVisibleUserConfigs(items []store.UserConfig) []store.UserConfig {
+	out := make([]store.UserConfig, 0, len(items))
+	for _, item := range items {
+		if isReservedUserConfigKey(item.Key) {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func isReservedUserConfigKey(key string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), reservedUserConfigPrefix)
 }

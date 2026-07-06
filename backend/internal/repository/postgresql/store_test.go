@@ -38,7 +38,7 @@ func TestBootstrapAppliesLatestPostgreSQLMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("migration status: %v", err)
 	}
-	if status.SchemaVersion != LatestVersion || len(status.Applied) != 2 {
+	if status.SchemaVersion != LatestVersion || len(status.Applied) != len(registeredMigrations) {
 		t.Fatalf("unexpected postgresql migration status: %#v", status)
 	}
 	for _, index := range []string{"idx_messages_response_id_nonempty", "idx_messages_request_debug_request_id"} {

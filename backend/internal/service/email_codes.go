@@ -20,11 +20,15 @@ const (
 	emailCodePurposeRegister      = "register"
 	emailCodePurposePasswordReset = "password_reset"
 	defaultEmailCodeTTL           = 10 * time.Minute
+	emailCodeResendInterval       = 60 * time.Second
+	emailCodeMaxFailedAttempts    = 5
 )
 
 var ErrEmailCodeInvalid = errors.New("email verification code is invalid")
 var ErrEmailCodeExpired = errors.New("email verification code has expired")
 var ErrEmailDeliveryUnavailable = errors.New("email delivery is unavailable")
+var ErrEmailCodeRateLimited = errors.New("email verification code rate limited")
+var ErrEmailCodeTooManyAttempts = errors.New("email verification code has too many failed attempts")
 
 type EmailCodeService struct {
 	store     store.Store
@@ -60,16 +64,26 @@ func (s *EmailCodeService) SendCode(ctx context.Context, email string, purpose s
 	if email == "" || purpose == "" {
 		return ErrInvalidUserInput
 	}
+	if existing, err := s.store.GetAuthVerificationCode(ctx, email, purpose); err == nil {
+		if !existing.LastSentAt.IsZero() && s.now().UTC().Before(existing.LastSentAt.Add(emailCodeResendInterval)) {
+			return ErrEmailCodeRateLimited
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
 	code, err := generateNumericCode(6)
 	if err != nil {
 		return err
 	}
-	expiresAt := s.now().UTC().Add(defaultEmailCodeTTL)
+	now := s.now().UTC()
+	expiresAt := now.Add(defaultEmailCodeTTL)
 	if _, err := s.store.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
-		Email:     email,
-		Purpose:   purpose,
-		CodeHash:  s.hash(email, purpose, code),
-		ExpiresAt: expiresAt,
+		Email:          email,
+		Purpose:        purpose,
+		CodeHash:       s.hash(email, purpose, code),
+		FailedAttempts: 0,
+		ExpiresAt:      expiresAt,
+		LastSentAt:     now,
 	}); err != nil {
 		return err
 	}
@@ -102,7 +116,19 @@ func (s *EmailCodeService) VerifyCode(ctx context.Context, email string, purpose
 		_ = s.store.DeleteAuthVerificationCode(ctx, email, purpose)
 		return ErrEmailCodeExpired
 	}
+	if item.FailedAttempts >= emailCodeMaxFailedAttempts {
+		_ = s.store.DeleteAuthVerificationCode(ctx, email, purpose)
+		return ErrEmailCodeTooManyAttempts
+	}
 	if !hmac.Equal([]byte(item.CodeHash), []byte(s.hash(email, purpose, code))) {
+		_, _ = s.store.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+			Email:          item.Email,
+			Purpose:        item.Purpose,
+			CodeHash:       item.CodeHash,
+			FailedAttempts: item.FailedAttempts + 1,
+			ExpiresAt:      item.ExpiresAt,
+			LastSentAt:     item.LastSentAt,
+		})
 		return ErrEmailCodeInvalid
 	}
 	if err := s.store.DeleteAuthVerificationCode(ctx, email, purpose); err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -135,11 +161,13 @@ func normalizeEmailAddress(email string) string {
 	return strings.TrimSpace(strings.ToLower(email))
 }
 
-func PurposeRegister() string      { return emailCodePurposeRegister }
-func PurposePasswordReset() string { return emailCodePurposePasswordReset }
-func EmailCodeTTLSeconds() int     { return int(defaultEmailCodeTTL / time.Second) }
+func PurposeRegister() string             { return emailCodePurposeRegister }
+func PurposePasswordReset() string        { return emailCodePurposePasswordReset }
+func EmailCodeTTLSeconds() int            { return int(defaultEmailCodeTTL / time.Second) }
+func EmailCodeResendIntervalSeconds() int { return int(emailCodeResendInterval / time.Second) }
 
-func NumericCodeLength() int { return 6 }
+func NumericCodeLength() int          { return 6 }
+func EmailCodeMaxFailedAttempts() int { return emailCodeMaxFailedAttempts }
 
 func ParseEmailCode(raw string) string {
 	return strings.TrimSpace(raw)

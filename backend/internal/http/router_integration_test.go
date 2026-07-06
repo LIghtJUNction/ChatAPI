@@ -1010,6 +1010,12 @@ func TestRegistrationWithEmailVerification(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("unexpected register send-code response: status=%d body=%q", status, body)
 	}
+	status, body = env.postText(t, "/api/auth/register/send-code", map[string]any{
+		"email": "newuser@example.com",
+	})
+	if status != http.StatusTooManyRequests || !strings.Contains(body, "rate limited") {
+		t.Fatalf("expected register send-code rate limit: status=%d body=%q", status, body)
+	}
 	code := smtpServer.waitForLatestCode(t)
 
 	registerResp := env.postJSON(t, "/api/auth/register", map[string]any{
@@ -1081,6 +1087,60 @@ func TestPasswordResetWithEmailCode(t *testing.T) {
 	}, http.StatusOK)
 	if nestedPathString(loginResp, "user", "id") != "reset-user" {
 		t.Fatalf("unexpected login after password reset: %#v", loginResp)
+	}
+}
+
+func TestPasswordResetCodeTooManyAttempts(t *testing.T) {
+	smtpServer := newFakeSMTPServer(t)
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.SMTPEnabled = true
+		cfg.SMTPHost = smtpServer.host
+		cfg.SMTPPort = smtpServer.port
+		cfg.SMTPSecurity = "none"
+		cfg.SMTPFrom = "noreply@example.com"
+		cfg.SMTPTimeout = 10 * time.Second
+	})
+	hash, err := passwordhash.Hash("attempt-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "attempt-user",
+		Username:     "attempt-user@example.com",
+		Email:        "attempt-user@example.com",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed attempt user: %v", err)
+	}
+
+	status, body := env.postText(t, "/api/auth/password/send-code", map[string]any{
+		"email": "attempt-user@example.com",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("unexpected send-code response: status=%d body=%q", status, body)
+	}
+	code := smtpServer.waitForLatestCode(t)
+
+	for i := 0; i < service.EmailCodeMaxFailedAttempts(); i++ {
+		status, body = env.postText(t, "/api/auth/password/reset", map[string]any{
+			"email":    "attempt-user@example.com",
+			"code":     "000000",
+			"password": "new-attempt-secret",
+		})
+		if status != http.StatusBadRequest || !strings.Contains(body, "invalid") {
+			t.Fatalf("expected invalid code on attempt %d: status=%d body=%q", i+1, status, body)
+		}
+	}
+
+	status, body = env.postText(t, "/api/auth/password/reset", map[string]any{
+		"email":    "attempt-user@example.com",
+		"code":     code,
+		"password": "new-attempt-secret",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "too many failed attempts") {
+		t.Fatalf("expected too many attempts rejection: status=%d body=%q", status, body)
 	}
 }
 

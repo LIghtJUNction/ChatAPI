@@ -935,7 +935,7 @@ func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.Use
 
 func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpose string) (store.AuthVerificationCode, error) {
 	item, err := scanAuthVerificationCode(s.db.QueryRowContext(ctx, `
-		SELECT email, purpose, code_hash, expires_at, created_at, updated_at
+		SELECT email, purpose, code_hash, failed_attempts, expires_at, last_sent_at, created_at, updated_at
 		FROM auth_verification_codes
 		WHERE email = ? AND purpose = ?
 	`, strings.TrimSpace(email), strings.TrimSpace(purpose)))
@@ -953,13 +953,15 @@ func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input store.Upse
 	email := strings.TrimSpace(strings.ToLower(input.Email))
 	purpose := strings.TrimSpace(input.Purpose)
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO auth_verification_codes(email, purpose, code_hash, expires_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO auth_verification_codes(email, purpose, code_hash, failed_attempts, expires_at, last_sent_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(email, purpose) DO UPDATE SET
 			code_hash = excluded.code_hash,
+			failed_attempts = excluded.failed_attempts,
 			expires_at = excluded.expires_at,
+			last_sent_at = excluded.last_sent_at,
 			updated_at = excluded.updated_at
-	`, email, purpose, strings.TrimSpace(input.CodeHash), formatTime(input.ExpiresAt.UTC()), formatTime(now), formatTime(now)); err != nil {
+	`, email, purpose, strings.TrimSpace(input.CodeHash), input.FailedAttempts, formatTime(input.ExpiresAt.UTC()), formatTime(input.LastSentAt.UTC()), formatTime(now), formatTime(now)); err != nil {
 		return store.AuthVerificationCode{}, err
 	}
 	return s.GetAuthVerificationCode(ctx, email, purpose)
@@ -2089,13 +2091,15 @@ type authVerificationCodeScanner interface {
 
 func scanAuthVerificationCode(scanner authVerificationCodeScanner) (store.AuthVerificationCode, error) {
 	var item store.AuthVerificationCode
+	var lastSentAt string
 	var expiresAt string
 	var createdAt string
 	var updatedAt string
-	if err := scanner.Scan(&item.Email, &item.Purpose, &item.CodeHash, &expiresAt, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&item.Email, &item.Purpose, &item.CodeHash, &item.FailedAttempts, &expiresAt, &lastSentAt, &createdAt, &updatedAt); err != nil {
 		return store.AuthVerificationCode{}, err
 	}
 	item.ExpiresAt = parseTime(expiresAt)
+	item.LastSentAt = parseTime(lastSentAt)
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return item, nil

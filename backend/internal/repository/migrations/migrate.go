@@ -10,7 +10,7 @@ import (
 )
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0003_sqlite_auth_verification_codes"
+const LatestVersion = "0004_sqlite_auth_verification_code_limits"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS

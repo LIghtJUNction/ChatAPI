@@ -22,7 +22,7 @@ type Store struct {
 }
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0003_postgresql_auth_verification_codes"
+const LatestVersion = "0004_postgresql_auth_verification_code_limits"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS
@@ -498,7 +498,7 @@ func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.Use
 
 func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpose string) (store.AuthVerificationCode, error) {
 	return scanAuthVerificationCode(s.pool.QueryRow(ctx, `
-		SELECT email, purpose, code_hash, expires_at, created_at, updated_at
+		SELECT email, purpose, code_hash, failed_attempts, expires_at, last_sent_at, created_at, updated_at
 		FROM auth_verification_codes
 		WHERE email = $1 AND purpose = $2
 	`, strings.TrimSpace(strings.ToLower(email)), strings.TrimSpace(purpose)))
@@ -507,13 +507,15 @@ func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpo
 func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input store.UpsertAuthVerificationCodeInput) (store.AuthVerificationCode, error) {
 	now := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO auth_verification_codes(email, purpose, code_hash, expires_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO auth_verification_codes(email, purpose, code_hash, failed_attempts, expires_at, last_sent_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT(email, purpose) DO UPDATE SET
 			code_hash = excluded.code_hash,
+			failed_attempts = excluded.failed_attempts,
 			expires_at = excluded.expires_at,
+			last_sent_at = excluded.last_sent_at,
 			updated_at = excluded.updated_at
-	`, strings.TrimSpace(strings.ToLower(input.Email)), strings.TrimSpace(input.Purpose), strings.TrimSpace(input.CodeHash), input.ExpiresAt.UTC(), now, now)
+	`, strings.TrimSpace(strings.ToLower(input.Email)), strings.TrimSpace(input.Purpose), strings.TrimSpace(input.CodeHash), input.FailedAttempts, input.ExpiresAt.UTC(), input.LastSentAt.UTC(), now, now)
 	if err != nil {
 		return store.AuthVerificationCode{}, err
 	}
@@ -603,7 +605,7 @@ func scanSystemConfig(row rowScanner) (store.SystemConfig, error) {
 
 func scanAuthVerificationCode(row rowScanner) (store.AuthVerificationCode, error) {
 	var item store.AuthVerificationCode
-	if err := row.Scan(&item.Email, &item.Purpose, &item.CodeHash, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Email, &item.Purpose, &item.CodeHash, &item.FailedAttempts, &item.ExpiresAt, &item.LastSentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return store.AuthVerificationCode{}, store.ErrNotFound
 		}

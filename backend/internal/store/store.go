@@ -148,12 +148,14 @@ type UserConfig struct {
 }
 
 type AuthVerificationCode struct {
-	Email     string    `json:"email"`
-	Purpose   string    `json:"purpose"`
-	CodeHash  string    `json:"-"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Email          string    `json:"email"`
+	Purpose        string    `json:"purpose"`
+	CodeHash       string    `json:"-"`
+	FailedAttempts int       `json:"failed_attempts"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	LastSentAt     time.Time `json:"last_sent_at"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type AutomationRule struct {
@@ -276,10 +278,12 @@ type SetUserConfigInput struct {
 }
 
 type UpsertAuthVerificationCodeInput struct {
-	Email     string
-	Purpose   string
-	CodeHash  string
-	ExpiresAt time.Time
+	Email          string
+	Purpose        string
+	CodeHash       string
+	FailedAttempts int
+	ExpiresAt      time.Time
+	LastSentAt     time.Time
 }
 
 type UpsertAutomationRuleInput struct {

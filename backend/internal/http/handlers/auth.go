@@ -579,10 +579,13 @@ func (h AuthHandler) recordAuthAudit(r *http.Request, action string, outcome str
 
 func writeRegistrationError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, service.ErrEmailCodeRateLimited):
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
 	case errors.Is(err, service.ErrRegistrationDisabled),
 		errors.Is(err, service.ErrInvalidUserInput),
 		errors.Is(err, service.ErrEmailCodeInvalid),
 		errors.Is(err, service.ErrEmailCodeExpired),
+		errors.Is(err, service.ErrEmailCodeTooManyAttempts),
 		errors.Is(err, service.ErrEmailDeliveryUnavailable):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:
@@ -592,10 +595,13 @@ func writeRegistrationError(w http.ResponseWriter, err error) {
 
 func writePasswordResetError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, service.ErrEmailCodeRateLimited):
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
 	case errors.Is(err, service.ErrPasswordResetDisabled),
 		errors.Is(err, service.ErrInvalidUserInput),
 		errors.Is(err, service.ErrEmailCodeInvalid),
 		errors.Is(err, service.ErrEmailCodeExpired),
+		errors.Is(err, service.ErrEmailCodeTooManyAttempts),
 		errors.Is(err, service.ErrEmailDeliveryUnavailable):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:

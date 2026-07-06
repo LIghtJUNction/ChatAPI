@@ -450,7 +450,7 @@ func TestRuntimeMigrationStatusBootstrapsPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("postgres migration status: %v", err)
 	}
-	if status.SchemaVersion != migrations.BootstrapVersion || status.MigrationDirty {
+	if status.SchemaVersion != pgstore.LatestVersion || status.MigrationDirty {
 		t.Fatalf("unexpected postgres migration status: %#v", status)
 	}
 }
@@ -466,7 +466,7 @@ func TestDBCheckCommandReportsPostgreSQLStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("postgres db check: %v report=%#v", err, report)
 	}
-	if !report.OK || report.Driver != "postgresql" || report.Status.SchemaVersion != migrations.BootstrapVersion {
+	if !report.OK || report.Driver != "postgresql" || report.Status.SchemaVersion != pgstore.LatestVersion {
 		t.Fatalf("unexpected postgres db check report: %#v", report)
 	}
 	if report.SQLite.Database.Path != "" || report.SQLite.WAL.Path != "" || report.SQLite.SHM.Path != "" {
@@ -487,7 +487,7 @@ func TestMigrateCommandDownResetsPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("postgres migrate down: %v report=%#v", err, report)
 	}
-	if !report.OK || report.Command != "down" || !report.Forced || report.Status.SchemaVersion != migrations.BootstrapVersion {
+	if !report.OK || report.Command != "down" || !report.Forced || report.Status.SchemaVersion != pgstore.LatestVersion {
 		t.Fatalf("unexpected postgres migrate down report: %#v", report)
 	}
 	statusReport, err := migrateCommand(context.Background(), migrateOptions{command: "status"}, backendRoot)

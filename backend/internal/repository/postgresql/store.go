@@ -19,6 +19,35 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+const BootstrapVersion = "0001_bootstrap"
+const LatestVersion = "0002_postgresql_request_indexes"
+
+type Migration struct {
+	Version string
+	Name    string
+	UpSQL   string
+}
+
+var registeredMigrations = []Migration{
+	{
+		Version: BootstrapVersion,
+		Name:    "bootstrap",
+	},
+	{
+		Version: LatestVersion,
+		Name:    "postgresql_request_indexes",
+		UpSQL: `
+CREATE INDEX IF NOT EXISTS idx_messages_response_id_nonempty
+ON messages(response_id)
+WHERE response_id IS NOT NULL AND response_id <> '';
+
+CREATE INDEX IF NOT EXISTS idx_messages_request_debug_request_id
+ON messages ((metadata_json->'request_debug'->>'request_id'))
+WHERE metadata_json->'request_debug'->>'request_id' IS NOT NULL;
+`,
+	},
+}
+
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -251,7 +280,15 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 	`); err != nil {
 		return fmt.Errorf("seed postgresql migration metadata: %w", err)
 	}
-	return nil
+	statusStore := &Store{pool: pool}
+	status, err := statusStore.MigrationStatus(ctx)
+	if err != nil {
+		return err
+	}
+	if status.MigrationDirty {
+		return nil
+	}
+	return applyPendingMigrations(ctx, pool, status)
 }
 
 func Reset(ctx context.Context, pool *pgxpool.Pool) error {
@@ -277,6 +314,61 @@ func Reset(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("reset postgresql schema: %w", err)
 	}
 	return nil
+}
+
+func applyPendingMigrations(ctx context.Context, pool *pgxpool.Pool, status store.MigrationStatus) error {
+	applied := make(map[string]store.AppliedMigration, len(status.Applied))
+	for _, item := range status.Applied {
+		applied[item.Version] = item
+	}
+	for _, migration := range registeredMigrations {
+		if migration.Version == BootstrapVersion {
+			continue
+		}
+		if _, ok := applied[migration.Version]; ok {
+			continue
+		}
+		if err := applyMigration(ctx, pool, migration); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyMigration(ctx context.Context, pool *pgxpool.Pool, migration Migration) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, migration.UpSQL); err != nil {
+		return fmt.Errorf("apply postgresql migration %s: %w", migration.Version, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO schema_migrations(version, name, applied_at, checksum, dirty)
+		VALUES ($1, $2, NOW(), '', false)
+	`, migration.Version, migration.Name); err != nil {
+		return fmt.Errorf("record postgresql migration %s: %w", migration.Version, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO db_meta(key, value, updated_at)
+		VALUES ('schema_version', $1, NOW())
+		ON CONFLICT(key) DO UPDATE SET
+			value = EXCLUDED.value,
+			updated_at = EXCLUDED.updated_at
+	`, migration.Version); err != nil {
+		return fmt.Errorf("update postgresql schema_version %s: %w", migration.Version, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO db_meta(key, value, updated_at)
+		VALUES ('last_migrated_at', TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), NOW())
+		ON CONFLICT(key) DO UPDATE SET
+			value = EXCLUDED.value,
+			updated_at = EXCLUDED.updated_at
+	`); err != nil {
+		return fmt.Errorf("update postgresql last_migrated_at %s: %w", migration.Version, err)
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (store.User, error) {

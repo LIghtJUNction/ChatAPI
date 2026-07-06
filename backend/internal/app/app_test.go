@@ -54,6 +54,24 @@ func TestDurationUntilDailyRun(t *testing.T) {
 	}
 }
 
+func TestShouldRunStorageDBMaintenance(t *testing.T) {
+	cfg := config.Default(config.ModeServe, t.TempDir())
+	cfg.DatabaseDriver = "sqlite"
+	if !shouldRunStorageDBMaintenance(cfg) {
+		t.Fatal("sqlite should enable scheduled db maintenance")
+	}
+
+	cfg.DatabaseDriver = "postgresql"
+	if shouldRunStorageDBMaintenance(cfg) {
+		t.Fatal("postgresql should skip sqlite-specific scheduled db maintenance")
+	}
+
+	cfg.DatabaseDriver = "PoStGrEs"
+	if shouldRunStorageDBMaintenance(cfg) {
+		t.Fatal("postgres alias should skip sqlite-specific scheduled db maintenance")
+	}
+}
+
 func TestEnsureSessionSecretKeepsEnvValue(t *testing.T) {
 	ctx := context.Background()
 	st := openAppTestStore(t)

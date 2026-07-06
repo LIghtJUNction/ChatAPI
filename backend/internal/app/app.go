@@ -281,17 +281,19 @@ func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataS
 				logger.Warn("storage scheduled file deletion retry failed", slog.String("error", err.Error()))
 			}
 			checkpointed := false
-			if err := monitor.Checkpoint(runCtx); err != nil {
-				logger.Warn("storage scheduled checkpoint failed", slog.String("error", err.Error()))
-			} else {
-				checkpointed = true
-			}
 			vacuumed := false
-			if cfg.StorageVacuumEnabled {
-				if _, err := monitor.Vacuum(runCtx, false); err != nil {
-					logger.Warn("storage scheduled vacuum failed", slog.String("error", err.Error()))
+			if shouldRunStorageDBMaintenance(cfg) {
+				if err := monitor.Checkpoint(runCtx); err != nil {
+					logger.Warn("storage scheduled checkpoint failed", slog.String("error", err.Error()))
 				} else {
-					vacuumed = true
+					checkpointed = true
+				}
+				if cfg.StorageVacuumEnabled {
+					if _, err := monitor.Vacuum(runCtx, false); err != nil {
+						logger.Warn("storage scheduled vacuum failed", slog.String("error", err.Error()))
+					} else {
+						vacuumed = true
+					}
 				}
 			}
 			audit.Record(runCtx, service.AuditEventInput{
@@ -332,6 +334,10 @@ func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataS
 			)
 		}
 	}()
+}
+
+func shouldRunStorageDBMaintenance(cfg config.Config) bool {
+	return strings.EqualFold(strings.TrimSpace(cfg.DatabaseDriver), "sqlite")
 }
 
 func durationUntilDailyRun(now time.Time, dailyTime string) (time.Duration, error) {

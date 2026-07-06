@@ -43,8 +43,8 @@ func (s *ChatAPIService) AutomationObserver() *AutomationObserver {
 	return s.autoObs
 }
 
-func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, request protocol.TurnRequest, body map[string]any) (map[string]any, error) {
-	turn, _, _, err := s.createPendingTurn(ctx, request, body)
+func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, request protocol.TurnRequest, body map[string]any, requestMeta store.Request) (map[string]any, error) {
+	turn, _, _, err := s.createPendingTurn(ctx, request, body, requestMeta)
 	if err != nil {
 		return nil, err
 	}
@@ -55,15 +55,15 @@ func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, request prot
 	return result.ResponseBody, nil
 }
 
-func (s *ChatAPIService) CreatePendingStream(ctx context.Context, request protocol.TurnRequest, body map[string]any) (*PendingTurn, store.Conversation, error) {
-	turn, conversation, _, err := s.createPendingTurn(ctx, request, body)
+func (s *ChatAPIService) CreatePendingStream(ctx context.Context, request protocol.TurnRequest, body map[string]any, requestMeta store.Request) (*PendingTurn, store.Conversation, error) {
+	turn, conversation, _, err := s.createPendingTurn(ctx, request, body, requestMeta)
 	if err != nil {
 		return nil, store.Conversation{}, err
 	}
 	return turn, conversation, nil
 }
 
-func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.TurnRequest, body map[string]any) (*PendingTurn, store.Conversation, store.Message, error) {
+func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.TurnRequest, body map[string]any, requestMeta store.Request) (*PendingTurn, store.Conversation, store.Message, error) {
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
 	conversationID := "conv_" + uuid.NewString()
@@ -80,6 +80,10 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 		AssistantContent: parsed.AssistantContent,
 		UserContent:      parsed.UserContent,
 		InputParts:       toStoreInputParts(parsed.InputParts),
+		RequestMethod:    requestMeta.RequestMethod,
+		RequestPath:      requestMeta.RequestPath,
+		RequestQuery:     requestMeta.RequestQuery,
+		RequestHeaders:   requestMeta.RequestHeaders,
 		RequestBody:      body,
 		ToolSchemas:      parsed.ToolSchemas,
 		ToolChoice:       store.RequestToolChoice{Type: parsed.ToolChoice.Type, Name: parsed.ToolChoice.Name},

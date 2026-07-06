@@ -113,7 +113,7 @@ func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		h.writeRequestError(w, service.ErrForbidden)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item, "parsed": requestParsedView(item)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item, "parsed": requestParsedView(requestBaseURL(r), item)})
 }
 
 func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request) {

@@ -24,7 +24,7 @@ func requestParsedSummary(item store.Request) map[string]any {
 	}
 }
 
-func requestParsedView(item store.Request) map[string]any {
+func requestParsedView(baseURL string, item store.Request) map[string]any {
 	return map[string]any{
 		"request_format":          item.RequestFormat,
 		"model":                   item.Model,
@@ -37,7 +37,12 @@ func requestParsedView(item store.Request) map[string]any {
 		"tool_schemas":            item.ToolSchemas,
 		"normalized_tool_schemas": normalizedToolSchemas(item.ToolSchemas),
 		"response_format":         item.ResponseFormat,
+		"request_method":          item.RequestMethod,
+		"request_path":            item.RequestPath,
+		"request_query":           item.RequestQuery,
+		"request_headers":         item.RequestHeaders,
 		"request_body_keys":       keysOf(item.RequestBody),
+		"replay":                  buildReplayView(baseURL, item),
 	}
 }
 

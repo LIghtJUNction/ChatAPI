@@ -49,12 +49,13 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	}
 
 	parsed := protocol.ParseRequest(requestFormat, body)
+	requestMeta := captureRequestMeta(r)
 	if parsed.Stream {
-		h.handleStreamRequest(w, r, parsed, body)
+		h.handleStreamRequest(w, r, parsed, body, requestMeta)
 		return
 	}
 
-	responseBody, err := h.Service.CreatePendingResponse(r.Context(), parsed, body)
+	responseBody, err := h.Service.CreatePendingResponse(r.Context(), parsed, body, requestMeta)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, protocol.BuildErrorBody(requestFormat, protocol.InternalError(err.Error())))
 		return
@@ -177,14 +178,14 @@ func buildTurnControlCommand(kind service.TurnControlKind, body map[string]any, 
 	}, nil
 }
 
-func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, body map[string]any) {
+func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, body map[string]any, requestMeta store.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
-	turn, conversation, err := h.Service.CreatePendingStream(r.Context(), request, body)
+	turn, conversation, err := h.Service.CreatePendingStream(r.Context(), request, body, requestMeta)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, protocol.BuildErrorBody(request.Protocol.String(), protocol.InternalError(err.Error())))
 		return

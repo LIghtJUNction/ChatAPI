@@ -227,6 +227,10 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			"model":           strings.TrimSpace(input.Model),
 			"request_format":  strings.TrimSpace(input.RequestFormat),
 			"request_keys":    keysOf(input.RequestBody),
+			"request_method":  strings.TrimSpace(input.RequestMethod),
+			"request_path":    strings.TrimSpace(input.RequestPath),
+			"request_query":   input.RequestQuery,
+			"request_headers": input.RequestHeaders,
 			"system_text":     strings.TrimSpace(input.SystemContent),
 			"developer_text":  strings.TrimSpace(input.DeveloperContent),
 			"assistant_text":  strings.TrimSpace(input.AssistantContent),
@@ -522,6 +526,10 @@ func scanRequestRow(scanner rowScanner) (store.Request, error) {
 	item.RequestFormat = metadataString(requestDebug, "request_format", "")
 	item.Model = metadataString(requestDebug, "model", "")
 	item.InputText = metadataString(requestDebug, "input_text", "")
+	item.RequestMethod = metadataString(requestDebug, "request_method", "")
+	item.RequestPath = metadataString(requestDebug, "request_path", "")
+	item.RequestQuery = parseStringSliceMap(requestDebug["request_query"])
+	item.RequestHeaders = parseStringSliceMap(requestDebug["request_headers"])
 	item.Status = metadataString(conversationMetadata, "realtime_status", "")
 	item.Metadata = messageMetadata
 	item.RequestBody, _ = requestDebug["request_body"].(map[string]any)
@@ -554,6 +562,36 @@ func parseRequestInputParts(value any) []store.RequestInputPart {
 		})
 	}
 	return parts
+}
+
+func parseStringSliceMap(value any) map[string][]string {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string][]string, len(record))
+	for key, raw := range record {
+		items, ok := raw.([]any)
+		if !ok {
+			continue
+		}
+		values := make([]string, 0, len(items))
+		for _, item := range items {
+			text, ok := item.(string)
+			if !ok {
+				continue
+			}
+			values = append(values, text)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		result[key] = values
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func parseRequestToolChoice(value any) store.RequestToolChoice {

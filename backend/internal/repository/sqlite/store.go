@@ -1474,6 +1474,10 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			"model":           input.Model,
 			"request_format":  input.RequestFormat,
 			"request_keys":    keysOf(input.RequestBody),
+			"request_method":  input.RequestMethod,
+			"request_path":    input.RequestPath,
+			"request_query":   input.RequestQuery,
+			"request_headers": input.RequestHeaders,
 			"system_text":     input.SystemContent,
 			"developer_text":  input.DeveloperContent,
 			"assistant_text":  input.AssistantContent,
@@ -1910,6 +1914,10 @@ func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	item.RequestFormat = metadataString(requestDebug, "request_format", "")
 	item.Model = metadataString(requestDebug, "model", "")
 	item.InputText = metadataString(requestDebug, "input_text", "")
+	item.RequestMethod = metadataString(requestDebug, "request_method", "")
+	item.RequestPath = metadataString(requestDebug, "request_path", "")
+	item.RequestQuery = parseStringSliceMap(requestDebug["request_query"])
+	item.RequestHeaders = parseStringSliceMap(requestDebug["request_headers"])
 	item.Status = metadataString(conversationMetadata, "realtime_status", "")
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
@@ -1944,6 +1952,36 @@ func parseRequestInputParts(value any) []store.RequestInputPart {
 		})
 	}
 	return parts
+}
+
+func parseStringSliceMap(value any) map[string][]string {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string][]string, len(record))
+	for key, raw := range record {
+		items, ok := raw.([]any)
+		if !ok {
+			continue
+		}
+		values := make([]string, 0, len(items))
+		for _, item := range items {
+			text, ok := item.(string)
+			if !ok {
+				continue
+			}
+			values = append(values, text)
+		}
+		if len(values) == 0 {
+			continue
+		}
+		result[key] = values
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func parseRequestToolChoice(value any) store.RequestToolChoice {

@@ -66,6 +66,7 @@ func buildRequestAccessSchema(listPath string, detailPath string, controlBasePat
 				RequiredScopes: []string{"requests:read"},
 				Notes: []string{
 					"The response shape is {ok, request, parsed}.",
+					"parsed now includes request_method, request_path, request_query, request_headers, and replay.curl for debugging/replay flows.",
 				},
 			},
 			{

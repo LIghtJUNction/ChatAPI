@@ -47,6 +47,10 @@ type Request struct {
 	Status         string                `json:"status,omitempty"`
 	CreatedAt      time.Time             `json:"created_at"`
 	UpdatedAt      time.Time             `json:"updated_at"`
+	RequestMethod  string                `json:"request_method,omitempty"`
+	RequestPath    string                `json:"request_path,omitempty"`
+	RequestQuery   map[string][]string   `json:"request_query,omitempty"`
+	RequestHeaders map[string][]string   `json:"request_headers,omitempty"`
 	RequestBody    map[string]any        `json:"request_body,omitempty"`
 	ToolSchemas    []any                 `json:"tool_schemas,omitempty"`
 	ToolChoice     RequestToolChoice     `json:"tool_choice,omitempty"`
@@ -376,6 +380,10 @@ type CreatePendingInput struct {
 	AssistantContent string
 	UserContent      string
 	InputParts       []RequestInputPart
+	RequestMethod    string
+	RequestPath      string
+	RequestQuery     map[string][]string
+	RequestHeaders   map[string][]string
 	RequestBody      map[string]any
 	ToolSchemas      []any
 	ToolChoice       RequestToolChoice

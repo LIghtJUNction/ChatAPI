@@ -21,6 +21,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -417,7 +418,10 @@ func TestStreamDeltaPathEndpoint(t *testing.T) {
 func TestLabRequestEndpointsByRequestID(t *testing.T) {
 	env := newTestEnv(t)
 
-	resultCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
+	resultCh := startJSONRequestWithHeaders(t, env.server.URL+"/v1/chat/completions?trace=1&tag=a&tag=b", map[string]string{
+		"Cookie":  "session=should-not-store",
+		"X-Debug": "lab-request-id",
+	}, map[string]any{
 		"model": "demo-lab-request-id",
 		"messages": []map[string]any{
 			{"role": "system", "content": "lab system policy"},
@@ -448,6 +452,26 @@ func TestLabRequestEndpointsByRequestID(t *testing.T) {
 		nestedPathString(requestResp, "parsed", "assistant_text") != "lab previous answer" ||
 		nestedPathString(requestResp, "parsed", "user_text") != "lab request id 测试" {
 		t.Fatalf("unexpected lab parsed request view: %#v", requestResp)
+	}
+	if nestedPathString(requestResp, "parsed", "request_method") != http.MethodPost ||
+		nestedPathString(requestResp, "parsed", "request_path") != "/v1/chat/completions" {
+		t.Fatalf("unexpected lab parsed replay basics: %#v", requestResp)
+	}
+	requestQuery := requestResp["parsed"].(map[string]any)["request_query"].(map[string]any)
+	if !reflect.DeepEqual(requestQuery["tag"], []any{"a", "b"}) || !reflect.DeepEqual(requestQuery["trace"], []any{"1"}) {
+		t.Fatalf("unexpected lab parsed request query: %#v", requestResp)
+	}
+	requestHeaders := requestResp["parsed"].(map[string]any)["request_headers"].(map[string]any)
+	if _, exists := requestHeaders["Cookie"]; exists {
+		t.Fatalf("cookie header should not be stored: %#v", requestResp)
+	}
+	if !reflect.DeepEqual(requestHeaders["X-Debug"], []any{"lab-request-id"}) {
+		t.Fatalf("unexpected lab parsed request headers: %#v", requestResp)
+	}
+	replay := requestResp["parsed"].(map[string]any)["replay"].(map[string]any)
+	if !strings.Contains(nestedString(replay, "curl"), env.server.URL+"/v1/chat/completions?tag=a&tag=b&trace=1") ||
+		!strings.Contains(nestedString(replay, "curl"), "X-Debug: lab-request-id") {
+		t.Fatalf("unexpected lab replay curl: %#v", requestResp)
 	}
 
 	env.postJSON(t, "/lab/requests/"+requestID+"/delta", map[string]any{

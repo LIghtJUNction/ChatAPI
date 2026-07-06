@@ -136,6 +136,7 @@ func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request prot
 		s.autoObs.RecordNoMatch()
 		s.autoObs.RecordSkipReasons(decision.SkipReasons)
 		s.autoObs.RecordSkipDetails(decision.SkipDetails)
+		s.autoObs.RecordSkipSamples(automationSkipSamples(decision.SkipDetails, request, conversationID))
 		return
 	}
 	if decision.Match == nil {
@@ -171,6 +172,23 @@ func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request prot
 			},
 		})
 	}
+}
+
+func automationSkipSamples(details []AutomationRuleSkipDetail, request protocol.TurnRequest, conversationID string) []AutomationSkipSample {
+	if len(details) == 0 {
+		return nil
+	}
+	samples := make([]AutomationSkipSample, 0, len(details))
+	for _, detail := range details {
+		samples = append(samples, AutomationSkipSample{
+			ConversationID: conversationID,
+			RequestFormat:  request.Protocol.String(),
+			Model:          request.Model,
+			RuleID:         detail.RuleID,
+			Reason:         detail.Reason,
+		})
+	}
+	return samples
 }
 
 func toStoreInputParts(parts []protocol.InputPart) []store.RequestInputPart {

@@ -49,6 +49,7 @@ type AutomationSnapshot struct {
 	NoMatch      int                            `json:"no_match"`
 	SkipByReason map[string]int                 `json:"skip_by_reason,omitempty"`
 	SkipByRule   map[string]AutomationRuleSkips `json:"skip_by_rule,omitempty"`
+	RecentSkips  []AutomationSkipSample         `json:"recent_skips,omitempty"`
 }
 
 type ConnectionSnapshot struct {
@@ -199,6 +200,7 @@ func (s *RuntimeMonitorService) Automation() AutomationSnapshot {
 		snapshot.NoMatch = observed.NoMatch
 		snapshot.SkipByReason = observed.SkipByReason
 		snapshot.SkipByRule = observed.SkipByRule
+		snapshot.RecentSkips = observed.RecentSkips
 	}
 	count, err := s.store.CountAuditLogs(context.Background(), store.CountAuditLogsInput{
 		EventType: "automation.rule",

@@ -2363,6 +2363,14 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	if numericValue(ruleReasons["contains_miss"]) != 1 {
 		t.Fatalf("unexpected runtime automation rule reasons: %#v", summaryResp)
 	}
+	recentSkips := automation["recent_skips"].([]any)
+	if len(recentSkips) == 0 {
+		t.Fatalf("expected recent automation skip samples: %#v", summaryResp)
+	}
+	firstSkip := recentSkips[0].(map[string]any)
+	if nestedString(firstSkip, "rule_id") != "runtime_rule_never_match" || nestedString(firstSkip, "reason") != "contains_miss" {
+		t.Fatalf("unexpected recent automation skip sample: %#v", summaryResp)
+	}
 	system := summary["system"].(map[string]any)
 	if nestedString(system, "os") == "" || numericValue(system["num_cpu"]) <= 0 || numericValue(system["process_open_fds"]) <= 0 {
 		t.Fatalf("unexpected runtime system summary: %#v", summaryResp)
@@ -2463,6 +2471,15 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	})
 	if status != http.StatusBadRequest || !strings.Contains(body, "gogc must be non-negative") {
 		t.Fatalf("expected runtime settings validation error: status=%d body=%q", status, body)
+	}
+
+	automationResp := env.getJSON(t, "/api/admin/runtime/automation", http.StatusOK)
+	automationPayload := automationResp["automation"].(map[string]any)
+	if numericValue(automationPayload["no_match"]) != 1 {
+		t.Fatalf("unexpected runtime automation endpoint response: %#v", automationResp)
+	}
+	if _, ok := automationPayload["recent_skips"]; !ok {
+		t.Fatalf("expected runtime automation endpoint recent skips: %#v", automationResp)
 	}
 }
 

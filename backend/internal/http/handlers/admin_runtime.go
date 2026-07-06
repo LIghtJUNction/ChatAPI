@@ -19,6 +19,13 @@ func (h AdminRuntimeHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h AdminRuntimeHandler) Automation(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"automation": h.Monitor.Automation(),
+	})
+}
+
 func (h AdminRuntimeHandler) Memory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,

@@ -209,6 +209,7 @@ func NewRouter(
 	adminRouter := chi.NewRouter()
 	adminRouter.Use(middleware.RequireAdminActor())
 	adminRouter.Get("/runtime/summary", adminRuntimeHandler.Summary)
+	adminRouter.Get("/runtime/automation", adminRuntimeHandler.Automation)
 	adminRouter.Get("/runtime/memory", adminRuntimeHandler.Memory)
 	adminRouter.Get("/runtime/system", adminRuntimeHandler.System)
 	adminRouter.Get("/runtime/connections", adminRuntimeHandler.Connections)

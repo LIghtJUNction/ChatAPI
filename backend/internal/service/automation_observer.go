@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type AutomationObserver struct {
@@ -13,6 +14,7 @@ type AutomationObserver struct {
 	mu      sync.Mutex
 	skips   map[string]int64
 	byRule  map[string]map[string]int64
+	recent  []AutomationSkipSample
 }
 
 type AutomationObserverSnapshot struct {
@@ -20,12 +22,24 @@ type AutomationObserverSnapshot struct {
 	NoMatch      int                            `json:"no_match"`
 	SkipByReason map[string]int                 `json:"skip_by_reason,omitempty"`
 	SkipByRule   map[string]AutomationRuleSkips `json:"skip_by_rule,omitempty"`
+	RecentSkips  []AutomationSkipSample         `json:"recent_skips,omitempty"`
 }
 
 type AutomationRuleSkips struct {
 	Total    int            `json:"total"`
 	ByReason map[string]int `json:"by_reason,omitempty"`
 }
+
+type AutomationSkipSample struct {
+	At             time.Time `json:"at"`
+	ConversationID string    `json:"conversation_id,omitempty"`
+	RequestFormat  string    `json:"request_format,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	RuleID         string    `json:"rule_id,omitempty"`
+	Reason         string    `json:"reason"`
+}
+
+const automationRecentSkipLimit = 100
 
 func NewAutomationObserver() *AutomationObserver {
 	return &AutomationObserver{
@@ -90,6 +104,35 @@ func (o *AutomationObserver) RecordSkipDetails(details []AutomationRuleSkipDetai
 	}
 }
 
+func (o *AutomationObserver) RecordSkipSample(sample AutomationSkipSample) {
+	if o == nil {
+		return
+	}
+	sample.Reason = normalizeAutomationSkipReason(sample.Reason)
+	sample.RuleID = strings.TrimSpace(sample.RuleID)
+	sample.ConversationID = strings.TrimSpace(sample.ConversationID)
+	sample.RequestFormat = strings.TrimSpace(sample.RequestFormat)
+	sample.Model = strings.TrimSpace(sample.Model)
+	if sample.Reason == "" {
+		return
+	}
+	if sample.At.IsZero() {
+		sample.At = time.Now().UTC()
+	}
+	o.mu.Lock()
+	o.recent = append([]AutomationSkipSample{sample}, o.recent...)
+	if len(o.recent) > automationRecentSkipLimit {
+		o.recent = o.recent[:automationRecentSkipLimit]
+	}
+	o.mu.Unlock()
+}
+
+func (o *AutomationObserver) RecordSkipSamples(samples []AutomationSkipSample) {
+	for _, sample := range samples {
+		o.RecordSkipSample(sample)
+	}
+}
+
 func (o *AutomationObserver) Snapshot() AutomationObserverSnapshot {
 	if o == nil {
 		return AutomationObserverSnapshot{}
@@ -132,6 +175,9 @@ func (o *AutomationObserver) Snapshot() AutomationObserverSnapshot {
 			}
 			snapshot.SkipByRule[ruleID] = item
 		}
+	}
+	if len(o.recent) > 0 {
+		snapshot.RecentSkips = append([]AutomationSkipSample(nil), o.recent...)
 	}
 	o.mu.Unlock()
 	return snapshot

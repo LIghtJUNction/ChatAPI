@@ -1,0 +1,292 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/store"
+)
+
+const systemSettingsConfigKey = "system_settings"
+
+var ErrInvalidSystemSettings = errors.New("invalid system settings")
+
+type SystemSettings struct {
+	PublicStatistics                          bool           `json:"public_statistics"`
+	TitleEnabled                              bool           `json:"title_enabled"`
+	Title                                     string         `json:"title"`
+	ExternalRegistrationEnabled               bool           `json:"external_registration_enabled"`
+	EmailVerificationEnabled                  bool           `json:"email_verification_enabled"`
+	EmailProvider                             string         `json:"email_provider"`
+	EmailProviderOptions                      []OptionItem   `json:"email_provider_options"`
+	RegistrationEmailDomainRestrictionEnabled bool           `json:"registration_email_domain_restriction_enabled"`
+	RegistrationEmailDomains                  string         `json:"registration_email_domains"`
+	NtfyPrivateURLPolicy                      string         `json:"ntfy_private_url_policy"`
+	APIKeyLimitPerUser                        int            `json:"api_key_limit_per_user"`
+	RealtimeMaxConnections                    int            `json:"realtime_max_connections"`
+	RealtimeMaxConnectionsPerUser             int            `json:"realtime_max_connections_per_user"`
+	RealtimeQueueSize                         int            `json:"realtime_queue_size"`
+	ImageMaxSingleBytes                       int64          `json:"image_max_single_bytes"`
+	ImageMaxRequestBytes                      int64          `json:"image_max_request_bytes"`
+	ImageMaxTotalBytes                        int64          `json:"image_max_total_bytes"`
+	PendingMaxPerUser                         int            `json:"pending_max_per_user"`
+	PendingMaxAgeHours                        int            `json:"pending_max_age_hours"`
+	PendingMaxOutputChars                     int            `json:"pending_max_output_chars"`
+	PendingAutoAbortMessage                   string         `json:"pending_auto_abort_message"`
+	ImageUsage                                ImageUsageInfo `json:"image_usage"`
+}
+
+type OptionItem struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+type ImageUsageInfo struct {
+	TotalBytes  int64 `json:"total_bytes"`
+	FileCount   int   `json:"file_count"`
+	OrphanBytes int64 `json:"orphan_bytes"`
+	OrphanCount int   `json:"orphan_count"`
+}
+
+type SystemSettingsService struct {
+	store store.Store
+	cfg   config.Config
+}
+
+func NewSystemSettingsService(dataStore store.Store, cfg config.Config) *SystemSettingsService {
+	return &SystemSettingsService{store: dataStore, cfg: cfg}
+}
+
+func (s *SystemSettingsService) Get(ctx context.Context) (SystemSettings, error) {
+	if s == nil || s.store == nil {
+		return SystemSettings{}, ErrInvalidSystemSettings
+	}
+	out := defaultSystemSettings(s.cfg)
+	item, err := s.store.GetSystemConfig(ctx, systemSettingsConfigKey)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return SystemSettings{}, err
+	}
+	if err == nil {
+		applySystemSettingsMap(&out, item.Value)
+	}
+	imageUsage, err := s.imageUsage(ctx)
+	if err != nil {
+		return SystemSettings{}, err
+	}
+	out.ImageUsage = imageUsage
+	return out, nil
+}
+
+func (s *SystemSettingsService) Set(ctx context.Context, input map[string]any) (SystemSettings, error) {
+	if s == nil || s.store == nil {
+		return SystemSettings{}, ErrInvalidSystemSettings
+	}
+	current, err := s.Get(ctx)
+	if err != nil {
+		return SystemSettings{}, err
+	}
+	applySystemSettingsMap(&current, input)
+	if _, err := s.store.SetSystemConfig(ctx, store.SetSystemConfigInput{
+		Key:   systemSettingsConfigKey,
+		Value: systemSettingsMap(current),
+	}); err != nil {
+		return SystemSettings{}, err
+	}
+	return s.Get(ctx)
+}
+
+func (s *SystemSettingsService) imageUsage(ctx context.Context) (ImageUsageInfo, error) {
+	items, err := s.store.ListUploadedImages(ctx)
+	if err != nil {
+		return ImageUsageInfo{}, err
+	}
+	var usage ImageUsageInfo
+	for _, item := range items {
+		usage.TotalBytes += item.Bytes
+		usage.FileCount++
+	}
+	return usage, nil
+}
+
+func defaultSystemSettings(cfg config.Config) SystemSettings {
+	emailProviders := []OptionItem{}
+	if cfg.SMTPEnabled {
+		emailProviders = append(emailProviders, OptionItem{Value: "smtp", Label: "SMTP"})
+	}
+	pendingAgeHours := 48
+	if cfg.PendingTurnTTL > 0 {
+		pendingAgeHours = int(cfg.PendingTurnTTL.Hours())
+	}
+	return SystemSettings{
+		PublicStatistics:            false,
+		TitleEnabled:                false,
+		Title:                       "",
+		ExternalRegistrationEnabled: false,
+		EmailVerificationEnabled:    false,
+		EmailProvider:               "",
+		EmailProviderOptions:        emailProviders,
+		RegistrationEmailDomainRestrictionEnabled: false,
+		RegistrationEmailDomains:                  "",
+		NtfyPrivateURLPolicy:                      "disabled",
+		APIKeyLimitPerUser:                        0,
+		RealtimeMaxConnections:                    cfg.RealtimeMaxConnections,
+		RealtimeMaxConnectionsPerUser:             cfg.RealtimeMaxConnectionsPerUser,
+		RealtimeQueueSize:                         100,
+		ImageMaxSingleBytes:                       cfg.UploadMaxBytes,
+		ImageMaxRequestBytes:                      cfg.UploadMaxBytes,
+		ImageMaxTotalBytes:                        cfg.StorageDefaultQuotaBytes,
+		PendingMaxPerUser:                         10,
+		PendingMaxAgeHours:                        pendingAgeHours,
+		PendingMaxOutputChars:                     300,
+		PendingAutoAbortMessage:                   "本次回复等待超过限制，已自动结束，请重新发送。",
+		ImageUsage:                                ImageUsageInfo{},
+	}
+}
+
+func applySystemSettingsMap(target *SystemSettings, values map[string]any) {
+	if target == nil {
+		return
+	}
+	if value, ok := values["public_statistics"]; ok {
+		target.PublicStatistics = settingsBool(value, target.PublicStatistics)
+	}
+	if value, ok := values["title_enabled"]; ok {
+		target.TitleEnabled = settingsBool(value, target.TitleEnabled)
+	}
+	if value, ok := values["title"]; ok {
+		target.Title = settingsString(value, target.Title)
+	}
+	if value, ok := values["external_registration_enabled"]; ok {
+		target.ExternalRegistrationEnabled = settingsBool(value, target.ExternalRegistrationEnabled)
+	}
+	if value, ok := values["email_verification_enabled"]; ok {
+		target.EmailVerificationEnabled = settingsBool(value, target.EmailVerificationEnabled)
+	}
+	if value, ok := values["email_provider"]; ok {
+		target.EmailProvider = settingsString(value, target.EmailProvider)
+	}
+	if value, ok := values["registration_email_domain_restriction_enabled"]; ok {
+		target.RegistrationEmailDomainRestrictionEnabled = settingsBool(value, target.RegistrationEmailDomainRestrictionEnabled)
+	}
+	if value, ok := values["registration_email_domains"]; ok {
+		target.RegistrationEmailDomains = settingsString(value, target.RegistrationEmailDomains)
+	}
+	if value, ok := values["ntfy_private_url_policy"]; ok {
+		target.NtfyPrivateURLPolicy = normalizePolicy(settingsString(value, target.NtfyPrivateURLPolicy))
+	}
+	if value, ok := values["api_key_limit_per_user"]; ok {
+		target.APIKeyLimitPerUser = settingsInt(value, target.APIKeyLimitPerUser)
+	}
+	if value, ok := values["realtime_max_connections"]; ok {
+		target.RealtimeMaxConnections = settingsInt(value, target.RealtimeMaxConnections)
+	}
+	if value, ok := values["realtime_max_connections_per_user"]; ok {
+		target.RealtimeMaxConnectionsPerUser = settingsInt(value, target.RealtimeMaxConnectionsPerUser)
+	}
+	if value, ok := values["realtime_queue_size"]; ok {
+		target.RealtimeQueueSize = settingsInt(value, target.RealtimeQueueSize)
+	}
+	if value, ok := values["image_max_single_bytes"]; ok {
+		target.ImageMaxSingleBytes = settingsInt64(value, target.ImageMaxSingleBytes)
+	}
+	if value, ok := values["image_max_request_bytes"]; ok {
+		target.ImageMaxRequestBytes = settingsInt64(value, target.ImageMaxRequestBytes)
+	}
+	if value, ok := values["image_max_total_bytes"]; ok {
+		target.ImageMaxTotalBytes = settingsInt64(value, target.ImageMaxTotalBytes)
+	}
+	if value, ok := values["pending_max_per_user"]; ok {
+		target.PendingMaxPerUser = settingsInt(value, target.PendingMaxPerUser)
+	}
+	if value, ok := values["pending_max_age_hours"]; ok {
+		target.PendingMaxAgeHours = settingsInt(value, target.PendingMaxAgeHours)
+	}
+	if value, ok := values["pending_max_output_chars"]; ok {
+		target.PendingMaxOutputChars = settingsInt(value, target.PendingMaxOutputChars)
+	}
+	if value, ok := values["pending_auto_abort_message"]; ok {
+		target.PendingAutoAbortMessage = settingsString(value, target.PendingAutoAbortMessage)
+	}
+}
+
+func systemSettingsMap(input SystemSettings) map[string]any {
+	return map[string]any{
+		"public_statistics":             input.PublicStatistics,
+		"title_enabled":                 input.TitleEnabled,
+		"title":                         input.Title,
+		"external_registration_enabled": input.ExternalRegistrationEnabled,
+		"email_verification_enabled":    input.EmailVerificationEnabled,
+		"email_provider":                input.EmailProvider,
+		"registration_email_domain_restriction_enabled": input.RegistrationEmailDomainRestrictionEnabled,
+		"registration_email_domains":                    input.RegistrationEmailDomains,
+		"ntfy_private_url_policy":                       normalizePolicy(input.NtfyPrivateURLPolicy),
+		"api_key_limit_per_user":                        input.APIKeyLimitPerUser,
+		"realtime_max_connections":                      input.RealtimeMaxConnections,
+		"realtime_max_connections_per_user":             input.RealtimeMaxConnectionsPerUser,
+		"realtime_queue_size":                           input.RealtimeQueueSize,
+		"image_max_single_bytes":                        input.ImageMaxSingleBytes,
+		"image_max_request_bytes":                       input.ImageMaxRequestBytes,
+		"image_max_total_bytes":                         input.ImageMaxTotalBytes,
+		"pending_max_per_user":                          input.PendingMaxPerUser,
+		"pending_max_age_hours":                         input.PendingMaxAgeHours,
+		"pending_max_output_chars":                      input.PendingMaxOutputChars,
+		"pending_auto_abort_message":                    input.PendingAutoAbortMessage,
+	}
+}
+
+func normalizePolicy(value string) string {
+	switch strings.TrimSpace(value) {
+	case "admin", "all":
+		return strings.TrimSpace(value)
+	default:
+		return "disabled"
+	}
+}
+
+func settingsString(value any, fallback string) string {
+	raw, ok := value.(string)
+	if !ok {
+		return fallback
+	}
+	return raw
+}
+
+func settingsBool(value any, fallback bool) bool {
+	raw, ok := value.(bool)
+	if !ok {
+		return fallback
+	}
+	return raw
+}
+
+func settingsInt(value any, fallback int) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	default:
+		return fallback
+	}
+}
+
+func settingsInt64(value any, fallback int64) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	case float32:
+		return int64(typed)
+	default:
+		return fallback
+	}
+}

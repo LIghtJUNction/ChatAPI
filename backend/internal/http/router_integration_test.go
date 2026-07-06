@@ -702,8 +702,8 @@ func TestConfigModelsRoutesAndModelsEndpoint(t *testing.T) {
 	env := newTestEnv(t)
 
 	initial := env.getJSON(t, "/api/config/models", http.StatusOK)
-	initialItems := initial["items"].([]any)
-	if len(initialItems) != 1 || nestedString(initialItems[0].(map[string]any), "id") != "chatapi-lab" {
+	initialModels := initial["models"].([]any)
+	if len(initialModels) != 1 || initialModels[0].(string) != "chatapi-lab" {
 		t.Fatalf("unexpected default config models: %#v", initial)
 	}
 
@@ -713,8 +713,8 @@ func TestConfigModelsRoutesAndModelsEndpoint(t *testing.T) {
 		"owned_by": "chatapi",
 		"enabled":  true,
 	}, http.StatusOK)
-	items := updateResp["items"].([]any)
-	if len(items) != 2 {
+	models := updateResp["models"].([]any)
+	if len(models) != 2 {
 		t.Fatalf("expected default + custom virtual model: %#v", updateResp)
 	}
 
@@ -737,13 +737,47 @@ func TestConfigModelsRoutesAndModelsEndpoint(t *testing.T) {
 
 	env.deleteJSON(t, "/api/config/models/chatapi-demo", http.StatusOK)
 	afterDelete := env.getJSON(t, "/api/config/models", http.StatusOK)
-	afterDeleteItems := afterDelete["items"].([]any)
-	if len(afterDeleteItems) != 1 || nestedString(afterDeleteItems[0].(map[string]any), "id") != "chatapi-lab" {
+	afterDeleteModels := afterDelete["models"].([]any)
+	if len(afterDeleteModels) != 1 || afterDeleteModels[0].(string) != "chatapi-lab" {
 		t.Fatalf("unexpected config models after delete: %#v", afterDelete)
 	}
 
 	assertAuditCount(t, env, "user.config", "virtual_model", "chatapi-demo", "upsert", "success", 1)
 	assertAuditCount(t, env, "user.config", "virtual_model", "chatapi-demo", "delete", "success", 1)
+}
+
+func TestConfigSystemRoutes(t *testing.T) {
+	env := newTestEnv(t)
+
+	initial := env.getJSON(t, "/api/config/system", http.StatusOK)
+	if nestedPathString(initial, "ntfy_private_url_policy") != "disabled" {
+		t.Fatalf("unexpected default system config: %#v", initial)
+	}
+	if numericValue(initial["realtime_queue_size"]) != 100 {
+		t.Fatalf("unexpected default realtime queue size: %#v", initial)
+	}
+
+	updateResp := env.postJSON(t, "/api/config/system", map[string]any{
+		"title_enabled":           true,
+		"title":                   "ChatAPI Test",
+		"public_statistics":       true,
+		"ntfy_private_url_policy": "admin",
+		"registration_email_domain_restriction_enabled": true,
+		"registration_email_domains":                    "example.com,example.org",
+		"pending_max_output_chars":                      512,
+	}, http.StatusOK)
+	if !nestedPathBool(updateResp, "title_enabled") || nestedPathString(updateResp, "title") != "ChatAPI Test" {
+		t.Fatalf("unexpected updated system config: %#v", updateResp)
+	}
+	if nestedPathString(updateResp, "ntfy_private_url_policy") != "admin" {
+		t.Fatalf("unexpected ntfy policy in updated config: %#v", updateResp)
+	}
+
+	getResp := env.getJSON(t, "/api/config/system", http.StatusOK)
+	if !nestedPathBool(getResp, "public_statistics") || nestedPathString(getResp, "registration_email_domains") != "example.com,example.org" {
+		t.Fatalf("unexpected persisted system config: %#v", getResp)
+	}
+	assertAuditCount(t, env, "admin.config", "system_settings", "", "update", "success", 1)
 }
 
 func TestUserIdentitiesListAndUnlink(t *testing.T) {

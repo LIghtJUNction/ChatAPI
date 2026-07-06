@@ -59,6 +59,7 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
 	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
+	configSystemHandler := handlers.ConfigSystemHandler{Config: cfg, Service: service.NewSystemSettingsService(dataStore, cfg), Audit: auditService}
 	userIdentitiesHandler := handlers.UserIdentitiesHandler{Service: service.NewUserIdentityService(dataStore), Audit: auditService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, dataStore, realtimeHub, pending)
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
@@ -94,6 +95,8 @@ func NewRouter(
 	router.Get("/api/config/models", configModelsHandler.Get)
 	router.Post("/api/config/models", configModelsHandler.Post)
 	router.Delete("/api/config/models/{modelID}", configModelsHandler.Delete)
+	router.Get("/api/config/system", configSystemHandler.Get)
+	router.Post("/api/config/system", configSystemHandler.Post)
 	router.Get("/api/user/identities", userIdentitiesHandler.List)
 	router.Delete("/api/user/identities/{identityID}", userIdentitiesHandler.Delete)
 	router.Get("/api/lab/workspace", labHandler.Workspace)

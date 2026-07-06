@@ -30,10 +30,7 @@ func (h ConfigModelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeConfigModelsError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"items": items,
-	})
+	writeConfigModelsResponse(w, items)
 }
 
 func (h ConfigModelsHandler) Post(w http.ResponseWriter, r *http.Request) {
@@ -60,10 +57,7 @@ func (h ConfigModelsHandler) Post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.recordAudit(r, userID, "upsert", input.ID)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"items": items,
-	})
+	writeConfigModelsResponse(w, items)
 }
 
 func (h ConfigModelsHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -79,9 +73,18 @@ func (h ConfigModelsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.recordAudit(r, userID, "delete", modelID)
+	writeConfigModelsResponse(w, items)
+}
+
+func writeConfigModelsResponse(w http.ResponseWriter, items []service.VirtualModel) {
+	models := make([]string, 0, len(items))
+	for _, item := range items {
+		models = append(models, item.ID)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"items": items,
+		"ok":     true,
+		"models": models,
+		"items":  items,
 	})
 }
 

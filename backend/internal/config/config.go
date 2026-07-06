@@ -21,31 +21,36 @@ const (
 )
 
 type Config struct {
-	Mode                          Mode
-	Host                          string
-	Port                          int
-	BaseURL                       string
-	WebDistDir                    string
-	DataDir                       string
-	DatabaseDriver                string
-	DatabaseDSN                   string
-	MasterKey                     string
-	AllowRemoteLab                bool
-	OpenBrowser                   bool
-	LabToken                      string
-	LabPassword                   string
-	AdminPassword                 string
-	LogLevel                      string
-	CORSOrigins                   []string
-	MetricsEnabled                bool
-	UploadMaxBytes                int64
-	StorageDefaultQuotaBytes      int64
-	PendingTurnTTL                time.Duration
-	RuntimeGOGC                   int
-	RuntimeMemoryLimitBytes       int64
-	RealtimeMaxConnections        int
-	RealtimeMaxConnectionsPerUser int
-	RealtimeWebUIReservedPerUser  int
+	Mode                                  Mode
+	Host                                  string
+	Port                                  int
+	BaseURL                               string
+	WebDistDir                            string
+	DataDir                               string
+	DatabaseDriver                        string
+	DatabaseDSN                           string
+	MasterKey                             string
+	AllowRemoteLab                        bool
+	OpenBrowser                           bool
+	LabToken                              string
+	LabPassword                           string
+	AdminPassword                         string
+	LogLevel                              string
+	CORSOrigins                           []string
+	MetricsEnabled                        bool
+	UploadMaxBytes                        int64
+	StorageDefaultQuotaBytes              int64
+	StorageCleanupEnabled                 bool
+	StorageCleanupTime                    string
+	StorageCleanupKeepRecentConversations int
+	StorageCleanupKeepRecentDays          int
+	StorageVacuumEnabled                  bool
+	PendingTurnTTL                        time.Duration
+	RuntimeGOGC                           int
+	RuntimeMemoryLimitBytes               int64
+	RealtimeMaxConnections                int
+	RealtimeMaxConnectionsPerUser         int
+	RealtimeWebUIReservedPerUser          int
 
 	SMTPEnabled  bool
 	SMTPHost     string
@@ -96,39 +101,44 @@ func Default(mode Mode, backendRoot string) Config {
 		masterKey = "chatapi-lab-insecure-master-key"
 	}
 	return Config{
-		Mode:                          mode,
-		Host:                          host,
-		Port:                          5000,
-		BaseURL:                       "",
-		WebDistDir:                    filepath.Join(projectRoot, "frontend", "dist"),
-		DataDir:                       dataDir,
-		DatabaseDriver:                "sqlite",
-		DatabaseDSN:                   filepath.Join(dataDir, "chatapi.sqlite3"),
-		MasterKey:                     masterKey,
-		AllowRemoteLab:                false,
-		OpenBrowser:                   openBrowser,
-		LabToken:                      "",
-		LabPassword:                   "",
-		AdminPassword:                 "",
-		LogLevel:                      "info",
-		CORSOrigins:                   []string{"http://localhost:5173", "http://127.0.0.1:5173"},
-		MetricsEnabled:                false,
-		UploadMaxBytes:                10 << 20,
-		StorageDefaultQuotaBytes:      0,
-		PendingTurnTTL:                0,
-		RuntimeGOGC:                   0,
-		RuntimeMemoryLimitBytes:       0,
-		RealtimeMaxConnections:        0,
-		RealtimeMaxConnectionsPerUser: 0,
-		RealtimeWebUIReservedPerUser:  1,
-		SMTPEnabled:                   false,
-		SMTPHost:                      "",
-		SMTPPort:                      587,
-		SMTPUsername:                  "",
-		SMTPPassword:                  "",
-		SMTPFrom:                      "",
-		SMTPSecurity:                  "starttls",
-		SMTPTimeout:                   10 * time.Second,
+		Mode:                                  mode,
+		Host:                                  host,
+		Port:                                  5000,
+		BaseURL:                               "",
+		WebDistDir:                            filepath.Join(projectRoot, "frontend", "dist"),
+		DataDir:                               dataDir,
+		DatabaseDriver:                        "sqlite",
+		DatabaseDSN:                           filepath.Join(dataDir, "chatapi.sqlite3"),
+		MasterKey:                             masterKey,
+		AllowRemoteLab:                        false,
+		OpenBrowser:                           openBrowser,
+		LabToken:                              "",
+		LabPassword:                           "",
+		AdminPassword:                         "",
+		LogLevel:                              "info",
+		CORSOrigins:                           []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		MetricsEnabled:                        false,
+		UploadMaxBytes:                        10 << 20,
+		StorageDefaultQuotaBytes:              0,
+		StorageCleanupEnabled:                 false,
+		StorageCleanupTime:                    "03:00",
+		StorageCleanupKeepRecentConversations: 100,
+		StorageCleanupKeepRecentDays:          30,
+		StorageVacuumEnabled:                  false,
+		PendingTurnTTL:                        0,
+		RuntimeGOGC:                           0,
+		RuntimeMemoryLimitBytes:               0,
+		RealtimeMaxConnections:                0,
+		RealtimeMaxConnectionsPerUser:         0,
+		RealtimeWebUIReservedPerUser:          1,
+		SMTPEnabled:                           false,
+		SMTPHost:                              "",
+		SMTPPort:                              587,
+		SMTPUsername:                          "",
+		SMTPPassword:                          "",
+		SMTPFrom:                              "",
+		SMTPSecurity:                          "starttls",
+		SMTPTimeout:                           10 * time.Second,
 
 		OIDCEnabled:        false,
 		OIDCProviderName:   "",
@@ -183,6 +193,23 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 		}
 		cfg.StorageDefaultQuotaBytes = value
 	}
+	cfg.StorageCleanupEnabled = parseBool(os.Getenv("CHATAPI_STORAGE_CLEANUP_ENABLED"), cfg.StorageCleanupEnabled)
+	cfg.StorageCleanupTime = firstNonEmpty(os.Getenv("CHATAPI_STORAGE_CLEANUP_TIME"), cfg.StorageCleanupTime)
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_CONVERSATIONS")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_CONVERSATIONS: %w", err)
+		}
+		cfg.StorageCleanupKeepRecentConversations = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_DAYS")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_DAYS: %w", err)
+		}
+		cfg.StorageCleanupKeepRecentDays = value
+	}
+	cfg.StorageVacuumEnabled = parseBool(os.Getenv("CHATAPI_STORAGE_VACUUM_ENABLED"), cfg.StorageVacuumEnabled)
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_PENDING_TURN_TTL")); raw != "" {
 		value, err := time.ParseDuration(raw)
 		if err != nil {
@@ -313,6 +340,17 @@ func (c Config) Validate() error {
 	if c.StorageDefaultQuotaBytes < 0 {
 		return errors.New("storage default quota bytes must be non-negative")
 	}
+	if c.StorageCleanupKeepRecentConversations < 0 {
+		return errors.New("storage cleanup keep recent conversations must be non-negative")
+	}
+	if c.StorageCleanupKeepRecentDays < 0 {
+		return errors.New("storage cleanup keep recent days must be non-negative")
+	}
+	if c.StorageCleanupEnabled {
+		if _, _, err := ParseDailyTime(c.StorageCleanupTime); err != nil {
+			return err
+		}
+	}
 	if c.PendingTurnTTL < 0 {
 		return errors.New("pending turn ttl must be non-negative")
 	}
@@ -376,6 +414,26 @@ func splitCSV(raw string) []string {
 		}
 	}
 	return result
+}
+
+func ParseDailyTime(value string) (hour int, minute int, err error) {
+	value = strings.TrimSpace(value)
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return 0, 0, errors.New("storage cleanup time must use HH:MM")
+	}
+	hour, err = strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, errors.New("storage cleanup time must use HH:MM")
+	}
+	minute, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, errors.New("storage cleanup time must use HH:MM")
+	}
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, errors.New("storage cleanup time must use HH:MM")
+	}
+	return hour, minute, nil
 }
 
 func parseBool(raw string, fallback bool) bool {

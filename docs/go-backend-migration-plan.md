@@ -47,7 +47,7 @@
 - 管理员运行时监控已落地最小接口：`GET /api/admin/runtime/summary`、`GET /api/admin/runtime/memory`、`GET /api/admin/runtime/system`、`GET /api/admin/runtime/connections`、`GET /api/admin/runtime/queue`、`GET/PUT /api/admin/runtime/settings`、`POST /api/admin/runtime/gc`，仅允许 admin session actor 访问，应用 API Key 和虚拟模型 API Key 不能访问；当前返回 Go runtime、内存、GC、Linux 系统内存/load/disk/RSS/FD、pending turn、realtime subscriber 和 SQLite 文件大小等可直接观测指标，并支持进程内调整 Go GC 百分比和内存限制。
 - Realtime 事件广播已补上最小背压策略：每个订阅者使用固定队列，队列满时记录 recoverable drop，连续满队列会断开慢订阅者并累计 `slow_disconnects`；`/api/admin/runtime/queue` 和 `/metrics` 都会暴露相关计数。
 - Realtime 连接限额已补上最小统一池：`CHATAPI_REALTIME_MAX_CONNECTIONS`、`CHATAPI_REALTIME_MAX_CONNECTIONS_PER_USER`、`CHATAPI_REALTIME_WEBUI_RESERVED_PER_USER` 控制全局、单用户和浏览器控制台预留名额；当前 `/api/ws` 作为 `webui` 连接接入，service 层已提供 `api` / `sse` lease，后续 API/SSE 长连接必须复用同一套限额，避免同用户 API/SSE 连接占满后 WebUI 进不来。管理员连接监控和 `/metrics` 已输出分类连接数与拒绝计数。
-- 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`、`POST /api/admin/storage/vacuum`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志；清理会识别候选会话正文和 metadata JSON 中的 `/api/uploads/imgs/{filename}` 引用，删除不再被保留会话引用的本地上传图片文件与 `uploaded_images` 元数据，并返回候选/已删除图片数量和字节数；SQLite vacuum 需要显式 `dry_run:false` 才会执行 WAL checkpoint 和 `VACUUM`。上传删除失败恢复队列仍待继续补齐。
+- 管理员存储监控已落地最小接口：`GET /api/admin/storage/summary`、`GET /api/admin/storage/users`、`POST /api/admin/storage/cleanup`、`POST /api/admin/storage/vacuum`，返回 SQLite 主库/WAL、uploads 目录大小、按 owner 估算的 conversations/messages 文本与 metadata 占用，以及清理候选预览；当前 cleanup 要求显式传 `dry_run`，`dry_run:true` 只预览，`dry_run:false` 会按同一候选算法删除已关闭/已终止的 conversations 并级联删除 messages，同时跳过 `waiting` / `streaming` 活跃请求并写审计日志；清理会识别候选会话正文和 metadata JSON 中的 `/api/uploads/imgs/{filename}` 引用，删除不再被保留会话引用的本地上传图片文件与 `uploaded_images` 元数据，并返回候选/已删除图片数量和字节数；SQLite vacuum 需要显式 `dry_run:false` 才会执行 WAL checkpoint 和 `VACUUM`。每日存储维护 worker 已可通过 `CHATAPI_STORAGE_CLEANUP_ENABLED=1` 启用，按本地时区 `CHATAPI_STORAGE_CLEANUP_TIME=HH:MM` 执行旧会话清理、孤儿图片清理、SQLite WAL checkpoint 和可选 SQLite VACUUM。上传删除失败恢复队列仍待继续补齐。
 - 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、默认配额、单用户 override、最终 `storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数，以及按 owner、model、status 聚合。
 - pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
@@ -993,7 +993,7 @@ type Hub struct {
 - `GET /api/admin/requests/overview`：返回所有用户请求的总数、pending/streaming/closed/aborted 计数、按状态/模型/owner 聚合和最老 pending 等待秒数；当前不返回平均人工回复耗时、自动化命中率和超时率，因为这些需要额外事件计量。
 - `POST /api/admin/storage/cleanup`：必须显式传 `dry_run`；请求参数为 `owner_id`、`keep_recent_conversations`、`keep_recent_days`，返回候选会话数、候选消息数、估算可回收字节数和按 owner 聚合的计划。`dry_run:false` 会删除候选 conversations，并通过数据库外键级联删除 messages；候选算法会跳过 `waiting` / `streaming` 活跃请求，避免清理正在等待人工/自动化回复的 turn。
 - `POST /api/admin/storage/vacuum`：必须显式传 `dry_run`；`dry_run:true` 只返回当前 SQLite 主库/WAL 大小，`dry_run:false` 会执行 WAL checkpoint 和 SQLite `VACUUM`，返回执行前后数据库信息并写入审计日志。
-- 当前会话/消息清理执行已支持删除候选会话独占引用的 `/api/uploads/imgs/{filename}` 本地上传图片文件和 `uploaded_images` 元数据；如果同一图片仍被保留会话引用则不会删除。后续必须补齐上传删除失败恢复队列、自动 vacuum 策略、定时任务和用户配额自动触发。
+- 当前会话/消息清理执行已支持删除候选会话独占引用的 `/api/uploads/imgs/{filename}` 本地上传图片文件和 `uploaded_images` 元数据；如果同一图片仍被保留会话引用则不会删除。后续必须补齐上传删除失败恢复队列和用户配额自动触发；定时任务和可选自动 vacuum 已先以环境变量方式落地。
 
 GC 设置：
 
@@ -1028,11 +1028,11 @@ GC 设置：
 
 - 支持配置每日定时清理时间，例如 `03:00`。
 - 定时任务应执行：
-  - 过期 pending turn 清理。当前 Go 重构分支已先提供 `CHATAPI_PENDING_TURN_TTL`，按固定 ticker 清理超时的 `waiting` / `streaming` turn；后续再接每日定时任务和管理员可视化配置。
-  - 孤儿图片清理。
-  - 超配额用户旧会话清理。
+  - 过期 pending turn 清理。当前 Go 重构分支已先提供 `CHATAPI_PENDING_TURN_TTL`，按固定 ticker 清理超时的 `waiting` / `streaming` turn；后续再接管理员可视化配置。
+  - 孤儿图片清理。当前 Go 重构分支的每日存储维护 worker 已执行。
+  - 超配额用户旧会话清理。当前 Go 重构分支已先支持按全局保留策略清理旧会话，后续再按用户超配额触发。
   - SQLite WAL checkpoint。
-  - 可选 `VACUUM` 或 `VACUUM INTO`，仅在管理员显式开启时执行。
+  - 可选 `VACUUM` 或 `VACUUM INTO`，仅在管理员显式开启时执行。当前 Go 重构分支支持 `CHATAPI_STORAGE_VACUUM_ENABLED=1` 后在每日存储维护中执行 SQLite `VACUUM`。
 - `VACUUM` 可能长时间锁库，默认不应每天自动执行；推荐先做 WAL checkpoint 和普通 prune，必要时由管理员手动执行空间回收。
 
 建议系统配置 key：
@@ -1050,7 +1050,7 @@ GC 设置：
 - `value.realtime_max_webui_connections_per_user`
 - `value.realtime_max_api_connections_per_user`
 
-当前 Go 重构分支已先提供环境变量 `CHATAPI_RUNTIME_GOGC`、`CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES` 和 `CHATAPI_PENDING_TURN_TTL`。前三者默认都是 `0` / `0s`，表示启动时不由 ChatAPI 显式覆盖 Go runtime 或 pending turn 生命周期；后续接入系统配置表后，再把管理员后台修改持久化到 `value.runtime_*` 和 `value.pending_turn_ttl`。
+当前 Go 重构分支已先提供环境变量 `CHATAPI_RUNTIME_GOGC`、`CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES`、`CHATAPI_PENDING_TURN_TTL`、`CHATAPI_STORAGE_CLEANUP_ENABLED`、`CHATAPI_STORAGE_CLEANUP_TIME`、`CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_CONVERSATIONS`、`CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_DAYS` 和 `CHATAPI_STORAGE_VACUUM_ENABLED`。默认不启用自动存储清理和自动 VACUUM；后续接入系统配置表后，再把管理员后台修改持久化到 `value.runtime_*`、`value.pending_turn_ttl` 和 `value.storage_*`。
 
 ### 6.7 上游模型辅助
 

@@ -82,9 +82,16 @@ func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, err
 	}, nil
 }
 
-func (s *Store) Vacuum(ctx context.Context) error {
+func (s *Store) Checkpoint(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE);`); err != nil {
 		return fmt.Errorf("sqlite wal checkpoint: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) Vacuum(ctx context.Context) error {
+	if err := s.Checkpoint(ctx); err != nil {
+		return err
 	}
 	if _, err := s.db.ExecContext(ctx, `VACUUM;`); err != nil {
 		return fmt.Errorf("sqlite vacuum: %w", err)

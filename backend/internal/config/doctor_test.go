@@ -112,6 +112,22 @@ func TestFromEnvLoadsStorageQuota(t *testing.T) {
 	}
 }
 
+func TestFromEnvLoadsStorageCleanupConfig(t *testing.T) {
+	t.Setenv("CHATAPI_STORAGE_CLEANUP_ENABLED", "1")
+	t.Setenv("CHATAPI_STORAGE_CLEANUP_TIME", "04:30")
+	t.Setenv("CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_CONVERSATIONS", "20")
+	t.Setenv("CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_DAYS", "14")
+	t.Setenv("CHATAPI_STORAGE_VACUUM_ENABLED", "1")
+
+	cfg, err := FromEnvUnchecked(ModeLab, t.TempDir())
+	if err != nil {
+		t.Fatalf("load storage cleanup config: %v", err)
+	}
+	if !cfg.StorageCleanupEnabled || cfg.StorageCleanupTime != "04:30" || cfg.StorageCleanupKeepRecentConversations != 20 || cfg.StorageCleanupKeepRecentDays != 14 || !cfg.StorageVacuumEnabled {
+		t.Fatalf("unexpected storage cleanup config: %#v", cfg)
+	}
+}
+
 func TestFromEnvLoadsRuntimeSettings(t *testing.T) {
 	t.Setenv("CHATAPI_RUNTIME_GOGC", "75")
 	t.Setenv("CHATAPI_RUNTIME_MEMORY_LIMIT_BYTES", "268435456")
@@ -151,6 +167,25 @@ func TestDiagnoseStorageQuota(t *testing.T) {
 	report = Diagnose(cfg, cfg.Validate())
 	if !hasDiagnostic(report, DiagnosticWarn, "storage.quota_low") {
 		t.Fatalf("missing low storage quota diagnostic: %#v", report)
+	}
+}
+
+func TestDiagnoseStorageCleanup(t *testing.T) {
+	cfg := Default(ModeLab, t.TempDir())
+	cfg.StorageCleanupEnabled = true
+	cfg.StorageCleanupKeepRecentConversations = 0
+	cfg.StorageCleanupKeepRecentDays = 0
+	cfg.StorageVacuumEnabled = true
+
+	report := Diagnose(cfg, cfg.Validate())
+	if !hasDiagnostic(report, DiagnosticInfo, "storage.cleanup_enabled") {
+		t.Fatalf("missing storage cleanup enabled diagnostic: %#v", report)
+	}
+	if !hasDiagnostic(report, DiagnosticWarn, "storage.cleanup_no_retention") {
+		t.Fatalf("missing no retention warning: %#v", report)
+	}
+	if !hasDiagnostic(report, DiagnosticWarn, "storage.vacuum_enabled") {
+		t.Fatalf("missing vacuum warning: %#v", report)
 	}
 }
 

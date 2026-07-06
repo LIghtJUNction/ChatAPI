@@ -297,6 +297,13 @@ func (s *StorageMonitorService) Vacuum(ctx context.Context, dryRun bool) (Storag
 	return result, nil
 }
 
+func (s *StorageMonitorService) Checkpoint(ctx context.Context) error {
+	if s.cfg.DatabaseDriver != "sqlite" {
+		return errors.New("storage checkpoint currently supports sqlite only")
+	}
+	return s.store.Checkpoint(ctx)
+}
+
 func (s *StorageMonitorService) cleanupPlan(ctx context.Context, input StorageCleanupPreviewInput) (StorageCleanupPreview, []storageCleanupCandidate, error) {
 	conversations, err := s.store.ListConversations(ctx)
 	if err != nil {

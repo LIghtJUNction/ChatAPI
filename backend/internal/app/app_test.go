@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zyf/chatapi/internal/repository/migrations"
 )
@@ -19,6 +20,29 @@ func TestParseSMTPTestOptionsConnectOnly(t *testing.T) {
 	}
 	if options.to != "user@example.com" || options.subject != "hello" {
 		t.Fatalf("unexpected smtp options: %#v", options)
+	}
+}
+
+func TestDurationUntilDailyRun(t *testing.T) {
+	now := time.Date(2026, 7, 6, 2, 30, 0, 0, time.UTC)
+	duration, err := durationUntilDailyRun(now, "03:00")
+	if err != nil {
+		t.Fatalf("duration until daily run: %v", err)
+	}
+	if duration != 30*time.Minute {
+		t.Fatalf("unexpected duration: %s", duration)
+	}
+
+	duration, err = durationUntilDailyRun(now, "02:00")
+	if err != nil {
+		t.Fatalf("duration until next day run: %v", err)
+	}
+	if duration != 23*time.Hour+30*time.Minute {
+		t.Fatalf("unexpected next day duration: %s", duration)
+	}
+
+	if _, err := durationUntilDailyRun(now, "25:00"); err == nil {
+		t.Fatalf("expected invalid daily time error")
 	}
 }
 

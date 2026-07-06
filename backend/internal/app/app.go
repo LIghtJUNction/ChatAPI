@@ -86,6 +86,7 @@ func Run(ctx context.Context, args []string) error {
 	))
 	chatService := service.NewChatAPIService(dataStore, pendingRegistry, realtimeHub)
 	startPendingExpirationWorker(ctx, cfg, chatService, logger)
+	startStorageMaintenanceWorker(ctx, cfg, dataStore, logger)
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr(),
@@ -157,6 +158,111 @@ func startPendingExpirationWorker(ctx context.Context, cfg config.Config, chatSe
 			}
 		}
 	}()
+}
+
+func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataStore *sqlitestore.Store, logger *slog.Logger) {
+	if !cfg.StorageCleanupEnabled {
+		return
+	}
+	monitor := service.NewStorageMonitorService(cfg, dataStore)
+	audit := service.NewAuditService(dataStore)
+	actor := service.RequestActor{
+		UserID:   "system",
+		Username: "system",
+		Role:     "system",
+		Source:   "scheduler",
+	}
+	go func() {
+		for {
+			wait, err := durationUntilDailyRun(time.Now(), cfg.StorageCleanupTime)
+			if err != nil {
+				logger.Warn("storage maintenance disabled due to invalid time", slog.String("error", err.Error()))
+				return
+			}
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			runCtx := service.WithRequestActor(ctx, actor)
+			result, err := monitor.DeleteCleanupCandidates(runCtx, service.StorageCleanupPreviewInput{
+				KeepRecentConversations: cfg.StorageCleanupKeepRecentConversations,
+				KeepRecentDays:          cfg.StorageCleanupKeepRecentDays,
+			})
+			if err != nil {
+				logger.Warn("storage scheduled cleanup failed", slog.String("error", err.Error()))
+				audit.Record(runCtx, service.AuditEventInput{
+					EventType:    "admin.storage",
+					ResourceType: "storage",
+					Action:       "scheduled_cleanup",
+					Outcome:      "failure",
+					Metadata: map[string]any{
+						"error": err.Error(),
+					},
+				})
+				continue
+			}
+			orphanResult, err := monitor.DeleteOrphanImages(runCtx)
+			if err != nil {
+				logger.Warn("storage scheduled orphan cleanup failed", slog.String("error", err.Error()))
+			}
+			checkpointed := false
+			if err := monitor.Checkpoint(runCtx); err != nil {
+				logger.Warn("storage scheduled checkpoint failed", slog.String("error", err.Error()))
+			} else {
+				checkpointed = true
+			}
+			vacuumed := false
+			if cfg.StorageVacuumEnabled {
+				if _, err := monitor.Vacuum(runCtx, false); err != nil {
+					logger.Warn("storage scheduled vacuum failed", slog.String("error", err.Error()))
+				} else {
+					vacuumed = true
+				}
+			}
+			audit.Record(runCtx, service.AuditEventInput{
+				EventType:    "admin.storage",
+				ResourceType: "storage",
+				Action:       "scheduled_cleanup",
+				Outcome:      "success",
+				Metadata: map[string]any{
+					"keep_recent_conversations": result.KeepRecentConversations,
+					"keep_recent_days":          result.KeepRecentDays,
+					"deleted_conversations":     result.DeletedConversations,
+					"deleted_messages":          result.DeletedMessages,
+					"deleted_images":            result.DeletedImages,
+					"deleted_image_bytes":       result.DeletedImageBytes,
+					"orphan_deleted_count":      orphanResult.DeletedCount,
+					"orphan_deleted_bytes":      orphanResult.DeletedBytes,
+					"checkpointed":              checkpointed,
+					"vacuumed":                  vacuumed,
+				},
+			})
+			logger.Info(
+				"storage scheduled cleanup completed",
+				slog.Int("deleted_conversations", result.DeletedConversations),
+				slog.Int("deleted_messages", result.DeletedMessages),
+				slog.Int("deleted_images", result.DeletedImages),
+				slog.Int("orphan_deleted_count", orphanResult.DeletedCount),
+				slog.Bool("checkpointed", checkpointed),
+				slog.Bool("vacuumed", vacuumed),
+			)
+		}
+	}()
+}
+
+func durationUntilDailyRun(now time.Time, dailyTime string) (time.Duration, error) {
+	hour, minute, err := config.ParseDailyTime(dailyTime)
+	if err != nil {
+		return 0, err
+	}
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next.Sub(now), nil
 }
 
 type versionReport struct {

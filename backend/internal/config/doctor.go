@@ -236,6 +236,25 @@ func (r *DiagnosticReport) checkSMTP(cfg Config) {
 }
 
 func (r *DiagnosticReport) checkStorage(cfg Config) {
+	if cfg.StorageCleanupKeepRecentConversations < 0 {
+		r.add(DiagnosticError, "storage.cleanup_keep_recent_conversations_invalid", "CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_CONVERSATIONS 不能为负数。")
+	}
+	if cfg.StorageCleanupKeepRecentDays < 0 {
+		r.add(DiagnosticError, "storage.cleanup_keep_recent_days_invalid", "CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_DAYS 不能为负数。")
+	}
+	if cfg.StorageCleanupEnabled {
+		if _, _, err := ParseDailyTime(cfg.StorageCleanupTime); err != nil {
+			r.add(DiagnosticError, "storage.cleanup_time_invalid", "CHATAPI_STORAGE_CLEANUP_TIME 必须使用 HH:MM。")
+		} else {
+			r.add(DiagnosticInfo, "storage.cleanup_enabled", "已启用每日存储维护；将按配置清理旧会话和孤儿图片。")
+		}
+		if cfg.StorageCleanupKeepRecentConversations == 0 && cfg.StorageCleanupKeepRecentDays == 0 {
+			r.add(DiagnosticWarn, "storage.cleanup_no_retention", "已启用存储清理但未保留最近会话或最近天数，可能删除所有已关闭会话。")
+		}
+		if cfg.StorageVacuumEnabled {
+			r.add(DiagnosticWarn, "storage.vacuum_enabled", "已启用自动 SQLite VACUUM；该操作可能长时间锁库，建议仅在低峰期使用。")
+		}
+	}
 	if cfg.StorageDefaultQuotaBytes == 0 {
 		r.add(DiagnosticInfo, "storage.quota_disabled", "未配置默认用户存储配额；用户图片上传不会按总量阻断。")
 		return

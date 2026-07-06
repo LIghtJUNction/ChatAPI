@@ -64,6 +64,7 @@ func (h LabHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"request": item,
+		"parsed":  requestParsedView(item),
 	})
 }
 

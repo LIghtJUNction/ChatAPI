@@ -418,6 +418,12 @@ func TestLabRequestEndpointsByRequestID(t *testing.T) {
 		nestedString(requestRecord, "assistant_text") != "lab previous answer" {
 		t.Fatalf("unexpected lab request context fields: %#v", requestResp)
 	}
+	if nestedPathString(requestResp, "parsed", "system_text") != "lab system policy" ||
+		nestedPathString(requestResp, "parsed", "developer_text") != "lab developer hint" ||
+		nestedPathString(requestResp, "parsed", "assistant_text") != "lab previous answer" ||
+		nestedPathString(requestResp, "parsed", "user_text") != "lab request id 测试" {
+		t.Fatalf("unexpected lab parsed request view: %#v", requestResp)
+	}
 
 	env.postJSON(t, "/lab/requests/"+requestID+"/delta", map[string]any{
 		"text": "通过 request_id 输出",
@@ -535,6 +541,12 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 		nestedPathString(detailResp, "request", "developer_text") != "app developer hint" ||
 		nestedPathString(detailResp, "request", "assistant_text") != "previous app answer" {
 		t.Fatalf("unexpected app api request context fields: %#v", detailResp)
+	}
+	if nestedPathString(detailResp, "parsed", "system_text") != "app system policy" ||
+		nestedPathString(detailResp, "parsed", "developer_text") != "app developer hint" ||
+		nestedPathString(detailResp, "parsed", "assistant_text") != "previous app answer" ||
+		nestedPathString(detailResp, "parsed", "user_text") != "app api 测试" {
+		t.Fatalf("unexpected app api parsed request view: %#v", detailResp)
 	}
 
 	env.appPostJSON(t, "/api/app/requests/"+requestID+"/complete", appKey, map[string]any{

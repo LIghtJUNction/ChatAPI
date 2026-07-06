@@ -208,6 +208,11 @@ func extractPartsFromTurnInput(input []any) []InputPart {
 		if !ok {
 			continue
 		}
+		part := extractInputPart(record)
+		if part.Type != "" {
+			parts = append(parts, part)
+			continue
+		}
 		if stringValue(record["role"], stringValue(record["type"], "")) == "user" || stringValue(record["type"], "") == "message" {
 			parts = append(parts, extractPartsFromMessageContent(record["content"])...)
 		}

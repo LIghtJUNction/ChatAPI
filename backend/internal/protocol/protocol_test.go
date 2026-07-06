@@ -60,6 +60,65 @@ func TestParseRequestReturnsTypedProtocol(t *testing.T) {
 	}
 }
 
+func TestParseRequestSupportsResponsesDirectInputParts(t *testing.T) {
+	request := ParseRequest("responses", map[string]any{
+		"model": "gpt-test",
+		"input": []any{
+			map[string]any{"type": "input_text", "text": "hello"},
+			map[string]any{"type": "input_image", "image_url": "https://example.com/a.png", "media_type": "image/png"},
+		},
+	})
+	if request.Protocol != ProtocolResponses {
+		t.Fatalf("unexpected protocol: %q", request.Protocol)
+	}
+	if request.UserContent != "hello" {
+		t.Fatalf("unexpected user content: %#v", request.UserContent)
+	}
+	if len(request.InputParts) != 2 {
+		t.Fatalf("unexpected direct input parts: %#v", request.InputParts)
+	}
+	if request.InputParts[0].Type != "text" || request.InputParts[0].Text != "hello" {
+		t.Fatalf("unexpected first direct input part: %#v", request.InputParts[0])
+	}
+	if request.InputParts[1].Type != "image" || request.InputParts[1].URL != "https://example.com/a.png" || request.InputParts[1].MediaType != "image/png" {
+		t.Fatalf("unexpected second direct input part: %#v", request.InputParts[1])
+	}
+}
+
+func TestParseRequestSupportsAnthropicImageSourceBlocks(t *testing.T) {
+	request := ParseRequest("anthropic_messages", map[string]any{
+		"model": "claude-test",
+		"messages": []any{
+			map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "describe image"},
+					map[string]any{
+						"type": "image",
+						"source": map[string]any{
+							"type":       "base64",
+							"media_type": "image/jpeg",
+							"data":       "ZmFrZS1iYXNlNjQ=",
+						},
+					},
+				},
+			},
+		},
+	})
+	if request.Protocol != ProtocolAnthropicMessages {
+		t.Fatalf("unexpected protocol: %q", request.Protocol)
+	}
+	if request.UserContent != "describe image" {
+		t.Fatalf("unexpected user content: %#v", request.UserContent)
+	}
+	if len(request.InputParts) != 2 {
+		t.Fatalf("unexpected anthropic input parts: %#v", request.InputParts)
+	}
+	if request.InputParts[1].Type != "image" || request.InputParts[1].MediaType != "image/jpeg" || request.InputParts[1].URL != "ZmFrZS1iYXNlNjQ=" {
+		t.Fatalf("unexpected anthropic image block: %#v", request.InputParts[1])
+	}
+}
+
 func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
 	conversation := store.Conversation{
 		ResponseID: "resp_1",

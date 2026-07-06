@@ -916,6 +916,7 @@ ChatAPI 的 OpenAI Responses、Chat Completions、Anthropic Messages 三套协�
 - 当前协议层还已开始补齐 `tools` / `tool_choice` / `response_format` 的最小契约校验：当 `tool_choice.type=function` 时，必须给出 `tool_choice.function.name`；如果本次请求同时声明了 tools 列表，该名字还必须出现在声明的 tools 里。这样既能约束真实 tool schema 场景，也不会打断当前把 `tool_choice` 当作结构化元数据使用、但暂时不附带完整 tools 列表的请求。`response_format.type=json_schema` 时，必须给出 `json_schema.name` 和对象形态的 `json_schema.schema`。这样后续无论是 ChatAPI handler、KirariNetwork 上游网关还是浏览器端辅助，只要复用这套 protocol 包，就能得到一致的 400 错误语义，而不是各自手写校验。
 - 协议编码侧当前也已开始从“直接拼 map”收口到可复用 encoder：Responses/Chat Completions/Anthropic 的 tool call、tool result、usage、tool-use block 已抽到共享 helper，`BuildResponseForMeta(meta, result)` 可在不依赖 `store.Conversation` 的情况下直接输出最终响应 JSON，便于后续把协议包拆出去给 KirariNetwork 或独立代理复用。
 - 协议测试侧当前也已开始补 fixture/golden 风格覆盖：同一个 `TurnResult` 会分别走 Responses / Chat Completions / Anthropic Messages 的非流和流式编码断言，尤其固定 assistant message、tool call、tool result、usage 等关键字段，降低后续继续补 reasoning、多模态或独立拆包时的回归风险。
+- 输入归一化侧当前已继续补齐两类常见多模态变体：OpenAI Responses 风格的 `input` 现在不仅支持 message 数组，也支持直接给 `input_text` / `input_image` content part 数组；Anthropic `image` block 的 `source.media_type` / `source.data|url` 也已通过协议测试固化。这样后续浏览器端辅助或外部 SDK 直接复用 protocol 包时，不需要额外再套一层“伪 message” 包装。
 
 这个包可以同时被 ChatAPI 和 KirariNetwork 使用：ChatAPI 用它接收外部 Agent 请求并归一化为 pending turn，KirariNetwork 可用它把不同上游模型协议归一化为统一模型网关响应。
 

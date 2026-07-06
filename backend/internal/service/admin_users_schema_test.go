@@ -4,7 +4,7 @@ import "testing"
 
 func TestBuildAdminUsersSchema(t *testing.T) {
 	schema := BuildAdminUsersSchema()
-	if len(schema.Operations) != 12 {
+	if len(schema.Operations) != 13 {
 		t.Fatalf("unexpected admin users schema operations: %#v", schema)
 	}
 	if schema.Operations[1].Name != "create_user" || len(schema.Operations[1].Fields) != 4 {
@@ -25,13 +25,16 @@ func TestBuildAdminUsersSchema(t *testing.T) {
 	if schema.Operations[7].Name != "transfer_user_ownership_selection" || len(schema.Operations[7].Fields) != 3 {
 		t.Fatalf("unexpected admin users ownership selection schema: %#v", schema.Operations[7])
 	}
-	if schema.Operations[9].Name != "unlink_user_identity" {
-		t.Fatalf("unexpected admin users unlink identity schema: %#v", schema.Operations[9])
+	if schema.Operations[8].Name != "cleanup_user_ownership_selection" || len(schema.Operations[8].Fields) != 2 {
+		t.Fatalf("unexpected admin users ownership cleanup schema: %#v", schema.Operations[8])
 	}
-	if schema.Operations[10].Name != "deactivate_user" {
-		t.Fatalf("unexpected admin users deactivate schema: %#v", schema.Operations[10])
+	if schema.Operations[10].Name != "unlink_user_identity" {
+		t.Fatalf("unexpected admin users unlink identity schema: %#v", schema.Operations[10])
 	}
-	if schema.Operations[11].Name != "purge_user" {
-		t.Fatalf("unexpected admin users purge schema: %#v", schema.Operations[11])
+	if schema.Operations[11].Name != "deactivate_user" {
+		t.Fatalf("unexpected admin users deactivate schema: %#v", schema.Operations[11])
+	}
+	if schema.Operations[12].Name != "purge_user" {
+		t.Fatalf("unexpected admin users purge schema: %#v", schema.Operations[12])
 	}
 }

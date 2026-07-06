@@ -125,6 +125,26 @@ type StorageFileDeletionRetryResult struct {
 	Failed      int       `json:"failed"`
 }
 
+type OwnershipCleanupSelectionResult struct {
+	GeneratedAt                 time.Time `json:"generated_at"`
+	OwnerID                     string    `json:"owner_id"`
+	RequestedConversations      []string  `json:"requested_conversations,omitempty"`
+	RequestedFilenames          []string  `json:"requested_filenames,omitempty"`
+	CandidateConversations      int       `json:"candidate_conversations"`
+	CandidateMessages           int       `json:"candidate_messages"`
+	CandidateImages             int       `json:"candidate_images"`
+	CandidateImageBytes         int64     `json:"candidate_image_bytes"`
+	DeletedConversations        int       `json:"deleted_conversations"`
+	DeletedMessages             int       `json:"deleted_messages"`
+	DeletedImages               int       `json:"deleted_images"`
+	DeletedImageBytes           int64     `json:"deleted_image_bytes"`
+	ImageDeleteFailures         int       `json:"image_delete_failures"`
+	SkippedActiveConversations  []string  `json:"skipped_active_conversations,omitempty"`
+	SkippedUnknownConversations []string  `json:"skipped_unknown_conversations,omitempty"`
+	SkippedReferencedUploads    []string  `json:"skipped_referenced_uploads,omitempty"`
+	SkippedUnknownUploads       []string  `json:"skipped_unknown_uploads,omitempty"`
+}
+
 type StorageOrphanImagesPreview struct {
 	GeneratedAt  time.Time            `json:"generated_at"`
 	DryRun       bool                 `json:"dry_run"`
@@ -332,6 +352,145 @@ func (s *StorageMonitorService) DeleteCleanupCandidates(ctx context.Context, inp
 	preview.DeletedImageBytes = imageResult.DeletedImageBytes
 	preview.ImageDeleteFailures = imageResult.DeleteFailures
 	return preview, nil
+}
+
+func (s *StorageMonitorService) DeleteOwnershipSelection(ctx context.Context, ownerID string, conversationIDs []string, filenames []string) (OwnershipCleanupSelectionResult, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	conversationIDs = uniqueStrings(conversationIDs)
+	filenames = uniqueStrings(filenames)
+	result := OwnershipCleanupSelectionResult{
+		GeneratedAt:            time.Now().UTC(),
+		OwnerID:                ownerID,
+		RequestedConversations: append([]string(nil), conversationIDs...),
+		RequestedFilenames:     append([]string(nil), filenames...),
+	}
+	if ownerID == "" {
+		return OwnershipCleanupSelectionResult{}, errors.New("owner_id is required")
+	}
+	if len(conversationIDs) == 0 && len(filenames) == 0 {
+		return OwnershipCleanupSelectionResult{}, errors.New("conversation_ids or filenames is required")
+	}
+
+	conversations, err := s.store.ListConversations(ctx)
+	if err != nil {
+		return OwnershipCleanupSelectionResult{}, err
+	}
+	uploads, err := s.store.ListUploadedImagesByOwner(ctx, ownerID)
+	if err != nil {
+		return OwnershipCleanupSelectionResult{}, err
+	}
+	uploadByFilename := map[string]store.UploadedImage{}
+	for _, upload := range uploads {
+		uploadByFilename[upload.Filename] = upload
+	}
+
+	conversationWanted := make(map[string]struct{}, len(conversationIDs))
+	for _, id := range conversationIDs {
+		conversationWanted[id] = struct{}{}
+	}
+	filenameWanted := make(map[string]struct{}, len(filenames))
+	for _, filename := range filenames {
+		filenameWanted[filename] = struct{}{}
+	}
+
+	candidates := make([]storageCleanupCandidate, 0)
+	seenConversation := map[string]struct{}{}
+	for _, conversation := range conversations {
+		if _, ok := conversationWanted[conversation.ID]; !ok {
+			continue
+		}
+		seenConversation[conversation.ID] = struct{}{}
+		if stringValue(conversation.Metadata["owner_id"], "") != ownerID {
+			result.SkippedUnknownConversations = append(result.SkippedUnknownConversations, conversation.ID)
+			continue
+		}
+		if isActiveStorageConversation(conversation) {
+			result.SkippedActiveConversations = append(result.SkippedActiveConversations, conversation.ID)
+			continue
+		}
+		messages, err := s.store.ListMessages(ctx, conversation.ID)
+		if err != nil {
+			return OwnershipCleanupSelectionResult{}, err
+		}
+		imageRefs := storageImageReferences(conversation, messages)
+		imageCount, imageBytes := cleanupImageEstimate(imageRefs, uploadByFilename)
+		result.CandidateConversations++
+		result.CandidateMessages += len(messages)
+		result.CandidateImages += imageCount
+		result.CandidateImageBytes += imageBytes
+		candidates = append(candidates, storageCleanupCandidate{
+			ConversationID: conversation.ID,
+			OwnerID:        ownerID,
+			MessageCount:   len(messages),
+			EstimatedBytes: storageConversationEstimatedBytes(conversation, messages) + imageBytes,
+			ImageFilenames: mapKeys(imageRefs),
+		})
+	}
+	for _, id := range conversationIDs {
+		if _, ok := seenConversation[id]; !ok {
+			result.SkippedUnknownConversations = append(result.SkippedUnknownConversations, id)
+		}
+	}
+
+	candidateIDs := map[string]struct{}{}
+	for _, candidate := range candidates {
+		candidateIDs[candidate.ConversationID] = struct{}{}
+	}
+	stillReferenced, err := s.referencedImagesOutsideCandidates(ctx, candidateIDs)
+	if err != nil {
+		return OwnershipCleanupSelectionResult{}, err
+	}
+
+	imagePlan, err := s.cleanupImagePlan(ctx, candidates)
+	if err != nil {
+		return OwnershipCleanupSelectionResult{}, err
+	}
+	selectedImages := map[string]store.UploadedImage{}
+	for _, image := range imagePlan.Images {
+		selectedImages[image.Filename] = image
+	}
+	for _, filename := range filenames {
+		upload, ok := uploadByFilename[filename]
+		if !ok {
+			result.SkippedUnknownUploads = append(result.SkippedUnknownUploads, filename)
+			continue
+		}
+		if _, ok := selectedImages[filename]; ok {
+			continue
+		}
+		if _, ok := stillReferenced[filename]; ok {
+			result.SkippedReferencedUploads = append(result.SkippedReferencedUploads, filename)
+			continue
+		}
+		imagePlan.Images = append(imagePlan.Images, upload)
+		selectedImages[filename] = upload
+		result.CandidateImages++
+		result.CandidateImageBytes += upload.Bytes
+	}
+	sort.SliceStable(imagePlan.Images, func(i, j int) bool {
+		return imagePlan.Images[i].Filename < imagePlan.Images[j].Filename
+	})
+
+	if len(candidates) > 0 {
+		deleteIDs := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			deleteIDs = append(deleteIDs, candidate.ConversationID)
+		}
+		deleteResult, err := s.store.DeleteConversations(ctx, deleteIDs)
+		if err != nil {
+			return OwnershipCleanupSelectionResult{}, err
+		}
+		result.DeletedConversations = deleteResult.DeletedConversations
+		result.DeletedMessages = deleteResult.DeletedMessages
+	}
+	imageDeleteResult, err := s.deleteCleanupImages(ctx, imagePlan)
+	if err != nil {
+		return OwnershipCleanupSelectionResult{}, err
+	}
+	result.DeletedImages = imageDeleteResult.DeletedImages
+	result.DeletedImageBytes = imageDeleteResult.DeletedImageBytes
+	result.ImageDeleteFailures = imageDeleteResult.DeleteFailures
+	return result, nil
 }
 
 func (s *StorageMonitorService) Vacuum(ctx context.Context, dryRun bool) (StorageVacuumResult, error) {
@@ -762,6 +921,24 @@ func isDirectChildPath(root string, path string) bool {
 		return false
 	}
 	return relative != "." && relative != ".." && filepath.Dir(relative) == "."
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func directoryInfo(root string) DirectoryInfo {

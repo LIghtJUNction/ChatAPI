@@ -117,6 +117,22 @@ func BuildAdminUsersSchema() AdminUsersSchema {
 				},
 			},
 			{
+				Name:          "cleanup_user_ownership_selection",
+				Method:        "POST",
+				Path:          "/api/admin/users/{user_id}/cleanup-selection",
+				Description:   "Delete selected conversations and/or uploaded images owned by the user, then return a fresh purge preview.",
+				RequiresAdmin: true,
+				Fields: []ConfigFieldSchema{
+					{Key: "conversation_ids", ValueType: "string_array", DefaultValue: []string{}, Public: false, AdminWriteOnly: true, Description: "Optional closed conversation ids to delete if they are currently owned by the source user."},
+					{Key: "filenames", ValueType: "string_array", DefaultValue: []string{}, Public: false, AdminWriteOnly: true, Description: "Optional uploaded image filenames to delete if they are currently owned by the source user and not still referenced by remaining conversations."},
+				},
+				Notes: []string{
+					"At least one of conversation_ids or filenames must be provided.",
+					"Active waiting/streaming conversations are skipped and reported back in the result.",
+					"Referenced uploads are skipped instead of being force-deleted, so remaining history does not break image links.",
+				},
+			},
+			{
 				Name:          "reset_user_password",
 				Method:        "PUT",
 				Path:          "/api/admin/users/{user_id}/password",

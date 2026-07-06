@@ -89,6 +89,7 @@ func NewRouter(
 		Identities: service.NewAdminUserIdentityService(dataStore),
 		Deletion:   service.NewAdminUserDeletionService(dataStore),
 		Ownership:  service.NewAdminUserOwnershipService(dataStore),
+		Storage:    storageMonitor,
 		Audit:      auditService,
 	}
 	adminConfigHandler := handlers.AdminConfigHandler{Service: service.NewSystemConfigService(dataStore), Audit: auditService}
@@ -289,6 +290,7 @@ func NewRouter(
 	adminRouter.Get("/users/{userID}/ownership-items", adminUsersHandler.OwnershipItems)
 	adminRouter.Post("/users/{userID}/transfer-ownership", adminUsersHandler.TransferOwnership)
 	adminRouter.Post("/users/{userID}/transfer-ownership-selection", adminUsersHandler.TransferOwnershipSelection)
+	adminRouter.Post("/users/{userID}/cleanup-selection", adminUsersHandler.CleanupSelection)
 	adminRouter.Post("/users", adminUsersHandler.Create)
 	adminRouter.Put("/users/{userID}/password", adminUsersHandler.ResetPassword)
 	adminRouter.Delete("/users/{userID}/identities/{identityID}", adminUsersHandler.IdentityDelete)

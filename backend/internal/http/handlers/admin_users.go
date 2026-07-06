@@ -19,6 +19,7 @@ type AdminUsersHandler struct {
 	Identities *service.AdminUserIdentityService
 	Deletion   *service.AdminUserDeletionService
 	Ownership  *service.AdminUserOwnershipService
+	Storage    *service.StorageMonitorService
 	Audit      *service.AuditService
 }
 
@@ -186,6 +187,47 @@ func (h AdminUsersHandler) TransferOwnershipSelection(w http.ResponseWriter, r *
 	}
 	h.recordWithMetadata(r, sourceUserID, "transfer_ownership_selection", "success", map[string]any{
 		"target_user_id":   strings.TrimSpace(input.TargetUserID),
+		"conversation_ids": input.ConversationIDs,
+		"filenames":        input.Filenames,
+		"result":           result,
+		"preview":          preview,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"result":  result,
+		"preview": preview,
+	})
+}
+
+func (h AdminUsersHandler) CleanupSelection(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ConversationIDs []string `json:"conversation_ids"`
+		Filenames       []string `json:"filenames"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid ownership cleanup selection request", http.StatusBadRequest)
+		return
+	}
+	if len(input.ConversationIDs) == 0 && len(input.Filenames) == 0 {
+		http.Error(w, "conversation_ids or filenames is required", http.StatusBadRequest)
+		return
+	}
+	userID := chi.URLParam(r, "userID")
+	if h.Storage == nil {
+		http.Error(w, "storage monitor is not configured", http.StatusInternalServerError)
+		return
+	}
+	result, err := h.Storage.DeleteOwnershipSelection(r.Context(), userID, input.ConversationIDs, input.Filenames)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	preview, err := h.Deletion.Preview(r.Context(), userID)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	h.recordWithMetadata(r, userID, "cleanup_selection", "success", map[string]any{
 		"conversation_ids": input.ConversationIDs,
 		"filenames":        input.Filenames,
 		"result":           result,

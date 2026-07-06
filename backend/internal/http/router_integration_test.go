@@ -4659,7 +4659,7 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	schemaResp := env.getJSONWithCookie(t, "/api/admin/users/schema", adminCookie, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 12 {
+	if len(operations) != 13 {
 		t.Fatalf("unexpected admin users schema response: %#v", schemaResp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "list_users" || nestedString(operations[1].(map[string]any), "name") != "create_user" {
@@ -5022,6 +5022,89 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	}, adminCookie, headers, http.StatusOK)
 	if !nestedPathBool(selectTransferResp, "preview", "can_delete") {
 		t.Fatalf("expected selective transfer to clear blockers after second pass: %#v", selectTransferResp)
+	}
+
+	cleanupSourceResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
+		"username": "cleanup-source",
+		"email":    "cleanup-source@example.com",
+		"password": "cleanup-secret",
+		"role":     "user",
+	}, adminCookie, headers, http.StatusCreated)
+	cleanupSourceUserID := nestedPathString(cleanupSourceResp, "user", "id")
+	if _, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
+		ConversationID: "conv_cleanup_http_keep",
+		RequestID:      "req_cleanup_http_keep",
+		ResponseID:     "resp_cleanup_http_keep",
+		OwnerID:        cleanupSourceUserID,
+		RequestFormat:  "responses",
+		Model:          "cleanup-model",
+		UserContent:    "keep /api/uploads/imgs/keep-http.png",
+		RequestBody:    map[string]any{"model": "cleanup-model"},
+	}); err != nil {
+		t.Fatalf("seed cleanup keep conversation: %v", err)
+	}
+	cleanupDeleteConversation, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
+		ConversationID: "conv_cleanup_http_delete",
+		RequestID:      "req_cleanup_http_delete",
+		ResponseID:     "resp_cleanup_http_delete",
+		OwnerID:        cleanupSourceUserID,
+		RequestFormat:  "responses",
+		Model:          "cleanup-model",
+		UserContent:    "delete /api/uploads/imgs/delete-http.png",
+		RequestBody:    map[string]any{"model": "cleanup-model"},
+	})
+	if err != nil {
+		t.Fatalf("seed cleanup delete conversation: %v", err)
+	}
+	if _, _, err := env.store.CompletePendingTurn(context.Background(), store.CompletePendingInput{
+		ConversationID: cleanupDeleteConversation.ID,
+		ResponseID:     "resp_cleanup_http_delete",
+		OutputText:     "done",
+		Mode:           "assistant_message",
+	}); err != nil {
+		t.Fatalf("complete cleanup delete conversation: %v", err)
+	}
+	for _, filename := range []string{"keep-http.png", "delete-http.png"} {
+		if _, err := env.store.CreateUploadedImage(context.Background(), store.CreateUploadedImageInput{
+			ID:               "img_" + filename,
+			OwnerID:          cleanupSourceUserID,
+			Filename:         filename,
+			OriginalFilename: filename,
+			ContentType:      "image/png",
+			Bytes:            18,
+			URL:              "/api/uploads/imgs/" + filename,
+		}); err != nil {
+			t.Fatalf("seed cleanup upload %s: %v", filename, err)
+		}
+	}
+
+	cleanupResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+cleanupSourceUserID+"/cleanup-selection", map[string]any{
+		"conversation_ids": []string{"conv_cleanup_http_keep", "conv_cleanup_http_delete"},
+		"filenames":        []string{"keep-http.png"},
+	}, adminCookie, headers, http.StatusOK)
+	if numericNestedPathValue(cleanupResp, "result", "deleted_conversations") != 1 ||
+		numericNestedPathValue(cleanupResp, "result", "deleted_images") != 1 ||
+		numericNestedPathValue(cleanupResp, "result", "deleted_image_bytes") != 18 {
+		t.Fatalf("unexpected cleanup selection response: %#v", cleanupResp)
+	}
+	skippedActive, _ := nestedPath(cleanupResp, "result", "skipped_active_conversations").([]any)
+	if len(skippedActive) != 1 || skippedActive[0] != "conv_cleanup_http_keep" {
+		t.Fatalf("expected active conversation skip in cleanup selection: %#v", cleanupResp)
+	}
+	skippedUploads, _ := nestedPath(cleanupResp, "result", "skipped_referenced_uploads").([]any)
+	if len(skippedUploads) != 1 || skippedUploads[0] != "keep-http.png" {
+		t.Fatalf("expected referenced upload skip in cleanup selection: %#v", cleanupResp)
+	}
+	assertAuditCountForActor(t, env, "admin", "admin.user", "user", cleanupSourceUserID, "cleanup_selection", "success", 1)
+	if _, err := env.store.GetConversation(context.Background(), "conv_cleanup_http_delete"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected cleanup-selected conversation to be deleted, got %v", err)
+	}
+	remainingCleanupUploads, err := env.store.ListUploadedImagesByOwner(context.Background(), cleanupSourceUserID)
+	if err != nil {
+		t.Fatalf("list remaining cleanup uploads: %v", err)
+	}
+	if len(remainingCleanupUploads) != 1 || remainingCleanupUploads[0].Filename != "keep-http.png" {
+		t.Fatalf("unexpected remaining cleanup uploads: %#v", remainingCleanupUploads)
 	}
 
 	purgeableResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{

@@ -1453,6 +1453,49 @@ func TestOIDCConfigEndpointReflectsServeSettings(t *testing.T) {
 	}
 }
 
+func TestOIDCLoginRedirectUsesPKCE(t *testing.T) {
+	var issuer string
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/.well-known/openid-configuration" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                 issuer,
+			"authorization_endpoint": issuer + "/authorize",
+			"token_endpoint":         issuer + "/token",
+			"jwks_uri":               issuer + "/jwks",
+			"userinfo_endpoint":      issuer + "/userinfo",
+		})
+	}))
+	defer provider.Close()
+	issuer = provider.URL
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.OIDCEnabled = true
+		cfg.OIDCIssuerURL = issuer
+		cfg.OIDCClientID = "chatapi"
+		cfg.OIDCClientSecret = "secret"
+		cfg.OIDCRedirectURL = "http://chat.example.com/api/auth/oidc/callback"
+	})
+
+	status, location, cookies := env.getRedirect(t, "/api/auth/oidc/login")
+	if status != http.StatusFound {
+		t.Fatalf("expected oidc redirect, got status=%d location=%q", status, location)
+	}
+	if !strings.HasPrefix(location, issuer+"/authorize?") ||
+		!strings.Contains(location, "code_challenge=") ||
+		!strings.Contains(location, "code_challenge_method=S256") ||
+		!strings.Contains(location, "nonce=") {
+		t.Fatalf("authorization redirect missing oidc/pkce parameters: %s", location)
+	}
+	if findCookie(cookies, "chatapi_oidc_state") == nil ||
+		findCookie(cookies, "chatapi_oidc_nonce") == nil ||
+		findCookie(cookies, "chatapi_oidc_pkce") == nil {
+		t.Fatalf("expected state, nonce and pkce cookies, got %#v", cookies)
+	}
+}
+
 func TestServeLocalUserLoginFromUsersTable(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("alice-secret")
@@ -3679,6 +3722,24 @@ func (e *testEnv) getTextWithHeaders(t *testing.T, path string, headers map[stri
 		t.Fatalf("read response %s: %v", path, err)
 	}
 	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) getRedirect(t *testing.T, path string) (int, string, []*http.Cookie) {
+	t.Helper()
+	client := *e.client
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Get(e.server.URL + path)
+	if err != nil {
+		t.Fatalf("get redirect %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	location := ""
+	if target, err := resp.Location(); err == nil {
+		location = target.String()
+	}
+	return resp.StatusCode, location, resp.Cookies()
 }
 
 func (e *testEnv) waitForWaitingConversation(t *testing.T, title string) map[string]any {

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -96,9 +97,11 @@ func (h AuthHandler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to create oidc nonce", http.StatusInternalServerError)
 		return
 	}
+	pkceVerifier := oauth2.GenerateVerifier()
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", state, int((10*time.Minute).Seconds())))
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", nonce, int((10*time.Minute).Seconds())))
-	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce)), http.StatusFound)
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", pkceVerifier, int((10*time.Minute).Seconds())))
+	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(pkceVerifier)), http.StatusFound)
 }
 
 func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
@@ -123,13 +126,25 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid oidc nonce", http.StatusUnauthorized)
 		return
 	}
+	pkceCookie, err := r.Cookie("chatapi_oidc_pkce")
+	if err != nil || pkceCookie.Value == "" {
+		h.recordAuthAudit(r, "oidc_pkce", "failure")
+		http.Error(w, "invalid oidc pkce verifier", http.StatusUnauthorized)
+		return
+	}
 	oauthCfg, provider, err := h.oidcRuntime(r.Context())
 	if err != nil {
 		h.recordAuthAudit(r, "oidc_callback", "failure")
 		http.Error(w, "oidc is not configured", http.StatusInternalServerError)
 		return
 	}
-	token, err := oauthCfg.Exchange(r.Context(), strings.TrimSpace(r.URL.Query().Get("code")))
+	pkceVerifier, err := url.QueryUnescape(pkceCookie.Value)
+	if err != nil {
+		h.recordAuthAudit(r, "oidc_pkce", "failure")
+		http.Error(w, "invalid oidc pkce verifier", http.StatusUnauthorized)
+		return
+	}
+	token, err := oauthCfg.Exchange(r.Context(), strings.TrimSpace(r.URL.Query().Get("code")), oauth2.VerifierOption(pkceVerifier))
 	if err != nil {
 		h.recordAuthAudit(r, "oidc_exchange", "failure")
 		http.Error(w, "oidc token exchange failed", http.StatusUnauthorized)
@@ -159,6 +174,11 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "oidc claims are invalid", http.StatusUnauthorized)
 		return
 	}
+	if err := h.mergeUserInfoClaims(r.Context(), provider, token, rawClaims); err != nil {
+		h.recordAuthAudit(r, "oidc_userinfo", "failure")
+		http.Error(w, "oidc userinfo claims are invalid", http.StatusUnauthorized)
+		return
+	}
 	claims := claimsFromMap(rawClaims)
 	if h.OIDCAuth == nil {
 		http.Error(w, "oidc auth service is not configured", http.StatusInternalServerError)
@@ -172,6 +192,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", "", -1))
 	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", "", -1))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", "", -1))
 	h.writeLoginSuccess(w, r, actor, "")
 }
 
@@ -276,6 +297,21 @@ func (h AuthHandler) oidcProviderName() string {
 	return "OIDC"
 }
 
+func (h AuthHandler) mergeUserInfoClaims(ctx context.Context, provider *oidc.Provider, token *oauth2.Token, rawClaims map[string]any) error {
+	if provider == nil || token == nil || strings.TrimSpace(token.AccessToken) == "" {
+		return nil
+	}
+	userInfo, err := provider.UserInfo(ctx, oauth2.StaticTokenSource(token))
+	if err != nil {
+		return nil
+	}
+	var userInfoClaims map[string]any
+	if err := userInfo.Claims(&userInfoClaims); err != nil {
+		return err
+	}
+	return mergeOIDCClaims(rawClaims, userInfoClaims)
+}
+
 func loginLimitKey(username string, r *http.Request) string {
 	return strings.TrimSpace(username) + "|" + directRemoteIP(r)
 }
@@ -377,6 +413,24 @@ func claimsFromMap(raw map[string]any) service.OIDCClaims {
 		PreferredName: stringClaim(raw, "preferred_username"),
 		Profile:       raw,
 	}
+}
+
+func mergeOIDCClaims(idTokenClaims map[string]any, userInfoClaims map[string]any) error {
+	if idTokenClaims == nil || len(userInfoClaims) == 0 {
+		return nil
+	}
+	idSub := stringClaim(idTokenClaims, "sub")
+	userInfoSub := stringClaim(userInfoClaims, "sub")
+	if idSub != "" && userInfoSub != "" && idSub != userInfoSub {
+		return fmt.Errorf("userinfo sub does not match id_token sub")
+	}
+	for key, value := range userInfoClaims {
+		if _, exists := idTokenClaims[key]; exists {
+			continue
+		}
+		idTokenClaims[key] = value
+	}
+	return nil
 }
 
 func stringClaim(raw map[string]any, key string) string {

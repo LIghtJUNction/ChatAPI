@@ -2077,6 +2077,30 @@ func TestUserModelAPIKeysManagement(t *testing.T) {
 	}
 }
 
+func TestUserModelAPIKeysSchema(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.getJSON(t, "/api/user/model-api-keys/schema", http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if nestedString(schema, "key_prefix") != "sk-" {
+		t.Fatalf("unexpected user model api key schema response: %#v", resp)
+	}
+	if !containsMapItemWithStringField(schema["create_fields"], "name", "model") {
+		t.Fatalf("unexpected user model api key schema fields: %#v", resp)
+	}
+}
+
+func TestUserModelAPIKeysRejectMissingModel(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := env.postText(t, "/api/user/model-api-keys", map[string]any{
+		"name": "missing-model",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "model is required") {
+		t.Fatalf("expected missing model rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestUserModelAPIKeysManagementUsesSessionActor(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("model-secret")
@@ -2124,6 +2148,37 @@ func TestUserModelAPIKeysManagementUsesSessionActor(t *testing.T) {
 	}
 	assertAuditCountForActor(t, env, "user_model_owner", "user.model_api_key", "model_api_key", keyID, "create", "success", 1)
 	assertAuditCountForActor(t, env, "user_model_owner", "user.model_api_key", "model_api_key", keyID, "delete", "success", 1)
+}
+
+func TestUserModelAPIKeysSchemaUsesSessionActor(t *testing.T) {
+	env := newTestEnvWithMode(t, config.ModeServe)
+	hash, err := passwordhash.Hash("model-schema-secret")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "user_model_schema_owner",
+		Username:     "model-schema-owner",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed model schema owner: %v", err)
+	}
+	_, cookies := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "model-schema-owner",
+		"password": "model-schema-secret",
+	}, http.StatusOK)
+	sessionCookie := findCookie(cookies, service.SessionCookieName)
+	if sessionCookie == nil {
+		t.Fatalf("missing model schema session cookie: %#v", cookies)
+	}
+
+	resp := env.getJSONWithCookie(t, "/api/user/model-api-keys/schema", sessionCookie, http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if nestedString(schema, "key_prefix") != "sk-" {
+		t.Fatalf("unexpected session model api key schema response: %#v", resp)
+	}
 }
 
 func TestUserRoutesRejectAPIKeyActors(t *testing.T) {
@@ -2268,6 +2323,32 @@ func TestAppAPIModelKeysManagement(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized {
 		t.Fatalf("deleted app-managed model key should be unauthorized: status=%d body=%q", status, body)
+	}
+}
+
+func TestAppAPIModelKeySchema(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"model_keys:read"}, nil)
+
+	resp := env.appGetJSON(t, "/api/app/model-keys/schema", appKey, http.StatusOK)
+	schema := resp["schema"].(map[string]any)
+	if nestedString(schema, "key_prefix") != "sk-" {
+		t.Fatalf("unexpected app model key schema response: %#v", resp)
+	}
+	if !containsMapItemWithStringField(schema["create_fields"], "name", "model") {
+		t.Fatalf("unexpected app model key schema fields: %#v", resp)
+	}
+}
+
+func TestAppAPIModelKeysRejectMissingModel(t *testing.T) {
+	env := newTestEnv(t)
+	appKey := env.seedAppAPIKey(t, "lab-user", []string{"model_keys:write"}, nil)
+
+	status, body := env.appPostText(t, "/api/app/model-keys", appKey, map[string]any{
+		"name": "missing-model",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "model is required") {
+		t.Fatalf("expected missing model app api rejection: status=%d body=%q", status, body)
 	}
 }
 

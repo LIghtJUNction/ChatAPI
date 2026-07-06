@@ -40,6 +40,7 @@
 - 应用 API Key 配置契约当前还已开始显式暴露：`GET /api/user/app-api-keys/schema` 会返回后端支持的 scopes、resource limit、依赖 scopes 和枚举值，避免前端或外部管理工具继续把这些规则硬编码在本地。
 - 应用 API 当前已覆盖 `requests:read` / `requests:respond` / `conversations:read` 的最小链路：`/api/app/requests*`、`/api/app/conversations`、`/api/app/conversations/{conversation_id}/messages` 均已打通，并对 scope 与 owner 隔离做了集成测试。
 - 已新增虚拟模型 API Key 的最小存储、可解密密文保存、管理接口和模型兼容入口鉴权：`GET/POST/DELETE /api/user/model-api-keys` 已可在 Lab actor 和正式 session actor 下工作，未登录访问会明确返回 `401 session required`；`/v1/responses`、`/v1/chat/completions`、`/messages` 等入口在生产模式要求 `Authorization: Bearer sk-...`，Lab 模式仍允许免 key，但如果请求携带有效 `sk-...` 会按该 key 所属用户写入 `owner_id`。
+- 虚拟模型 API Key 配置契约当前也已开始显式暴露：`GET /api/user/model-api-keys/schema` 和 `GET /api/app/model-keys/schema` 会返回 `sk-` 前缀和创建字段定义；同时服务端已开始把 `model` 收紧为必填，避免生成未绑定虚拟模型名的 key。
 - 用户侧虚拟模型配置已补上最小接口：`GET/POST/DELETE /api/config/models` 当前按 actor 读写 `user_configs.virtual_models`，用于保存当前用户自己的虚拟模型列表；`GET /models` / `GET /v1/models` 也已开始优先返回当前 actor 的已启用虚拟模型，而不是硬编码单个 `chatapi-lab`。若当前用户没有配置模型，则回退到默认 `chatapi-lab`。
 - 为兼容当前前端设置面板，`/api/config/models` 当前同时返回 `models: string[]` 和 `items`；前端仍按简单字符串列表工作，后续前端改造时再逐步切到更完整的模型对象结构。
 - 为兼容当前前端自动规则面板，`GET/POST /api/config/automation-rules` 已补上用户侧兼容接口，直接按当前 actor 读写自己的自动规则列表，响应格式对齐前端使用中的 `{ ok, rules }`；底层复用与应用 API 同一套 `automation_rules` 存储与校验逻辑，后续前端切到应用 API 时不需要再迁移数据结构。
@@ -1417,6 +1418,7 @@ user_app_api_keys
 用户管理自己的虚拟模型 API Key 的 session 路由：
 
 - `GET /api/user/model-api-keys`
+- `GET /api/user/model-api-keys/schema`
 - `POST /api/user/model-api-keys`
 - `DELETE /api/user/model-api-keys/{key_id}`
 
@@ -1449,6 +1451,7 @@ user_app_api_keys
 - `max_requests_per_minute`：当前已按应用 API Key 在单 Go 进程内实现 1 分钟窗口限流；值为空或 `0` 表示不限流。超限请求返回 `429 app api key rate limited`，并记录 `error_code=rate_limited`。后续多实例部署需要迁移到 Redis 或数据库限流器。
 - `allowed_source_ips`：当前已在应用 API 鉴权后、scope 校验前执行。未配置时不限制；配置后请求来源 IP 不匹配则返回 `403 app api key source ip forbidden`，并记录 `error_code=source_ip_forbidden`。
 - `GET /api/app/model-keys`：需要 `model_keys:read`，返回当前用户自己的虚拟模型 API Key；如果配置了 `allowed_model_key_ids`，只返回允许的 key。
+- `GET /api/app/model-keys/schema`：需要 `model_keys:read`，返回虚拟模型 API Key 的机器可读 schema，供外部程序或前端表单渲染使用。
 - `POST /api/app/model-keys`：需要 `model_keys:write`，请求体包含 `name`、`model`；如果配置了 `allowed_virtual_models`，只能为允许的虚拟模型创建 key；如果配置了 `max_model_keys`，当前用户未撤销虚拟模型 key 数量达到上限时返回 `403`。
 - `DELETE /api/app/model-keys/{key_id}`：需要 `model_keys:delete`，只能删除当前用户自己的 key；如果配置了 `allowed_model_key_ids`，只能删除允许的 key。
 - `GET /api/app/statistics/summary`：需要 `statistics:read`，当前返回请求态势摘要和自动化规则命中数；首版不返回 token、价格、平均耗时等需要额外计量的数据，避免给外部自动化暴露误导性指标。

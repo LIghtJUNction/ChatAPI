@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -31,6 +32,18 @@ func (h UserModelAPIKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
+func (h UserModelAPIKeysHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	userID, err := currentActorUserID(r, h.Config)
+	if err != nil || userID == "" {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": h.ModelAPIKeys.Schema(),
+	})
+}
+
 func (h UserModelAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID, err := currentActorUserID(r, h.Config)
 	if err != nil {
@@ -49,6 +62,10 @@ func (h UserModelAPIKeysHandler) Create(w http.ResponseWriter, r *http.Request) 
 			"model": stringValue(body["model"], ""),
 			"error": err.Error(),
 		})
+		if errors.Is(err, service.ErrModelRequired) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

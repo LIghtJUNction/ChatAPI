@@ -115,6 +115,7 @@ func NewRouter(
 	userRouter.Post("/app-api-keys", userAppAPIKeysHandler.Create)
 	userRouter.Delete("/app-api-keys/{keyID}", userAppAPIKeysHandler.Delete)
 	userRouter.Get("/model-api-keys", userModelAPIKeysHandler.List)
+	userRouter.Get("/model-api-keys/schema", userModelAPIKeysHandler.Schema)
 	userRouter.Post("/model-api-keys", userModelAPIKeysHandler.Create)
 	userRouter.Delete("/model-api-keys/{keyID}", userModelAPIKeysHandler.Delete)
 	userRouter.Get("/config", userConfigHandler.Get)
@@ -186,6 +187,10 @@ func NewRouter(
 		appAuth("model_keys:read"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),
 	).Get("/model-keys", appAPIHandler.ListModelAPIKeys)
+	appRouter.With(
+		appAuth("model_keys:read"),
+		middleware.AuditAppAPIRequests(appAPIKeyService),
+	).Get("/model-keys/schema", appAPIHandler.ModelAPIKeySchema)
 	appRouter.With(
 		appAuth("model_keys:write"),
 		middleware.AuditAppAPIRequests(appAPIKeyService),

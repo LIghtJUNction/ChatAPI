@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -25,7 +26,20 @@ type ModelAPIKeyService struct {
 	masterKey string
 }
 
+type ModelAPIKeySchema struct {
+	KeyPrefix    string                   `json:"key_prefix"`
+	CreateFields []ModelAPIKeyCreateField `json:"create_fields"`
+}
+
+type ModelAPIKeyCreateField struct {
+	Name        string `json:"name"`
+	Required    bool   `json:"required"`
+	Description string `json:"description"`
+}
+
 const modelAPIKeyLastUsedMinInterval = 5 * time.Minute
+
+var ErrModelRequired = errors.New("model is required")
 
 func NewModelAPIKeyService(dataStore store.Store, masterKey string) *ModelAPIKeyService {
 	return &ModelAPIKeyService{
@@ -34,7 +48,21 @@ func NewModelAPIKeyService(dataStore store.Store, masterKey string) *ModelAPIKey
 	}
 }
 
+func (s *ModelAPIKeyService) Schema() ModelAPIKeySchema {
+	return ModelAPIKeySchema{
+		KeyPrefix: "sk-",
+		CreateFields: []ModelAPIKeyCreateField{
+			{Name: "name", Required: false, Description: "Display name for the virtual model key."},
+			{Name: "model", Required: true, Description: "Virtual model name that the key is bound to."},
+		},
+	}
+}
+
 func (s *ModelAPIKeyService) CreateKey(ctx context.Context, userID string, name string, model string) (store.ModelAPIKey, string, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return store.ModelAPIKey{}, "", ErrModelRequired
+	}
 	raw := "sk-" + uuid.NewString()
 	ciphertext, err := secretbox.Seal(raw, s.masterKey)
 	if err != nil {
@@ -46,7 +74,7 @@ func (s *ModelAPIKeyService) CreateKey(ctx context.Context, userID string, name 
 		Name:          strings.TrimSpace(name),
 		KeyCiphertext: ciphertext,
 		KeyPrefix:     apikey.Prefix(raw),
-		Model:         strings.TrimSpace(model),
+		Model:         model,
 	})
 	if err != nil {
 		return store.ModelAPIKey{}, "", err

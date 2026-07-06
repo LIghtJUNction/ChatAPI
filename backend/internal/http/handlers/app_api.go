@@ -142,6 +142,15 @@ func (h AppAPIHandler) ListModelAPIKeys(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
+func (h AppAPIHandler) ModelAPIKeySchema(w http.ResponseWriter, r *http.Request) {
+	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.UserID) == "" {
+		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "schema": h.ModelAPIKeys.Schema()})
+}
+
 func (h AppAPIHandler) CreateModelAPIKey(w http.ResponseWriter, r *http.Request) {
 	principal, ok := middleware.AppAPIPrincipalFromContext(r.Context())
 	if !ok {
@@ -181,6 +190,10 @@ func (h AppAPIHandler) CreateModelAPIKey(w http.ResponseWriter, r *http.Request)
 	}
 	item, rawKey, err := h.ModelAPIKeys.CreateKey(r.Context(), principal.UserID, stringValue(body["name"], "model key"), model)
 	if err != nil {
+		if errors.Is(err, service.ErrModelRequired) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

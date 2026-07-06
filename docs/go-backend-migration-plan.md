@@ -1025,7 +1025,7 @@ type Hub struct {
 当前 Go 重构分支已先落地运行时监控的服务内指标和 Linux 系统级探针：
 
 - `GET /api/admin/runtime/summary`：返回 Go runtime 基本信息、系统资源快照、Go 内存快照、自动化规则命中/失败摘要，以及运行期 `no_rules` / `no_match` 跳过计数、`skip_by_reason` 聚合、`skip_by_rule` 聚合、最近未命中样本、pending turn 统计、realtime subscriber 队列统计、SQLite 主库/WAL 文件大小。
-- `GET /api/admin/runtime/automation`：返回与 summary 中同源的自动化诊断视图，首版用于独立读取 `hits`、`failures`、`no_rules`、`no_match`、`skip_by_reason`、`skip_by_rule` 和 `recent_skips`，避免前端为查看自动化状态必须拉取整份 runtime summary。
+- `GET /api/admin/runtime/automation`：返回与 summary 中同源的自动化诊断视图，首版用于独立读取 `hits`、`failures`、`no_rules`、`no_match`、`skip_by_reason`、`skip_by_rule` 和 `recent_skips`，避免前端为查看自动化状态必须拉取整份 runtime summary。当前已支持查询参数 `limit`、`reason`、`rule_id` 过滤最近未命中样本。
 - `GET /api/admin/runtime/memory`：返回当前 Go `runtime.MemStats` 的核心字段，包括 heap、sys、next GC、GC 次数和 pause 累计。
 - `GET /api/admin/runtime/system`：返回主机名、CPU 数、load average、系统总内存/可用内存、ChatAPI 进程 RSS、打开 FD 数，以及 `data_dir` 所在文件系统总容量/可用容量。当前实现使用 Linux `/proc` 和 `statfs`，非 Linux 部署后续按目标平台补齐。
 - `GET /api/admin/runtime/connections`：返回当前 realtime subscriber 数、WebUI subscriber 数、API/SSE lease 数、总连接数和被限额拒绝的连接数。当前 `/api/ws` 已按 `webui` 计数，后续 API/SSE 长连接接入时必须使用 realtime hub 的 `Acquire` / `Release`。

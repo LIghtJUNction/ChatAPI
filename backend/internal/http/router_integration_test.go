@@ -2481,6 +2481,17 @@ func TestAdminRuntimeEndpoints(t *testing.T) {
 	if _, ok := automationPayload["recent_skips"]; !ok {
 		t.Fatalf("expected runtime automation endpoint recent skips: %#v", automationResp)
 	}
+
+	filteredResp := env.getJSON(t, "/api/admin/runtime/automation?rule_id=runtime_rule_never_match&reason=contains_miss&limit=1", http.StatusOK)
+	filteredAutomation := filteredResp["automation"].(map[string]any)
+	filteredRecent := filteredAutomation["recent_skips"].([]any)
+	if len(filteredRecent) != 1 {
+		t.Fatalf("expected filtered runtime automation samples: %#v", filteredResp)
+	}
+	filteredFirst := filteredRecent[0].(map[string]any)
+	if nestedString(filteredFirst, "rule_id") != "runtime_rule_never_match" || nestedString(filteredFirst, "reason") != "contains_miss" {
+		t.Fatalf("unexpected filtered runtime automation sample: %#v", filteredResp)
+	}
 }
 
 func TestAdminRuntimeEndpointsWithPostgreSQL(t *testing.T) {

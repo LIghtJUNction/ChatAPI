@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/zyf/chatapi/internal/service"
 )
@@ -20,9 +22,14 @@ func (h AdminRuntimeHandler) Summary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AdminRuntimeHandler) Automation(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"automation": h.Monitor.Automation(),
+		"ok": true,
+		"automation": h.Monitor.AutomationDiagnostics(service.AutomationDiagnosticsInput{
+			Limit:  limit,
+			Reason: strings.TrimSpace(r.URL.Query().Get("reason")),
+			RuleID: strings.TrimSpace(r.URL.Query().Get("rule_id")),
+		}),
 	})
 }
 

@@ -134,6 +134,12 @@ type UpdateRuntimeSettingsInput struct {
 	MemoryLimitBytes *int64 `json:"memory_limit_bytes,omitempty"`
 }
 
+type AutomationDiagnosticsInput struct {
+	Limit  int
+	Reason string
+	RuleID string
+}
+
 func NewRuntimeMonitorService(cfg config.Config, dataStore store.Store, realtime *RealtimeHub, pending *PendingRegistry) *RuntimeMonitorService {
 	service := &RuntimeMonitorService{
 		cfg:              cfg,
@@ -220,6 +226,41 @@ func (s *RuntimeMonitorService) Automation() AutomationSnapshot {
 		snapshot.Failures = failures
 	}
 	return snapshot
+}
+
+func (s *RuntimeMonitorService) AutomationDiagnostics(input AutomationDiagnosticsInput) AutomationSnapshot {
+	snapshot := s.Automation()
+	snapshot.RecentSkips = filterAutomationRecentSkips(snapshot.RecentSkips, input)
+	return snapshot
+}
+
+func filterAutomationRecentSkips(items []AutomationSkipSample, input AutomationDiagnosticsInput) []AutomationSkipSample {
+	if len(items) == 0 {
+		return nil
+	}
+	reason := normalizeAutomationSkipReason(strings.TrimSpace(input.Reason))
+	ruleID := strings.TrimSpace(input.RuleID)
+	limit := input.Limit
+	if limit <= 0 || limit > len(items) {
+		limit = len(items)
+	}
+	filtered := make([]AutomationSkipSample, 0, limit)
+	for _, item := range items {
+		if reason != "" && item.Reason != reason {
+			continue
+		}
+		if ruleID != "" && item.RuleID != ruleID {
+			continue
+		}
+		filtered = append(filtered, item)
+		if len(filtered) >= limit {
+			break
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 func ReadSystemSnapshot(dataDir string) SystemSnapshot {

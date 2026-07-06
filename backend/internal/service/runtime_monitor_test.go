@@ -222,3 +222,41 @@ func TestRuntimeMonitorSummaryIncludesAutomationRecentSkips(t *testing.T) {
 		t.Fatalf("unexpected recent skip item: %#v", item)
 	}
 }
+
+func TestRuntimeMonitorAutomationDiagnosticsFiltersRecentSkips(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "chatapi.sqlite3")
+	st, err := sqlitestore.Open(dsn)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := migrations.Bootstrap(context.Background(), st.DB()); err != nil {
+		t.Fatalf("bootstrap sqlite: %v", err)
+	}
+
+	cfg := config.Default(config.ModeServe, t.TempDir())
+	cfg.DatabaseDriver = "sqlite"
+	cfg.DatabaseDSN = dsn
+
+	monitor := NewRuntimeMonitorService(cfg, st, NewRealtimeHub(st), NewPendingRegistry())
+	observer := NewAutomationObserver()
+	observer.RecordSkipSample(AutomationSkipSample{ConversationID: "conv_a", RuleID: "rule_a", Reason: "contains_miss"})
+	observer.RecordSkipSample(AutomationSkipSample{ConversationID: "conv_b", RuleID: "rule_b", Reason: "excluded"})
+	observer.RecordSkipSample(AutomationSkipSample{ConversationID: "conv_c", RuleID: "rule_a", Reason: "contains_miss"})
+	monitor.SetAutomationObserver(observer)
+
+	byRule := monitor.AutomationDiagnostics(AutomationDiagnosticsInput{RuleID: "rule_a", Limit: 10})
+	if len(byRule.RecentSkips) != 2 || byRule.RecentSkips[0].RuleID != "rule_a" || byRule.RecentSkips[1].RuleID != "rule_a" {
+		t.Fatalf("unexpected rule filtered diagnostics: %#v", byRule)
+	}
+
+	byReason := monitor.AutomationDiagnostics(AutomationDiagnosticsInput{Reason: "excluded", Limit: 10})
+	if len(byReason.RecentSkips) != 1 || byReason.RecentSkips[0].Reason != "excluded" {
+		t.Fatalf("unexpected reason filtered diagnostics: %#v", byReason)
+	}
+
+	limited := monitor.AutomationDiagnostics(AutomationDiagnosticsInput{Limit: 1})
+	if len(limited.RecentSkips) != 1 || limited.RecentSkips[0].ConversationID != "conv_c" {
+		t.Fatalf("unexpected limited diagnostics: %#v", limited)
+	}
+}

@@ -4663,6 +4663,17 @@ func TestAdminAuditLogsEndpoint(t *testing.T) {
 	if len(runtimeItems) != 1 || nestedString(runtimeItems[0].(map[string]any), "action") != "gc" {
 		t.Fatalf("expected runtime gc audit log: %#v", runtimeResp)
 	}
+
+	schemaResp := env.getJSON(t, "/api/admin/audit/schema", http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 1 {
+		t.Fatalf("unexpected admin audit schema response: %#v", schemaResp)
+	}
+	operation := operations[0].(map[string]any)
+	if nestedString(operation, "name") != "list_audit_logs" || nestedString(operation, "path") != "/api/admin/audit/logs" {
+		t.Fatalf("unexpected admin audit schema operation: %#v", schemaResp)
+	}
 }
 
 func TestAdminAuditLogsRejectsAPIKeys(t *testing.T) {
@@ -4674,6 +4685,13 @@ func TestAdminAuditLogsRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key audit admin rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/audit/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key audit schema rejection: status=%d body=%q", status, body)
 	}
 }
 
@@ -4728,6 +4746,17 @@ func TestAdminRequestsOverview(t *testing.T) {
 		t.Fatalf("unexpected admin requests model buckets: %#v", overviewResp)
 	}
 
+	schemaResp := env.getJSON(t, "/api/admin/requests/schema", http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 1 {
+		t.Fatalf("unexpected admin requests schema response: %#v", schemaResp)
+	}
+	operation := operations[0].(map[string]any)
+	if nestedString(operation, "name") != "requests_overview" || nestedString(operation, "path") != "/api/admin/requests/overview" {
+		t.Fatalf("unexpected admin requests schema operation: %#v", schemaResp)
+	}
+
 	env.postJSON(t, "/api/conversations/"+secondConversation["id"].(string)+"/respond", map[string]any{
 		"text": "overview cleanup",
 		"mode": "assistant_message",
@@ -4744,6 +4773,13 @@ func TestAdminRequestsOverviewRejectsAPIKeys(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
 		t.Fatalf("expected app api key requests overview admin rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/admin/requests/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "admin session required") {
+		t.Fatalf("expected app api key requests schema rejection: status=%d body=%q", status, body)
 	}
 }
 

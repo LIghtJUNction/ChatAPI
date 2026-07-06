@@ -61,8 +61,10 @@
 - 管理员存储操作 schema 已开始显式暴露：`GET /api/admin/storage/schema` 当前返回 quota 覆盖、cleanup、orphan cleanup、vacuum 这些写操作的字段定义、默认值、路径和说明，避免前端或 CLI 继续硬编码 `dry_run`、`quota_bytes`、`keep_recent_conversations`、`keep_recent_days` 以及 SQLite-only vacuum 约束。
 - 管理员存储监控已开始把 `uploaded_images` 元数据纳入用户维度估算，`/api/admin/storage/users` 返回每个 owner 的 `image_count`、`image_bytes`、默认配额、单用户 override、最终 `storage_quota_bytes` 和 `storage_over_quota`，summary 的 `estimated_bytes` 也会包含已落库图片字节数。
 - 管理员请求态势已落地最小接口：`GET /api/admin/requests/overview`，返回全局请求总数、waiting/streaming/closed/aborted 计数、自动化规则命中数，以及按 owner、model、status 聚合。
+- 管理员请求态势 schema 已开始显式暴露：`GET /api/admin/requests/schema` 当前声明 `requests_overview` 的路径、方法和返回语义，避免前端或 CLI 再去猜 `overview` 负载里有哪些聚合字段、何时省略 `oldest_pending_wait_seconds`。
 - pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
 - 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、自动化规则自动完成命中、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
+- 管理员审计查询 schema 已开始显式暴露：`GET /api/admin/audit/schema` 当前返回 `limit`、`event_type`、`actor_user_id`、`include_app_api` 这些过滤字段的默认值、值域和特殊语义，明确 `include_app_api` 只会影响空 `event_type` 或 `event_type=app_api.request` 的查询。
 - 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、session secret、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope、realtime 连接预留配置等风险。
 - 数据库版本诊断已落地最小版本：SQLite 和 PostgreSQL bootstrap 都会维护 `db_meta` 和 `schema_migrations`；当前 `chatapi db check` 已能通过统一 store 打开两种数据库，输出 schema version、dirty 状态、创建来源、最近迁移时间、已应用迁移列表，以及 SQLite 主库/WAL/SHM 文件存在性和字节数。
 - 基础运维命令已落地最小版本：`chatapi version` 输出 JSON 版本信息；`chatapi config print --redact [serve|lab]` 输出最终配置的脱敏 JSON，master key、session secret、管理员密码、Lab token/password、OIDC client secret 和非 SQLite DSN 不会明文输出；`chatapi migrate up|status|down --force` 已开始同时支持 SQLite 和 PostgreSQL 的当前 schema 状态查询与本地重置，`chatapi migrate-db sqlite-to-postgres --sqlite <path> --postgres <dsn>` 已开始支持 SQLite 到 PostgreSQL 的最小全量搬迁。当前 SQLite 和 PostgreSQL 都已开始进入注册式增量 migration：SQLite 的首个 `0002_sqlite_app_api_indexes` 已补上应用 API Key 相关索引，PostgreSQL 的首个 `0002_postgresql_request_indexes` 已补上 `messages.response_id` 和 `request_debug.request_id` 读取相关索引。`chatapi oidc test` 可拉取 OIDC discovery document 并校验 issuer 与核心 endpoint。
@@ -1553,6 +1555,10 @@ Go 版首个可替换版本必须覆盖：
 - `GET /api/admin/runtime/summary`
 - `GET /api/admin/runtime/memory`
 - `GET /api/admin/runtime/connections`
+- `GET /api/admin/requests/schema`
+- `GET /api/admin/requests/overview`
+- `GET /api/admin/audit/schema`
+- `GET /api/admin/audit/logs`
 
 说明：
 

@@ -12,6 +12,13 @@ type AdminAuditHandler struct {
 	Audit *service.AuditService
 }
 
+func (h AdminAuditHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildAdminAuditSchema(),
+	})
+}
+
 func (h AdminAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {

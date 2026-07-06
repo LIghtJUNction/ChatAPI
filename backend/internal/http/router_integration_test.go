@@ -1382,6 +1382,20 @@ func TestUserConfigSchemaUsesSessionActor(t *testing.T) {
 func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	env := newTestEnv(t)
 
+	schemaResp := env.getJSON(t, "/api/workspace/tool-call/schema", http.StatusOK)
+	schema := schemaResp["schema"].(map[string]any)
+	operations := schema["operations"].([]any)
+	if len(operations) != 1 {
+		t.Fatalf("unexpected tool-call schema response: %#v", schemaResp)
+	}
+	operation := operations[0].(map[string]any)
+	if nestedString(operation, "name") != "assist_context" || nestedString(operation, "path") != "/api/workspace/tool-call/assist-context" {
+		t.Fatalf("unexpected tool-call schema operation: %#v", schemaResp)
+	}
+	if !containsMapItemWithStringField(operation["fields"], "key", "candidate_base_url") {
+		t.Fatalf("expected candidate_base_url field in tool-call schema: %#v", schemaResp)
+	}
+
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
 		"model": "demo-tool-assist-lab",
 		"input": []map[string]any{
@@ -1594,11 +1608,25 @@ func TestWorkspaceToolCallAssistContextRejectsProgrammaticActors(t *testing.T) {
 		t.Fatalf("expected app key assist-context rejection: status=%d body=%q", status, body)
 	}
 
+	status, body = env.getTextWithHeaders(t, "/api/workspace/tool-call/schema", map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected app key tool-call schema rejection: status=%d body=%q", status, body)
+	}
+
 	status, body = env.getTextWithHeaders(t, "/api/workspace/tool-call/assist-context?request_id=req_demo", map[string]string{
 		"Authorization": "Bearer " + modelKey,
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
 		t.Fatalf("expected model key assist-context rejection: status=%d body=%q", status, body)
+	}
+
+	status, body = env.getTextWithHeaders(t, "/api/workspace/tool-call/schema", map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected model key tool-call schema rejection: status=%d body=%q", status, body)
 	}
 }
 

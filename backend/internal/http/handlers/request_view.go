@@ -3,6 +3,7 @@ package handlers
 import (
 	"sort"
 
+	"github.com/zyf/chatapi/internal/protocol"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -70,62 +71,18 @@ func keysOf(value map[string]any) []string {
 }
 
 func normalizedToolSchemas(items []any) []map[string]any {
-	if len(items) == 0 {
+	raw := protocol.NormalizeToolSchemas(items)
+	if len(raw) == 0 {
 		return nil
 	}
-	normalized := make([]map[string]any, 0, len(items))
-	for _, raw := range items {
-		record, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		toolType := stringValue(record["type"], "")
-		if function, ok := record["function"].(map[string]any); ok {
-			name := stringValue(function["name"], "")
-			if name == "" {
-				continue
-			}
-			normalized = append(normalized, map[string]any{
-				"name":        name,
-				"description": stringValue(function["description"], ""),
-				"parameters":  firstMap(function["parameters"], function["input_schema"]),
-				"type":        defaultString(toolType, "function"),
-			})
-			continue
-		}
-
-		name := stringValue(record["name"], "")
-		if name == "" {
-			continue
-		}
+	normalized := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
 		normalized = append(normalized, map[string]any{
-			"name":        name,
-			"description": stringValue(record["description"], ""),
-			"parameters":  firstMap(record["parameters"], record["input_schema"]),
-			"type":        defaultString(toolType, "function"),
+			"name":        item.Name,
+			"description": item.Description,
+			"parameters":  item.Parameters,
+			"type":        item.Type,
 		})
 	}
-	if len(normalized) == 0 {
-		return nil
-	}
 	return normalized
-}
-
-func firstMap(values ...any) map[string]any {
-	for _, value := range values {
-		record, ok := value.(map[string]any)
-		if ok {
-			return record
-		}
-	}
-	return nil
-}
-
-func defaultString(value string, fallback string) string {
-	value = stringValue(value, "")
-	if value == "" {
-		return fallback
-	}
-	return value
 }

@@ -243,6 +243,46 @@ func TestParseRequestCapturesResponsesAssistantInputMessages(t *testing.T) {
 	}
 }
 
+func TestNormalizeToolSchemasSupportsOpenAIAndAnthropicShapes(t *testing.T) {
+	normalized := NormalizeToolSchemas([]any{
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "lookup_weather",
+				"description": "lookup weather",
+				"parameters": map[string]any{
+					"type": "object",
+				},
+			},
+		},
+		map[string]any{
+			"name":        "write_note",
+			"description": "write note",
+			"input_schema": map[string]any{
+				"type": "object",
+			},
+		},
+		map[string]any{
+			"type": "custom",
+			"name": "custom_tool",
+		},
+		"invalid",
+		map[string]any{"function": map[string]any{}},
+	})
+	if len(normalized) != 3 {
+		t.Fatalf("unexpected normalized tool schema count: %#v", normalized)
+	}
+	if normalized[0].Name != "lookup_weather" || normalized[0].Type != "function" || normalized[0].Parameters["type"] != "object" {
+		t.Fatalf("unexpected openai tool normalization: %#v", normalized[0])
+	}
+	if normalized[1].Name != "write_note" || normalized[1].Type != "function" || normalized[1].Parameters["type"] != "object" {
+		t.Fatalf("unexpected anthropic tool normalization: %#v", normalized[1])
+	}
+	if normalized[2].Name != "custom_tool" || normalized[2].Type != "custom" {
+		t.Fatalf("unexpected passthrough tool normalization: %#v", normalized[2])
+	}
+}
+
 func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
 	conversation := store.Conversation{
 		ResponseID: "resp_1",

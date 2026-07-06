@@ -16,6 +16,13 @@ type WorkspaceToolCallHandler struct {
 	Service *service.WorkspaceToolCallService
 }
 
+func (h WorkspaceToolCallHandler) Schema(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"schema": service.BuildWorkspaceToolCallContextSchema(),
+	})
+}
+
 func (h WorkspaceToolCallHandler) AssistContext(w http.ResponseWriter, r *http.Request) {
 	actor, ok := service.RequestActorFromContext(r.Context())
 	if !ok || !service.IsInteractiveUserActor(actor) {

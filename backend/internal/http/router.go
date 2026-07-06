@@ -128,6 +128,7 @@ func NewRouter(
 	userRouter.Get("/identities", userIdentitiesHandler.List)
 	userRouter.Delete("/identities/{identityID}", userIdentitiesHandler.Delete)
 	router.Mount("/api/user", userRouter)
+	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/schema", workspaceToolCallHandler.Schema)
 	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/assist-context", workspaceToolCallHandler.AssistContext)
 	router.Get("/api/config/automation-rules", configAutomationRulesHandler.Get)
 	router.Get("/api/config/automation-rules/schema", configAutomationRulesHandler.Schema)

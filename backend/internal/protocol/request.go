@@ -69,6 +69,13 @@ type ResponseFormat struct {
 	Schema map[string]any
 }
 
+type NormalizedToolSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+	Type        string         `json:"type"`
+}
+
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
@@ -188,6 +195,49 @@ func extractToolSchemas(body map[string]any) []any {
 	return nil
 }
 
+func NormalizeToolSchemas(items []any) []NormalizedToolSchema {
+	if len(items) == 0 {
+		return nil
+	}
+	normalized := make([]NormalizedToolSchema, 0, len(items))
+	for _, raw := range items {
+		record, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		toolType := defaultString(stringValue(record["type"], ""), "function")
+		if function, ok := record["function"].(map[string]any); ok {
+			name := stringValue(function["name"], "")
+			if name == "" {
+				continue
+			}
+			normalized = append(normalized, NormalizedToolSchema{
+				Name:        name,
+				Description: stringValue(function["description"], ""),
+				Parameters:  firstMap(function["parameters"], function["input_schema"]),
+				Type:        toolType,
+			})
+			continue
+		}
+
+		name := stringValue(record["name"], "")
+		if name == "" {
+			continue
+		}
+		normalized = append(normalized, NormalizedToolSchema{
+			Name:        name,
+			Description: stringValue(record["description"], ""),
+			Parameters:  firstMap(record["parameters"], record["input_schema"]),
+			Type:        toolType,
+		})
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
 func extractInputParts(body map[string]any) []InputPart {
 	if input, ok := body["input"].(string); ok && strings.TrimSpace(input) != "" {
 		return []InputPart{{Type: "text", Text: strings.TrimSpace(input)}}
@@ -211,6 +261,24 @@ func extractInputParts(body map[string]any) []InputPart {
 		}
 	}
 	return nil
+}
+
+func firstMap(values ...any) map[string]any {
+	for _, value := range values {
+		record, ok := value.(map[string]any)
+		if ok {
+			return record
+		}
+	}
+	return nil
+}
+
+func defaultString(value string, fallback string) string {
+	value = stringValue(value, "")
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func extractRoleContent(body map[string]any, role string) string {

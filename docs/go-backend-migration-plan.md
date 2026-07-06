@@ -27,8 +27,8 @@
 - `/api/ws` 已切到真实 WebSocket 广播骨架，可发送 snapshot / conversation_upsert / connection_count 事件。
 - 已新增 Go `httptest` 集成测试，覆盖 `responses`、`chat/completions`、`messages` 三套协议的 pending/complete/abort 基础链路。
 - `backend/internal/protocol` 已开始承接三套协议的请求提取与完成响应构造，后续会继续从 service/handler 中抽离更多协议细节。
-- 当前最小实现已覆盖 `assistant_message`、`thinking`、`tool_call`、`tool_result` 四种人工完成模式，并用集成测试守护消息持久化顺序与三套协议返回外壳。
-- 协议层已把非流式和流式都作为一等能力：`stream=false` 或缺省 `stream` 会等待人工/自动完成后返回一次性 JSON，`stream=true` 走真实 SSE 链路；当前已覆盖 OpenAI Responses、Chat Completions、Anthropic Messages 三套协议的非流闭环和最小流式集成测试，并补上了 `tool_call` 的基础流式返回外壳。PostgreSQL 路径下也已补上三套协议的最小非流闭环与基础 SSE 闭环集成测试，确保 pending turn、realtime 和协议 encoder 在两种数据库后端下行为一致。
+- 当前最小实现已覆盖 `assistant_message`、`thinking`、`tool_call`、`tool_result` 四种人工完成模式，并用集成测试守护消息持久化顺序与三套协议返回外壳。PostgreSQL 路径下也已开始覆盖 `thinking`、`tool_call`、`tool_result` 这些完成模式，确认完成响应和消息 metadata 在两种数据库后端下保持一致。
+- 协议层已把非流式和流式都作为一等能力：`stream=false` 或缺省 `stream` 会等待人工/自动完成后返回一次性 JSON，`stream=true` 走真实 SSE 链路；当前已覆盖 OpenAI Responses、Chat Completions、Anthropic Messages 三套协议的非流闭环和最小流式集成测试，并补上了 `tool_call` 的基础流式返回外壳。PostgreSQL 路径下也已补上三套协议的最小非流闭环、基础 SSE 闭环，以及部分完成模式分支测试，确保 pending turn、realtime 和协议 encoder 在两种数据库后端下行为一致。
 - pending turn 已补上最小状态机约束：`delta` 会把会话推进到 `streaming`，终态后的 `delta` / `complete` / `abort` 会返回 `409`，并用集成测试守护这些行为。
 - `backend/internal/service` 已开始收敛统一的 `TurnControlCommand`，把 WebUI 手工回复、后续应用 API 和自动化规则共享的 turn control 输入模型从 handler 中抽离出来。
 - 已补上 `request_id -> conversation_id -> TurnControlCommand` 的最小解析链路，并先用于 `lab` 路由；后续应用 API 的 `/api/app/requests/{request_id}/*` 将直接复用这层能力。

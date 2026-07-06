@@ -1,6 +1,9 @@
 package protocol
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type RequestError struct {
 	StatusCode int
@@ -54,7 +57,95 @@ func ValidateRequest(protocolValue string, body map[string]any) error {
 			return InvalidRequest("input must include at least one user content part", "input")
 		}
 	}
+	if err := validateToolChoice(body, request); err != nil {
+		return err
+	}
+	if err := validateResponseFormat(body, request); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateToolChoice(body map[string]any, request TurnRequest) error {
+	rawChoice, exists := body["tool_choice"]
+	if !exists {
+		return nil
+	}
+	switch typed := rawChoice.(type) {
+	case string:
+		switch strings.TrimSpace(typed) {
+		case "", "auto", "required", "none", "any":
+			return nil
+		default:
+			return InvalidRequest("tool_choice string must be one of auto|required|none|any", "tool_choice")
+		}
+	case map[string]any:
+		if request.ToolChoice.Type == "" {
+			return InvalidRequest("tool_choice.type is required", "tool_choice.type")
+		}
+		if request.ToolChoice.Type != "function" {
+			return nil
+		}
+		if request.ToolChoice.Name == "" {
+			return InvalidRequest("tool_choice.function.name is required when type=function", "tool_choice.function.name")
+		}
+		if len(request.ToolSchemas) > 0 && !toolSchemaContains(request.ToolSchemas, request.ToolChoice.Name) {
+			return InvalidRequest("tool_choice.function.name must reference a declared tool", "tool_choice.function.name")
+		}
+		return nil
+	default:
+		return InvalidRequest("tool_choice must be a string or object", "tool_choice")
+	}
+}
+
+func validateResponseFormat(body map[string]any, request TurnRequest) error {
+	rawFormat, exists := body["response_format"]
+	if !exists {
+		return nil
+	}
+	record, ok := rawFormat.(map[string]any)
+	if !ok {
+		return InvalidRequest("response_format must be an object", "response_format")
+	}
+	formatType := strings.TrimSpace(request.ResponseFormat.Type)
+	if formatType == "" {
+		return InvalidRequest("response_format.type is required", "response_format.type")
+	}
+	if formatType != "json_schema" {
+		return nil
+	}
+	schemaRecord, ok := record["json_schema"].(map[string]any)
+	if !ok {
+		return InvalidRequest("response_format.json_schema is required when type=json_schema", "response_format.json_schema")
+	}
+	if strings.TrimSpace(request.ResponseFormat.Name) == "" {
+		return InvalidRequest("response_format.json_schema.name is required", "response_format.json_schema.name")
+	}
+	if _, ok := schemaRecord["schema"].(map[string]any); !ok {
+		return InvalidRequest("response_format.json_schema.schema is required", "response_format.json_schema.schema")
+	}
+	return nil
+}
+
+func toolSchemaContains(items []any, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, item := range items {
+		record, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(stringValue(record["name"], "")) == target {
+			return true
+		}
+		function, ok := record["function"].(map[string]any)
+		if ok && strings.TrimSpace(stringValue(function["name"], "")) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func BuildErrorBody(protocolValue string, err error) map[string]any {

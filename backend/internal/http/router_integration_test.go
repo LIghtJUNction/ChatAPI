@@ -194,6 +194,56 @@ func TestAnthropicAbortReturnsAnthropicErrorEnvelope(t *testing.T) {
 	}
 }
 
+func TestProtocolRequestValidationRejectsUnknownToolChoice(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := postExternalText(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"input": "hello",
+		"tools": []any{
+			map[string]any{
+				"type":     "function",
+				"function": map[string]any{"name": "weather"},
+			},
+		},
+		"tool_choice": map[string]any{
+			"type":     "function",
+			"function": map[string]any{"name": "lookup"},
+		},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d body=%s", status, body)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode payload: %v body=%s", err, body)
+	}
+	if nestedPathString(payload, "error", "param") != "tool_choice.function.name" {
+		t.Fatalf("unexpected tool choice error payload: %#v", payload)
+	}
+}
+
+func TestProtocolRequestValidationRejectsInvalidJSONSchemaResponseFormat(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := postExternalText(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"input": "hello",
+		"response_format": map[string]any{
+			"type":        "json_schema",
+			"json_schema": map[string]any{"name": "answer"},
+		},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %d body=%s", status, body)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode payload: %v body=%s", err, body)
+	}
+	if nestedPathString(payload, "error", "param") != "response_format.json_schema.schema" {
+		t.Fatalf("unexpected response_format error payload: %#v", payload)
+	}
+}
+
 func TestDraftMarksConversationStreaming(t *testing.T) {
 	env := newTestEnv(t)
 

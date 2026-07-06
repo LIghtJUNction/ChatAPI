@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zyf/chatapi/internal/store"
@@ -257,6 +258,175 @@ func TestBuildErrorBodyUsesProtocolShape(t *testing.T) {
 	}
 	if got := stringValue(anthropicBody["type"], ""); got != "error" {
 		t.Fatalf("unexpected anthropic envelope type: %#v", anthropicBody)
+	}
+}
+
+func TestValidateRequestValidatesToolChoiceAgainstTools(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    map[string]any
+		wantErr string
+		param   string
+	}{
+		{
+			name: "function choice missing name",
+			body: map[string]any{
+				"input": "hello",
+				"tool_choice": map[string]any{
+					"type":     "function",
+					"function": map[string]any{},
+				},
+			},
+			wantErr: "is required when type=function",
+			param:   "tool_choice.function.name",
+		},
+		{
+			name: "function choice unknown tool",
+			body: map[string]any{
+				"input": "hello",
+				"tools": []any{
+					map[string]any{
+						"type":     "function",
+						"function": map[string]any{"name": "weather"},
+					},
+				},
+				"tool_choice": map[string]any{
+					"type":     "function",
+					"function": map[string]any{"name": "lookup"},
+				},
+			},
+			wantErr: "must reference a declared tool",
+			param:   "tool_choice.function.name",
+		},
+		{
+			name: "invalid string choice",
+			body: map[string]any{
+				"input":       "hello",
+				"tool_choice": "lookup",
+			},
+			wantErr: "must be one of",
+			param:   "tool_choice",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRequest("responses", tc.body)
+			requestErr, ok := err.(*RequestError)
+			if !ok || requestErr == nil {
+				t.Fatalf("expected request error, got %v", err)
+			}
+			if !strings.Contains(requestErr.Message, tc.wantErr) || requestErr.Param != tc.param {
+				t.Fatalf("unexpected request error: %#v", requestErr)
+			}
+		})
+	}
+}
+
+func TestValidateRequestAcceptsDeclaredToolChoice(t *testing.T) {
+	cases := []map[string]any{
+		{
+			"input": "hello",
+			"tool_choice": map[string]any{
+				"type":     "function",
+				"function": map[string]any{"name": "lookup"},
+			},
+		},
+		{
+			"input": "hello",
+			"tools": []any{
+				map[string]any{
+					"type":     "function",
+					"function": map[string]any{"name": "lookup"},
+				},
+			},
+			"tool_choice": map[string]any{
+				"type":     "function",
+				"function": map[string]any{"name": "lookup"},
+			},
+		},
+	}
+	for i, body := range cases {
+		err := ValidateRequest("responses", body)
+		if err != nil {
+			t.Fatalf("case %d expected valid request, got %v", i, err)
+		}
+	}
+}
+
+func TestValidateRequestValidatesResponseFormat(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    map[string]any
+		param   string
+		wantErr string
+	}{
+		{
+			name: "missing json_schema object",
+			body: map[string]any{
+				"input": "hello",
+				"response_format": map[string]any{
+					"type": "json_schema",
+				},
+			},
+			param:   "response_format.json_schema",
+			wantErr: "is required when type=json_schema",
+		},
+		{
+			name: "missing schema name",
+			body: map[string]any{
+				"input": "hello",
+				"response_format": map[string]any{
+					"type":        "json_schema",
+					"json_schema": map[string]any{"schema": map[string]any{"type": "object"}},
+				},
+			},
+			param:   "response_format.json_schema.name",
+			wantErr: "name is required",
+		},
+		{
+			name: "missing schema body",
+			body: map[string]any{
+				"input": "hello",
+				"response_format": map[string]any{
+					"type":        "json_schema",
+					"json_schema": map[string]any{"name": "answer"},
+				},
+			},
+			param:   "response_format.json_schema.schema",
+			wantErr: "schema is required",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRequest("responses", tc.body)
+			requestErr, ok := err.(*RequestError)
+			if !ok || requestErr == nil {
+				t.Fatalf("expected request error, got %v", err)
+			}
+			if !strings.Contains(requestErr.Message, tc.wantErr) || requestErr.Param != tc.param {
+				t.Fatalf("unexpected request error: %#v", requestErr)
+			}
+		})
+	}
+}
+
+func TestValidateRequestAcceptsJSONSchemaResponseFormat(t *testing.T) {
+	err := ValidateRequest("responses", map[string]any{
+		"input": "hello",
+		"response_format": map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name": "answer",
+				"schema": map[string]any{
+					"type": "object",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected valid response format, got %v", err)
 	}
 }
 

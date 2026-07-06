@@ -914,6 +914,7 @@ ChatAPI 的 OpenAI Responses、Chat Completions、Anthropic Messages 三套协�
 - 只依赖标准库和少量 JSON/schema 工具，方便其他项目引用。
 - 当前 Go 重构分支已先把协议层错误输出收回 `internal/protocol`：模型兼容入口在创建 pending turn 之前会先做最小请求校验（例如 `stream` 必须为布尔值、请求里必须有至少一个用户输入 part），并按协议返回错误 envelope，而不是直接吐通用 `http.Error`。Responses / Chat Completions 当前统一返回 OpenAI 风格 `{error:{message,type,code,param}}`，Anthropic Messages 返回 `{type:"error", error:{type,message}}`。人工 abort 终态也会按原请求协议返回同一套错误外形。
 - 当前协议层还已开始补齐 `tools` / `tool_choice` / `response_format` 的最小契约校验：当 `tool_choice.type=function` 时，必须给出 `tool_choice.function.name`；如果本次请求同时声明了 tools 列表，该名字还必须出现在声明的 tools 里。这样既能约束真实 tool schema 场景，也不会打断当前把 `tool_choice` 当作结构化元数据使用、但暂时不附带完整 tools 列表的请求。`response_format.type=json_schema` 时，必须给出 `json_schema.name` 和对象形态的 `json_schema.schema`。这样后续无论是 ChatAPI handler、KirariNetwork 上游网关还是浏览器端辅助，只要复用这套 protocol 包，就能得到一致的 400 错误语义，而不是各自手写校验。
+- 协议编码侧当前也已开始从“直接拼 map”收口到可复用 encoder：Responses/Chat Completions/Anthropic 的 tool call、tool result、usage、tool-use block 已抽到共享 helper，`BuildResponseForMeta(meta, result)` 可在不依赖 `store.Conversation` 的情况下直接输出最终响应 JSON，便于后续把协议包拆出去给 KirariNetwork 或独立代理复用。
 
 这个包可以同时被 ChatAPI 和 KirariNetwork 使用：ChatAPI 用它接收外部 Agent 请求并归一化为 pending turn，KirariNetwork 可用它把不同上游模型协议归一化为统一模型网关响应。
 

@@ -95,7 +95,7 @@ func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent
 	switch meta.Protocol {
 	case ProtocolChatCompletions:
 		chunk := map[string]any{
-			"id":     "chatcmpl_" + uuid.NewString(),
+			"id":     chatCompletionID(result),
 			"object": "chat.completion.chunk",
 			"model":  meta.Model,
 			"choices": []map[string]any{{
@@ -108,14 +108,7 @@ func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent
 			chunk["choices"] = []map[string]any{{
 				"index": 0,
 				"delta": map[string]any{
-					"tool_calls": []map[string]any{{
-						"id":   stringValue(result.ToolCallID, "toolcall_"+uuid.NewString()),
-						"type": "function",
-						"function": map[string]any{
-							"name":      result.ToolName,
-							"arguments": result.OutputText,
-						},
-					}},
+					"tool_calls": []map[string]any{buildChatCompletionToolCall(result)},
 				},
 				"finish_reason": "tool_calls",
 			}}
@@ -155,27 +148,6 @@ func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent
 			},
 		}
 	default:
-		output := []map[string]any{{
-			"type": "message",
-			"role": "assistant",
-			"content": []map[string]any{
-				{"type": "output_text", "text": result.OutputText},
-			},
-		}}
-		if result.Mode == "tool_call" {
-			output = []map[string]any{{
-				"type":      "function_call",
-				"name":      result.ToolName,
-				"call_id":   stringValue(result.ToolCallID, "call_"+uuid.NewString()),
-				"arguments": result.OutputText,
-			}}
-		} else if result.Mode == "tool_result" {
-			output = []map[string]any{{
-				"type":    "function_call_output",
-				"call_id": stringValue(result.ToolCallID, "call_"+uuid.NewString()),
-				"output":  stringValue(result.ToolOutput, result.OutputText),
-			}}
-		}
 		return []StreamEvent{{
 			Event: "response.completed",
 			Data: map[string]any{
@@ -190,7 +162,7 @@ func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent
 						"output_tokens": usage.OutputTokens,
 						"total_tokens":  usage.TotalTokens,
 					},
-					"output": output,
+					"output": buildResponsesOutput(result),
 				},
 			},
 		}}
@@ -203,12 +175,7 @@ func BuildAnthropicContentBlockStart(result TurnResult) StreamEvent {
 		"text": "",
 	}
 	if result.Mode == "tool_call" {
-		block = map[string]any{
-			"type":  "tool_use",
-			"id":    stringValue(result.ToolCallID, "toolu_"+uuid.NewString()),
-			"name":  result.ToolName,
-			"input": parseJSONValue(result.OutputText),
-		}
+		block = buildAnthropicToolUseBlock(result)
 	}
 	return StreamEvent{
 		Event: "content_block_start",

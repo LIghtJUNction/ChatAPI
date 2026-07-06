@@ -1,8 +1,6 @@
 package protocol
 
 import (
-	"encoding/json"
-
 	"github.com/google/uuid"
 
 	"github.com/zyf/chatapi/internal/store"
@@ -10,115 +8,50 @@ import (
 
 func BuildResponse(conversation store.Conversation, result TurnResult) map[string]any {
 	meta := ConversationMetaFromConversation(conversation)
+	body := BuildResponseForMeta(meta, result)
+	body["conversation"] = conversation
+	return body
+}
+
+func BuildResponseForMeta(meta ConversationMeta, result TurnResult) map[string]any {
 	usage := normalizeUsage(result.Usage)
 	switch meta.Protocol {
 	case ProtocolChatCompletions:
-		message := map[string]any{
-			"role":    "assistant",
-			"content": result.OutputText,
-		}
-		if result.Mode == "tool_call" {
-			message["content"] = ""
-			message["tool_calls"] = []map[string]any{
-				{
-					"id":   stringValue(result.ToolCallID, "toolcall_"+uuid.NewString()),
-					"type": "function",
-					"function": map[string]any{
-						"name":      result.ToolName,
-						"arguments": result.OutputText,
-					},
-				},
-			}
-		}
 		return map[string]any{
-			"id":      stringValue(result.ResponseID, "chatcmpl_"+uuid.NewString()),
+			"id":      chatCompletionID(result),
 			"object":  "chat.completion",
 			"model":   meta.Model,
-			"choices": []map[string]any{{"index": 0, "message": message, "finish_reason": "stop"}},
+			"choices": []map[string]any{{"index": 0, "message": buildChatCompletionMessage(result), "finish_reason": "stop"}},
 			"usage": map[string]any{
 				"prompt_tokens":     usage.InputTokens,
 				"completion_tokens": usage.OutputTokens,
 				"total_tokens":      usage.TotalTokens,
 			},
-			"conversation": conversation,
 		}
 	case ProtocolAnthropicMessages:
-		content := []map[string]any{{"type": "text", "text": result.OutputText}}
-		if result.Mode == "tool_call" {
-			content = []map[string]any{{
-				"type":  "tool_use",
-				"id":    stringValue(result.ToolCallID, "toolu_"+uuid.NewString()),
-				"name":  result.ToolName,
-				"input": parseJSONValue(result.OutputText),
-			}}
-		}
 		return map[string]any{
-			"id":          stringValue(result.ResponseID, "msg_"+uuid.NewString()),
+			"id":          anthropicMessageID(result),
 			"type":        "message",
 			"role":        "assistant",
 			"stop_reason": "end_turn",
-			"content":     content,
+			"content":     buildAnthropicContent(result),
 			"usage": map[string]any{
 				"input_tokens":  usage.InputTokens,
 				"output_tokens": usage.OutputTokens,
 			},
-			"conversation": conversation,
 		}
 	default:
-		output := []map[string]any{{
-			"type": "message",
-			"role": "assistant",
-			"content": []map[string]any{
-				{"type": "output_text", "text": result.OutputText},
-			},
-		}}
-		if result.Mode == "tool_call" {
-			output = []map[string]any{{
-				"type":      "function_call",
-				"name":      result.ToolName,
-				"call_id":   stringValue(result.ToolCallID, "call_"+uuid.NewString()),
-				"arguments": result.OutputText,
-			}}
-		} else if result.Mode == "tool_result" {
-			output = []map[string]any{{
-				"type":    "function_call_output",
-				"call_id": stringValue(result.ToolCallID, "call_"+uuid.NewString()),
-				"output":  stringValue(result.ToolOutput, result.OutputText),
-			}}
-		}
 		return map[string]any{
-			"id":           result.ResponseID,
-			"object":       "response",
-			"status":       "completed",
-			"conversation": conversation,
-			"output_text":  result.OutputText,
+			"id":          responseIDWithFallback(result, "resp_"+uuid.NewString()),
+			"object":      "response",
+			"status":      "completed",
+			"output_text": result.OutputText,
 			"usage": map[string]any{
 				"input_tokens":  usage.InputTokens,
 				"output_tokens": usage.OutputTokens,
 				"total_tokens":  usage.TotalTokens,
 			},
-			"output": output,
+			"output": buildResponsesOutput(result),
 		}
 	}
-}
-
-func parseJSONValue(raw string) any {
-	var value any
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return raw
-	}
-	return value
-}
-
-func normalizeUsage(usage Usage) Usage {
-	if usage.InputTokens < 0 {
-		usage.InputTokens = 0
-	}
-	if usage.OutputTokens < 0 {
-		usage.OutputTokens = 0
-	}
-	if usage.TotalTokens <= 0 {
-		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
-	}
-	return usage
 }

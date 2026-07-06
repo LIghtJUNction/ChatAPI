@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -202,6 +203,67 @@ func TestBuildStreamCompleteIncludesUsageForResponsesAndAnthropic(t *testing.T) 
 	usage := messageDelta["usage"].(map[string]any)
 	if usage["output_tokens"] != 4 {
 		t.Fatalf("unexpected anthropic stream usage: %#v", usage)
+	}
+}
+
+func TestBuildResponseForMetaMatchesStoredConversationEncoding(t *testing.T) {
+	conversation := store.Conversation{
+		ResponseID: "resp_meta_match",
+		Metadata: map[string]any{
+			"request_format": "responses",
+			"model":          "chatapi-lab",
+		},
+	}
+	result := TurnResult{
+		ResponseID: "resp_meta_match",
+		OutputText: "{\"city\":\"tokyo\"}",
+		Mode:       "tool_call",
+		ToolName:   "lookup_weather",
+		ToolCallID: "call_meta_match",
+		Usage:      Usage{InputTokens: 1, OutputTokens: 2},
+	}
+	withConversation := BuildResponse(conversation, result)
+	metaOnly := BuildResponseForMeta(ConversationMetaFromConversation(conversation), result)
+	delete(withConversation, "conversation")
+	if !reflect.DeepEqual(withConversation, metaOnly) {
+		t.Fatalf("meta-only response diverged\nwith=%#v\nmeta=%#v", withConversation, metaOnly)
+	}
+}
+
+func TestBuildStreamCompleteUsesSharedToolPayloads(t *testing.T) {
+	result := TurnResult{
+		ResponseID: "resp_tool_payload",
+		OutputText: "{\"city\":\"tokyo\"}",
+		Mode:       "tool_call",
+		ToolName:   "lookup_weather",
+		ToolCallID: "call_tool_payload",
+	}
+
+	responsesEvents := BuildStreamComplete(ConversationMeta{
+		Protocol:   ProtocolResponses,
+		Model:      "demo",
+		ResponseID: result.ResponseID,
+	}, result)
+	responsePayload := responsesEvents[0].Data.(map[string]any)["response"].(map[string]any)
+	output := responsePayload["output"].([]map[string]any)
+	if output[0]["call_id"] != "call_tool_payload" || output[0]["name"] != "lookup_weather" {
+		t.Fatalf("unexpected responses tool output payload: %#v", output[0])
+	}
+
+	chatEvents := BuildStreamComplete(ConversationMeta{
+		Protocol: ProtocolChatCompletions,
+		Model:    "demo",
+	}, result)
+	choices := chatEvents[0].Data.(map[string]any)["choices"].([]map[string]any)
+	toolCalls := choices[0]["delta"].(map[string]any)["tool_calls"].([]map[string]any)
+	if nestedPathString(toolCalls[0], "function", "name") != "lookup_weather" || toolCalls[0]["id"] != "call_tool_payload" {
+		t.Fatalf("unexpected chat completions tool call payload: %#v", toolCalls[0])
+	}
+
+	anthropicBlock := BuildAnthropicContentBlockStart(result)
+	contentBlock := anthropicBlock.Data.(map[string]any)["content_block"].(map[string]any)
+	if contentBlock["id"] != "call_tool_payload" || contentBlock["name"] != "lookup_weather" {
+		t.Fatalf("unexpected anthropic tool use payload: %#v", contentBlock)
 	}
 }
 

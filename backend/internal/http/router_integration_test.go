@@ -780,6 +780,49 @@ func TestConfigSystemRoutes(t *testing.T) {
 	assertAuditCount(t, env, "admin.config", "system_settings", "", "update", "success", 1)
 }
 
+func TestConfigAutomationRulesRoutes(t *testing.T) {
+	env := newTestEnv(t)
+
+	initial := env.getJSON(t, "/api/config/automation-rules", http.StatusOK)
+	initialRules := initial["rules"].([]any)
+	if len(initialRules) != 0 {
+		t.Fatalf("expected empty automation rules by default: %#v", initial)
+	}
+
+	updateResp := env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_demo",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "hello"}},
+					"excludes": []map[string]any{},
+				},
+				"timing": map[string]any{
+					"delay_seconds":           0,
+					"repeat_interval_seconds": 0,
+					"max_output_count":        3,
+				},
+				"action": map[string]any{
+					"type": "output_text",
+					"text": "world",
+				},
+			},
+		},
+	}, http.StatusOK)
+	updatedRules := updateResp["rules"].([]any)
+	if len(updatedRules) != 1 || nestedString(updatedRules[0].(map[string]any), "id") != "rule_demo" {
+		t.Fatalf("unexpected updated automation rules: %#v", updateResp)
+	}
+
+	getResp := env.getJSON(t, "/api/config/automation-rules", http.StatusOK)
+	persistedRules := getResp["rules"].([]any)
+	if len(persistedRules) != 1 || nestedString(persistedRules[0].(map[string]any), "id") != "rule_demo" {
+		t.Fatalf("unexpected persisted automation rules: %#v", getResp)
+	}
+	assertAuditCount(t, env, "user.config", "automation_rule", "", "replace", "success", 1)
+}
+
 func TestUserIdentitiesListAndUnlink(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("identity-secret")

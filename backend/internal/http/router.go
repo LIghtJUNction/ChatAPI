@@ -58,6 +58,7 @@ func NewRouter(
 	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService, Audit: auditService}
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
+	configAutomationRulesHandler := handlers.ConfigAutomationRulesHandler{Config: cfg, Service: automationRuleService, Audit: auditService}
 	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
 	configSystemHandler := handlers.ConfigSystemHandler{Config: cfg, Service: service.NewSystemSettingsService(dataStore, cfg), Audit: auditService}
 	userIdentitiesHandler := handlers.UserIdentitiesHandler{Service: service.NewUserIdentityService(dataStore), Audit: auditService}
@@ -92,6 +93,8 @@ func NewRouter(
 	router.Delete("/api/user/model-api-keys/{keyID}", userModelAPIKeysHandler.Delete)
 	router.Get("/api/user/config", userConfigHandler.Get)
 	router.Post("/api/user/config", userConfigHandler.Set)
+	router.Get("/api/config/automation-rules", configAutomationRulesHandler.Get)
+	router.Post("/api/config/automation-rules", configAutomationRulesHandler.Post)
 	router.Get("/api/config/models", configModelsHandler.Get)
 	router.Post("/api/config/models", configModelsHandler.Post)
 	router.Delete("/api/config/models/{modelID}", configModelsHandler.Delete)

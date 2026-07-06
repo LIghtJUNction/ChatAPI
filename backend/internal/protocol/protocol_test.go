@@ -8,6 +8,14 @@ import (
 	"github.com/zyf/chatapi/internal/store"
 )
 
+type responseFixture struct {
+	name       string
+	meta       ConversationMeta
+	result     TurnResult
+	assertBody func(t *testing.T, body map[string]any)
+	assertSSE  func(t *testing.T, events []StreamEvent)
+}
+
 func TestParseRequestReturnsTypedProtocol(t *testing.T) {
 	request := ParseRequest("chat_completions", map[string]any{
 		"model":  "gpt-test",
@@ -264,6 +272,120 @@ func TestBuildStreamCompleteUsesSharedToolPayloads(t *testing.T) {
 	contentBlock := anthropicBlock.Data.(map[string]any)["content_block"].(map[string]any)
 	if contentBlock["id"] != "call_tool_payload" || contentBlock["name"] != "lookup_weather" {
 		t.Fatalf("unexpected anthropic tool use payload: %#v", contentBlock)
+	}
+}
+
+func TestProtocolResponseFixtures(t *testing.T) {
+	fixtures := []responseFixture{
+		{
+			name: "responses_assistant_message",
+			meta: ConversationMeta{Protocol: ProtocolResponses, Model: "demo", ResponseID: "resp_fixture_1"},
+			result: TurnResult{
+				ResponseID: "resp_fixture_1",
+				OutputText: "hello world",
+				Mode:       "assistant_message",
+				Usage:      Usage{InputTokens: 3, OutputTokens: 4},
+			},
+			assertBody: func(t *testing.T, body map[string]any) {
+				t.Helper()
+				if body["object"] != "response" || body["status"] != "completed" || body["output_text"] != "hello world" {
+					t.Fatalf("unexpected responses body: %#v", body)
+				}
+				output := body["output"].([]map[string]any)
+				if output[0]["type"] != "message" {
+					t.Fatalf("unexpected responses output block: %#v", output[0])
+				}
+				usage := body["usage"].(map[string]any)
+				if usage["total_tokens"] != 7 {
+					t.Fatalf("unexpected responses usage: %#v", usage)
+				}
+			},
+			assertSSE: func(t *testing.T, events []StreamEvent) {
+				t.Helper()
+				if len(events) != 1 || events[0].Event != "response.completed" {
+					t.Fatalf("unexpected responses events: %#v", events)
+				}
+				payload := events[0].Data.(map[string]any)["response"].(map[string]any)
+				if payload["output_text"] != "hello world" {
+					t.Fatalf("unexpected responses stream payload: %#v", payload)
+				}
+			},
+		},
+		{
+			name: "chat_completions_tool_call",
+			meta: ConversationMeta{Protocol: ProtocolChatCompletions, Model: "demo"},
+			result: TurnResult{
+				ResponseID: "resp_fixture_2",
+				OutputText: "{\"city\":\"tokyo\"}",
+				Mode:       "tool_call",
+				ToolName:   "lookup_weather",
+				ToolCallID: "tool_fixture_1",
+				Usage:      Usage{InputTokens: 5, OutputTokens: 6},
+			},
+			assertBody: func(t *testing.T, body map[string]any) {
+				t.Helper()
+				if body["object"] != "chat.completion" {
+					t.Fatalf("unexpected chat completion body: %#v", body)
+				}
+				choices := body["choices"].([]map[string]any)
+				message := choices[0]["message"].(map[string]any)
+				toolCalls := message["tool_calls"].([]map[string]any)
+				if toolCalls[0]["id"] != "tool_fixture_1" || nestedPathString(toolCalls[0], "function", "name") != "lookup_weather" {
+					t.Fatalf("unexpected chat completion tool call body: %#v", toolCalls[0])
+				}
+			},
+			assertSSE: func(t *testing.T, events []StreamEvent) {
+				t.Helper()
+				if len(events) != 2 || events[1].Data != "[DONE]" {
+					t.Fatalf("unexpected chat completion events: %#v", events)
+				}
+				choices := events[0].Data.(map[string]any)["choices"].([]map[string]any)
+				if choices[0]["finish_reason"] != "tool_calls" {
+					t.Fatalf("unexpected chat completion finish reason: %#v", choices[0])
+				}
+			},
+		},
+		{
+			name: "anthropic_tool_call",
+			meta: ConversationMeta{Protocol: ProtocolAnthropicMessages, Model: "claude-demo"},
+			result: TurnResult{
+				ResponseID: "resp_fixture_3",
+				OutputText: "{\"city\":\"tokyo\"}",
+				Mode:       "tool_call",
+				ToolName:   "lookup_weather",
+				ToolCallID: "toolu_fixture_1",
+				Usage:      Usage{InputTokens: 7, OutputTokens: 8},
+			},
+			assertBody: func(t *testing.T, body map[string]any) {
+				t.Helper()
+				if body["type"] != "message" || body["stop_reason"] != "end_turn" {
+					t.Fatalf("unexpected anthropic body: %#v", body)
+				}
+				content := body["content"].([]map[string]any)
+				if content[0]["id"] != "toolu_fixture_1" || content[0]["name"] != "lookup_weather" {
+					t.Fatalf("unexpected anthropic content: %#v", content[0])
+				}
+			},
+			assertSSE: func(t *testing.T, events []StreamEvent) {
+				t.Helper()
+				if len(events) != 3 || events[0].Event != "content_block_stop" || events[2].Event != "message_stop" {
+					t.Fatalf("unexpected anthropic events: %#v", events)
+				}
+				delta := events[1].Data.(map[string]any)
+				if nestedPathString(delta, "delta", "stop_reason") != "tool_use" {
+					t.Fatalf("unexpected anthropic stop reason: %#v", delta)
+				}
+			},
+		},
+	}
+
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			body := BuildResponseForMeta(fixture.meta, fixture.result)
+			fixture.assertBody(t, body)
+			events := BuildStreamComplete(fixture.meta, fixture.result)
+			fixture.assertSSE(t, events)
+		})
 	}
 }
 

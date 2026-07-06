@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/store"
 )
 
 type UpstreamAssistantSchema struct {
@@ -21,6 +22,15 @@ type UpstreamAssistantHints struct {
 	CandidateRecursive  bool     `json:"candidate_recursive"`
 	Warnings            []string `json:"warnings,omitempty"`
 	Notes               []string `json:"notes,omitempty"`
+}
+
+type UpstreamInputHints struct {
+	DefaultMaxInputMessages int              `json:"default_max_input_messages"`
+	AvailableMessages       int              `json:"available_messages"`
+	RecommendedMessages     []map[string]any `json:"recommended_messages"`
+	Truncated               bool             `json:"truncated"`
+	ExcludedMessages        int              `json:"excluded_messages"`
+	ConstructionRules       []string         `json:"construction_rules"`
 }
 
 func BuildUpstreamAssistantSchema() UpstreamAssistantSchema {
@@ -68,6 +78,46 @@ func BuildUpstreamAssistantHints(cfg config.Config, observedBaseURL string, cand
 		hints.Warnings = append(hints.Warnings, "candidate_base_url points to the current ChatAPI instance and may recurse back into pending turns")
 	}
 	return hints
+}
+
+func BuildUpstreamInputHints(messages []store.Message, draftText string, maxInputMessages int) UpstreamInputHints {
+	if maxInputMessages <= 0 {
+		maxInputMessages = 20
+	}
+	selected := messages
+	truncated := false
+	excluded := 0
+	if len(selected) > maxInputMessages {
+		truncated = true
+		excluded = len(selected) - maxInputMessages
+		selected = selected[len(selected)-maxInputMessages:]
+	}
+	recommended := make([]map[string]any, 0, len(selected))
+	for _, item := range selected {
+		recommended = append(recommended, map[string]any{
+			"id":         item.ID,
+			"role":       item.Role,
+			"content":    item.Content,
+			"created_at": item.CreatedAt,
+			"status":     item.Status,
+		})
+	}
+	rules := []string{
+		"Use recommended_messages as the default upstream context window in chronological order.",
+		"If truncated=true, older messages were dropped by count only; no token-based truncation has been applied yet.",
+		"Do not convert the current draft into a committed assistant message automatically.",
+	}
+	if strings.TrimSpace(draftText) != "" {
+		rules = append(rules, "If the UI wants the upstream model to see the current draft, pass draft.text separately instead of mutating recommended_messages.")
+	}
+	return UpstreamInputHints{
+		DefaultMaxInputMessages: maxInputMessages,
+		AvailableMessages:       len(messages),
+		RecommendedMessages:     recommended,
+		Truncated:               truncated,
+		ExcludedMessages:        excluded,
+		ConstructionRules:       rules,
+	}
 }
 
 func currentInstanceURLs(cfg config.Config, observedBaseURL string) []string {

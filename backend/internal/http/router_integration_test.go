@@ -1388,6 +1388,17 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	if !nestedPathBool(resp, "upstream_hints", "candidate_recursive") {
 		t.Fatalf("expected recursive upstream hint: %#v", resp)
 	}
+	upstreamInputHints := resp["upstream_input_hints"].(map[string]any)
+	if numericValue(upstreamInputHints["available_messages"]) < 1 {
+		t.Fatalf("unexpected upstream input hints message count: %#v", resp)
+	}
+	recommendedMessages, ok := upstreamInputHints["recommended_messages"].([]any)
+	if !ok || len(recommendedMessages) < 1 {
+		t.Fatalf("unexpected upstream recommended messages: %#v", resp)
+	}
+	if !containsStringValue(upstreamInputHints["construction_rules"], "Do not convert the current draft into a committed assistant message automatically.") {
+		t.Fatalf("unexpected upstream input construction rules: %#v", resp)
+	}
 
 	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
 		"text": "done",
@@ -1476,6 +1487,10 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	}
 	if nestedPathBool(resp, "upstream_hints", "candidate_recursive") {
 		t.Fatalf("did not expect recursive upstream hint: %#v", resp)
+	}
+	upstreamInputHints := resp["upstream_input_hints"].(map[string]any)
+	if !nestedPathBool(resp, "upstream_input_hints", "truncated") && numericValue(upstreamInputHints["default_max_input_messages"]) != 20 {
+		t.Fatalf("unexpected upstream input default window: %#v", resp)
 	}
 
 	_, _ = env.postJSONWithCookieAndHeaders(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{

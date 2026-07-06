@@ -76,7 +76,7 @@
 - 系统配置已落地最小管理接口：`GET /api/admin/config` 返回 `config` 表列表和聚合 config map，`POST /api/admin/config` 按 key upsert JSON object 配置并写入 `admin.config` 审计事件；当前只负责持久化和管理，不会自动覆盖 `.env` 派生的运行时配置，后续各服务再逐步读取对应 key。
 - 面向当前前端系统设置面板的最小接口也已补上：`GET/POST /api/config/system` 当前要求 admin actor，读写 `config.system_settings` 单条 JSON，并把前端已使用的字段展平成固定响应结构；`realtime_*`、图片大小上限和 SMTP provider 选项会优先回显当前运行时配置，其他字段先作为可持久化设置保留，后续再逐步接入真实运行时行为。
 - 交互式配置 schema 已开始显式暴露：`GET /api/user/config/schema` 返回当前支持的用户偏好字段、默认值和保留前缀；`GET /api/config/system/schema` 返回系统设置字段、默认值、只读项和枚举/最小值等校验 metadata，避免前端和 CLI 继续硬编码这批设置键。原始 `GET/POST /api/admin/config` 目前仍保留为自由 JSON object 持久化接口，不额外伪造一层 schema。
-- Tool Call 辅助上下文接口已落地最小版本：`GET /api/workspace/tool-call/assist-context` 当前要求交互式用户 actor，接受 `request_id` 或 `conversation_id`，返回当前用户可见的 `request`、解析后的 `parsed` 视图、`conversation`、`messages`、当前 `draft`，以及 `assist_schema`、`upstream_assistant_schema`、`upstream_hints`。其中 `parsed.normalized_tool_schemas` 会把不同协议/客户端风格的原始 `tool_schemas` 统一投影成稳定结构 `{name, description, parameters, type}`，减少前端继续手写协议差异适配。`assist_schema` 会显式描述浏览器端期望的大模型结构化输出 JSON Schema、confidence 枚举和前端校验规则；`upstream_assistant_schema` 会声明浏览器本地上游配置字段、协议枚举和敏感字段；`upstream_hints` 会返回当前实例可见 base URL 列表，并可结合可选 `candidate_base_url` 提前判断是否会递归打回当前 ChatAPI。
+- Tool Call 辅助上下文接口已落地最小版本：`GET /api/workspace/tool-call/assist-context` 当前要求交互式用户 actor，接受 `request_id` 或 `conversation_id`，返回当前用户可见的 `request`、解析后的 `parsed` 视图、`conversation`、`messages`、当前 `draft`，以及 `assist_schema`、`upstream_assistant_schema`、`upstream_hints`、`upstream_input_hints`。其中 `parsed.normalized_tool_schemas` 会把不同协议/客户端风格的原始 `tool_schemas` 统一投影成稳定结构 `{name, description, parameters, type}`，减少前端继续手写协议差异适配。`assist_schema` 会显式描述浏览器端期望的大模型结构化输出 JSON Schema、confidence 枚举和前端校验规则；`upstream_assistant_schema` 会声明浏览器本地上游配置字段、协议枚举和敏感字段；`upstream_hints` 会返回当前实例可见 base URL 列表，并可结合可选 `candidate_base_url` 提前判断是否会递归打回当前 ChatAPI；`upstream_input_hints` 会给出默认 `max_input_messages`、推荐消息窗口、是否发生截断和构造规则，避免前端再次各自实现消息裁剪策略。
 - 管理员 SMTP 测试邮件接口已补上：`POST /api/admin/send-test-email` 当前直接读取 `.env` 派生的 SMTP 运行时配置发送测试邮件，不读取数据库里的 provider 凭据；配置缺失或 SMTP 禁用时返回 `400`，真实发送失败返回 `502`，并记录 `admin.email / send_test_email` 审计事件。这样前端系统设置页可以验证“当前进程实际生效的 SMTP 配置”，而不是仅验证持久化设置值。
 - 用户侧改密最小接口已补上：`POST /api/user/password` 当前按 actor 更新本地 `users.password_hash`，用于前端设置页的“重置密码”表单；这条链路只负责已登录用户的本地密码更新，不包含邮箱找回、验证码或 TOTP 二次确认，后续正式账号恢复流程再单独补齐。
 - Upload/Image Store 已落地最小兼容接口：`POST /api/uploads/imgs` 使用服务端生成文件名、内容嗅探和大小限制写入 `data/uploads/imgs`，并写入 `uploaded_images` 元数据表记录 owner、原始文件名、MIME、字节数和访问 URL；`GET /api/uploads/imgs/{filename}` 使用严格文件名白名单和根目录校验读取图片；`GET /api/uploads/imgs/usage` 返回文件数与字节数；`CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES` 可先按 owner 已上传图片字节数阻断新图片上传；管理员可通过 `PUT/DELETE /api/admin/storage/users/{owner_id}/quota` 设置或恢复单用户配额覆盖；`GET /api/admin/storage/orphans` 可 dry-run 预览无元数据的孤儿图片，`POST /api/admin/storage/orphans/cleanup` 可在显式 `dry_run:false` 后删除这些孤儿文件并写审计日志。
@@ -1189,12 +1189,13 @@ GC 设置：
 - 支持用户取消正在进行的上游请求。
 - 上游请求默认不进入 ChatAPI 的公开 `/v1/*` pending turn 流程，避免递归调用自身。
 - 如果 base URL 指向当前 ChatAPI 实例，应提示递归风险并拒绝或要求显式确认。当前 Go 重构分支已通过 `assist-context.upstream_hints` 返回 `current_instance_urls`、`candidate_recursive` 和 warning 文本；递归判断优先按浏览器当前访问的实例入口（request host / forwarded proto）计算，而不是只依赖服务端监听地址。
+- 当前 Go 重构分支还会通过 `assist-context.upstream_input_hints` 返回默认 `max_input_messages=20`、按时间顺序保留最近消息窗口的 `recommended_messages`、`truncated` / `excluded_messages` 标记，以及“草稿文本如需传给上游应单独传，不应伪装成已提交 assistant message”的构造规则。
 - 浏览器直连会受 CORS 限制；文档应说明如果云厂商不允许浏览器跨域请求，用户需要使用允许 CORS 的兼容网关、本地代理或未来可选的服务端上游代理。
 
 建议路由：
 
 - 首版默认不需要服务端配置路由和 assist 路由，上游配置由浏览器本地保存。
-- 当前 Go 重构分支已先提供 `GET /api/workspace/tool-call/assist-context`：返回当前用户可见的上下文、原始 `tool_schemas`、标准化后的 `normalized_tool_schemas`、草稿、`assist_schema`、`upstream_assistant_schema` 和 `upstream_hints`，不接收上游 key，不请求上游模型。
+- 当前 Go 重构分支已先提供 `GET /api/workspace/tool-call/assist-context`：返回当前用户可见的上下文、原始 `tool_schemas`、标准化后的 `normalized_tool_schemas`、草稿、`assist_schema`、`upstream_assistant_schema`、`upstream_hints` 和 `upstream_input_hints`，不接收上游 key，不请求上游模型。
 - 如果未来启用服务端代理，再增加 `POST /api/workspace/tool-call/assist`，并要求管理员显式开启。
 
 安全边界：

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestBuildUpstreamAssistantSchema(t *testing.T) {
@@ -49,5 +50,26 @@ func TestBuildUpstreamAssistantHintsUsesObservedBaseURL(t *testing.T) {
 	hints := BuildUpstreamAssistantHints(cfg, "http://127.0.0.1:39123", "http://127.0.0.1:39123/v1")
 	if !hints.CandidateRecursive {
 		t.Fatalf("expected recursive candidate via observed base url: %#v", hints)
+	}
+}
+
+func TestBuildUpstreamInputHintsTruncatesNewestWindow(t *testing.T) {
+	messages := []store.Message{
+		{ID: "msg1", Role: "user", Content: "one"},
+		{ID: "msg2", Role: "assistant", Content: "two"},
+		{ID: "msg3", Role: "user", Content: "three"},
+	}
+	hints := BuildUpstreamInputHints(messages, "draft", 2)
+	if !hints.Truncated || hints.ExcludedMessages != 1 {
+		t.Fatalf("expected truncation metadata: %#v", hints)
+	}
+	if len(hints.RecommendedMessages) != 2 {
+		t.Fatalf("unexpected recommended messages: %#v", hints)
+	}
+	if hints.RecommendedMessages[0]["id"] != "msg2" || hints.RecommendedMessages[1]["id"] != "msg3" {
+		t.Fatalf("unexpected recommended window order: %#v", hints.RecommendedMessages)
+	}
+	if len(hints.ConstructionRules) < 3 {
+		t.Fatalf("expected construction rules: %#v", hints)
 	}
 }

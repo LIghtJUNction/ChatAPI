@@ -68,6 +68,7 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
 	userPasswordHandler := handlers.UserPasswordHandler{Config: cfg, Password: service.NewUserPasswordService(dataStore), Audit: auditService}
+	kirariIntegrationHandler := handlers.KirariIntegrationHandler{Config: cfg, Service: service.NewKirariIntegrationService(dataStore, cfg, nil), Audit: auditService}
 	workspaceToolCallHandler := handlers.WorkspaceToolCallHandler{Config: cfg, Service: service.NewWorkspaceToolCallService(dataStore)}
 	configAutomationRulesHandler := handlers.ConfigAutomationRulesHandler{Config: cfg, Service: automationRuleService, Audit: auditService}
 	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
@@ -122,6 +123,7 @@ func NewRouter(
 	router.Get("/api/auth/oidc/login", authHandler.OIDCLogin)
 	router.With(middleware.RequireUserActor()).Get("/api/auth/oidc/link", authHandler.OIDCLink)
 	router.Get("/api/auth/oidc/callback", authHandler.OIDCCallback)
+	router.Get("/api/integrations/kirari/callback", kirariIntegrationHandler.Callback)
 	userRouter := chi.NewRouter()
 	userRouter.Use(middleware.RequireUserActor())
 	userRouter.Get("/app-api-keys", userAppAPIKeysHandler.List)
@@ -139,6 +141,11 @@ func NewRouter(
 	userRouter.Get("/identities/schema", userIdentitiesHandler.Schema)
 	userRouter.Get("/identities", userIdentitiesHandler.List)
 	userRouter.Delete("/identities/{identityID}", userIdentitiesHandler.Delete)
+	userRouter.Get("/integrations/kirari/schema", kirariIntegrationHandler.Schema)
+	userRouter.Get("/integrations/kirari", kirariIntegrationHandler.Status)
+	userRouter.Get("/integrations/kirari/connect", kirariIntegrationHandler.Connect)
+	userRouter.Get("/integrations/kirari/meta", kirariIntegrationHandler.Meta)
+	userRouter.Delete("/integrations/kirari", kirariIntegrationHandler.Disconnect)
 	router.Mount("/api/user", userRouter)
 	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/schema", workspaceToolCallHandler.Schema)
 	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/assist-context", workspaceToolCallHandler.AssistContext)

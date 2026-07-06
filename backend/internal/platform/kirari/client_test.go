@@ -24,6 +24,7 @@ func TestClientAuthorizationURLAndTokenFlow(t *testing.T) {
 		EmailVerified:     true,
 		Name:              "Kirari User",
 		PreferredUsername: "kirari-user",
+		Nonce:             "nonce-fixed",
 	})
 	defer provider.Close()
 
@@ -39,6 +40,7 @@ func TestClientAuthorizationURLAndTokenFlow(t *testing.T) {
 	}
 
 	authURL, session, err := client.AuthorizationURL(context.Background(), AuthorizationOptions{
+		Nonce:     "nonce-fixed",
 		Prompt:    "consent",
 		LoginHint: "kirari@example.com",
 	})
@@ -47,6 +49,9 @@ func TestClientAuthorizationURLAndTokenFlow(t *testing.T) {
 	}
 	if session.State == "" || session.Nonce == "" || session.CodeVerifier == "" || session.CodeChallengeMethod != "S256" {
 		t.Fatalf("unexpected authorization session: %#v", session)
+	}
+	if session.Nonce != "nonce-fixed" {
+		t.Fatalf("unexpected nonce in authorization session: %#v", session)
 	}
 	parsed, err := neturl.Parse(authURL)
 	if err != nil {
@@ -154,6 +159,7 @@ func TestClientExchangeCodeRejectsUserInfoSubjectMismatch(t *testing.T) {
 		Email:             "kirari@example.com",
 		EmailVerified:     true,
 		PreferredUsername: "kirari-user",
+		Nonce:             "nonce-subject-mismatch",
 	})
 	defer provider.Close()
 
@@ -168,12 +174,43 @@ func TestClientExchangeCodeRejectsUserInfoSubjectMismatch(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	_, session, err := client.AuthorizationURL(context.Background(), AuthorizationOptions{})
+	_, session, err := client.AuthorizationURL(context.Background(), AuthorizationOptions{Nonce: "nonce-subject-mismatch"})
 	if err != nil {
 		t.Fatalf("authorization url: %v", err)
 	}
 	if _, err := client.ExchangeCode(context.Background(), "auth-code", session); err != ErrSubjectMismatch {
 		t.Fatalf("expected subject mismatch, got %v", err)
+	}
+}
+
+func TestClientExchangeCodeRejectsNonceMismatch(t *testing.T) {
+	provider := newTestOIDCProvider(t, testOIDCProviderConfig{
+		Subject:           "kirari-subject",
+		Nonce:             "nonce-from-provider",
+		UserInfoSubject:   "kirari-subject",
+		Email:             "kirari@example.com",
+		EmailVerified:     true,
+		PreferredUsername: "kirari-user",
+	})
+	defer provider.Close()
+
+	client, err := NewClient(Config{
+		IssuerURL:      provider.Issuer(),
+		ClientID:       "chatapi",
+		ClientSecret:   "secret",
+		RedirectURL:    "https://chat.example.com/callback",
+		AllowedIssuers: []string{provider.Issuer()},
+	}, provider.server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if _, err := client.ExchangeCode(context.Background(), "auth-code", AuthorizationSession{
+		State:        "state",
+		Nonce:        "nonce-from-session",
+		CodeVerifier: "verifier",
+	}); err != ErrNonceMismatch {
+		t.Fatalf("expected nonce mismatch, got %v", err)
 	}
 }
 
@@ -184,6 +221,7 @@ type testOIDCProviderConfig struct {
 	EmailVerified     bool
 	Name              string
 	PreferredUsername string
+	Nonce             string
 }
 
 type testOIDCProvider struct {
@@ -348,6 +386,7 @@ func (p *testOIDCProvider) signIDToken() (string, error) {
 		"email_verified":     p.config.EmailVerified,
 		"name":               p.config.Name,
 		"preferred_username": p.config.PreferredUsername,
+		"nonce":              p.config.Nonce,
 	}).Serialize()
 }
 

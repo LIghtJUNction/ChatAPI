@@ -80,6 +80,16 @@ type Config struct {
 	OIDCAllowedEmails  []string
 	OIDCAdminEmails    []string
 	OIDCAutoCreateUser bool
+
+	KirariEnabled                    bool
+	KirariIssuerURL                  string
+	KirariClientID                   string
+	KirariClientSecret               string
+	KirariRedirectURL                string
+	KirariScopes                     []string
+	KirariAllowedIssuers             []string
+	KirariMetaEndpointURL            string
+	KirariChatCompletionsEndpointURL string
 }
 
 func LoadEnv(backendRoot string) error {
@@ -165,6 +175,16 @@ func Default(mode Mode, backendRoot string) Config {
 		OIDCAllowedEmails:  nil,
 		OIDCAdminEmails:    nil,
 		OIDCAutoCreateUser: false,
+
+		KirariEnabled:                    false,
+		KirariIssuerURL:                  "",
+		KirariClientID:                   "",
+		KirariClientSecret:               "",
+		KirariRedirectURL:                "",
+		KirariScopes:                     []string{"openid", "profile", "email", "offline_access", "llm:read", "llm:stream"},
+		KirariAllowedIssuers:             nil,
+		KirariMetaEndpointURL:            "",
+		KirariChatCompletionsEndpointURL: "",
 	}
 }
 
@@ -309,6 +329,18 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.OIDCAdminEmails = splitCSV(os.Getenv("CHATAPI_OIDC_ADMIN_EMAILS"))
 	cfg.OIDCAutoCreateUser = parseBool(os.Getenv("CHATAPI_OIDC_AUTO_CREATE_USER"), cfg.OIDCAutoCreateUser)
 
+	cfg.KirariEnabled = parseBool(os.Getenv("CHATAPI_KIRARI_ENABLED"), cfg.KirariEnabled)
+	cfg.KirariIssuerURL = strings.TrimSpace(os.Getenv("CHATAPI_KIRARI_ISSUER_URL"))
+	cfg.KirariClientID = strings.TrimSpace(os.Getenv("CHATAPI_KIRARI_CLIENT_ID"))
+	cfg.KirariClientSecret = strings.TrimSpace(os.Getenv("CHATAPI_KIRARI_CLIENT_SECRET"))
+	cfg.KirariRedirectURL = strings.TrimSpace(os.Getenv("CHATAPI_KIRARI_REDIRECT_URL"))
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_KIRARI_SCOPES")); raw != "" {
+		cfg.KirariScopes = splitCSV(raw)
+	}
+	cfg.KirariAllowedIssuers = splitCSV(os.Getenv("CHATAPI_KIRARI_ALLOWED_ISSUERS"))
+	cfg.KirariMetaEndpointURL = strings.TrimSpace(os.Getenv("CHATAPI_KIRARI_META_ENDPOINT_URL"))
+	cfg.KirariChatCompletionsEndpointURL = strings.TrimSpace(os.Getenv("CHATAPI_KIRARI_CHAT_COMPLETIONS_ENDPOINT_URL"))
+
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_PORT")); raw != "" {
 		port, err := strconv.Atoi(raw)
 		if err != nil {
@@ -445,6 +477,23 @@ func (c Config) Validate() error {
 		}
 		if !containsString(c.OIDCScopes, "openid") {
 			return errors.New("oidc scopes must include openid")
+		}
+	}
+	if c.KirariEnabled {
+		if strings.TrimSpace(c.KirariIssuerURL) == "" {
+			return errors.New("kirari issuer url is required when kirari is enabled")
+		}
+		if strings.TrimSpace(c.KirariClientID) == "" {
+			return errors.New("kirari client id is required when kirari is enabled")
+		}
+		if strings.TrimSpace(c.KirariClientSecret) == "" {
+			return errors.New("kirari client secret is required when kirari is enabled")
+		}
+		if strings.TrimSpace(c.KirariRedirectURL) == "" {
+			return errors.New("kirari redirect url is required when kirari is enabled")
+		}
+		if !containsString(c.KirariScopes, "openid") {
+			return errors.New("kirari scopes must include openid")
 		}
 	}
 	return nil

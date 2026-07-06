@@ -27,6 +27,7 @@ var (
 	ErrMissingCode         = errors.New("authorization code is required")
 	ErrMissingSubject      = errors.New("oidc subject is required")
 	ErrSubjectMismatch     = errors.New("userinfo subject does not match id token subject")
+	ErrNonceMismatch       = errors.New("id token nonce does not match the authorization session")
 )
 
 type Config struct {
@@ -216,7 +217,7 @@ func (c *Client) ExchangeCode(ctx context.Context, code string, session Authoriz
 	if err != nil {
 		return TokenExchangeResult{}, fmt.Errorf("exchange authorization code: %w", err)
 	}
-	result, err := c.buildTokenExchangeResult(ctx, doc, token)
+	result, err := c.buildTokenExchangeResult(ctx, doc, token, session)
 	if err != nil {
 		return TokenExchangeResult{}, err
 	}
@@ -334,7 +335,7 @@ func (c *Client) ChatCompletions(ctx context.Context, accessToken string, body a
 	return resp, nil
 }
 
-func (c *Client) buildTokenExchangeResult(ctx context.Context, doc DiscoveryDocument, token *oauth2.Token) (TokenExchangeResult, error) {
+func (c *Client) buildTokenExchangeResult(ctx context.Context, doc DiscoveryDocument, token *oauth2.Token, session AuthorizationSession) (TokenExchangeResult, error) {
 	if token == nil {
 		return TokenExchangeResult{}, errors.New("token exchange returned nil token")
 	}
@@ -350,6 +351,17 @@ func (c *Client) buildTokenExchangeResult(ctx context.Context, doc DiscoveryDocu
 	idToken, err := provider.Verifier(&oidc.Config{ClientID: c.cfg.ClientID}).Verify(c.clientContext(ctx), rawIDToken)
 	if err != nil {
 		return TokenExchangeResult{}, fmt.Errorf("verify id token: %w", err)
+	}
+	if strings.TrimSpace(session.Nonce) != "" {
+		var nonceClaims struct {
+			Nonce string `json:"nonce"`
+		}
+		if err := idToken.Claims(&nonceClaims); err != nil {
+			return TokenExchangeResult{}, fmt.Errorf("decode id token nonce: %w", err)
+		}
+		if strings.TrimSpace(nonceClaims.Nonce) != strings.TrimSpace(session.Nonce) {
+			return TokenExchangeResult{}, ErrNonceMismatch
+		}
 	}
 	identity, err := decodeIdentityClaims(idToken.Subject, idToken)
 	if err != nil {

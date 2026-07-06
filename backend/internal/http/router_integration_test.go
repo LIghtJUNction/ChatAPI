@@ -4549,6 +4549,120 @@ func TestOIDCCallbackRejectsUserInfoSubjectMismatch(t *testing.T) {
 	assertAuditCountForActor(t, env, "", "auth.session", "session", "admin", "oidc_userinfo", "failure", 1)
 }
 
+func TestKirariIntegrationLifecycle(t *testing.T) {
+	provider := newTestKirariProvider(t)
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.KirariEnabled = true
+		cfg.KirariIssuerURL = provider.Issuer()
+		cfg.KirariClientID = "chatapi"
+		cfg.KirariClientSecret = "secret"
+		cfg.KirariRedirectURL = "http://chat.example.com/api/integrations/kirari/callback"
+		cfg.KirariAllowedIssuers = []string{provider.Issuer()}
+		cfg.KirariScopes = []string{"openid", "profile", "email", "offline_access", "llm:read", "llm:stream"}
+	})
+
+	schemaResp := env.getJSON(t, "/api/user/integrations/kirari/schema", http.StatusOK)
+	operations := schemaResp["schema"].(map[string]any)["operations"].([]any)
+	if len(operations) != 5 || nestedString(operations[1].(map[string]any), "path") != "/api/user/integrations/kirari/connect" {
+		t.Fatalf("unexpected kirari schema response: %#v", schemaResp)
+	}
+
+	initialStatus := env.getJSON(t, "/api/user/integrations/kirari", http.StatusOK)
+	if !nestedPathBool(initialStatus, "status", "enabled") || nestedPathBool(initialStatus, "status", "connected") {
+		t.Fatalf("unexpected initial kirari status: %#v", initialStatus)
+	}
+
+	redirectStatus, location, cookies := env.getRedirect(t, "/api/user/integrations/kirari/connect")
+	if redirectStatus != http.StatusFound {
+		t.Fatalf("expected kirari connect redirect, got status=%d location=%q", redirectStatus, location)
+	}
+	locationURL, err := neturl.Parse(location)
+	if err != nil {
+		t.Fatalf("parse kirari redirect: %v", err)
+	}
+	query := locationURL.Query()
+	provider.idTokenClaims["nonce"] = query.Get("nonce")
+
+	callbackResp, callbackCookies := env.getJSONAndCookiesWithCookies(t, "/api/integrations/kirari/callback?code=kirari-code&state="+neturl.QueryEscape(query.Get("state")), cookies, http.StatusOK)
+	if !nestedPathBool(callbackResp, "status", "connected") || nestedPathString(callbackResp, "status", "subject") != "kirari-test-sub" {
+		t.Fatalf("unexpected kirari callback response: %#v", callbackResp)
+	}
+	if findCookie(callbackCookies, "chatapi_kirari_state") == nil {
+		t.Fatalf("expected kirari callback cleanup cookies: %#v", callbackCookies)
+	}
+
+	storedConfig, err := env.store.GetUserConfig(context.Background(), "lab-user", "security.kirari")
+	if err != nil {
+		t.Fatalf("load stored kirari config: %v", err)
+	}
+	if nestedString(storedConfig.Value, "access_token_ciphertext") == "" || nestedString(storedConfig.Value, "refresh_token_ciphertext") == "" {
+		t.Fatalf("expected encrypted kirari tokens in stored config: %#v", storedConfig)
+	}
+
+	connectedStatus := env.getJSON(t, "/api/user/integrations/kirari", http.StatusOK)
+	if !nestedPathBool(connectedStatus, "status", "connected") || !nestedPathBool(connectedStatus, "status", "has_refresh_token") {
+		t.Fatalf("unexpected connected kirari status: %#v", connectedStatus)
+	}
+
+	metaResp := env.getJSON(t, "/api/user/integrations/kirari/meta", http.StatusOK)
+	metaModels, _ := nestedPath(metaResp, "meta", "models").([]any)
+	if metaResp["cached"] != false || len(metaModels) != 1 || nestedString(metaModels[0].(map[string]any), "id") != "kirari-model" {
+		t.Fatalf("unexpected kirari meta response: %#v", metaResp)
+	}
+	if provider.metaCalls != 1 {
+		t.Fatalf("expected one kirari meta call, got %d", provider.metaCalls)
+	}
+
+	cachedMetaResp := env.getJSON(t, "/api/user/integrations/kirari/meta", http.StatusOK)
+	if cachedMetaResp["cached"] != true || provider.metaCalls != 1 {
+		t.Fatalf("expected cached kirari meta response: resp=%#v calls=%d", cachedMetaResp, provider.metaCalls)
+	}
+
+	forcedMetaResp := env.getJSON(t, "/api/user/integrations/kirari/meta?force_refresh=1", http.StatusOK)
+	if forcedMetaResp["cached"] != false || provider.metaCalls != 2 {
+		t.Fatalf("expected forced kirari meta refresh: resp=%#v calls=%d", forcedMetaResp, provider.metaCalls)
+	}
+
+	deleteResp := env.deleteJSON(t, "/api/user/integrations/kirari", http.StatusOK)
+	if deleteResp["disconnected"] != true {
+		t.Fatalf("unexpected kirari disconnect response: %#v", deleteResp)
+	}
+	if _, err := env.store.GetUserConfig(context.Background(), "lab-user", "security.kirari"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected kirari config deletion, got %v", err)
+	}
+	assertAuditCountForActor(t, env, "lab-user", "user.kirari", "kirari_connection", "lab-user", "connect_start", "success", 1)
+	assertAuditCountForActor(t, env, "lab-user", "user.kirari", "kirari_connection", "lab-user", "connect_complete", "success", 1)
+	assertAuditCountForActor(t, env, "lab-user", "user.kirari", "kirari_connection", "lab-user", "disconnect", "success", 1)
+}
+
+func TestKirariIntegrationRejectsInvalidState(t *testing.T) {
+	provider := newTestKirariProvider(t)
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.KirariEnabled = true
+		cfg.KirariIssuerURL = provider.Issuer()
+		cfg.KirariClientID = "chatapi"
+		cfg.KirariClientSecret = "secret"
+		cfg.KirariRedirectURL = "http://chat.example.com/api/integrations/kirari/callback"
+		cfg.KirariAllowedIssuers = []string{provider.Issuer()}
+	})
+
+	_, location, cookies := env.getRedirect(t, "/api/user/integrations/kirari/connect")
+	locationURL, err := neturl.Parse(location)
+	if err != nil {
+		t.Fatalf("parse kirari redirect: %v", err)
+	}
+	provider.idTokenClaims["nonce"] = locationURL.Query().Get("nonce")
+
+	status, body, _ := env.getTextAndCookiesWithCookies(t, "/api/integrations/kirari/callback?code=kirari-code&state=wrong-state", cookies)
+	if status != http.StatusBadRequest || !strings.Contains(body, service.ErrKirariInvalidState.Error()) {
+		t.Fatalf("expected invalid kirari state rejection: status=%d body=%q", status, body)
+	}
+}
+
 func TestServeLocalUserLoginFromUsersTable(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("alice-secret")
@@ -7470,6 +7584,148 @@ func newTestOIDCProvider(t *testing.T, cfg testOIDCProviderConfig) *testOIDCProv
 		}
 	}))
 	return provider
+}
+
+type testKirariProvider struct {
+	server         *httptest.Server
+	privateKey     *rsa.PrivateKey
+	keyID          string
+	idTokenClaims  map[string]any
+	userInfoClaims map[string]any
+	metaCalls      int
+}
+
+func newTestKirariProvider(t *testing.T) *testKirariProvider {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate kirari test rsa key: %v", err)
+	}
+	provider := &testKirariProvider{
+		privateKey: privateKey,
+		keyID:      "kirari-key-1",
+		idTokenClaims: map[string]any{
+			"sub":            "kirari-test-sub",
+			"email":          "kirari@example.com",
+			"email_verified": true,
+		},
+		userInfoClaims: map[string]any{
+			"sub":                "kirari-test-sub",
+			"email":              "kirari@example.com",
+			"email_verified":     true,
+			"name":               "Kirari Test User",
+			"preferred_username": "kirari-user",
+		},
+	}
+	provider.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                        provider.server.URL,
+				"authorization_endpoint":        provider.server.URL + "/authorize",
+				"token_endpoint":                provider.server.URL + "/token",
+				"jwks_uri":                      provider.server.URL + "/jwks",
+				"userinfo_endpoint":             provider.server.URL + "/userinfo",
+				"llm_meta_endpoint":             provider.server.URL + "/api/llm/meta",
+				"llm_chat_completions_endpoint": provider.server.URL + "/api/llm/chat/completions",
+			})
+		case "/jwks":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"keys": []map[string]any{provider.publicJWK()},
+			})
+		case "/token":
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			grantType := r.Form.Get("grant_type")
+			idToken, err := provider.signedIDToken()
+			if err != nil {
+				http.Error(w, "failed to sign kirari id token", http.StatusInternalServerError)
+				return
+			}
+			response := map[string]any{
+				"token_type": "Bearer",
+				"expires_in": 3600,
+				"id_token":   idToken,
+			}
+			switch grantType {
+			case "authorization_code":
+				response["access_token"] = "kirari-access-token"
+				response["refresh_token"] = "kirari-refresh-token"
+				response["scope"] = "openid profile email offline_access llm:read llm:stream"
+			case "refresh_token":
+				response["access_token"] = "kirari-access-token-refreshed"
+				response["refresh_token"] = "kirari-refresh-token-refreshed"
+				response["scope"] = "openid profile email offline_access llm:read llm:stream"
+			default:
+				http.Error(w, "unsupported grant type", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(response)
+		case "/userinfo":
+			_ = json.NewEncoder(w).Encode(provider.userInfoClaims)
+		case "/api/llm/meta":
+			provider.metaCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"models": []map[string]any{
+					{"id": "kirari-model", "available": true, "price": map[string]any{"input": 1.2}},
+				},
+			})
+		case "/api/llm/chat/completions":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return provider
+}
+
+func (p *testKirariProvider) Close() {
+	if p != nil && p.server != nil {
+		p.server.Close()
+	}
+}
+
+func (p *testKirariProvider) Issuer() string {
+	if p == nil || p.server == nil {
+		return ""
+	}
+	return p.server.URL
+}
+
+func (p *testKirariProvider) publicJWK() map[string]any {
+	return map[string]any{
+		"kty": "RSA",
+		"alg": "RS256",
+		"use": "sig",
+		"kid": p.keyID,
+		"n":   base64.RawURLEncoding.EncodeToString(p.privateKey.PublicKey.N.Bytes()),
+		"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(p.privateKey.PublicKey.E)).Bytes()),
+	}
+}
+
+func (p *testKirariProvider) signedIDToken() (string, error) {
+	signer, err := jose.NewSigner(jose.SigningKey{
+		Algorithm: jose.RS256,
+		Key: jose.JSONWebKey{
+			Key:       p.privateKey,
+			KeyID:     p.keyID,
+			Use:       "sig",
+			Algorithm: string(jose.RS256),
+		},
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	claims := cloneMap(p.idTokenClaims)
+	now := time.Now().UTC()
+	claims["iss"] = p.server.URL
+	claims["aud"] = "chatapi"
+	claims["iat"] = now.Unix()
+	claims["exp"] = now.Add(time.Hour).Unix()
+	return jwt.Signed(signer).Claims(claims).Serialize()
 }
 
 func (p *testOIDCProvider) Close() {

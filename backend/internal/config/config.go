@@ -394,6 +394,23 @@ func (c Config) Validate() error {
 			return errors.New("smtp timeout must be positive")
 		}
 	}
+	if c.OIDCEnabled {
+		if strings.TrimSpace(c.OIDCIssuerURL) == "" {
+			return errors.New("oidc issuer url is required when oidc is enabled")
+		}
+		if strings.TrimSpace(c.OIDCClientID) == "" {
+			return errors.New("oidc client id is required when oidc is enabled")
+		}
+		if strings.TrimSpace(c.OIDCClientSecret) == "" {
+			return errors.New("oidc client secret is required when oidc is enabled")
+		}
+		if strings.TrimSpace(c.OIDCRedirectURL) == "" {
+			return errors.New("oidc redirect url is required when oidc is enabled")
+		}
+		if !containsString(c.OIDCScopes, "openid") {
+			return errors.New("oidc scopes must include openid")
+		}
+	}
 	return nil
 }
 
@@ -451,4 +468,13 @@ func parseBool(raw string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), want) {
+			return true
+		}
+	}
+	return false
 }

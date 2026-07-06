@@ -1432,6 +1432,27 @@ func TestServeAdminSessionLoginAndLogout(t *testing.T) {
 	assertAuditCountForActor(t, env, "admin", "auth.session", "session", "admin", "logout", "success", 1)
 }
 
+func TestOIDCConfigEndpointReflectsServeSettings(t *testing.T) {
+	disabledEnv := newTestEnvWithMode(t, config.ModeServe)
+	disabled := disabledEnv.getJSON(t, "/api/auth/oidc/config", http.StatusOK)
+	if disabled["enabled"] != false {
+		t.Fatalf("expected disabled oidc config: %#v", disabled)
+	}
+
+	enabledEnv := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.OIDCEnabled = true
+		cfg.OIDCProviderName = "Kirari"
+		cfg.OIDCIssuerURL = "https://issuer.example.com"
+		cfg.OIDCClientID = "chatapi"
+		cfg.OIDCClientSecret = "secret"
+		cfg.OIDCRedirectURL = "http://chat.example.com/api/auth/oidc/callback"
+	})
+	enabled := enabledEnv.getJSON(t, "/api/auth/oidc/config", http.StatusOK)
+	if enabled["enabled"] != true || enabled["provider_name"] != "Kirari" || enabled["login_url"] != "/api/auth/oidc/login" {
+		t.Fatalf("unexpected enabled oidc config: %#v", enabled)
+	}
+}
+
 func TestServeLocalUserLoginFromUsersTable(t *testing.T) {
 	env := newTestEnvWithMode(t, config.ModeServe)
 	hash, err := passwordhash.Hash("alice-secret")

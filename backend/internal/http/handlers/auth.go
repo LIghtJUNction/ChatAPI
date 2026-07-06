@@ -2,20 +2,28 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/service"
+	"golang.org/x/oauth2"
 )
 
 type AuthHandler struct {
 	Config       config.Config
 	Audit        *service.AuditService
 	LocalAuth    *service.LocalAuthService
+	OIDCAuth     *service.OIDCAuthService
 	LoginLimiter *service.LoginRateLimiter
 }
 
@@ -34,6 +42,8 @@ func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 		GeetestCaptchaID              string `json:"geetest_captcha_id"`
 		CurrentConnectionCount        int    `json:"current_connection_count"`
 		RealtimeMaxConnectionsPerUser int    `json:"realtime_max_connections_per_user"`
+		OIDCEnabled                   bool   `json:"oidc_enabled"`
+		OIDCProviderName              string `json:"oidc_provider_name"`
 	}
 
 	payload := response{
@@ -45,6 +55,8 @@ func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 		GeetestCaptchaID:              "",
 		CurrentConnectionCount:        0,
 		RealtimeMaxConnectionsPerUser: 0,
+		OIDCEnabled:                   h.Config.Mode != config.ModeLab && h.Config.OIDCEnabled,
+		OIDCProviderName:              h.oidcProviderName(),
 	}
 	if actor, ok := service.RequestActorFromContext(r.Context()); ok {
 		payload.Authenticated = true
@@ -52,6 +64,115 @@ func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (h AuthHandler) OIDCConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"enabled":       h.Config.Mode != config.ModeLab && h.Config.OIDCEnabled,
+		"provider_name": h.oidcProviderName(),
+		"login_url":     "/api/auth/oidc/login",
+	})
+}
+
+func (h AuthHandler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
+	if h.Config.Mode == config.ModeLab || !h.Config.OIDCEnabled {
+		http.Error(w, "oidc is not enabled", http.StatusNotFound)
+		return
+	}
+	oauthCfg, _, err := h.oidcRuntime(r.Context())
+	if err != nil {
+		h.recordAuthAudit(r, "oidc_login", "failure")
+		http.Error(w, "oidc is not configured", http.StatusInternalServerError)
+		return
+	}
+	state, err := randomToken()
+	if err != nil {
+		http.Error(w, "failed to create oidc state", http.StatusInternalServerError)
+		return
+	}
+	nonce, err := randomToken()
+	if err != nil {
+		http.Error(w, "failed to create oidc nonce", http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", state, int((10*time.Minute).Seconds())))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", nonce, int((10*time.Minute).Seconds())))
+	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce)), http.StatusFound)
+}
+
+func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
+	if h.Config.Mode == config.ModeLab || !h.Config.OIDCEnabled {
+		http.Error(w, "oidc is not enabled", http.StatusNotFound)
+		return
+	}
+	if errText := strings.TrimSpace(r.URL.Query().Get("error")); errText != "" {
+		h.recordAuthAudit(r, "oidc_callback", "failure")
+		http.Error(w, errText, http.StatusUnauthorized)
+		return
+	}
+	stateCookie, err := r.Cookie("chatapi_oidc_state")
+	if err != nil || stateCookie.Value == "" || !subtleCompare(stateCookie.Value, r.URL.Query().Get("state")) {
+		h.recordAuthAudit(r, "oidc_state", "failure")
+		http.Error(w, "invalid oidc state", http.StatusUnauthorized)
+		return
+	}
+	nonceCookie, err := r.Cookie("chatapi_oidc_nonce")
+	if err != nil || nonceCookie.Value == "" {
+		h.recordAuthAudit(r, "oidc_nonce", "failure")
+		http.Error(w, "invalid oidc nonce", http.StatusUnauthorized)
+		return
+	}
+	oauthCfg, provider, err := h.oidcRuntime(r.Context())
+	if err != nil {
+		h.recordAuthAudit(r, "oidc_callback", "failure")
+		http.Error(w, "oidc is not configured", http.StatusInternalServerError)
+		return
+	}
+	token, err := oauthCfg.Exchange(r.Context(), strings.TrimSpace(r.URL.Query().Get("code")))
+	if err != nil {
+		h.recordAuthAudit(r, "oidc_exchange", "failure")
+		http.Error(w, "oidc token exchange failed", http.StatusUnauthorized)
+		return
+	}
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok || strings.TrimSpace(rawIDToken) == "" {
+		h.recordAuthAudit(r, "oidc_id_token", "failure")
+		http.Error(w, "oidc id_token is missing", http.StatusUnauthorized)
+		return
+	}
+	verifier := provider.Verifier(&oidc.Config{ClientID: h.Config.OIDCClientID})
+	idToken, err := verifier.Verify(r.Context(), rawIDToken)
+	if err != nil {
+		h.recordAuthAudit(r, "oidc_verify", "failure")
+		http.Error(w, "oidc id_token verification failed", http.StatusUnauthorized)
+		return
+	}
+	if idToken.Nonce != nonceCookie.Value {
+		h.recordAuthAudit(r, "oidc_nonce", "failure")
+		http.Error(w, "invalid oidc nonce", http.StatusUnauthorized)
+		return
+	}
+	var rawClaims map[string]any
+	if err := idToken.Claims(&rawClaims); err != nil {
+		h.recordAuthAudit(r, "oidc_claims", "failure")
+		http.Error(w, "oidc claims are invalid", http.StatusUnauthorized)
+		return
+	}
+	claims := claimsFromMap(rawClaims)
+	if h.OIDCAuth == nil {
+		http.Error(w, "oidc auth service is not configured", http.StatusInternalServerError)
+		return
+	}
+	actor, err := h.OIDCAuth.Authenticate(r.Context(), claims)
+	if err != nil {
+		h.recordAuthAudit(r, oidcFailureAction(err), "failure")
+		http.Error(w, oidcFailureMessage(err), http.StatusUnauthorized)
+		return
+	}
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", "", -1))
+	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", "", -1))
+	h.writeLoginSuccess(w, r, actor, "")
 }
 
 func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +236,7 @@ func (h AuthHandler) authenticateLocalUser(ctx context.Context, username string,
 }
 
 func (h AuthHandler) writeLoginSuccess(w http.ResponseWriter, r *http.Request, actor service.RequestActor, limitKey string) {
-	if h.LoginLimiter != nil {
+	if h.LoginLimiter != nil && limitKey != "" {
 		h.LoginLimiter.Reset(limitKey)
 	}
 	codec := service.NewSessionCodec(h.Config.SessionSecret)
@@ -132,6 +253,27 @@ func (h AuthHandler) writeLoginSuccess(w http.ResponseWriter, r *http.Request, a
 		"ok":   true,
 		"user": userPayload,
 	})
+}
+
+func (h AuthHandler) oidcRuntime(ctx context.Context) (*oauth2.Config, *oidc.Provider, error) {
+	provider, err := oidc.NewProvider(ctx, strings.TrimRight(strings.TrimSpace(h.Config.OIDCIssuerURL), "/"))
+	if err != nil {
+		return nil, nil, err
+	}
+	return &oauth2.Config{
+		ClientID:     h.Config.OIDCClientID,
+		ClientSecret: h.Config.OIDCClientSecret,
+		Endpoint:     provider.Endpoint(),
+		RedirectURL:  h.Config.OIDCRedirectURL,
+		Scopes:       h.Config.OIDCScopes,
+	}, provider, nil
+}
+
+func (h AuthHandler) oidcProviderName() string {
+	if strings.TrimSpace(h.Config.OIDCProviderName) != "" {
+		return strings.TrimSpace(h.Config.OIDCProviderName)
+	}
+	return "OIDC"
 }
 
 func loginLimitKey(username string, r *http.Request) string {
@@ -195,5 +337,82 @@ func sessionCookie(r *http.Request, value string, maxAge int) *http.Cookie {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 		Secure:   r.TLS != nil,
+	}
+}
+
+func oidcCookie(r *http.Request, name string, value string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     name,
+		Value:    url.QueryEscape(value),
+		Path:     "/api/auth/oidc",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   r.TLS != nil,
+	}
+}
+
+func randomToken() (string, error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf[:]), nil
+}
+
+func subtleCompare(a string, b string) bool {
+	unescaped, err := url.QueryUnescape(a)
+	if err == nil {
+		a = unescaped
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(strings.TrimSpace(b))) == 1
+}
+
+func claimsFromMap(raw map[string]any) service.OIDCClaims {
+	return service.OIDCClaims{
+		Subject:       stringClaim(raw, "sub"),
+		Email:         stringClaim(raw, "email"),
+		EmailVerified: boolClaim(raw, "email_verified"),
+		Name:          stringClaim(raw, "name"),
+		PreferredName: stringClaim(raw, "preferred_username"),
+		Profile:       raw,
+	}
+}
+
+func stringClaim(raw map[string]any, key string) string {
+	if value, ok := raw[key].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func boolClaim(raw map[string]any, key string) bool {
+	if value, ok := raw[key].(bool); ok {
+		return value
+	}
+	return false
+}
+
+func oidcFailureAction(err error) string {
+	switch {
+	case errors.Is(err, service.ErrOIDCAccessDenied):
+		return "oidc_access_denied"
+	case errors.Is(err, service.ErrOIDCUserNotFound):
+		return "oidc_user_not_found"
+	case errors.Is(err, service.ErrOIDCEmailUnverified):
+		return "oidc_email_unverified"
+	default:
+		return "oidc_callback"
+	}
+}
+
+func oidcFailureMessage(err error) string {
+	switch {
+	case errors.Is(err, service.ErrOIDCAccessDenied):
+		return "oidc account is not allowed"
+	case errors.Is(err, service.ErrOIDCUserNotFound):
+		return "oidc account is not linked"
+	default:
+		return "oidc login failed"
 	}
 }

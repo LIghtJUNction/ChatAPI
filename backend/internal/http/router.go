@@ -47,6 +47,7 @@ func NewRouter(
 		Config:       cfg,
 		Audit:        auditService,
 		LocalAuth:    service.NewLocalAuthService(dataStore),
+		OIDCAuth:     service.NewOIDCAuthService(dataStore, cfg),
 		LoginLimiter: service.NewLoginRateLimiter(5, time.Minute),
 	}
 	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore), Audit: auditService}
@@ -77,6 +78,9 @@ func NewRouter(
 	router.Get("/api/auth/session", authHandler.Session)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)
+	router.Get("/api/auth/oidc/config", authHandler.OIDCConfig)
+	router.Get("/api/auth/oidc/login", authHandler.OIDCLogin)
+	router.Get("/api/auth/oidc/callback", authHandler.OIDCCallback)
 	router.Get("/api/user/app-api-keys", userAppAPIKeysHandler.List)
 	router.Post("/api/user/app-api-keys", userAppAPIKeysHandler.Create)
 	router.Delete("/api/user/app-api-keys/{keyID}", userAppAPIKeysHandler.Delete)

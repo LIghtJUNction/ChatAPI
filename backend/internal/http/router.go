@@ -13,6 +13,7 @@ import (
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/http/handlers"
 	"github.com/zyf/chatapi/internal/http/middleware"
+	"github.com/zyf/chatapi/internal/platform/email"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
 )
@@ -63,6 +64,7 @@ func NewRouter(
 	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
 	configSystemHandler := handlers.ConfigSystemHandler{Config: cfg, Service: service.NewSystemSettingsService(dataStore, cfg), Audit: auditService}
 	userIdentitiesHandler := handlers.UserIdentitiesHandler{Service: service.NewUserIdentityService(dataStore), Audit: auditService}
+	adminEmailHandler := handlers.AdminEmailHandler{Email: service.NewAdminEmailService(email.SMTPConfigFromConfig(cfg), nil), Audit: auditService}
 	runtimeMonitor := service.NewRuntimeMonitorService(cfg, dataStore, realtimeHub, pending)
 	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
 	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
@@ -198,6 +200,7 @@ func NewRouter(
 	adminRouter.Get("/audit/logs", adminAuditHandler.List)
 	adminRouter.Get("/config", adminConfigHandler.Get)
 	adminRouter.Post("/config", adminConfigHandler.Set)
+	adminRouter.Post("/send-test-email", adminEmailHandler.SendTestEmail)
 	adminRouter.Get("/users", adminUsersHandler.List)
 	adminRouter.Post("/users", adminUsersHandler.Create)
 	adminRouter.Put("/users/{userID}/password", adminUsersHandler.ResetPassword)

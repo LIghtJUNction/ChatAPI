@@ -780,6 +780,18 @@ func TestConfigSystemRoutes(t *testing.T) {
 	assertAuditCount(t, env, "admin.config", "system_settings", "", "update", "success", 1)
 }
 
+func TestAdminSendTestEmailRouteRejectsInvalidSMTPConfig(t *testing.T) {
+	env := newTestEnv(t)
+
+	status, body := env.postText(t, "/api/admin/send-test-email", map[string]any{
+		"email": "admin@example.com",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(body, "email config invalid") {
+		t.Fatalf("expected invalid smtp config error: status=%d body=%q", status, body)
+	}
+	assertAuditCount(t, env, "admin.email", "smtp", "", "send_test_email", "failure", 1)
+}
+
 func TestConfigAutomationRulesRoutes(t *testing.T) {
 	env := newTestEnv(t)
 

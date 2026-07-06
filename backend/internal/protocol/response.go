@@ -8,55 +8,46 @@ import (
 	"github.com/zyf/chatapi/internal/store"
 )
 
-type CompletePayload struct {
-	ResponseID string
-	OutputText string
-	Mode       string
-	ToolName   string
-	ToolCallID string
-	ToolOutput string
-}
-
-func BuildResponse(conversation store.Conversation, payload CompletePayload) map[string]any {
-	format := stringValue(conversation.Metadata["request_format"], "responses")
-	switch format {
-	case "chat_completions":
+func BuildResponse(conversation store.Conversation, result TurnResult) map[string]any {
+	meta := ConversationMetaFromConversation(conversation)
+	switch meta.Protocol {
+	case ProtocolChatCompletions:
 		message := map[string]any{
 			"role":    "assistant",
-			"content": payload.OutputText,
+			"content": result.OutputText,
 		}
-		if payload.Mode == "tool_call" {
+		if result.Mode == "tool_call" {
 			message["content"] = ""
 			message["tool_calls"] = []map[string]any{
 				{
-					"id":   stringValue(payload.ToolCallID, "toolcall_"+uuid.NewString()),
+					"id":   stringValue(result.ToolCallID, "toolcall_"+uuid.NewString()),
 					"type": "function",
 					"function": map[string]any{
-						"name":      payload.ToolName,
-						"arguments": payload.OutputText,
+						"name":      result.ToolName,
+						"arguments": result.OutputText,
 					},
 				},
 			}
 		}
 		return map[string]any{
-			"id":           stringValue(payload.ResponseID, "chatcmpl_"+uuid.NewString()),
+			"id":           stringValue(result.ResponseID, "chatcmpl_"+uuid.NewString()),
 			"object":       "chat.completion",
-			"model":        stringValue(conversation.Metadata["model"], "chatapi-lab"),
+			"model":        meta.Model,
 			"choices":      []map[string]any{{"index": 0, "message": message, "finish_reason": "stop"}},
 			"conversation": conversation,
 		}
-	case "anthropic_messages":
-		content := []map[string]any{{"type": "text", "text": payload.OutputText}}
-		if payload.Mode == "tool_call" {
+	case ProtocolAnthropicMessages:
+		content := []map[string]any{{"type": "text", "text": result.OutputText}}
+		if result.Mode == "tool_call" {
 			content = []map[string]any{{
 				"type":  "tool_use",
-				"id":    stringValue(payload.ToolCallID, "toolu_"+uuid.NewString()),
-				"name":  payload.ToolName,
-				"input": parseJSONValue(payload.OutputText),
+				"id":    stringValue(result.ToolCallID, "toolu_"+uuid.NewString()),
+				"name":  result.ToolName,
+				"input": parseJSONValue(result.OutputText),
 			}}
 		}
 		return map[string]any{
-			"id":           stringValue(payload.ResponseID, "msg_"+uuid.NewString()),
+			"id":           stringValue(result.ResponseID, "msg_"+uuid.NewString()),
 			"type":         "message",
 			"role":         "assistant",
 			"stop_reason":  "end_turn",
@@ -68,29 +59,29 @@ func BuildResponse(conversation store.Conversation, payload CompletePayload) map
 			"type": "message",
 			"role": "assistant",
 			"content": []map[string]any{
-				{"type": "output_text", "text": payload.OutputText},
+				{"type": "output_text", "text": result.OutputText},
 			},
 		}}
-		if payload.Mode == "tool_call" {
+		if result.Mode == "tool_call" {
 			output = []map[string]any{{
 				"type":      "function_call",
-				"name":      payload.ToolName,
-				"call_id":   stringValue(payload.ToolCallID, "call_"+uuid.NewString()),
-				"arguments": payload.OutputText,
+				"name":      result.ToolName,
+				"call_id":   stringValue(result.ToolCallID, "call_"+uuid.NewString()),
+				"arguments": result.OutputText,
 			}}
-		} else if payload.Mode == "tool_result" {
+		} else if result.Mode == "tool_result" {
 			output = []map[string]any{{
 				"type":    "function_call_output",
-				"call_id": stringValue(payload.ToolCallID, "call_"+uuid.NewString()),
-				"output":  stringValue(payload.ToolOutput, payload.OutputText),
+				"call_id": stringValue(result.ToolCallID, "call_"+uuid.NewString()),
+				"output":  stringValue(result.ToolOutput, result.OutputText),
 			}}
 		}
 		return map[string]any{
-			"id":           payload.ResponseID,
+			"id":           result.ResponseID,
 			"object":       "response",
 			"status":       "completed",
 			"conversation": conversation,
-			"output_text":  payload.OutputText,
+			"output_text":  result.OutputText,
 			"output":       output,
 		}
 	}

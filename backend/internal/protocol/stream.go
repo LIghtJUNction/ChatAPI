@@ -1,10 +1,6 @@
 package protocol
 
-import (
-	"github.com/google/uuid"
-
-	"github.com/zyf/chatapi/internal/store"
-)
+import "github.com/google/uuid"
 
 type StreamEvent struct {
 	Event string
@@ -12,25 +8,22 @@ type StreamEvent struct {
 	Done  bool
 }
 
-func BuildStreamStart(conversation store.Conversation) []StreamEvent {
-	format := stringValue(conversation.Metadata["request_format"], "responses")
-	responseID := stringValue(conversation.ResponseID, "resp_"+uuid.NewString())
-	model := stringValue(conversation.Metadata["model"], "chatapi-lab")
-
-	switch format {
-	case "chat_completions":
+func BuildStreamStart(meta ConversationMeta) []StreamEvent {
+	responseID := stringValue(meta.ResponseID, "resp_"+uuid.NewString())
+	switch meta.Protocol {
+	case ProtocolChatCompletions:
 		return []StreamEvent{{
 			Data: map[string]any{
 				"id":     "chatcmpl_" + uuid.NewString(),
 				"object": "chat.completion.chunk",
-				"model":  model,
+				"model":  meta.Model,
 				"choices": []map[string]any{{
 					"index": 0,
 					"delta": map[string]any{"role": "assistant"},
 				}},
 			},
 		}}
-	case "anthropic_messages":
+	case ProtocolAnthropicMessages:
 		return []StreamEvent{{
 			Event: "message_start",
 			Data: map[string]any{
@@ -39,7 +32,7 @@ func BuildStreamStart(conversation store.Conversation) []StreamEvent {
 					"id":      "msg_" + uuid.NewString(),
 					"type":    "message",
 					"role":    "assistant",
-					"model":   model,
+					"model":   meta.Model,
 					"content": []any{},
 				},
 			},
@@ -53,29 +46,28 @@ func BuildStreamStart(conversation store.Conversation) []StreamEvent {
 					"id":     responseID,
 					"object": "response",
 					"status": "in_progress",
-					"model":  model,
+					"model":  meta.Model,
 				},
 			},
 		}}
 	}
 }
 
-func BuildStreamDelta(conversation store.Conversation, deltaText string) []StreamEvent {
-	format := stringValue(conversation.Metadata["request_format"], "responses")
-	switch format {
-	case "chat_completions":
+func BuildStreamDelta(meta ConversationMeta, deltaText string) []StreamEvent {
+	switch meta.Protocol {
+	case ProtocolChatCompletions:
 		return []StreamEvent{{
 			Data: map[string]any{
 				"id":     "chatcmpl_" + uuid.NewString(),
 				"object": "chat.completion.chunk",
-				"model":  stringValue(conversation.Metadata["model"], "chatapi-lab"),
+				"model":  meta.Model,
 				"choices": []map[string]any{{
 					"index": 0,
 					"delta": map[string]any{"content": deltaText},
 				}},
 			},
 		}}
-	case "anthropic_messages":
+	case ProtocolAnthropicMessages:
 		return []StreamEvent{{
 			Event: "content_block_delta",
 			Data: map[string]any{
@@ -98,30 +90,29 @@ func BuildStreamDelta(conversation store.Conversation, deltaText string) []Strea
 	}
 }
 
-func BuildStreamComplete(conversation store.Conversation, payload CompletePayload) []StreamEvent {
-	format := stringValue(conversation.Metadata["request_format"], "responses")
-	switch format {
-	case "chat_completions":
+func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent {
+	switch meta.Protocol {
+	case ProtocolChatCompletions:
 		chunk := map[string]any{
 			"id":     "chatcmpl_" + uuid.NewString(),
 			"object": "chat.completion.chunk",
-			"model":  stringValue(conversation.Metadata["model"], "chatapi-lab"),
+			"model":  meta.Model,
 			"choices": []map[string]any{{
 				"index":         0,
 				"delta":         map[string]any{},
 				"finish_reason": "stop",
 			}},
 		}
-		if payload.Mode == "tool_call" {
+		if result.Mode == "tool_call" {
 			chunk["choices"] = []map[string]any{{
 				"index": 0,
 				"delta": map[string]any{
 					"tool_calls": []map[string]any{{
-						"id":   stringValue(payload.ToolCallID, "toolcall_"+uuid.NewString()),
+						"id":   stringValue(result.ToolCallID, "toolcall_"+uuid.NewString()),
 						"type": "function",
 						"function": map[string]any{
-							"name":      payload.ToolName,
-							"arguments": payload.OutputText,
+							"name":      result.ToolName,
+							"arguments": result.OutputText,
 						},
 					}},
 				},
@@ -129,9 +120,9 @@ func BuildStreamComplete(conversation store.Conversation, payload CompletePayloa
 			}}
 		}
 		return []StreamEvent{{Data: chunk}, {Data: "[DONE]", Done: true}}
-	case "anthropic_messages":
+	case ProtocolAnthropicMessages:
 		stopReason := "end_turn"
-		if payload.Mode == "tool_call" {
+		if result.Mode == "tool_call" {
 			stopReason = "tool_use"
 		}
 		return []StreamEvent{
@@ -159,27 +150,54 @@ func BuildStreamComplete(conversation store.Conversation, payload CompletePayloa
 			},
 		}
 	default:
+		output := []map[string]any{{
+			"type": "message",
+			"role": "assistant",
+			"content": []map[string]any{
+				{"type": "output_text", "text": result.OutputText},
+			},
+		}}
+		if result.Mode == "tool_call" {
+			output = []map[string]any{{
+				"type":      "function_call",
+				"name":      result.ToolName,
+				"call_id":   stringValue(result.ToolCallID, "call_"+uuid.NewString()),
+				"arguments": result.OutputText,
+			}}
+		} else if result.Mode == "tool_result" {
+			output = []map[string]any{{
+				"type":    "function_call_output",
+				"call_id": stringValue(result.ToolCallID, "call_"+uuid.NewString()),
+				"output":  stringValue(result.ToolOutput, result.OutputText),
+			}}
+		}
 		return []StreamEvent{{
 			Event: "response.completed",
 			Data: map[string]any{
-				"type":     "response.completed",
-				"response": BuildResponse(conversation, payload),
+				"type": "response.completed",
+				"response": map[string]any{
+					"id":          result.ResponseID,
+					"object":      "response",
+					"status":      "completed",
+					"output_text": result.OutputText,
+					"output":      output,
+				},
 			},
 		}}
 	}
 }
 
-func BuildAnthropicContentBlockStart(payload CompletePayload) StreamEvent {
+func BuildAnthropicContentBlockStart(result TurnResult) StreamEvent {
 	block := map[string]any{
 		"type": "text",
 		"text": "",
 	}
-	if payload.Mode == "tool_call" {
+	if result.Mode == "tool_call" {
 		block = map[string]any{
 			"type":  "tool_use",
-			"id":    stringValue(payload.ToolCallID, "toolu_"+uuid.NewString()),
-			"name":  payload.ToolName,
-			"input": parseJSONValue(payload.OutputText),
+			"id":    stringValue(result.ToolCallID, "toolu_"+uuid.NewString()),
+			"name":  result.ToolName,
+			"input": parseJSONValue(result.OutputText),
 		}
 	}
 	return StreamEvent{
@@ -192,12 +210,11 @@ func BuildAnthropicContentBlockStart(payload CompletePayload) StreamEvent {
 	}
 }
 
-func BuildStreamAbort(conversation store.Conversation, body map[string]any) []StreamEvent {
-	format := stringValue(conversation.Metadata["request_format"], "responses")
-	switch format {
-	case "chat_completions":
+func BuildStreamAbort(meta ConversationMeta, body map[string]any) []StreamEvent {
+	switch meta.Protocol {
+	case ProtocolChatCompletions:
 		return []StreamEvent{{Data: body}, {Data: "[DONE]", Done: true}}
-	case "anthropic_messages":
+	case ProtocolAnthropicMessages:
 		return []StreamEvent{{
 			Event: "error",
 			Data:  body,

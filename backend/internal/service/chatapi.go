@@ -32,9 +32,8 @@ func NewChatAPIService(dataStore store.Store, pending *PendingRegistry, realtime
 	}
 }
 
-func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, requestFormat string, body map[string]any) (map[string]any, error) {
-	parsed := protocol.ParseRequest(requestFormat, body)
-	turn, _, _, err := s.createPendingTurn(ctx, parsed, body)
+func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, request protocol.TurnRequest, body map[string]any) (map[string]any, error) {
+	turn, _, _, err := s.createPendingTurn(ctx, request, body)
 	if err != nil {
 		return nil, err
 	}
@@ -45,16 +44,15 @@ func (s *ChatAPIService) CreatePendingResponse(ctx context.Context, requestForma
 	return result.ResponseBody, nil
 }
 
-func (s *ChatAPIService) CreatePendingStream(ctx context.Context, requestFormat string, body map[string]any) (*PendingTurn, store.Conversation, error) {
-	parsed := protocol.ParseRequest(requestFormat, body)
-	turn, conversation, _, err := s.createPendingTurn(ctx, parsed, body)
+func (s *ChatAPIService) CreatePendingStream(ctx context.Context, request protocol.TurnRequest, body map[string]any) (*PendingTurn, store.Conversation, error) {
+	turn, conversation, _, err := s.createPendingTurn(ctx, request, body)
 	if err != nil {
 		return nil, store.Conversation{}, err
 	}
 	return turn, conversation, nil
 }
 
-func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.ParsedRequest, body map[string]any) (*PendingTurn, store.Conversation, store.Message, error) {
+func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.TurnRequest, body map[string]any) (*PendingTurn, store.Conversation, store.Message, error) {
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
 	conversationID := "conv_" + uuid.NewString()
@@ -64,7 +62,7 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 		RequestID:      requestID,
 		ResponseID:     responseID,
 		OwnerID:        OwnerIDFromContext(ctx),
-		RequestFormat:  parsed.RequestFormat,
+		RequestFormat:  parsed.Protocol.String(),
 		Model:          parsed.Model,
 		UserContent:    parsed.UserContent,
 		RequestBody:    body,
@@ -78,7 +76,7 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 		RequestID:      requestID,
 		ConversationID: conversationID,
 		ResponseID:     responseID,
-		RequestFormat:  parsed.RequestFormat,
+		RequestFormat:  parsed.Protocol.String(),
 		Model:          parsed.Model,
 		CreatedAt:      time.Now().UTC(),
 		Events:         make(chan PendingEvent, 32),
@@ -200,7 +198,7 @@ func (s *ChatAPIService) CompleteConversation(ctx context.Context, input store.C
 		s.realtime.PublishConversationUpsert(conversation, []store.Message{message})
 	}
 
-	responseBody := protocol.BuildResponse(conversation, protocol.CompletePayload{
+	responseBody := protocol.BuildResponse(conversation, protocol.TurnResult{
 		ResponseID: stringValue(conversation.ResponseID, input.ResponseID),
 		OutputText: message.Content,
 		Mode:       input.Mode,

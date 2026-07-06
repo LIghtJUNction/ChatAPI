@@ -39,11 +39,11 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 
 	parsed := protocol.ParseRequest(requestFormat, body)
 	if parsed.Stream {
-		h.handleStreamRequest(w, r, requestFormat, body)
+		h.handleStreamRequest(w, r, parsed, body)
 		return
 	}
 
-	responseBody, err := h.Service.CreatePendingResponse(r.Context(), requestFormat, body)
+	responseBody, err := h.Service.CreatePendingResponse(r.Context(), parsed, body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -166,14 +166,14 @@ func buildTurnControlCommand(kind service.TurnControlKind, body map[string]any, 
 	}, nil
 }
 
-func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, requestFormat string, body map[string]any) {
+func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, body map[string]any) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
-	turn, conversation, err := h.Service.CreatePendingStream(r.Context(), requestFormat, body)
+	turn, conversation, err := h.Service.CreatePendingStream(r.Context(), request, body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -184,8 +184,9 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	anthropicBlockStarted := false
+	meta := protocol.ConversationMetaFromConversation(conversation)
 
-	for _, event := range protocol.BuildStreamStart(conversation) {
+	for _, event := range meta.BuildStreamStart() {
 		if err := writeSSEEvent(w, event); err != nil {
 			return
 		}
@@ -200,7 +201,19 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 			if !ok {
 				return
 			}
-			streamEvents, nextAnthropicBlockStarted := buildPendingStreamEvents(conversation, event, anthropicBlockStarted)
+			streamEvents, nextAnthropicBlockStarted := meta.BuildPendingStreamEvents(protocol.PendingStreamEvent{
+				Type:      event.Type,
+				DeltaText: event.DeltaText,
+				ErrorBody: event.ErrorBody,
+				Result: protocol.TurnResult{
+					ResponseID: stringValue(conversation.ResponseID, ""),
+					OutputText: event.OutputText,
+					Mode:       event.Mode,
+					ToolName:   event.ToolName,
+					ToolCallID: event.ToolCallID,
+					ToolOutput: event.ToolOutput,
+				},
+			}, anthropicBlockStarted)
 			anthropicBlockStarted = nextAnthropicBlockStarted
 			for _, streamEvent := range streamEvents {
 				if err := writeSSEEvent(w, streamEvent); err != nil {
@@ -209,56 +222,6 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 				flusher.Flush()
 			}
 		}
-	}
-}
-
-func buildPendingStreamEvents(conversation store.Conversation, event service.PendingEvent, anthropicBlockStarted bool) ([]protocol.StreamEvent, bool) {
-	format := stringValue(conversation.Metadata["request_format"], "responses")
-	if format == "anthropic_messages" {
-		payload := protocol.CompletePayload{
-			ResponseID: stringValue(conversation.ResponseID, ""),
-			OutputText: event.OutputText,
-			Mode:       event.Mode,
-			ToolName:   event.ToolName,
-			ToolCallID: event.ToolCallID,
-			ToolOutput: event.ToolOutput,
-		}
-		switch event.Type {
-		case "delta":
-			if !anthropicBlockStarted {
-				return append([]protocol.StreamEvent{protocol.BuildAnthropicContentBlockStart(payload)}, protocol.BuildStreamDelta(conversation, event.DeltaText)...), true
-			}
-			return protocol.BuildStreamDelta(conversation, event.DeltaText), true
-		case "complete":
-			streamEvents := make([]protocol.StreamEvent, 0, 4)
-			if !anthropicBlockStarted {
-				streamEvents = append(streamEvents, protocol.BuildAnthropicContentBlockStart(payload))
-			}
-			streamEvents = append(streamEvents, protocol.BuildStreamComplete(conversation, payload)...)
-			return streamEvents, true
-		case "abort":
-			return protocol.BuildStreamAbort(conversation, event.ErrorBody), anthropicBlockStarted
-		default:
-			return nil, anthropicBlockStarted
-		}
-	}
-
-	switch event.Type {
-	case "delta":
-		return protocol.BuildStreamDelta(conversation, event.DeltaText), anthropicBlockStarted
-	case "abort":
-		return protocol.BuildStreamAbort(conversation, event.ErrorBody), anthropicBlockStarted
-	case "complete":
-		return protocol.BuildStreamComplete(conversation, protocol.CompletePayload{
-			ResponseID: stringValue(conversation.ResponseID, ""),
-			OutputText: event.OutputText,
-			Mode:       event.Mode,
-			ToolName:   event.ToolName,
-			ToolCallID: event.ToolCallID,
-			ToolOutput: event.ToolOutput,
-		}), anthropicBlockStarted
-	default:
-		return nil, anthropicBlockStarted
 	}
 }
 

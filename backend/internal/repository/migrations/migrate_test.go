@@ -111,6 +111,32 @@ func TestBootstrapDoesNotClearDirtyMetadata(t *testing.T) {
 	}
 }
 
+func TestResetDropsBootstrapSchema(t *testing.T) {
+	db := openTestDB(t)
+	if err := Bootstrap(context.Background(), db); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if err := Reset(context.Background(), db); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if _, err := StatusReport(context.Background(), db); err == nil {
+		t.Fatal("expected status after reset to fail")
+	}
+	for _, table := range bootstrapTables {
+		var count int
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT COUNT(*)
+			FROM sqlite_master
+			WHERE type = 'table' AND name = ?
+		`, table).Scan(&count); err != nil {
+			t.Fatalf("inspect table %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("expected table %s to be dropped", table)
+		}
+	}
+}
+
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "chatapi.sqlite3"))

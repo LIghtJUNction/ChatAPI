@@ -379,6 +379,7 @@ type migrateReport struct {
 	Command string            `json:"command"`
 	Driver  string            `json:"driver"`
 	DSN     string            `json:"dsn"`
+	Forced  bool              `json:"forced,omitempty"`
 	Status  migrations.Status `json:"status,omitempty"`
 	Error   string            `json:"error,omitempty"`
 }
@@ -641,14 +642,13 @@ func runDB(args []string, backendRoot string) error {
 
 func runMigrate(ctx context.Context, args []string, backendRoot string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("unknown migrate command, supported: up, status")
+		return fmt.Errorf("unknown migrate command, supported: up, status, down --force")
 	}
-	switch args[0] {
-	case "up", "status":
-	default:
-		return fmt.Errorf("unknown migrate command %q, supported: up, status", args[0])
+	options, err := parseMigrateOptions(args)
+	if err != nil {
+		return err
 	}
-	report, err := migrateCommand(ctx, args[0], backendRoot)
+	report, err := migrateCommand(ctx, options, backendRoot)
 	if err != nil {
 		_ = writeJSONReport(os.Stdout, report)
 		return err
@@ -662,18 +662,59 @@ func runMigrate(ctx context.Context, args []string, backendRoot string) error {
 	return nil
 }
 
-func migrateCommand(ctx context.Context, command string, backendRoot string) (migrateReport, error) {
+type migrateOptions struct {
+	command string
+	force   bool
+}
+
+func parseMigrateOptions(args []string) (migrateOptions, error) {
+	options := migrateOptions{command: args[0]}
+	switch options.command {
+	case "up", "status":
+		if len(args) > 1 {
+			return migrateOptions{}, fmt.Errorf("migrate %s does not accept options", options.command)
+		}
+	case "down":
+		for _, arg := range args[1:] {
+			switch arg {
+			case "--force":
+				options.force = true
+			default:
+				return migrateOptions{}, fmt.Errorf("unknown migrate down option %q, supported: --force", arg)
+			}
+		}
+		if !options.force {
+			return migrateOptions{}, errors.New("migrate down requires --force")
+		}
+	default:
+		return migrateOptions{}, fmt.Errorf("unknown migrate command %q, supported: up, status, down --force", options.command)
+	}
+	return options, nil
+}
+
+func migrateCommand(ctx context.Context, options migrateOptions, backendRoot string) (migrateReport, error) {
 	cfg, err := config.FromEnvUnchecked(config.ModeServe, backendRoot)
 	if err != nil {
-		return migrateReport{OK: false, Command: command, Error: err.Error()}, err
+		return migrateReport{OK: false, Command: options.command, Forced: options.force, Error: err.Error()}, err
 	}
 	report := migrateReport{
 		OK:      true,
-		Command: command,
+		Command: options.command,
 		Driver:  cfg.DatabaseDriver,
 		DSN:     cfg.DatabaseDSN,
+		Forced:  options.force,
 	}
-	status, err := sqliteMigrationStatus(ctx, cfg, command == "up")
+	if options.command == "down" {
+		status, err := sqliteMigrateDown(ctx, cfg)
+		if err != nil {
+			report.OK = false
+			report.Error = err.Error()
+			return report, err
+		}
+		report.Status = status
+		return report, nil
+	}
+	status, err := sqliteMigrationStatus(ctx, cfg, options.command == "up")
 	if err != nil {
 		report.OK = false
 		report.Error = err.Error()
@@ -685,6 +726,28 @@ func migrateCommand(ctx context.Context, command string, backendRoot string) (mi
 		report.Error = "migration dirty"
 	}
 	return report, nil
+}
+
+func sqliteMigrateDown(ctx context.Context, cfg config.Config) (migrations.Status, error) {
+	if cfg.DatabaseDriver != "sqlite" {
+		return migrations.Status{}, errors.New("only sqlite migration is implemented in the current Go refactor branch")
+	}
+	dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
+	if err != nil {
+		return migrations.Status{}, err
+	}
+	defer dataStore.DB().Close()
+	before, err := migrations.StatusReport(ctx, dataStore.DB())
+	if err != nil {
+		return migrations.Status{}, err
+	}
+	if before.MigrationDirty {
+		return migrations.Status{}, errors.New("migration dirty")
+	}
+	if err := migrations.Reset(ctx, dataStore.DB()); err != nil {
+		return migrations.Status{}, err
+	}
+	return before, nil
 }
 
 func sqliteMigrationStatus(ctx context.Context, cfg config.Config, bootstrap bool) (migrations.Status, error) {

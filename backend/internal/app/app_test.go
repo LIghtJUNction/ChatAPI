@@ -118,7 +118,7 @@ func TestMigrateCommandUpBootstrapsSQLite(t *testing.T) {
 	t.Setenv("CHATAPI_DB_DSN", filepath.Join(backendRoot, "data", "chatapi.sqlite3"))
 	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
 
-	report, err := migrateCommand(context.Background(), "up", backendRoot)
+	report, err := migrateCommand(context.Background(), migrateOptions{command: "up"}, backendRoot)
 	if err != nil {
 		t.Fatalf("migrate up: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestMigrateCommandUpBootstrapsSQLite(t *testing.T) {
 		t.Fatalf("unexpected migration status: %#v", report.Status)
 	}
 
-	statusReport, err := migrateCommand(context.Background(), "status", backendRoot)
+	statusReport, err := migrateCommand(context.Background(), migrateOptions{command: "status"}, backendRoot)
 	if err != nil {
 		t.Fatalf("migrate status: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestMigrateCommandStatusDoesNotBootstrapSQLite(t *testing.T) {
 	t.Setenv("CHATAPI_DB_DSN", filepath.Join(backendRoot, "data", "chatapi.sqlite3"))
 	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
 
-	report, err := migrateCommand(context.Background(), "status", backendRoot)
+	report, err := migrateCommand(context.Background(), migrateOptions{command: "status"}, backendRoot)
 	if err == nil {
 		t.Fatal("expected status before migrate up to fail")
 	}
@@ -157,11 +157,50 @@ func TestMigrateCommandRejectsUnsupportedDriver(t *testing.T) {
 	backendRoot := t.TempDir()
 	t.Setenv("CHATAPI_DB_DRIVER", "postgresql")
 
-	report, err := migrateCommand(context.Background(), "status", backendRoot)
+	report, err := migrateCommand(context.Background(), migrateOptions{command: "status"}, backendRoot)
 	if err == nil {
 		t.Fatal("expected unsupported driver error")
 	}
 	if report.OK || !strings.Contains(report.Error, "only sqlite migration is implemented") {
 		t.Fatalf("unexpected unsupported driver report: %#v", report)
+	}
+}
+
+func TestParseMigrateOptionsRequiresForceForDown(t *testing.T) {
+	_, err := parseMigrateOptions([]string{"down"})
+	if err == nil {
+		t.Fatal("expected migrate down without force to fail")
+	}
+	options, err := parseMigrateOptions([]string{"down", "--force"})
+	if err != nil {
+		t.Fatalf("parse migrate down force: %v", err)
+	}
+	if options.command != "down" || !options.force {
+		t.Fatalf("unexpected migrate options: %#v", options)
+	}
+}
+
+func TestMigrateCommandDownResetsSQLite(t *testing.T) {
+	backendRoot := t.TempDir()
+	t.Setenv("CHATAPI_DB_DRIVER", "sqlite")
+	t.Setenv("CHATAPI_DB_DSN", filepath.Join(backendRoot, "data", "chatapi.sqlite3"))
+	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
+
+	if _, err := migrateCommand(context.Background(), migrateOptions{command: "up"}, backendRoot); err != nil {
+		t.Fatalf("migrate up: %v", err)
+	}
+	report, err := migrateCommand(context.Background(), migrateOptions{command: "down", force: true}, backendRoot)
+	if err != nil {
+		t.Fatalf("migrate down: %v", err)
+	}
+	if !report.OK || report.Command != "down" || !report.Forced || report.Status.SchemaVersion != migrations.BootstrapVersion {
+		t.Fatalf("unexpected migrate down report: %#v", report)
+	}
+	statusReport, err := migrateCommand(context.Background(), migrateOptions{command: "status"}, backendRoot)
+	if err == nil {
+		t.Fatal("expected status after migrate down to fail")
+	}
+	if statusReport.OK || !strings.Contains(statusReport.Error, "read db_meta") {
+		t.Fatalf("unexpected status after down: %#v", statusReport)
 	}
 }

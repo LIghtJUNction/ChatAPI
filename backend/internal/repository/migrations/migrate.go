@@ -8,6 +8,21 @@ import (
 
 const BootstrapVersion = "0001_bootstrap"
 
+var bootstrapTables = []string{
+	"storage_file_deletion_failures",
+	"storage_user_quotas",
+	"uploaded_images",
+	"audit_logs",
+	"app_api_key_audit_logs",
+	"user_app_api_keys",
+	"automation_rules",
+	"user_api_keys",
+	"messages",
+	"conversations",
+	"schema_migrations",
+	"db_meta",
+}
+
 const bootstrapSchema = `
 CREATE TABLE IF NOT EXISTS db_meta (
 	key TEXT PRIMARY KEY,
@@ -219,6 +234,29 @@ func Bootstrap(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("seed schema_migrations: %w", err)
 	}
 	if err := setLastMigratedAt(ctx, db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func Reset(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=OFF;`); err != nil {
+		return fmt.Errorf("disable foreign keys: %w", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), `PRAGMA foreign_keys=ON;`)
+	}()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, table := range bootstrapTables {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+table); err != nil {
+			return fmt.Errorf("drop table %s: %w", table, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return nil

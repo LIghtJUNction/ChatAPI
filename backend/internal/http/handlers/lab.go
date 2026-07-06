@@ -44,9 +44,14 @@ func (h LabHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	parsedItems := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		parsedItems = append(parsedItems, requestParsedSummary(item))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"items": items,
+		"ok":           true,
+		"items":        items,
+		"parsed_items": parsedItems,
 	})
 }
 

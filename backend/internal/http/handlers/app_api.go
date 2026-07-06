@@ -49,7 +49,15 @@ func (h AppAPIHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	parsedItems := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		parsedItems = append(parsedItems, requestParsedSummary(item))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"items":        items,
+		"parsed_items": parsedItems,
+	})
 }
 
 func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {

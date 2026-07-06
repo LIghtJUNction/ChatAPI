@@ -472,8 +472,12 @@ func TestLabRequestsList(t *testing.T) {
 
 	listResp := env.getJSON(t, "/lab/requests", http.StatusOK)
 	items := listResp["items"].([]any)
+	parsedItems := listResp["parsed_items"].([]any)
 	if len(items) < 2 {
 		t.Fatalf("unexpected lab requests list: %#v", listResp)
+	}
+	if len(parsedItems) != len(items) {
+		t.Fatalf("unexpected lab parsed_items size: %#v", listResp)
 	}
 
 	foundFirst := false
@@ -489,6 +493,26 @@ func TestLabRequestsList(t *testing.T) {
 	}
 	if !foundFirst || !foundSecond {
 		t.Fatalf("missing expected requests in list: %#v", listResp)
+	}
+
+	foundFirstParsed := false
+	foundSecondParsed := false
+	for _, item := range parsedItems {
+		record := item.(map[string]any)
+		switch nestedString(record, "model") {
+		case "demo-list-1":
+			foundFirstParsed = nestedString(record, "request_format") == "responses" &&
+				nestedString(record, "user_text") == "list 请求 1"
+		case "demo-list-2":
+			partTypes, ok := record["input_part_types"].([]any)
+			foundSecondParsed = ok &&
+				len(partTypes) == 1 &&
+				partTypes[0] == "text" &&
+				nestedString(record, "request_format") == "chat_completions"
+		}
+	}
+	if !foundFirstParsed || !foundSecondParsed {
+		t.Fatalf("missing expected parsed requests in list: %#v", listResp)
 	}
 
 	env.postJSON(t, "/api/conversations/"+firstConversation["id"].(string)+"/respond", map[string]any{
@@ -531,6 +555,28 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 	items := listResp["items"].([]any)
 	if len(items) == 0 {
 		t.Fatalf("unexpected empty app api requests list: %#v", listResp)
+	}
+	parsedItems := listResp["parsed_items"].([]any)
+	if len(parsedItems) != len(items) {
+		t.Fatalf("unexpected app api parsed_items size: %#v", listResp)
+	}
+	foundParsed := false
+	for _, item := range parsedItems {
+		record := item.(map[string]any)
+		if nestedString(record, "request_id") != requestID {
+			continue
+		}
+		partTypes, ok := record["input_part_types"].([]any)
+		foundParsed = nestedString(record, "system_text") == "app system policy" &&
+			nestedString(record, "developer_text") == "app developer hint" &&
+			nestedString(record, "assistant_text") == "previous app answer" &&
+			nestedString(record, "user_text") == "app api 测试" &&
+			ok &&
+			len(partTypes) == 1 &&
+			partTypes[0] == "text"
+	}
+	if !foundParsed {
+		t.Fatalf("missing expected parsed app api request in list: %#v", listResp)
 	}
 
 	detailResp := env.appGetJSON(t, "/api/app/requests/"+requestID, appKey, http.StatusOK)

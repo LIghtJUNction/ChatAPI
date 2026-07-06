@@ -923,6 +923,7 @@ ChatAPI 的 OpenAI Responses、Chat Completions、Anthropic Messages 三套协�
 - 这些解析出来的上下文字段当前已继续下推到 pending turn `request_debug` 持久化：SQLite / PostgreSQL 在创建请求时都会把 `system_text`、`developer_text`、`assistant_text` 写进 message metadata，并在 `GetRequest/ListRequests` 读取路径回填到统一 `store.Request`。这样协议层新增信息不会只停留在解析阶段，后续管理端、Lab 模式和应用 API 读取请求详情时都能复用。
 - Lab 请求详情和应用 API 请求详情当前已能直接读到这些上下文字段；对应集成测试已开始覆盖 `GET /lab/requests/{requestID}` 和 `GET /api/app/requests/{requestID}` 的 `system_text` / `developer_text` / `assistant_text` 返回，确保 SQLite / PostgreSQL 两条后端路径下都不会在读取阶段丢字段。
 - 在此基础上，Lab 和应用 API 的 request detail 当前还已新增轻量 `parsed` 视图：把 `request_format`、model、system/developer/assistant/user 文本、input parts、tool choice、tool schemas、response format 以及 `request_body_keys` 归到一处，避免调试界面必须同时拼接平铺字段和原始 `request_body` 才能看清解析结果。
+- `GET /lab/requests` 和 `GET /api/app/requests` 当前还会并行返回 `parsed_items` 轻量摘要数组，用于列表页直接展示解析后的请求关键信息，而不必把 detail 级别的完整 `input_parts` / `tool_schemas` 重复塞回列表。摘要当前包含 `request_id`、协议格式、model、system/developer/assistant/user 文本、`input_part_types`、tool choice、response format 和 `request_body_keys`。
 
 这个包可以同时被 ChatAPI 和 KirariNetwork 使用：ChatAPI 用它接收外部 Agent 请求并归一化为 pending turn，KirariNetwork 可用它把不同上游模型协议归一化为统一模型网关响应。
 

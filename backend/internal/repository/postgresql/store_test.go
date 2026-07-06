@@ -43,23 +43,5 @@ func openTestStore(dsn string) storetest.NewStoreFunc {
 }
 
 func resetTestSchema(ctx context.Context, st *Store) error {
-	_, err := st.Pool().Exec(ctx, `
-		DROP TABLE IF EXISTS user_configs;
-		DROP TABLE IF EXISTS config;
-		DROP TABLE IF EXISTS audit_logs;
-		DROP TABLE IF EXISTS automation_rules;
-		DROP TABLE IF EXISTS app_api_key_audit_logs;
-		DROP TABLE IF EXISTS user_app_api_keys;
-		DROP TABLE IF EXISTS user_api_keys;
-		DROP TABLE IF EXISTS uploaded_images;
-		DROP TABLE IF EXISTS storage_user_quotas;
-		DROP TABLE IF EXISTS storage_file_deletion_failures;
-		DROP TABLE IF EXISTS messages;
-		DROP TABLE IF EXISTS conversations;
-		DROP TABLE IF EXISTS schema_migrations;
-		DROP TABLE IF EXISTS db_meta;
-		DROP TABLE IF EXISTS user_identities;
-		DROP TABLE IF EXISTS users;
-	`)
-	return err
+	return Reset(ctx, st.Pool())
 }

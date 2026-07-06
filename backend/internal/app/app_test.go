@@ -396,24 +396,7 @@ func TestRuntimeMigrationStatusBootstrapsPostgreSQL(t *testing.T) {
 		t.Fatalf("open postgres store: %v", err)
 	}
 	t.Cleanup(pgStore.Close)
-	if _, err := pgStore.Pool().Exec(ctx, `
-		DROP TABLE IF EXISTS user_configs;
-		DROP TABLE IF EXISTS config;
-		DROP TABLE IF EXISTS audit_logs;
-		DROP TABLE IF EXISTS automation_rules;
-		DROP TABLE IF EXISTS app_api_key_audit_logs;
-		DROP TABLE IF EXISTS user_app_api_keys;
-		DROP TABLE IF EXISTS user_api_keys;
-		DROP TABLE IF EXISTS uploaded_images;
-		DROP TABLE IF EXISTS storage_user_quotas;
-		DROP TABLE IF EXISTS storage_file_deletion_failures;
-		DROP TABLE IF EXISTS messages;
-		DROP TABLE IF EXISTS conversations;
-		DROP TABLE IF EXISTS schema_migrations;
-		DROP TABLE IF EXISTS db_meta;
-		DROP TABLE IF EXISTS user_identities;
-		DROP TABLE IF EXISTS users;
-	`); err != nil {
+	if err := pgstore.Reset(ctx, pgStore.Pool()); err != nil {
 		t.Fatalf("reset postgres schema: %v", err)
 	}
 
@@ -453,17 +436,31 @@ func TestDBCheckCommandReportsPostgreSQLStatus(t *testing.T) {
 	}
 }
 
-func TestMigrateCommandDownRejectsPostgreSQL(t *testing.T) {
+func TestMigrateCommandDownResetsPostgreSQL(t *testing.T) {
+	dsn := os.Getenv("CHATAPI_PG_TEST_DSN")
+	if dsn == "" {
+		t.Skip("CHATAPI_PG_TEST_DSN is not set")
+	}
 	backendRoot := t.TempDir()
 	t.Setenv("CHATAPI_DB_DRIVER", "postgresql")
-	t.Setenv("CHATAPI_DB_DSN", "postgres://chatapi:secret@localhost:5432/chatapi?sslmode=disable")
+	t.Setenv("CHATAPI_DB_DSN", dsn)
 
-	report, err := migrateCommand(context.Background(), migrateOptions{command: "down", force: true}, backendRoot)
-	if err == nil {
-		t.Fatal("expected postgres migrate down to fail")
+	if _, err := migrateCommand(context.Background(), migrateOptions{command: "up"}, backendRoot); err != nil {
+		t.Fatalf("postgres migrate up: %v", err)
 	}
-	if report.OK || !strings.Contains(report.Error, "migrate down is only implemented for sqlite") {
+	report, err := migrateCommand(context.Background(), migrateOptions{command: "down", force: true}, backendRoot)
+	if err != nil {
+		t.Fatalf("postgres migrate down: %v report=%#v", err, report)
+	}
+	if !report.OK || report.Command != "down" || !report.Forced || report.Status.SchemaVersion != migrations.BootstrapVersion {
 		t.Fatalf("unexpected postgres migrate down report: %#v", report)
+	}
+	statusReport, err := migrateCommand(context.Background(), migrateOptions{command: "status"}, backendRoot)
+	if err == nil {
+		t.Fatal("expected postgres status after migrate down to fail")
+	}
+	if statusReport.OK || !strings.Contains(statusReport.Error, "db_meta") {
+		t.Fatalf("unexpected postgres status after down: %#v", statusReport)
 	}
 }
 

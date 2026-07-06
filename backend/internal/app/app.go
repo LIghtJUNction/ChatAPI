@@ -949,7 +949,7 @@ func migrateCommand(ctx context.Context, options migrateOptions, backendRoot str
 		Forced:  options.force,
 	}
 	if options.command == "down" {
-		status, err := sqliteMigrateDown(ctx, cfg)
+		status, err := runtimeMigrateDown(ctx, cfg)
 		if err != nil {
 			report.OK = false
 			report.Error = err.Error()
@@ -972,26 +972,46 @@ func migrateCommand(ctx context.Context, options migrateOptions, backendRoot str
 	return report, nil
 }
 
-func sqliteMigrateDown(ctx context.Context, cfg config.Config) (migrations.Status, error) {
-	if strings.ToLower(strings.TrimSpace(cfg.DatabaseDriver)) != "sqlite" {
-		return migrations.Status{}, errors.New("migrate down is only implemented for sqlite in the current Go refactor branch")
+func runtimeMigrateDown(ctx context.Context, cfg config.Config) (migrations.Status, error) {
+	driver := strings.ToLower(strings.TrimSpace(cfg.DatabaseDriver))
+	switch driver {
+	case "sqlite":
+		dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
+		if err != nil {
+			return migrations.Status{}, err
+		}
+		defer dataStore.Close()
+		before, err := migrations.StatusReport(ctx, dataStore.DB())
+		if err != nil {
+			return migrations.Status{}, err
+		}
+		if before.MigrationDirty {
+			return migrations.Status{}, errors.New("migration dirty")
+		}
+		if err := migrations.Reset(ctx, dataStore.DB()); err != nil {
+			return migrations.Status{}, err
+		}
+		return before, nil
+	case "postgres", "postgresql":
+		dataStore, err := pgstore.Open(ctx, cfg.DatabaseDSN)
+		if err != nil {
+			return migrations.Status{}, err
+		}
+		defer dataStore.Close()
+		before, err := runtimeMigrationStatus(ctx, cfg, false)
+		if err != nil {
+			return migrations.Status{}, err
+		}
+		if before.MigrationDirty {
+			return migrations.Status{}, errors.New("migration dirty")
+		}
+		if err := pgstore.Reset(ctx, dataStore.Pool()); err != nil {
+			return migrations.Status{}, err
+		}
+		return before, nil
+	default:
+		return migrations.Status{}, fmt.Errorf("unsupported database driver %q", cfg.DatabaseDriver)
 	}
-	dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
-	if err != nil {
-		return migrations.Status{}, err
-	}
-	defer dataStore.Close()
-	before, err := migrations.StatusReport(ctx, dataStore.DB())
-	if err != nil {
-		return migrations.Status{}, err
-	}
-	if before.MigrationDirty {
-		return migrations.Status{}, errors.New("migration dirty")
-	}
-	if err := migrations.Reset(ctx, dataStore.DB()); err != nil {
-		return migrations.Status{}, err
-	}
-	return before, nil
 }
 
 func runtimeMigrationStatus(ctx context.Context, cfg config.Config, bootstrap bool) (migrations.Status, error) {

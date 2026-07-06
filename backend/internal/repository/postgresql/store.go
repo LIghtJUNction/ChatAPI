@@ -254,6 +254,31 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
+func Reset(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
+		DROP TABLE IF EXISTS user_configs;
+		DROP TABLE IF EXISTS config;
+		DROP TABLE IF EXISTS audit_logs;
+		DROP TABLE IF EXISTS automation_rules;
+		DROP TABLE IF EXISTS app_api_key_audit_logs;
+		DROP TABLE IF EXISTS user_app_api_keys;
+		DROP TABLE IF EXISTS user_api_keys;
+		DROP TABLE IF EXISTS uploaded_images;
+		DROP TABLE IF EXISTS storage_user_quotas;
+		DROP TABLE IF EXISTS storage_file_deletion_failures;
+		DROP TABLE IF EXISTS messages;
+		DROP TABLE IF EXISTS conversations;
+		DROP TABLE IF EXISTS schema_migrations;
+		DROP TABLE IF EXISTS db_meta;
+		DROP TABLE IF EXISTS user_identities;
+		DROP TABLE IF EXISTS users;
+	`)
+	if err != nil {
+		return fmt.Errorf("reset postgresql schema: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (store.User, error) {
 	now := time.Now().UTC()
 	role := strings.TrimSpace(input.Role)

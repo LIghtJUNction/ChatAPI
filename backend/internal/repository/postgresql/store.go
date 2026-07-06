@@ -22,7 +22,7 @@ type Store struct {
 }
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0002_postgresql_request_indexes"
+const LatestVersion = "0003_postgresql_auth_verification_codes"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS
@@ -91,6 +91,7 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 func Reset(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx, `
 		DROP TABLE IF EXISTS user_configs;
+		DROP TABLE IF EXISTS auth_verification_codes;
 		DROP TABLE IF EXISTS config;
 		DROP TABLE IF EXISTS audit_logs;
 		DROP TABLE IF EXISTS automation_rules;
@@ -495,6 +496,44 @@ func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.Use
 	return items, rows.Err()
 }
 
+func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpose string) (store.AuthVerificationCode, error) {
+	return scanAuthVerificationCode(s.pool.QueryRow(ctx, `
+		SELECT email, purpose, code_hash, expires_at, created_at, updated_at
+		FROM auth_verification_codes
+		WHERE email = $1 AND purpose = $2
+	`, strings.TrimSpace(strings.ToLower(email)), strings.TrimSpace(purpose)))
+}
+
+func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input store.UpsertAuthVerificationCodeInput) (store.AuthVerificationCode, error) {
+	now := time.Now().UTC()
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO auth_verification_codes(email, purpose, code_hash, expires_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT(email, purpose) DO UPDATE SET
+			code_hash = excluded.code_hash,
+			expires_at = excluded.expires_at,
+			updated_at = excluded.updated_at
+	`, strings.TrimSpace(strings.ToLower(input.Email)), strings.TrimSpace(input.Purpose), strings.TrimSpace(input.CodeHash), input.ExpiresAt.UTC(), now, now)
+	if err != nil {
+		return store.AuthVerificationCode{}, err
+	}
+	return s.GetAuthVerificationCode(ctx, input.Email, input.Purpose)
+}
+
+func (s *Store) DeleteAuthVerificationCode(ctx context.Context, email string, purpose string) error {
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM auth_verification_codes
+		WHERE email = $1 AND purpose = $2
+	`, strings.TrimSpace(strings.ToLower(email)), strings.TrimSpace(purpose))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -559,6 +598,17 @@ func scanSystemConfig(row rowScanner) (store.SystemConfig, error) {
 		return store.SystemConfig{}, err
 	}
 	item.Value = parseJSONMap(valueJSON)
+	return item, nil
+}
+
+func scanAuthVerificationCode(row rowScanner) (store.AuthVerificationCode, error) {
+	var item store.AuthVerificationCode
+	if err := row.Scan(&item.Email, &item.Purpose, &item.CodeHash, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.AuthVerificationCode{}, store.ErrNotFound
+		}
+		return store.AuthVerificationCode{}, err
+	}
 	return item, nil
 }
 

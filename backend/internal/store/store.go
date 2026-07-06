@@ -147,6 +147,15 @@ type UserConfig struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
+type AuthVerificationCode struct {
+	Email     string    `json:"email"`
+	Purpose   string    `json:"purpose"`
+	CodeHash  string    `json:"-"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type AutomationRule struct {
 	ID        string         `json:"id"`
 	UserID    string         `json:"user_id"`
@@ -264,6 +273,13 @@ type SetUserConfigInput struct {
 	UserID string
 	Key    string
 	Value  map[string]any
+}
+
+type UpsertAuthVerificationCodeInput struct {
+	Email     string
+	Purpose   string
+	CodeHash  string
+	ExpiresAt time.Time
 }
 
 type UpsertAutomationRuleInput struct {
@@ -400,6 +416,9 @@ type Store interface {
 	SetUserConfig(context.Context, SetUserConfigInput) (UserConfig, error)
 	DeleteUserConfig(context.Context, string, string) error
 	ListUserConfigs(context.Context, string) ([]UserConfig, error)
+	GetAuthVerificationCode(context.Context, string, string) (AuthVerificationCode, error)
+	UpsertAuthVerificationCode(context.Context, UpsertAuthVerificationCodeInput) (AuthVerificationCode, error)
+	DeleteAuthVerificationCode(context.Context, string, string) error
 	ListAutomationRulesByUser(context.Context, string) ([]AutomationRule, error)
 	ReplaceAutomationRulesForUser(context.Context, string, map[string]struct{}, []UpsertAutomationRuleInput) ([]AutomationRule, error)
 	CreateUploadedImage(context.Context, CreateUploadedImageInput) (UploadedImage, error)

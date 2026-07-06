@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -10,11 +11,15 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -970,6 +975,113 @@ func TestTOTPSetupConfirmLoginAndReset(t *testing.T) {
 	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "totp_setup", "success", 1)
 	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "totp_confirm", "success", 1)
 	assertAuditCountForActor(t, env, user.ID, "auth.session", "session", user.ID, "totp_reset", "success", 1)
+}
+
+func TestRegistrationWithEmailVerification(t *testing.T) {
+	smtpServer := newFakeSMTPServer(t)
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.SMTPEnabled = true
+		cfg.SMTPHost = smtpServer.host
+		cfg.SMTPPort = smtpServer.port
+		cfg.SMTPSecurity = "none"
+		cfg.SMTPFrom = "noreply@example.com"
+		cfg.SMTPTimeout = 10 * time.Second
+	})
+	if _, err := env.store.SetSystemConfig(context.Background(), store.SetSystemConfigInput{
+		Key: "system_settings",
+		Value: map[string]any{
+			"external_registration_enabled":                 true,
+			"email_verification_enabled":                    true,
+			"registration_email_domain_restriction_enabled": true,
+			"registration_email_domains":                    "example.com",
+		},
+	}); err != nil {
+		t.Fatalf("seed system settings: %v", err)
+	}
+
+	configResp := env.getJSON(t, "/api/auth/register/config", http.StatusOK)
+	if !nestedPathBool(configResp, "registration_enabled") || !nestedPathBool(configResp, "email_verification_enabled") {
+		t.Fatalf("unexpected register config: %#v", configResp)
+	}
+
+	status, body := env.postText(t, "/api/auth/register/send-code", map[string]any{
+		"email": "newuser@example.com",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("unexpected register send-code response: status=%d body=%q", status, body)
+	}
+	code := smtpServer.waitForLatestCode(t)
+
+	registerResp := env.postJSON(t, "/api/auth/register", map[string]any{
+		"email":    "newuser@example.com",
+		"password": "register-secret",
+		"code":     code,
+	}, http.StatusOK)
+	userID := nestedPathString(registerResp, "user", "id")
+	if userID == "" {
+		t.Fatalf("unexpected register response: %#v", registerResp)
+	}
+
+	loginResp, _ := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "newuser@example.com",
+		"password": "register-secret",
+	}, http.StatusOK)
+	if nestedPathString(loginResp, "user", "id") != userID {
+		t.Fatalf("unexpected login after register: %#v", loginResp)
+	}
+}
+
+func TestPasswordResetWithEmailCode(t *testing.T) {
+	smtpServer := newFakeSMTPServer(t)
+	env := newTestEnvWithConfig(t, config.ModeServe, func(cfg *config.Config) {
+		cfg.SMTPEnabled = true
+		cfg.SMTPHost = smtpServer.host
+		cfg.SMTPPort = smtpServer.port
+		cfg.SMTPSecurity = "none"
+		cfg.SMTPFrom = "noreply@example.com"
+		cfg.SMTPTimeout = 10 * time.Second
+	})
+	hash, err := passwordhash.Hash("old-reset-secret")
+	if err != nil {
+		t.Fatalf("hash reset password: %v", err)
+	}
+	if _, err := env.store.CreateUser(context.Background(), store.CreateUserInput{
+		ID:           "reset-user",
+		Username:     "reset-user@example.com",
+		Email:        "reset-user@example.com",
+		PasswordHash: hash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("seed reset user: %v", err)
+	}
+
+	configResp := env.getJSON(t, "/api/auth/password/config", http.StatusOK)
+	if !nestedPathBool(configResp, "password_reset_enabled") {
+		t.Fatalf("unexpected password config: %#v", configResp)
+	}
+
+	status, body := env.postText(t, "/api/auth/password/send-code", map[string]any{
+		"email": "reset-user@example.com",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("unexpected password send-code response: status=%d body=%q", status, body)
+	}
+	code := smtpServer.waitForLatestCode(t)
+
+	env.postJSON(t, "/api/auth/password/reset", map[string]any{
+		"email":    "reset-user@example.com",
+		"code":     code,
+		"password": "new-reset-secret",
+	}, http.StatusOK)
+
+	loginResp, _ := env.postJSONWithCookies(t, "/api/auth/login", map[string]any{
+		"username": "reset-user@example.com",
+		"password": "new-reset-secret",
+	}, http.StatusOK)
+	if nestedPathString(loginResp, "user", "id") != "reset-user" {
+		t.Fatalf("unexpected login after password reset: %#v", loginResp)
+	}
 }
 
 func TestUserIdentitiesListAndUnlink(t *testing.T) {
@@ -5008,4 +5120,140 @@ func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
 		}
 	}
 	return nil
+}
+
+type fakeSMTPServer struct {
+	listener net.Listener
+	host     string
+	port     int
+
+	mu       sync.Mutex
+	messages []string
+}
+
+func newFakeSMTPServer(t *testing.T) *fakeSMTPServer {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen fake smtp: %v", err)
+	}
+	host, portText, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("split fake smtp addr: %v", err)
+	}
+	server := &fakeSMTPServer{
+		listener: ln,
+		host:     host,
+		port:     atoi(portText),
+	}
+	go server.serve()
+	t.Cleanup(func() { _ = ln.Close() })
+	return server
+}
+
+func (s *fakeSMTPServer) serve() {
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			return
+		}
+		go s.handleConn(conn)
+	}
+}
+
+func (s *fakeSMTPServer) handleConn(conn net.Conn) {
+	defer conn.Close()
+	reader := bufio.NewReader(conn)
+	writer := bufio.NewWriter(conn)
+	writeLine := func(line string) bool {
+		if _, err := writer.WriteString(line + "\r\n"); err != nil {
+			return false
+		}
+		return writer.Flush() == nil
+	}
+	if !writeLine("220 fake-smtp") {
+		return
+	}
+
+	var dataLines []string
+	inData := false
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if inData {
+			if line == "." {
+				s.mu.Lock()
+				s.messages = append(s.messages, strings.Join(dataLines, "\n"))
+				s.mu.Unlock()
+				dataLines = nil
+				inData = false
+				if !writeLine("250 queued") {
+					return
+				}
+				continue
+			}
+			dataLines = append(dataLines, line)
+			continue
+		}
+		upper := strings.ToUpper(line)
+		switch {
+		case strings.HasPrefix(upper, "EHLO"), strings.HasPrefix(upper, "HELO"):
+			if _, err := writer.WriteString("250-fake-smtp\r\n250 OK\r\n"); err != nil {
+				return
+			}
+			if err := writer.Flush(); err != nil {
+				return
+			}
+		case strings.HasPrefix(upper, "MAIL FROM:"),
+			strings.HasPrefix(upper, "RCPT TO:"):
+			if !writeLine("250 OK") {
+				return
+			}
+		case strings.HasPrefix(upper, "DATA"):
+			inData = true
+			if !writeLine("354 End data with <CR><LF>.<CR><LF>") {
+				return
+			}
+		case strings.HasPrefix(upper, "QUIT"):
+			_ = writeLine("221 Bye")
+			return
+		default:
+			if !writeLine("250 OK") {
+				return
+			}
+		}
+	}
+}
+
+func (s *fakeSMTPServer) waitForLatestCode(t *testing.T) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		count := len(s.messages)
+		var latest string
+		if count > 0 {
+			latest = s.messages[count-1]
+		}
+		s.mu.Unlock()
+		if latest != "" {
+			re := regexp.MustCompile(`验证码：([0-9]{6})`)
+			matches := re.FindStringSubmatch(latest)
+			if len(matches) == 2 {
+				return matches[1]
+			}
+			t.Fatalf("email sent but verification code not found: %q", latest)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for fake smtp message")
+	return ""
+}
+
+func atoi(raw string) int {
+	value, _ := strconv.Atoi(strings.TrimSpace(raw))
+	return value
 }

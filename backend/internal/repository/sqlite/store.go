@@ -933,6 +933,46 @@ func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.Use
 	return items, rows.Err()
 }
 
+func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpose string) (store.AuthVerificationCode, error) {
+	item, err := scanAuthVerificationCode(s.db.QueryRowContext(ctx, `
+		SELECT email, purpose, code_hash, expires_at, created_at, updated_at
+		FROM auth_verification_codes
+		WHERE email = ? AND purpose = ?
+	`, strings.TrimSpace(email), strings.TrimSpace(purpose)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.AuthVerificationCode{}, errNotFound
+		}
+		return store.AuthVerificationCode{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input store.UpsertAuthVerificationCodeInput) (store.AuthVerificationCode, error) {
+	now := time.Now().UTC()
+	email := strings.TrimSpace(strings.ToLower(input.Email))
+	purpose := strings.TrimSpace(input.Purpose)
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO auth_verification_codes(email, purpose, code_hash, expires_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(email, purpose) DO UPDATE SET
+			code_hash = excluded.code_hash,
+			expires_at = excluded.expires_at,
+			updated_at = excluded.updated_at
+	`, email, purpose, strings.TrimSpace(input.CodeHash), formatTime(input.ExpiresAt.UTC()), formatTime(now), formatTime(now)); err != nil {
+		return store.AuthVerificationCode{}, err
+	}
+	return s.GetAuthVerificationCode(ctx, email, purpose)
+}
+
+func (s *Store) DeleteAuthVerificationCode(ctx context.Context, email string, purpose string) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM auth_verification_codes
+		WHERE email = ? AND purpose = ?
+	`, strings.TrimSpace(strings.ToLower(email)), strings.TrimSpace(purpose))
+	return err
+}
+
 func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]store.AutomationRule, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, enabled, rule_json, created_at, updated_at
@@ -2038,6 +2078,24 @@ func scanAutomationRule(scanner automationRuleScanner) (store.AutomationRule, er
 	}
 	item.Enabled = enabled != 0
 	item.Payload = parseJSONMap(payloadJSON)
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
+	return item, nil
+}
+
+type authVerificationCodeScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAuthVerificationCode(scanner authVerificationCodeScanner) (store.AuthVerificationCode, error) {
+	var item store.AuthVerificationCode
+	var expiresAt string
+	var createdAt string
+	var updatedAt string
+	if err := scanner.Scan(&item.Email, &item.Purpose, &item.CodeHash, &expiresAt, &createdAt, &updatedAt); err != nil {
+		return store.AuthVerificationCode{}, err
+	}
+	item.ExpiresAt = parseTime(expiresAt)
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return item, nil

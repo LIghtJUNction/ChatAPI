@@ -28,7 +28,7 @@ func TestBootstrapSeedsMigrationMetadata(t *testing.T) {
 	if status.CreatedBy != "go" || status.LastMigratedAt == "" {
 		t.Fatalf("missing migration meta: %#v", status)
 	}
-	if len(status.Applied) != 2 || status.Applied[0].Version != BootstrapVersion || status.Applied[0].Name != "bootstrap" || status.Applied[1].Version != LatestVersion {
+	if len(status.Applied) != len(registeredMigrations) || status.Applied[0].Version != BootstrapVersion || status.Applied[0].Name != "bootstrap" || status.Applied[len(status.Applied)-1].Version != LatestVersion {
 		t.Fatalf("unexpected applied migrations: %#v", status.Applied)
 	}
 	for _, table := range []string{"users", "user_identities", "user_configs", "config"} {
@@ -69,8 +69,8 @@ func TestBootstrapUpgradesThinMetadataTables(t *testing.T) {
 	if status.SchemaVersion != LatestVersion || status.Meta["migration_dirty"] != "0" {
 		t.Fatalf("unexpected upgraded meta: %#v", status)
 	}
-	if len(status.Applied) != 3 {
-		t.Fatalf("expected legacy, bootstrap and latest migrations: %#v", status.Applied)
+	if len(status.Applied) != len(registeredMigrations)+1 {
+		t.Fatalf("expected legacy and all registered migrations: %#v", status.Applied)
 	}
 }
 

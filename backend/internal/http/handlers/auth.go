@@ -26,6 +26,9 @@ type AuthHandler struct {
 	LocalAuth    *service.LocalAuthService
 	OIDCAuth     *service.OIDCAuthService
 	TOTP         *service.TOTPService
+	Settings     *service.AuthSettingsService
+	Registration *service.RegistrationService
+	Passwords    *service.PasswordResetService
 	LoginLimiter *service.LoginRateLimiter
 }
 
@@ -60,6 +63,11 @@ func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 		OIDCEnabled:                   h.Config.Mode != config.ModeLab && h.Config.OIDCEnabled,
 		OIDCProviderName:              h.oidcProviderName(),
 	}
+	if h.Settings != nil {
+		if settings, err := h.Settings.Public(r.Context()); err == nil {
+			payload.RegistrationEnabled = settings.RegistrationEnabled
+		}
+	}
 	if actor, ok := service.RequestActorFromContext(r.Context()); ok {
 		payload.Authenticated = true
 		payload.User = &user{ID: actor.UserID, Username: actor.Username, Role: actor.Role}
@@ -69,6 +77,118 @@ func (h AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func (h AuthHandler) RegisterConfig(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.Settings.Public(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                         true,
+		"registration_enabled":       settings.RegistrationEnabled,
+		"email_verification_enabled": settings.EmailVerificationEnabled,
+		"registration_email_domain_restriction_enabled": settings.RegistrationEmailDomainRestriction,
+		"registration_email_domains":                    settings.RegistrationEmailDomains,
+		"geetest_enabled":                               settings.GeetestEnabled,
+		"geetest_captcha_id":                            settings.GeetestCaptchaID,
+	})
+}
+
+func (h AuthHandler) RegisterSendCode(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid register send-code request", http.StatusBadRequest)
+		return
+	}
+	if err := h.Registration.SendCode(r.Context(), input.Email); err != nil {
+		writeRegistrationError(w, err)
+		return
+	}
+	h.recordAuthAudit(r, "register_send_code", "success")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid register request", http.StatusBadRequest)
+		return
+	}
+	user, err := h.Registration.Register(r.Context(), input.Email, input.Password, input.Code)
+	if err != nil {
+		writeRegistrationError(w, err)
+		return
+	}
+	h.recordAuthAudit(r.WithContext(service.WithRequestActor(r.Context(), service.RequestActor{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     user.Role,
+		Source:   "registration",
+	})), "register", "success")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"user": map[string]any{
+			"id":       user.ID,
+			"username": user.Username,
+			"role":     user.Role,
+		},
+	})
+}
+
+func (h AuthHandler) PasswordConfig(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.Settings.Public(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":                     true,
+		"password_reset_enabled": settings.PasswordResetEnabled,
+		"geetest_enabled":        settings.GeetestEnabled,
+		"geetest_captcha_id":     settings.GeetestCaptchaID,
+	})
+}
+
+func (h AuthHandler) PasswordSendCode(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid password send-code request", http.StatusBadRequest)
+		return
+	}
+	if err := h.Passwords.SendCode(r.Context(), input.Email); err != nil {
+		writePasswordResetError(w, err)
+		return
+	}
+	h.recordAuthAudit(r, "password_send_code", "success")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h AuthHandler) PasswordReset(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email    string `json:"email"`
+		Code     string `json:"code"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid password reset request", http.StatusBadRequest)
+		return
+	}
+	if err := h.Passwords.Reset(r.Context(), input.Email, input.Code, input.Password); err != nil {
+		writePasswordResetError(w, err)
+		return
+	}
+	h.recordAuthAudit(r, "password_reset", "success")
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AuthHandler) OIDCConfig(w http.ResponseWriter, r *http.Request) {
@@ -455,6 +575,32 @@ func (h AuthHandler) recordAuthAudit(r *http.Request, action string, outcome str
 		IPAddress:    clientIP(r),
 		UserAgent:    r.UserAgent(),
 	})
+}
+
+func writeRegistrationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrRegistrationDisabled),
+		errors.Is(err, service.ErrInvalidUserInput),
+		errors.Is(err, service.ErrEmailCodeInvalid),
+		errors.Is(err, service.ErrEmailCodeExpired),
+		errors.Is(err, service.ErrEmailDeliveryUnavailable):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func writePasswordResetError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrPasswordResetDisabled),
+		errors.Is(err, service.ErrInvalidUserInput),
+		errors.Is(err, service.ErrEmailCodeInvalid),
+		errors.Is(err, service.ErrEmailCodeExpired),
+		errors.Is(err, service.ErrEmailDeliveryUnavailable):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func sessionCookie(r *http.Request, value string, maxAge int) *http.Cookie {

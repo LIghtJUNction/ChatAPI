@@ -44,12 +44,17 @@ func NewRouter(
 	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
 	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
 	auditService := service.NewAuditService(dataStore)
+	authSettingsService := service.NewAuthSettingsService(dataStore, cfg)
+	emailCodeService := service.NewEmailCodeService(dataStore, cfg.MasterKey, email.SMTPConfigFromConfig(cfg), nil)
 	authHandler := handlers.AuthHandler{
 		Config:       cfg,
 		Audit:        auditService,
 		LocalAuth:    service.NewLocalAuthService(dataStore),
 		OIDCAuth:     service.NewOIDCAuthService(dataStore, cfg),
 		TOTP:         service.NewTOTPService(dataStore, cfg.MasterKey, "ChatAPI"),
+		Settings:     authSettingsService,
+		Registration: service.NewRegistrationService(dataStore, authSettingsService, emailCodeService),
+		Passwords:    service.NewPasswordResetService(dataStore, authSettingsService, emailCodeService),
 		LoginLimiter: service.NewLoginRateLimiter(5, time.Minute),
 	}
 	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore), Audit: auditService}
@@ -90,6 +95,12 @@ func NewRouter(
 	router.Get("/api/auth/session", authHandler.Session)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)
+	router.Get("/api/auth/register/config", authHandler.RegisterConfig)
+	router.Post("/api/auth/register/send-code", authHandler.RegisterSendCode)
+	router.Post("/api/auth/register", authHandler.Register)
+	router.Get("/api/auth/password/config", authHandler.PasswordConfig)
+	router.Post("/api/auth/password/send-code", authHandler.PasswordSendCode)
+	router.Post("/api/auth/password/reset", authHandler.PasswordReset)
 	router.Get("/api/auth/totp/setup", authHandler.TOTPSetup)
 	router.Post("/api/auth/totp/confirm", authHandler.TOTPConfirm)
 	router.Post("/api/auth/totp/reset", authHandler.TOTPReset)

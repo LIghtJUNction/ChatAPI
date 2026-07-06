@@ -18,6 +18,15 @@ func TestBuildUpstreamAssistantSchema(t *testing.T) {
 	if len(schema.SensitiveFields) != 1 || schema.SensitiveFields[0] != "api_key" {
 		t.Fatalf("unexpected sensitive fields: %#v", schema)
 	}
+	if schema.DefaultConfig["protocol"] != "responses" || schema.DefaultConfig["timeout_seconds"] != 30 {
+		t.Fatalf("unexpected upstream assistant defaults: %#v", schema.DefaultConfig)
+	}
+	if len(schema.ValidationRules) == 0 || len(schema.ErrorCodes) == 0 {
+		t.Fatalf("expected validation rules and error codes: %#v", schema)
+	}
+	if schema.ErrorCodes[0].Code == "" || schema.ErrorCodes[0].Description == "" {
+		t.Fatalf("unexpected first error code: %#v", schema.ErrorCodes[0])
+	}
 }
 
 func TestBuildUpstreamProtocolTemplates(t *testing.T) {

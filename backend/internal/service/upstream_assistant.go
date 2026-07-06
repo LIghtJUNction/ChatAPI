@@ -13,7 +13,15 @@ type UpstreamAssistantSchema struct {
 	Fields          []ConfigFieldSchema `json:"fields"`
 	ProtocolOptions []string            `json:"protocol_options"`
 	SensitiveFields []string            `json:"sensitive_fields"`
+	DefaultConfig   map[string]any      `json:"default_config"`
+	ValidationRules []string            `json:"validation_rules"`
+	ErrorCodes      []UpstreamErrorCode `json:"error_codes"`
 	Storage         map[string]any      `json:"storage"`
+}
+
+type UpstreamErrorCode struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
 }
 
 type UpstreamProtocolTemplate struct {
@@ -54,6 +62,33 @@ func BuildUpstreamAssistantSchema() UpstreamAssistantSchema {
 		},
 		ProtocolOptions: []string{"responses", "chat_completions", "anthropic_messages"},
 		SensitiveFields: []string{"api_key"},
+		DefaultConfig: map[string]any{
+			"enabled":            false,
+			"protocol":           "responses",
+			"base_url":           "",
+			"api_key":            "",
+			"model":              "",
+			"extra_headers":      map[string]any{},
+			"timeout_seconds":    30,
+			"max_input_messages": 20,
+		},
+		ValidationRules: []string{
+			"When enabled=true, protocol, base_url, api_key, and model must all be non-empty.",
+			"base_url must be an absolute http or https URL.",
+			"extra_headers must remain a flat JSON object with string values.",
+			"timeout_seconds must stay within [1, 600].",
+			"max_input_messages must stay within [1, 200].",
+			"candidate_base_url should be checked against upstream_hints before the UI sends a real upstream request.",
+		},
+		ErrorCodes: []UpstreamErrorCode{
+			{Code: "upstream_assistant.invalid_protocol", Description: "protocol is not one of responses, chat_completions, anthropic_messages"},
+			{Code: "upstream_assistant.invalid_base_url", Description: "base_url is not a valid absolute http/https URL"},
+			{Code: "upstream_assistant.recursive_base_url", Description: "base_url points to the current ChatAPI instance and may recurse"},
+			{Code: "upstream_assistant.invalid_extra_headers", Description: "extra_headers contains non-string values or nested objects"},
+			{Code: "upstream_assistant.timeout_out_of_range", Description: "timeout_seconds is outside the allowed range"},
+			{Code: "upstream_assistant.max_input_messages_out_of_range", Description: "max_input_messages is outside the allowed range"},
+			{Code: "upstream_assistant.missing_required_field", Description: "enabled assistant is missing a required non-sensitive or sensitive field"},
+		},
 		Storage: map[string]any{
 			"mode":                 "browser_local_only",
 			"allow_server_storage": false,

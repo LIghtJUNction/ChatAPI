@@ -166,6 +166,26 @@ type UserOwnershipTransferResult struct {
 	TargetQuotaCreatedFromSource bool   `json:"target_quota_created_from_source"`
 }
 
+type UserOwnedConversationItem struct {
+	ConversationID string    `json:"conversation_id"`
+	Title          string    `json:"title"`
+	LastMessageAt  time.Time `json:"last_message_at"`
+	MessageCount   int       `json:"message_count"`
+}
+
+type UserOwnedUploadItem struct {
+	ID        string    `json:"id"`
+	Filename  string    `json:"filename"`
+	Bytes     int64     `json:"bytes"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type UserOwnershipSelection struct {
+	User          User                        `json:"user"`
+	Conversations []UserOwnedConversationItem `json:"conversations"`
+	Uploads       []UserOwnedUploadItem       `json:"uploads"`
+}
+
 type UserDeletionPreviewCounts struct {
 	Identities                  int `json:"identities"`
 	UserConfigs                 int `json:"user_configs"`
@@ -498,6 +518,7 @@ type Store interface {
 	PreviewUserDeletion(context.Context, string) (UserDeletionPreview, error)
 	DeleteUserAccount(context.Context, string) error
 	TransferUserOwnership(context.Context, string, string) (UserOwnershipTransferResult, error)
+	TransferUserOwnershipSelection(context.Context, string, string, []string, []string) (UserOwnershipTransferResult, error)
 	UpsertUserIdentity(context.Context, UpsertUserIdentityInput) (UserIdentity, error)
 	GetUserIdentity(context.Context, string, string) (UserIdentity, error)
 	ListUserIdentities(context.Context, string) ([]UserIdentity, error)

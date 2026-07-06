@@ -154,6 +154,50 @@ func (h AdminUsersHandler) TransferOwnership(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+func (h AdminUsersHandler) OwnershipItems(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	items, err := h.Ownership.Items(r.Context(), userID)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":    true,
+		"user":  items.User,
+		"items": items,
+	})
+}
+
+func (h AdminUsersHandler) TransferOwnershipSelection(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		TargetUserID    string   `json:"target_user_id"`
+		ConversationIDs []string `json:"conversation_ids"`
+		Filenames       []string `json:"filenames"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid ownership transfer selection request", http.StatusBadRequest)
+		return
+	}
+	sourceUserID := chi.URLParam(r, "userID")
+	result, preview, err := h.Ownership.TransferSelection(r.Context(), sourceUserID, input.TargetUserID, input.ConversationIDs, input.Filenames)
+	if err != nil {
+		writeAdminUserError(w, err)
+		return
+	}
+	h.recordWithMetadata(r, sourceUserID, "transfer_ownership_selection", "success", map[string]any{
+		"target_user_id":   strings.TrimSpace(input.TargetUserID),
+		"conversation_ids": input.ConversationIDs,
+		"filenames":        input.Filenames,
+		"result":           result,
+		"preview":          preview,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"result":  result,
+		"preview": preview,
+	})
+}
+
 func (h AdminUsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var input service.CreateAdminUserInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {

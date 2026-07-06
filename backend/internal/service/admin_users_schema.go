@@ -90,6 +90,33 @@ func BuildAdminUsersSchema() AdminUsersSchema {
 				},
 			},
 			{
+				Name:          "list_user_ownership_items",
+				Method:        "GET",
+				Path:          "/api/admin/users/{user_id}/ownership-items",
+				Description:   "List the conversations and uploaded images still owned by a user for selective transfer decisions.",
+				RequiresAdmin: true,
+				Notes: []string{
+					"The response shape is {ok, user, items} where items contains conversations and uploads arrays.",
+				},
+			},
+			{
+				Name:          "transfer_user_ownership_selection",
+				Method:        "POST",
+				Path:          "/api/admin/users/{user_id}/transfer-ownership-selection",
+				Description:   "Transfer only selected conversations and/or uploaded images to another user before retrying purge.",
+				RequiresAdmin: true,
+				Fields: []ConfigFieldSchema{
+					{Key: "target_user_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Existing target user that will receive selected ownership records."},
+					{Key: "conversation_ids", ValueType: "string_array", DefaultValue: []string{}, Public: false, AdminWriteOnly: true, Description: "Optional conversation ids to transfer if they are currently owned by the source user."},
+					{Key: "filenames", ValueType: "string_array", DefaultValue: []string{}, Public: false, AdminWriteOnly: true, Description: "Optional uploaded image filenames to transfer if they are currently owned by the source user."},
+				},
+				Notes: []string{
+					"At least one of conversation_ids or filenames must be provided.",
+					"Selected upload transfer also moves matching storage deletion failure ownership by filename.",
+					"This endpoint does not move quota overrides or account-level keys/config; it is only for granular history ownership cleanup.",
+				},
+			},
+			{
 				Name:          "reset_user_password",
 				Method:        "PUT",
 				Path:          "/api/admin/users/{user_id}/password",

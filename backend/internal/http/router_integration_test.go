@@ -4659,7 +4659,7 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	schemaResp := env.getJSONWithCookie(t, "/api/admin/users/schema", adminCookie, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 10 {
+	if len(operations) != 12 {
 		t.Fatalf("unexpected admin users schema response: %#v", schemaResp)
 	}
 	if nestedString(operations[0].(map[string]any), "name") != "list_users" || nestedString(operations[1].(map[string]any), "name") != "create_user" {
@@ -4929,6 +4929,100 @@ func TestAdminUsersManageLocalUsers(t *testing.T) {
 	}
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", transferSourceUserID, "transfer_ownership", "success", 1)
 	assertAuditCountForActor(t, env, "admin", "admin.user", "user", transferSourceUserID, "purge", "success", 1)
+
+	selectSourceResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
+		"username": "select-source",
+		"email":    "select-source@example.com",
+		"password": "select-secret",
+		"role":     "user",
+	}, adminCookie, headers, http.StatusCreated)
+	selectSourceUserID := nestedPathString(selectSourceResp, "user", "id")
+	selectTargetResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
+		"username": "select-target",
+		"email":    "select-target@example.com",
+		"password": "select-secret",
+		"role":     "user",
+	}, adminCookie, headers, http.StatusCreated)
+	selectTargetUserID := nestedPathString(selectTargetResp, "user", "id")
+	if _, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
+		ConversationID: "conv_select_http_one",
+		RequestID:      "req_select_http_one",
+		ResponseID:     "resp_select_http_one",
+		OwnerID:        selectSourceUserID,
+		RequestFormat:  "responses",
+		Model:          "select-model",
+		UserContent:    "select one",
+		RequestBody:    map[string]any{"model": "select-model"},
+	}); err != nil {
+		t.Fatalf("seed selective transfer conversation one: %v", err)
+	}
+	if _, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
+		ConversationID: "conv_select_http_two",
+		RequestID:      "req_select_http_two",
+		ResponseID:     "resp_select_http_two",
+		OwnerID:        selectSourceUserID,
+		RequestFormat:  "responses",
+		Model:          "select-model",
+		UserContent:    "select two",
+		RequestBody:    map[string]any{"model": "select-model"},
+	}); err != nil {
+		t.Fatalf("seed selective transfer conversation two: %v", err)
+	}
+	for _, filename := range []string{"select-http-one.png", "select-http-two.png"} {
+		if _, err := env.store.CreateUploadedImage(context.Background(), store.CreateUploadedImageInput{
+			ID:               "img_" + filename,
+			OwnerID:          selectSourceUserID,
+			Filename:         filename,
+			OriginalFilename: filename,
+			ContentType:      "image/png",
+			Bytes:            21,
+			URL:              "/api/uploads/imgs/" + filename,
+		}); err != nil {
+			t.Fatalf("seed selective transfer upload %s: %v", filename, err)
+		}
+		if _, err := env.store.UpsertStorageFileDeletionFailure(context.Background(), store.UpsertStorageFileDeletionFailureInput{
+			Path:      "/tmp/" + filename,
+			Filename:  filename,
+			OwnerID:   selectSourceUserID,
+			Bytes:     21,
+			LastError: "busy",
+		}); err != nil {
+			t.Fatalf("seed selective transfer failure %s: %v", filename, err)
+		}
+	}
+
+	itemsResp := env.getJSONWithCookie(t, "/api/admin/users/"+selectSourceUserID+"/ownership-items", adminCookie, http.StatusOK)
+	ownershipItems := itemsResp["items"].(map[string]any)
+	if len(ownershipItems["conversations"].([]any)) != 2 || len(ownershipItems["uploads"].([]any)) != 2 {
+		t.Fatalf("unexpected ownership items response: %#v", itemsResp)
+	}
+
+	selectTransferResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+selectSourceUserID+"/transfer-ownership-selection", map[string]any{
+		"target_user_id":   selectTargetUserID,
+		"conversation_ids": []string{"conv_select_http_one"},
+		"filenames":        []string{"select-http-one.png"},
+	}, adminCookie, headers, http.StatusOK)
+	if numericNestedPathValue(selectTransferResp, "result", "transferred_conversations") != 1 ||
+		numericNestedPathValue(selectTransferResp, "result", "transferred_uploaded_images") != 1 ||
+		nestedPathBool(selectTransferResp, "preview", "can_delete") {
+		t.Fatalf("unexpected selective transfer response: %#v", selectTransferResp)
+	}
+	assertAuditCountForActor(t, env, "admin", "admin.user", "user", selectSourceUserID, "transfer_ownership_selection", "success", 1)
+
+	selectPreviewResp := env.getJSONWithCookie(t, "/api/admin/users/"+selectSourceUserID+"/delete-preview", adminCookie, http.StatusOK)
+	if numericNestedPathValue(selectPreviewResp, "preview", "counts", "owned_conversations") != 1 ||
+		numericNestedPathValue(selectPreviewResp, "preview", "counts", "owned_uploaded_images") != 1 {
+		t.Fatalf("expected selective transfer to leave one blocker each: %#v", selectPreviewResp)
+	}
+
+	selectTransferResp, _ = env.postJSONWithCookieAndHeaders(t, "/api/admin/users/"+selectSourceUserID+"/transfer-ownership-selection", map[string]any{
+		"target_user_id":   selectTargetUserID,
+		"conversation_ids": []string{"conv_select_http_two"},
+		"filenames":        []string{"select-http-two.png"},
+	}, adminCookie, headers, http.StatusOK)
+	if !nestedPathBool(selectTransferResp, "preview", "can_delete") {
+		t.Fatalf("expected selective transfer to clear blockers after second pass: %#v", selectTransferResp)
+	}
 
 	purgeableResp, _ := env.postJSONWithCookieAndHeaders(t, "/api/admin/users", map[string]any{
 		"username": "purgeable",

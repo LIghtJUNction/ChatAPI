@@ -27,6 +27,9 @@ func RunUserRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Run("user_ownership_transfer", func(t *testing.T) {
 		testUserRepositoryTransfersOwnership(t, newStore)
 	})
+	t.Run("user_ownership_transfer_selection", func(t *testing.T) {
+		testUserRepositoryTransfersOwnershipSelection(t, newStore)
+	})
 	t.Run("user_identities", func(t *testing.T) {
 		testUserIdentityRepositoryUpsertsByProviderSubject(t, newStore)
 	})
@@ -511,6 +514,101 @@ func testUserRepositoryTransfersOwnership(t *testing.T, newStore NewStoreFunc) {
 	targetQuota, err = st.GetStorageUserQuota(ctx, "user_transfer_target")
 	if err != nil || targetQuota.QuotaBytes != 4096 {
 		t.Fatalf("expected target quota preserved, quota=%#v err=%v", targetQuota, err)
+	}
+}
+
+func testUserRepositoryTransfersOwnershipSelection(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+
+	for _, item := range []store.CreateUserInput{
+		{ID: "user_transfer_select_source", Username: "select-source", Email: "select-source@example.com", PasswordHash: "hash", IsActive: true},
+		{ID: "user_transfer_select_target", Username: "select-target", Email: "select-target@example.com", PasswordHash: "hash", IsActive: true},
+	} {
+		if _, err := st.CreateUser(ctx, item); err != nil {
+			t.Fatalf("create user %s: %v", item.ID, err)
+		}
+	}
+	for _, conversationID := range []string{"conv_select_one", "conv_select_two"} {
+		if _, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+			ConversationID: conversationID,
+			RequestID:      "req_" + conversationID,
+			ResponseID:     "resp_" + conversationID,
+			OwnerID:        "user_transfer_select_source",
+			RequestFormat:  "responses",
+			Model:          "select-transfer-test",
+			UserContent:    conversationID,
+			RequestBody:    map[string]any{"model": "select-transfer-test"},
+		}); err != nil {
+			t.Fatalf("create conversation %s: %v", conversationID, err)
+		}
+	}
+	for _, filename := range []string{"select-one.png", "select-two.png"} {
+		if _, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+			ID:               "img_" + filename,
+			OwnerID:          "user_transfer_select_source",
+			Filename:         filename,
+			OriginalFilename: filename,
+			ContentType:      "image/png",
+			Bytes:            64,
+			URL:              "/api/uploads/imgs/" + filename,
+		}); err != nil {
+			t.Fatalf("create upload %s: %v", filename, err)
+		}
+		if _, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+			Path:      "/tmp/" + filename,
+			Filename:  filename,
+			OwnerID:   "user_transfer_select_source",
+			Bytes:     64,
+			LastError: "busy",
+		}); err != nil {
+			t.Fatalf("create deletion failure %s: %v", filename, err)
+		}
+	}
+
+	result, err := st.TransferUserOwnershipSelection(ctx, "user_transfer_select_source", "user_transfer_select_target", []string{"conv_select_one"}, []string{"select-one.png"})
+	if err != nil {
+		t.Fatalf("transfer ownership selection: %v", err)
+	}
+	if result.TransferredConversations != 1 || result.TransferredUploadedImages != 1 || result.TransferredDeletionFailures != 1 {
+		t.Fatalf("unexpected selective transfer result: %#v", result)
+	}
+	preview, err := st.PreviewUserDeletion(ctx, "user_transfer_select_source")
+	if err != nil {
+		t.Fatalf("preview after partial transfer: %v", err)
+	}
+	if preview.CanDelete || preview.Counts.OwnedConversations != 1 || preview.Counts.OwnedUploadedImages != 1 {
+		t.Fatalf("expected remaining blockers after partial transfer: %#v", preview)
+	}
+	conversation, err := st.GetConversation(ctx, "conv_select_one")
+	if err != nil {
+		t.Fatalf("get moved conversation: %v", err)
+	}
+	if conversation.Metadata["owner_id"] != "user_transfer_select_target" {
+		t.Fatalf("expected selected conversation owner move: %#v", conversation)
+	}
+	stillOwned, err := st.GetConversation(ctx, "conv_select_two")
+	if err != nil {
+		t.Fatalf("get remaining conversation: %v", err)
+	}
+	if stillOwned.Metadata["owner_id"] != "user_transfer_select_source" {
+		t.Fatalf("expected unselected conversation to remain: %#v", stillOwned)
+	}
+	targetImages, err := st.ListUploadedImagesByOwner(ctx, "user_transfer_select_target")
+	if err != nil || len(targetImages) != 1 || targetImages[0].Filename != "select-one.png" {
+		t.Fatalf("unexpected target selected uploads: %#v err=%v", targetImages, err)
+	}
+
+	if _, err := st.TransferUserOwnershipSelection(ctx, "user_transfer_select_source", "user_transfer_select_target", []string{"conv_select_two"}, []string{"select-two.png"}); err != nil {
+		t.Fatalf("transfer remaining ownership selection: %v", err)
+	}
+	preview, err = st.PreviewUserDeletion(ctx, "user_transfer_select_source")
+	if err != nil {
+		t.Fatalf("preview after full selective transfer: %v", err)
+	}
+	if !preview.CanDelete || preview.Counts.OwnedConversations != 0 || preview.Counts.OwnedUploadedImages != 0 {
+		t.Fatalf("expected blockers cleared after full selective transfer: %#v", preview)
 	}
 }
 

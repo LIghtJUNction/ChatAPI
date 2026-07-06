@@ -314,6 +314,75 @@ func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, 
 	return result, nil
 }
 
+func (s *Store) TransferUserOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (store.UserOwnershipTransferResult, error) {
+	sourceUserID = strings.TrimSpace(sourceUserID)
+	targetUserID = strings.TrimSpace(targetUserID)
+	conversationIDs = uniqueNonEmptyStrings(conversationIDs)
+	filenames = uniqueNonEmptyStrings(filenames)
+	if sourceUserID == "" || targetUserID == "" || sourceUserID == targetUserID || (len(conversationIDs) == 0 && len(filenames) == 0) {
+		return store.UserOwnershipTransferResult{}, errConflict
+	}
+	if _, err := s.GetUser(ctx, sourceUserID); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	if _, err := s.GetUser(ctx, targetUserID); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	result := store.UserOwnershipTransferResult{
+		SourceUserID: sourceUserID,
+		TargetUserID: targetUserID,
+	}
+
+	if len(conversationIDs) > 0 {
+		tag, err := tx.Exec(ctx, `
+			UPDATE conversations
+			SET metadata_json = jsonb_set(COALESCE(metadata_json, '{}'::jsonb), '{owner_id}', to_jsonb($1::text), true)
+			WHERE COALESCE(metadata_json->>'owner_id', '') = $2
+				AND id = ANY($3)
+		`, targetUserID, sourceUserID, conversationIDs)
+		if err != nil {
+			return store.UserOwnershipTransferResult{}, err
+		}
+		result.TransferredConversations = int(tag.RowsAffected())
+	}
+
+	if len(filenames) > 0 {
+		tag, err := tx.Exec(ctx, `
+			UPDATE uploaded_images
+			SET owner_id = $1
+			WHERE owner_id = $2
+				AND filename = ANY($3)
+		`, targetUserID, sourceUserID, filenames)
+		if err != nil {
+			return store.UserOwnershipTransferResult{}, err
+		}
+		result.TransferredUploadedImages = int(tag.RowsAffected())
+
+		failureTag, err := tx.Exec(ctx, `
+			UPDATE storage_file_deletion_failures
+			SET owner_id = $1
+			WHERE owner_id = $2
+				AND filename = ANY($3)
+		`, targetUserID, sourceUserID, filenames)
+		if err != nil {
+			return store.UserOwnershipTransferResult{}, err
+		}
+		result.TransferredDeletionFailures = int(failureTag.RowsAffected())
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) getStorageFileDeletionFailure(ctx context.Context, path string) (store.StorageFileDeletionFailure, error) {
 	return scanStorageFileDeletionFailure(s.pool.QueryRow(ctx, `
 		SELECT path, filename, owner_id, bytes, last_error, attempts, created_at, updated_at

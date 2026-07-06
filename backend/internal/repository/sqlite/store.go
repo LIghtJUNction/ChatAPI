@@ -972,6 +972,104 @@ func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, 
 	return result, nil
 }
 
+func (s *Store) TransferUserOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (store.UserOwnershipTransferResult, error) {
+	sourceUserID = strings.TrimSpace(sourceUserID)
+	targetUserID = strings.TrimSpace(targetUserID)
+	conversationIDs = uniqueNonEmptyStrings(conversationIDs)
+	filenames = uniqueNonEmptyStrings(filenames)
+	if sourceUserID == "" || targetUserID == "" || sourceUserID == targetUserID || (len(conversationIDs) == 0 && len(filenames) == 0) {
+		return store.UserOwnershipTransferResult{}, errConflict
+	}
+	if _, err := s.GetUser(ctx, sourceUserID); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	if _, err := s.GetUser(ctx, targetUserID); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result := store.UserOwnershipTransferResult{
+		SourceUserID: sourceUserID,
+		TargetUserID: targetUserID,
+	}
+
+	if len(conversationIDs) > 0 {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(conversationIDs)), ",")
+		args := make([]any, 0, len(conversationIDs)+2)
+		args = append(args, targetUserID, sourceUserID)
+		for _, id := range conversationIDs {
+			args = append(args, id)
+		}
+		res, err := tx.ExecContext(ctx, `
+			UPDATE conversations
+			SET metadata_json = json_set(COALESCE(metadata_json, '{}'), '$.owner_id', ?)
+			WHERE COALESCE(json_extract(metadata_json, '$.owner_id'), '') = ?
+				AND id IN (`+placeholders+`)
+		`, args...)
+		if err != nil {
+			return store.UserOwnershipTransferResult{}, err
+		}
+		if rows, err := res.RowsAffected(); err == nil {
+			result.TransferredConversations = int(rows)
+		} else {
+			return store.UserOwnershipTransferResult{}, err
+		}
+	}
+
+	if len(filenames) > 0 {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(filenames)), ",")
+		imageArgs := make([]any, 0, len(filenames)+2)
+		imageArgs = append(imageArgs, targetUserID, sourceUserID)
+		for _, filename := range filenames {
+			imageArgs = append(imageArgs, filename)
+		}
+		res, err := tx.ExecContext(ctx, `
+			UPDATE uploaded_images
+			SET owner_id = ?
+			WHERE owner_id = ?
+				AND filename IN (`+placeholders+`)
+		`, imageArgs...)
+		if err != nil {
+			return store.UserOwnershipTransferResult{}, err
+		}
+		if rows, err := res.RowsAffected(); err == nil {
+			result.TransferredUploadedImages = int(rows)
+		} else {
+			return store.UserOwnershipTransferResult{}, err
+		}
+
+		failureArgs := make([]any, 0, len(filenames)+2)
+		failureArgs = append(failureArgs, targetUserID, sourceUserID)
+		for _, filename := range filenames {
+			failureArgs = append(failureArgs, filename)
+		}
+		failureRes, err := tx.ExecContext(ctx, `
+			UPDATE storage_file_deletion_failures
+			SET owner_id = ?
+			WHERE owner_id = ?
+				AND filename IN (`+placeholders+`)
+		`, failureArgs...)
+		if err != nil {
+			return store.UserOwnershipTransferResult{}, err
+		}
+		if rows, err := failureRes.RowsAffected(); err == nil {
+			result.TransferredDeletionFailures = int(rows)
+		} else {
+			return store.UserOwnershipTransferResult{}, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return store.UserOwnershipTransferResult{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) UpsertUserIdentity(ctx context.Context, input store.UpsertUserIdentityInput) (store.UserIdentity, error) {
 	now := time.Now().UTC()
 	profile := ensureMap(input.Profile)

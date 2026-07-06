@@ -155,6 +155,20 @@ CREATE TABLE IF NOT EXISTS storage_user_quotas (
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS storage_file_deletion_failures (
+	path TEXT PRIMARY KEY,
+	filename TEXT NOT NULL DEFAULT '',
+	owner_id TEXT NOT NULL DEFAULT '',
+	bytes INTEGER NOT NULL DEFAULT 0,
+	last_error TEXT NOT NULL DEFAULT '',
+	attempts INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_storage_file_deletion_failures_updated
+ON storage_file_deletion_failures(updated_at ASC, path ASC);
 `
 
 type Status struct {

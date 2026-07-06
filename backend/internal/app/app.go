@@ -208,6 +208,10 @@ func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataS
 			if err != nil {
 				logger.Warn("storage scheduled orphan cleanup failed", slog.String("error", err.Error()))
 			}
+			retryResult, err := monitor.RetryFileDeletionFailures(runCtx, 100)
+			if err != nil {
+				logger.Warn("storage scheduled file deletion retry failed", slog.String("error", err.Error()))
+			}
 			checkpointed := false
 			if err := monitor.Checkpoint(runCtx); err != nil {
 				logger.Warn("storage scheduled checkpoint failed", slog.String("error", err.Error()))
@@ -236,6 +240,8 @@ func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataS
 					"deleted_image_bytes":       result.DeletedImageBytes,
 					"orphan_deleted_count":      orphanResult.DeletedCount,
 					"orphan_deleted_bytes":      orphanResult.DeletedBytes,
+					"retry_deleted_files":       retryResult.Deleted,
+					"retry_failed_files":        retryResult.Failed,
 					"checkpointed":              checkpointed,
 					"vacuumed":                  vacuumed,
 				},
@@ -246,6 +252,8 @@ func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataS
 				slog.Int("deleted_messages", result.DeletedMessages),
 				slog.Int("deleted_images", result.DeletedImages),
 				slog.Int("orphan_deleted_count", orphanResult.DeletedCount),
+				slog.Int("retry_deleted_files", retryResult.Deleted),
+				slog.Int("retry_failed_files", retryResult.Failed),
 				slog.Bool("checkpointed", checkpointed),
 				slog.Bool("vacuumed", vacuumed),
 			)

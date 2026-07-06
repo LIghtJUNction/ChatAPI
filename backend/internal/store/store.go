@@ -133,6 +133,17 @@ type StorageUserQuota struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+type StorageFileDeletionFailure struct {
+	Path      string    `json:"path"`
+	Filename  string    `json:"filename,omitempty"`
+	OwnerID   string    `json:"owner_id,omitempty"`
+	Bytes     int64     `json:"bytes"`
+	LastError string    `json:"last_error"`
+	Attempts  int       `json:"attempts"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type MigrationStatus struct {
 	SchemaVersion  string             `json:"schema_version"`
 	AppVersion     string             `json:"app_version,omitempty"`
@@ -207,6 +218,14 @@ type CreateUploadedImageInput struct {
 	ContentType      string
 	Bytes            int64
 	URL              string
+}
+
+type UpsertStorageFileDeletionFailureInput struct {
+	Path      string
+	Filename  string
+	OwnerID   string
+	Bytes     int64
+	LastError string
 }
 
 type CreatePendingInput struct {
@@ -285,6 +304,9 @@ type Store interface {
 	ListUploadedImages(context.Context) ([]UploadedImage, error)
 	ListUploadedImagesByOwner(context.Context, string) ([]UploadedImage, error)
 	DeleteUploadedImagesByFilenames(context.Context, []string) (DeleteUploadedImagesResult, error)
+	UpsertStorageFileDeletionFailure(context.Context, UpsertStorageFileDeletionFailureInput) (StorageFileDeletionFailure, error)
+	ListStorageFileDeletionFailures(context.Context, int) ([]StorageFileDeletionFailure, error)
+	DeleteStorageFileDeletionFailures(context.Context, []string) error
 	ListStorageUserQuotas(context.Context) ([]StorageUserQuota, error)
 	GetStorageUserQuota(context.Context, string) (StorageUserQuota, error)
 	SetStorageUserQuota(context.Context, string, int64) (StorageUserQuota, error)

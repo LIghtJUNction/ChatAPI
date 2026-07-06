@@ -750,6 +750,89 @@ func (s *Store) DeleteUploadedImagesByFilenames(ctx context.Context, filenames [
 	return store.DeleteUploadedImagesResult{DeletedImages: int(rowsAffected)}, nil
 }
 
+func (s *Store) UpsertStorageFileDeletionFailure(ctx context.Context, input store.UpsertStorageFileDeletionFailureInput) (store.StorageFileDeletionFailure, error) {
+	now := time.Now().UTC()
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO storage_file_deletion_failures(
+			path, filename, owner_id, bytes, last_error, attempts, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+		ON CONFLICT(path) DO UPDATE SET
+			filename = excluded.filename,
+			owner_id = excluded.owner_id,
+			bytes = excluded.bytes,
+			last_error = excluded.last_error,
+			attempts = attempts + 1,
+			updated_at = excluded.updated_at
+	`,
+		input.Path,
+		input.Filename,
+		input.OwnerID,
+		input.Bytes,
+		input.LastError,
+		formatTime(now),
+		formatTime(now),
+	); err != nil {
+		return store.StorageFileDeletionFailure{}, err
+	}
+	return s.getStorageFileDeletionFailure(ctx, input.Path)
+}
+
+func (s *Store) ListStorageFileDeletionFailures(ctx context.Context, limit int) ([]store.StorageFileDeletionFailure, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT path, filename, owner_id, bytes, last_error, attempts, created_at, updated_at
+		FROM storage_file_deletion_failures
+		ORDER BY updated_at ASC, path ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.StorageFileDeletionFailure, 0)
+	for rows.Next() {
+		item, err := scanStorageFileDeletionFailure(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) DeleteStorageFileDeletionFailures(ctx context.Context, paths []string) error {
+	paths = uniqueNonEmptyStrings(paths)
+	if len(paths) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(paths)), ",")
+	args := make([]any, 0, len(paths))
+	for _, path := range paths {
+		args = append(args, path)
+	}
+	query := fmt.Sprintf(`DELETE FROM storage_file_deletion_failures WHERE path IN (%s)`, placeholders)
+	_, err := s.db.ExecContext(ctx, query, args...)
+	return err
+}
+
+func (s *Store) getStorageFileDeletionFailure(ctx context.Context, path string) (store.StorageFileDeletionFailure, error) {
+	item, err := scanStorageFileDeletionFailure(s.db.QueryRowContext(ctx, `
+		SELECT path, filename, owner_id, bytes, last_error, attempts, created_at, updated_at
+		FROM storage_file_deletion_failures
+		WHERE path = ?
+	`, path))
+	if err != nil {
+		return store.StorageFileDeletionFailure{}, err
+	}
+	return item, nil
+}
+
 func (s *Store) ListStorageUserQuotas(ctx context.Context) ([]store.StorageUserQuota, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT owner_id, quota_bytes, created_at, updated_at
@@ -1340,6 +1423,10 @@ type uploadedImageScanner interface {
 	Scan(dest ...any) error
 }
 
+type storageFileDeletionFailureScanner interface {
+	Scan(dest ...any) error
+}
+
 type storageUserQuotaScanner interface {
 	Scan(dest ...any) error
 }
@@ -1513,6 +1600,27 @@ func scanUploadedImage(scanner uploadedImageScanner) (store.UploadedImage, error
 		return store.UploadedImage{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
+	return item, nil
+}
+
+func scanStorageFileDeletionFailure(scanner storageFileDeletionFailureScanner) (store.StorageFileDeletionFailure, error) {
+	var item store.StorageFileDeletionFailure
+	var createdAt string
+	var updatedAt string
+	if err := scanner.Scan(
+		&item.Path,
+		&item.Filename,
+		&item.OwnerID,
+		&item.Bytes,
+		&item.LastError,
+		&item.Attempts,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return store.StorageFileDeletionFailure{}, err
+	}
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
 	return item, nil
 }
 

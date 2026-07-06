@@ -70,6 +70,7 @@ type StorageCleanupPreview struct {
 	DeletedMessages           int                       `json:"deleted_messages,omitempty"`
 	DeletedImages             int                       `json:"deleted_images,omitempty"`
 	DeletedImageBytes         int64                     `json:"deleted_image_bytes,omitempty"`
+	ImageDeleteFailures       int                       `json:"image_delete_failures,omitempty"`
 	ByOwner                   []StorageCleanupOwnerPlan `json:"by_owner"`
 }
 
@@ -104,6 +105,14 @@ type storageCleanupImagePlan struct {
 type storageCleanupImageResult struct {
 	DeletedImages     int
 	DeletedImageBytes int64
+	DeleteFailures    int
+}
+
+type StorageFileDeletionRetryResult struct {
+	GeneratedAt time.Time `json:"generated_at"`
+	Scanned     int       `json:"scanned"`
+	Deleted     int       `json:"deleted"`
+	Failed      int       `json:"failed"`
 }
 
 type StorageOrphanImagesPreview struct {
@@ -274,6 +283,7 @@ func (s *StorageMonitorService) DeleteCleanupCandidates(ctx context.Context, inp
 	preview.DeletedMessages = result.DeletedMessages
 	preview.DeletedImages = imageResult.DeletedImages
 	preview.DeletedImageBytes = imageResult.DeletedImageBytes
+	preview.ImageDeleteFailures = imageResult.DeleteFailures
 	return preview, nil
 }
 
@@ -491,7 +501,11 @@ func (s *StorageMonitorService) deleteCleanupImages(ctx context.Context, plan st
 		}
 		if err := os.Remove(path); err != nil {
 			if !os.IsNotExist(err) {
-				return storageCleanupImageResult{}, err
+				result.DeleteFailures++
+				if recordErr := s.recordFileDeletionFailure(ctx, path, image.Filename, image.OwnerID, image.Bytes, err); recordErr != nil {
+					return storageCleanupImageResult{}, recordErr
+				}
+				continue
 			}
 		}
 		deletedFilenames = append(deletedFilenames, image.Filename)
@@ -503,6 +517,84 @@ func (s *StorageMonitorService) deleteCleanupImages(ctx context.Context, plan st
 	}
 	result.DeletedImages = deleteResult.DeletedImages
 	return result, nil
+}
+
+func (s *StorageMonitorService) RetryFileDeletionFailures(ctx context.Context, limit int) (StorageFileDeletionRetryResult, error) {
+	items, err := s.store.ListStorageFileDeletionFailures(ctx, limit)
+	if err != nil {
+		return StorageFileDeletionRetryResult{}, err
+	}
+	result := StorageFileDeletionRetryResult{
+		GeneratedAt: time.Now().UTC(),
+		Scanned:     len(items),
+	}
+	root := filepath.Join(s.cfg.DataDir, "uploads", "imgs")
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return StorageFileDeletionRetryResult{}, err
+	}
+	deletedPaths := make([]string, 0, len(items))
+	deletedFilenames := make([]string, 0, len(items))
+	for _, item := range items {
+		select {
+		case <-ctx.Done():
+			return StorageFileDeletionRetryResult{}, ctx.Err()
+		default:
+		}
+		if !isDirectChildPath(absRoot, item.Path) {
+			result.Failed++
+			if _, err := s.store.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+				Path:      item.Path,
+				Filename:  item.Filename,
+				OwnerID:   item.OwnerID,
+				Bytes:     item.Bytes,
+				LastError: "file path is outside uploads/imgs",
+			}); err != nil {
+				return StorageFileDeletionRetryResult{}, err
+			}
+			continue
+		}
+		if err := os.Remove(item.Path); err != nil {
+			if os.IsNotExist(err) {
+				deletedPaths = append(deletedPaths, item.Path)
+				deletedFilenames = append(deletedFilenames, item.Filename)
+				result.Deleted++
+				continue
+			}
+			result.Failed++
+			if _, err := s.store.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+				Path:      item.Path,
+				Filename:  item.Filename,
+				OwnerID:   item.OwnerID,
+				Bytes:     item.Bytes,
+				LastError: err.Error(),
+			}); err != nil {
+				return StorageFileDeletionRetryResult{}, err
+			}
+			continue
+		}
+		deletedPaths = append(deletedPaths, item.Path)
+		deletedFilenames = append(deletedFilenames, item.Filename)
+		result.Deleted++
+	}
+	if _, err := s.store.DeleteUploadedImagesByFilenames(ctx, deletedFilenames); err != nil {
+		return StorageFileDeletionRetryResult{}, err
+	}
+	if err := s.store.DeleteStorageFileDeletionFailures(ctx, deletedPaths); err != nil {
+		return StorageFileDeletionRetryResult{}, err
+	}
+	return result, nil
+}
+
+func (s *StorageMonitorService) recordFileDeletionFailure(ctx context.Context, path string, filename string, ownerID string, bytes int64, cause error) error {
+	_, err := s.store.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+		Path:      path,
+		Filename:  filename,
+		OwnerID:   ownerID,
+		Bytes:     bytes,
+		LastError: cause.Error(),
+	})
+	return err
 }
 
 func (s *StorageMonitorService) OrphanImagesPreview(ctx context.Context) (StorageOrphanImagesPreview, error) {
@@ -598,7 +690,10 @@ func (s *StorageMonitorService) DeleteOrphanImages(ctx context.Context) (Storage
 			if os.IsNotExist(err) {
 				continue
 			}
-			return StorageOrphanImagesPreview{}, err
+			if recordErr := s.recordFileDeletionFailure(ctx, item.Path, item.Filename, "", item.Bytes, err); recordErr != nil {
+				return StorageOrphanImagesPreview{}, recordErr
+			}
+			continue
 		}
 		preview.DeletedCount++
 		preview.DeletedBytes += item.Bytes

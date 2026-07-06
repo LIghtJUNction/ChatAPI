@@ -1732,6 +1732,73 @@ func TestAdminStorageCleanupKeepsUploadsReferencedByRetainedConversation(t *test
 	}
 }
 
+func TestStorageFileDeletionFailureRetry(t *testing.T) {
+	env := newTestEnv(t)
+
+	uploadsDir := filepath.Join(env.dataDir, "uploads", "imgs")
+	if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
+		t.Fatalf("create uploads dir: %v", err)
+	}
+	path := filepath.Join(uploadsDir, "retry.png")
+	if err := os.WriteFile(path, tinyPNG(), 0o644); err != nil {
+		t.Fatalf("write retry image: %v", err)
+	}
+	if _, err := env.store.CreateUploadedImage(context.Background(), store.CreateUploadedImageInput{
+		ID:               "img_retry",
+		OwnerID:          "lab-user",
+		Filename:         "retry.png",
+		OriginalFilename: "retry.png",
+		ContentType:      "image/png",
+		Bytes:            int64(len(tinyPNG())),
+		URL:              "/api/uploads/imgs/retry.png",
+	}); err != nil {
+		t.Fatalf("seed uploaded image metadata: %v", err)
+	}
+	if _, err := env.store.UpsertStorageFileDeletionFailure(context.Background(), store.UpsertStorageFileDeletionFailureInput{
+		Path:      path,
+		Filename:  "retry.png",
+		OwnerID:   "lab-user",
+		Bytes:     int64(len(tinyPNG())),
+		LastError: "initial failure",
+	}); err != nil {
+		t.Fatalf("seed deletion failure: %v", err)
+	}
+
+	monitor := service.NewStorageMonitorService(config.Config{
+		DataDir:        env.dataDir,
+		DatabaseDriver: "sqlite",
+		DatabaseDSN:    filepath.Join(env.dataDir, "chatapi.sqlite3"),
+	}, env.store)
+	result, err := monitor.RetryFileDeletionFailures(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("retry deletion failures: %v", err)
+	}
+	if result.Scanned != 1 || result.Deleted != 1 || result.Failed != 0 {
+		t.Fatalf("unexpected retry result: %#v", result)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected retry file to be removed, err=%v", err)
+	}
+	items, err := env.store.ListStorageFileDeletionFailures(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list deletion failures: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected deletion failure queue to be empty: %#v", items)
+	}
+	var uploadCount int
+	if err := env.store.DB().QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM uploaded_images
+		WHERE filename = 'retry.png'
+	`).Scan(&uploadCount); err != nil {
+		t.Fatalf("count retried uploaded image metadata: %v", err)
+	}
+	if uploadCount != 0 {
+		t.Fatalf("expected retried upload metadata to be deleted, got %d", uploadCount)
+	}
+}
+
 func TestAdminStorageCleanupRejectsMissingDryRun(t *testing.T) {
 	env := newTestEnv(t)
 

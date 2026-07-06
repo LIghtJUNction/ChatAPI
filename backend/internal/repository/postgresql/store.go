@@ -19,8 +19,6 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
-var errNotImplemented = errors.New("postgresql repository method not implemented")
-
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -49,6 +47,20 @@ func (s *Store) Ping(ctx context.Context) error {
 
 func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS db_meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			checksum TEXT NOT NULL DEFAULT '',
+			dirty BOOLEAN NOT NULL DEFAULT false
+		);
+
 		CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			username TEXT NOT NULL DEFAULT '',
@@ -222,6 +234,22 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("bootstrap postgresql schema: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO db_meta(key, value, updated_at)
+		VALUES
+			('schema_version', '0001_bootstrap', NOW()),
+			('migration_dirty', '0', NOW()),
+			('migration_lock', '', NOW()),
+			('created_by', 'go', NOW()),
+			('last_migrated_at', TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), NOW())
+		ON CONFLICT(key) DO NOTHING;
+
+		INSERT INTO schema_migrations(version, name, applied_at, checksum, dirty)
+		VALUES ('0001_bootstrap', 'bootstrap', NOW(), '', false)
+		ON CONFLICT(version) DO NOTHING;
+	`); err != nil {
+		return fmt.Errorf("seed postgresql migration metadata: %w", err)
 	}
 	return nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/zyf/chatapi/internal/platform/browser"
 	"github.com/zyf/chatapi/internal/platform/email"
 	"github.com/zyf/chatapi/internal/repository/migrations"
+	pgstore "github.com/zyf/chatapi/internal/repository/postgresql"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service"
 	"github.com/zyf/chatapi/internal/store"
@@ -33,6 +34,10 @@ var (
 )
 
 const sessionSecretConfigKey = "security.session_secret"
+
+type runtimeStore interface {
+	store.Store
+}
 
 func Run(ctx context.Context, args []string) error {
 	backendRoot, err := os.Getwd()
@@ -84,13 +89,11 @@ func Run(ctx context.Context, args []string) error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
+	dataStore, closeStore, err := openRuntimeStore(ctx, cfg, true)
 	if err != nil {
 		return err
 	}
-	if err := migrations.Bootstrap(ctx, dataStore.DB()); err != nil {
-		return err
-	}
+	defer closeStore()
 	if err := ensureSessionSecret(ctx, &cfg, dataStore, logger); err != nil {
 		return err
 	}
@@ -140,7 +143,7 @@ func Run(ctx context.Context, args []string) error {
 	}
 }
 
-func ensureSessionSecret(ctx context.Context, cfg *config.Config, dataStore *sqlitestore.Store, logger *slog.Logger) error {
+func ensureSessionSecret(ctx context.Context, cfg *config.Config, dataStore store.Store, logger *slog.Logger) error {
 	if cfg == nil {
 		return errors.New("config is nil")
 	}
@@ -218,7 +221,7 @@ func startPendingExpirationWorker(ctx context.Context, cfg config.Config, chatSe
 	}()
 }
 
-func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataStore *sqlitestore.Store, logger *slog.Logger) {
+func startStorageMaintenanceWorker(ctx context.Context, cfg config.Config, dataStore store.Store, logger *slog.Logger) {
 	if !cfg.StorageCleanupEnabled {
 		return
 	}
@@ -844,7 +847,7 @@ func dbCheckCommand(backendRoot string) (dbCheckReport, error) {
 	if cfg.DatabaseDriver == "sqlite" {
 		report.SQLite = sqliteDBFileInfo(cfg.DatabaseDSN)
 	}
-	status, err := sqliteMigrationStatus(context.Background(), cfg, true)
+	status, err := runtimeMigrationStatus(context.Background(), cfg, true)
 	if err != nil {
 		report.OK = false
 		report.Error = err.Error()
@@ -955,7 +958,7 @@ func migrateCommand(ctx context.Context, options migrateOptions, backendRoot str
 		report.Status = status
 		return report, nil
 	}
-	status, err := sqliteMigrationStatus(ctx, cfg, options.command == "up")
+	status, err := runtimeMigrationStatus(ctx, cfg, options.command == "up")
 	if err != nil {
 		report.OK = false
 		report.Error = err.Error()
@@ -970,14 +973,14 @@ func migrateCommand(ctx context.Context, options migrateOptions, backendRoot str
 }
 
 func sqliteMigrateDown(ctx context.Context, cfg config.Config) (migrations.Status, error) {
-	if cfg.DatabaseDriver != "sqlite" {
-		return migrations.Status{}, errors.New("only sqlite migration is implemented in the current Go refactor branch")
+	if strings.ToLower(strings.TrimSpace(cfg.DatabaseDriver)) != "sqlite" {
+		return migrations.Status{}, errors.New("migrate down is only implemented for sqlite in the current Go refactor branch")
 	}
 	dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
 	if err != nil {
 		return migrations.Status{}, err
 	}
-	defer dataStore.DB().Close()
+	defer dataStore.Close()
 	before, err := migrations.StatusReport(ctx, dataStore.DB())
 	if err != nil {
 		return migrations.Status{}, err
@@ -991,21 +994,71 @@ func sqliteMigrateDown(ctx context.Context, cfg config.Config) (migrations.Statu
 	return before, nil
 }
 
-func sqliteMigrationStatus(ctx context.Context, cfg config.Config, bootstrap bool) (migrations.Status, error) {
-	if cfg.DatabaseDriver != "sqlite" {
-		return migrations.Status{}, errors.New("only sqlite migration is implemented in the current Go refactor branch")
-	}
-	dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
+func runtimeMigrationStatus(ctx context.Context, cfg config.Config, bootstrap bool) (migrations.Status, error) {
+	dataStore, closeStore, err := openRuntimeStore(ctx, cfg, bootstrap)
 	if err != nil {
 		return migrations.Status{}, err
 	}
-	defer dataStore.DB().Close()
-	if bootstrap {
-		if err := migrations.Bootstrap(ctx, dataStore.DB()); err != nil {
-			return migrations.Status{}, err
-		}
+	defer closeStore()
+	status, err := dataStore.MigrationStatus(ctx)
+	if err != nil {
+		return migrations.Status{}, err
 	}
-	return migrations.StatusReport(ctx, dataStore.DB())
+	return migrations.Status{
+		SchemaVersion:  status.SchemaVersion,
+		AppVersion:     status.AppVersion,
+		MigrationDirty: status.MigrationDirty,
+		MigrationLock:  status.MigrationLock,
+		CreatedBy:      status.CreatedBy,
+		LastMigratedAt: status.LastMigratedAt,
+		Applied: func() []migrations.AppliedMigration {
+			items := make([]migrations.AppliedMigration, 0, len(status.Applied))
+			for _, item := range status.Applied {
+				items = append(items, migrations.AppliedMigration{
+					Version:   item.Version,
+					Name:      item.Name,
+					AppliedAt: item.AppliedAt,
+					Checksum:  item.Checksum,
+					Dirty:     item.Dirty,
+				})
+			}
+			return items
+		}(),
+	}, nil
+}
+
+func openRuntimeStore(ctx context.Context, cfg config.Config, bootstrap bool) (runtimeStore, func(), error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.DatabaseDriver)) {
+	case "sqlite":
+		dataStore, err := sqlitestore.Open(cfg.DatabaseDSN)
+		if err != nil {
+			return nil, nil, err
+		}
+		if bootstrap {
+			if err := migrations.Bootstrap(ctx, dataStore.DB()); err != nil {
+				_ = dataStore.Close()
+				return nil, nil, err
+			}
+		}
+		return dataStore, func() { _ = dataStore.Close() }, nil
+	case "postgres", "postgresql":
+		if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+			return nil, nil, errors.New("postgresql database dsn is required")
+		}
+		dataStore, err := pgstore.Open(ctx, cfg.DatabaseDSN)
+		if err != nil {
+			return nil, nil, err
+		}
+		if bootstrap {
+			if err := pgstore.Bootstrap(ctx, dataStore.Pool()); err != nil {
+				dataStore.Close()
+				return nil, nil, err
+			}
+		}
+		return dataStore, dataStore.Close, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported database driver %q", cfg.DatabaseDriver)
+	}
 }
 
 func firstNonEmptyString(values ...string) string {

@@ -52,6 +52,13 @@ func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	return s.db.Close()
+}
+
 func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }

@@ -56,6 +56,8 @@ func resetTestSchema(ctx context.Context, st *Store) error {
 		DROP TABLE IF EXISTS storage_file_deletion_failures;
 		DROP TABLE IF EXISTS messages;
 		DROP TABLE IF EXISTS conversations;
+		DROP TABLE IF EXISTS schema_migrations;
+		DROP TABLE IF EXISTS db_meta;
 		DROP TABLE IF EXISTS user_identities;
 		DROP TABLE IF EXISTS users;
 	`)

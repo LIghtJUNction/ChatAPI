@@ -177,6 +177,9 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.DataDir = firstNonEmpty(os.Getenv("CHATAPI_DATA_DIR"), cfg.DataDir)
 	cfg.DatabaseDriver = firstNonEmpty(os.Getenv("CHATAPI_DB_DRIVER"), cfg.DatabaseDriver)
 	cfg.DatabaseDSN = firstNonEmpty(os.Getenv("CHATAPI_DB_DSN"), cfg.DatabaseDSN)
+	if (cfg.DatabaseDriver == "postgres" || cfg.DatabaseDriver == "postgresql") && strings.TrimSpace(os.Getenv("CHATAPI_DB_DSN")) == "" {
+		cfg.DatabaseDSN = ""
+	}
 	cfg.MasterKey = firstNonEmpty(os.Getenv("CHATAPI_MASTER_KEY"), cfg.MasterKey)
 	cfg.SessionSecret = firstNonEmpty(os.Getenv("CHATAPI_SESSION_SECRET"), cfg.SessionSecret)
 	cfg.LogLevel = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_LEVEL"), cfg.LogLevel))
@@ -339,6 +342,9 @@ func (c Config) Validate() error {
 	}
 	if c.DatabaseDriver == "sqlite" && strings.TrimSpace(c.DatabaseDSN) == "" {
 		return errors.New("sqlite database dsn is required")
+	}
+	if (c.DatabaseDriver == "postgres" || c.DatabaseDriver == "postgresql") && strings.TrimSpace(c.DatabaseDSN) == "" {
+		return errors.New("postgresql database dsn is required")
 	}
 	if c.UploadMaxBytes <= 0 {
 		return errors.New("upload max bytes must be positive")

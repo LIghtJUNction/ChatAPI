@@ -327,16 +327,16 @@ func TestMigrateCommandStatusDoesNotBootstrapSQLite(t *testing.T) {
 	}
 }
 
-func TestMigrateCommandRejectsUnsupportedDriver(t *testing.T) {
+func TestMigrateCommandRejectsPostgreSQLWithoutDSN(t *testing.T) {
 	backendRoot := t.TempDir()
 	t.Setenv("CHATAPI_DB_DRIVER", "postgresql")
 
 	report, err := migrateCommand(context.Background(), migrateOptions{command: "status"}, backendRoot)
 	if err == nil {
-		t.Fatal("expected unsupported driver error")
+		t.Fatal("expected postgresql dsn error")
 	}
-	if report.OK || !strings.Contains(report.Error, "only sqlite migration is implemented") {
-		t.Fatalf("unexpected unsupported driver report: %#v", report)
+	if report.OK || !strings.Contains(report.Error, "postgresql database dsn is required") {
+		t.Fatalf("unexpected postgresql report: %#v", report)
 	}
 }
 

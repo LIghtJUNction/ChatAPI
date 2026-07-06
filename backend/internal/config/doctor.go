@@ -123,9 +123,13 @@ func (r *DiagnosticReport) checkDatabase(cfg Config) {
 			r.add(DiagnosticError, "database.sqlite_missing_dsn", "SQLite DSN 不能为空。")
 		}
 	case "postgres", "postgresql":
-		r.add(DiagnosticError, "database.postgresql_partial", "当前 Go 重构分支已有 PostgreSQL repository 基础契约测试，但运行时所需业务表尚未全部实现，暂不能用 PostgreSQL 启动服务。")
+		if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+			r.add(DiagnosticError, "database.postgresql_missing_dsn", "PostgreSQL DSN 不能为空。")
+		} else {
+			r.add(DiagnosticInfo, "database.postgresql_enabled", "已启用 PostgreSQL；建议继续用 `chatapi db check` 验证 migration 状态和连接。")
+		}
 	default:
-		r.add(DiagnosticError, "database.unsupported_driver", "CHATAPI_DB_DRIVER 只支持 sqlite/postgresql；PostgreSQL 运行时接入完成后再开放 serve 使用。")
+		r.add(DiagnosticError, "database.unsupported_driver", "CHATAPI_DB_DRIVER 只支持 sqlite/postgres/postgresql。")
 	}
 }
 

@@ -2471,11 +2471,15 @@ func TestConfigAutomationRulesSchemaRoute(t *testing.T) {
 	resp := env.getJSON(t, "/api/config/automation-rules/schema", http.StatusOK)
 	schema := resp["schema"].(map[string]any)
 	typed := schema["typed_condition_types"].([]any)
+	actionSchemas := schema["action_type_schemas"].([]any)
 	if len(typed) == 0 || nestedString(typed[0].(map[string]any), "type") == "" {
 		t.Fatalf("unexpected automation schema response: %#v", resp)
 	}
 	if !containsStringValue(schema["action_types"], "output_text") || !containsStringValue(schema["legacy_fields"], "tool_choice.name") {
 		t.Fatalf("unexpected automation schema response: %#v", resp)
+	}
+	if !containsStringValue(schema["action_types"], "tool_call") || !containsMapItemWithStringField(actionSchemas, "type", "tool_result") {
+		t.Fatalf("unexpected automation action schema response: %#v", resp)
 	}
 }
 
@@ -2524,6 +2528,114 @@ func TestAutomationRuleAutoCompletesResponsesRequest(t *testing.T) {
 		t.Fatalf("expected automation-completed request in list: %#v", requests)
 	}
 	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_complete", "auto_complete", "success", 1)
+}
+
+func TestAutomationRuleAutoCompletesToolCallResponsesRequest(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_auto_tool_call",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "auto tool call"}},
+				},
+				"action": map[string]any{
+					"type":         "tool_call",
+					"text":         "{\"city\":\"Shanghai\"}",
+					"tool_name":    "lookup_weather",
+					"tool_call_id": "call_auto_tool_1",
+				},
+			},
+		},
+	}, http.StatusOK)
+
+	resp := postExternalJSON(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "demo-auto-tool-call",
+		"input": "please auto tool call now",
+	})
+	if nestedString(resp, "output_text") != "{\"city\":\"Shanghai\"}" {
+		t.Fatalf("unexpected tool_call automation output_text: %#v", resp)
+	}
+	output := nestedPath(resp, "output").([]any)
+	if len(output) != 1 {
+		t.Fatalf("unexpected tool_call automation output blocks: %#v", resp)
+	}
+	first := output[0].(map[string]any)
+	if nestedString(first, "type") != "function_call" || nestedString(first, "name") != "lookup_weather" || nestedString(first, "call_id") != "call_auto_tool_1" || nestedString(first, "arguments") != "{\"city\":\"Shanghai\"}" {
+		t.Fatalf("unexpected tool_call automation payload: %#v", resp)
+	}
+	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_tool_call", "auto_complete", "success", 1)
+}
+
+func TestAutomationRuleAutoCompletesToolResultResponsesRequest(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_auto_tool_result",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "auto tool result"}},
+				},
+				"action": map[string]any{
+					"type":         "tool_result",
+					"text":         "tool result summary",
+					"tool_output":  "{\"ok\":true}",
+					"tool_call_id": "call_auto_tool_2",
+				},
+			},
+		},
+	}, http.StatusOK)
+
+	resp := postExternalJSON(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "demo-auto-tool-result",
+		"input": "please auto tool result now",
+	})
+	if nestedString(resp, "output_text") != "tool result summary" {
+		t.Fatalf("unexpected tool_result automation output_text: %#v", resp)
+	}
+	output := nestedPath(resp, "output").([]any)
+	if len(output) != 1 {
+		t.Fatalf("unexpected tool_result automation output blocks: %#v", resp)
+	}
+	first := output[0].(map[string]any)
+	if nestedString(first, "type") != "function_call_output" || nestedString(first, "call_id") != "call_auto_tool_2" || nestedString(first, "output") != "{\"ok\":true}" {
+		t.Fatalf("unexpected tool_result automation payload: %#v", resp)
+	}
+	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_tool_result", "auto_complete", "success", 1)
+}
+
+func TestAutomationRuleAutoCompletesThinkingResponsesRequest(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.postJSON(t, "/api/config/automation-rules", map[string]any{
+		"rules": []map[string]any{
+			{
+				"id":      "rule_auto_thinking",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "auto thinking"}},
+				},
+				"action": map[string]any{
+					"type":                  "thinking",
+					"text":                  "first reason, then answer",
+					"reasoning_stream_mode": "summary",
+				},
+			},
+		},
+	}, http.StatusOK)
+
+	resp := postExternalJSON(t, env.server.URL+"/v1/responses", nil, map[string]any{
+		"model": "demo-auto-thinking",
+		"input": "please auto thinking now",
+	})
+	if nestedString(resp, "output_text") != "<think>first reason, then answer</think>" {
+		t.Fatalf("unexpected thinking automation output_text: %#v", resp)
+	}
+	assertAuditCount(t, env, "automation.rule", "automation_rule", "rule_auto_thinking", "auto_complete", "success", 1)
 }
 
 func TestLabRequestsSchema(t *testing.T) {
@@ -3756,7 +3868,7 @@ func TestAppAPIAutomationRulesSchema(t *testing.T) {
 
 	resp := env.appGetJSON(t, "/api/app/automation-rules/schema", appKey, http.StatusOK)
 	schema := resp["schema"].(map[string]any)
-	if !containsStringValue(schema["action_types"], "output_text") || !containsStringValue(schema["legacy_match_types"], "substring") {
+	if !containsStringValue(schema["action_types"], "output_text") || !containsStringValue(schema["action_types"], "thinking") || !containsStringValue(schema["legacy_match_types"], "substring") {
 		t.Fatalf("unexpected automation schema response: %#v", resp)
 	}
 }

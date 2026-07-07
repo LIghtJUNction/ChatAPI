@@ -82,11 +82,21 @@ func TestParseAutomationRulePayloadRejectsUnknownConditionType(t *testing.T) {
 
 func TestAutomationRuleServiceSchemaIncludesTypedConditions(t *testing.T) {
 	schema := NewAutomationRuleService(nil).Schema()
-	if len(schema.ActionTypes) != 1 || schema.ActionTypes[0] != "output_text" {
+	if !containsTestString(schema.ActionTypes, "output_text") || !containsTestString(schema.ActionTypes, "tool_call") || !containsTestString(schema.ActionTypes, "tool_result") {
 		t.Fatalf("unexpected action types: %#v", schema)
 	}
 	if len(schema.LegacyFields) == 0 || len(schema.TypedConditionTypes) == 0 {
 		t.Fatalf("unexpected automation schema: %#v", schema)
+	}
+	foundToolCallAction := false
+	for _, item := range schema.ActionTypeSchemas {
+		if item.Type == "tool_call" {
+			foundToolCallAction = containsTestString(item.RequiredFields, "tool_name") && containsTestString(item.RequiredFields, "text")
+			break
+		}
+	}
+	if !foundToolCallAction {
+		t.Fatalf("expected tool_call action schema in automation schema: %#v", schema)
 	}
 	foundToolChoice := false
 	for _, item := range schema.TypedConditionTypes {
@@ -97,6 +107,39 @@ func TestAutomationRuleServiceSchemaIncludesTypedConditions(t *testing.T) {
 	}
 	if !foundToolChoice {
 		t.Fatalf("expected tool_choice_is typed condition in schema: %#v", schema)
+	}
+}
+
+func TestParseAutomationRulePayloadSupportsToolCallAction(t *testing.T) {
+	rule, err := ParseAutomationRulePayload(map[string]any{
+		"id":      "rule_tool_call",
+		"enabled": true,
+		"action": map[string]any{
+			"type":         "tool_call",
+			"text":         "{\"city\":\"Shanghai\"}",
+			"tool_name":    "lookup_weather",
+			"tool_call_id": "call_auto_1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("parse tool_call action: %v", err)
+	}
+	if rule.Action.Type != "tool_call" || rule.Action.ToolName != "lookup_weather" || rule.Action.ToolCallID != "call_auto_1" {
+		t.Fatalf("unexpected parsed tool_call action: %#v", rule.Action)
+	}
+}
+
+func TestParseAutomationRulePayloadRejectsInvalidToolCallAction(t *testing.T) {
+	_, err := ParseAutomationRulePayload(map[string]any{
+		"id":      "rule_bad_tool_call",
+		"enabled": true,
+		"action": map[string]any{
+			"type": "tool_call",
+			"text": "{\"city\":\"Shanghai\"}",
+		},
+	})
+	if err != ErrInvalidAutomationRule {
+		t.Fatalf("expected invalid tool_call automation rule, got %v", err)
 	}
 }
 
@@ -135,4 +178,13 @@ func testStringValue(value any, fallback string) string {
 		return fallback
 	}
 	return raw
+}
+
+func containsTestString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }

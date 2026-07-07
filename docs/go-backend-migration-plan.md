@@ -999,7 +999,7 @@ type Hub struct {
 当前 Go 重构分支已先落地最小执行内核：
 
 - `AutomationRuleService` 不再只负责 CRUD，已开始提供基于结构化 `TurnRequest` 的规则匹配入口。
-- 当前已支持最小条件子集：`conditions.contains` / `conditions.excludes` 配合 `action.type=output_text` 的自动完成动作。
+- 当前已支持 `conditions.contains` / `conditions.excludes` 配合多种自动完成动作：兼容旧规则的 `action.type=output_text`，以及更贴近统一 turn complete 状态机的 `assistant_message`、`thinking`、`tool_call`、`tool_result`。其中 `tool_call` 会要求 `tool_name + text(arguments)`，`tool_result` 支持 `text + tool_output`，`thinking` 支持可选 `reasoning_stream_mode`。
 - 规则匹配会复用协议层已经结构化的 `UserContent` / `InputParts`，而不是重新从原始 JSON body 做临时字符串解析。
 - `contains/excludes` 当前同时支持两种 matcher 形态：
   - legacy matcher：`{ "field": "...", "match_type": "substring|exact", "pattern": "..." }`
@@ -1008,6 +1008,7 @@ type Hub struct {
 - typed condition block 当前已落地：`text_contains`、`text_is`、`user_content_contains`、`user_content_is`、`model_is`、`protocol_is`、`tool_choice_is`、`response_format_is`、`input_part_type_is`、`input_media_type_contains`、`input_media_type_is`、`input_url_contains`。这样后续扩展条件能力时，可以新增显式类型，而不是继续堆散乱的 `field + pattern` 组合。
 - 自动化规则当前已开始复用 richer request context：legacy `field` 已补上 `system_content`、`developer_content`、`assistant_content`、`tool_result`；typed condition 也已补上 `system_content_contains|is`、`developer_content_contains|is`、`assistant_content_contains|is`、`tool_result_contains|is`。这样规则不仅能看最后一条 user 文本，也能利用历史 assistant 回复、显式 system/developer 指令和最近工具返回文本做匹配。
 - 后端当前已新增规则结构化 parser/validator：`ReplaceRules` 不再直接接受任意裸 `map[string]any` 入库，而是先解析成内部规则对象、校验 action 和 matcher、再输出规范化 payload。这样 WebUI、应用 API、未来导入导出以及规则执行共享同一套校验逻辑；对外 JSON 形状暂时保持不变，前端本轮不需要同步改协议。
+- 自动化规则 schema metadata 也已同步补厚：`GET /api/config/automation-rules/schema` 和 `GET /api/app/automation-rules/schema` 除了 `action_types` 外，还会返回 `action_type_schemas`，显式声明 `thinking` / `tool_call` / `tool_result` 这些动作各自要求的字段，避免前端和外部程序继续把 `tool_name`、`tool_output`、`reasoning_stream_mode` 之类的约束写死在本地。
 - 规则命中后，`ChatAPIService` 会在 pending turn 落库并进入 realtime 广播后，复用同一套 `CompleteConversation` 状态机直接自动完成请求；因此非流请求会直接返回自动结果，流式请求会在 SSE 起始事件后收到同样的完成事件，而不会走另一条旁路逻辑。
 - 当前自动执行是 best-effort：规则读取或匹配异常不会阻断主请求链路，只会退化为普通 pending turn。
 - 当前输出会受服务内最大长度限制截断；自动化规则自动完成命中已写入 `audit_logs`，并汇总到 `/api/app/statistics/summary`、`/api/admin/requests/overview`、`/api/admin/runtime/summary`、`/api/admin/runtime/automation` 和 `/metrics`。当前还会把 `ListAutomationRules` 失败、自动完成失败写入 `audit_logs` 的 `outcome=failure`，并把运行期 `no_rules` / `no_match` 跳过计数、规则级 `skip_by_reason` 聚合、按规则分组的 `skip_by_rule` 统计以及最近未命中样本暴露到管理员运行时接口；`/metrics` 继续只暴露低基数的 reason 维度，避免把 rule id 带进指标标签。除此之外，请求级 `no_rules` / `no_match` 跳过结果也已写入 `audit_logs` 的 `outcome=skipped`，逐条规则级跳过会写成 `event_type=automation.rule`、`action=rule_skip` 的独立审计事件，metadata 带上 `reason`、`conversation_id`、`request_format` 和 `model`。更细的规则执行超时审计仍待继续补齐。
@@ -1515,7 +1516,7 @@ user_app_api_keys
 - `GET /api/app/statistics/summary`：需要 `statistics:read`，当前返回请求态势摘要和自动化规则命中数；首版不返回 token、价格、平均耗时等需要额外计量的数据，避免给外部自动化暴露误导性指标。
 - 虚拟模型 key 使用 `sk-` 前缀和可解密密文保存；应用 API Key 使用 `ak-` 前缀和 hash 保存。两套鉴权中间件完全分离，`ak-` 不能访问模型兼容入口，`sk-` 不能访问 `/api/app/*`。
 - 自动化规则当前以 `automation_rules.rule_json` 保存完整规则 JSON，同时单独保存 `user_id`、`id`、`enabled`、`created_at`、`updated_at`；当前最小自动执行内核、WebUI 配置接口和应用 API 已开始复用同一张表与 `AutomationRuleService`，避免规则格式分叉。
-- 当前最小自动执行内核已开始支持 `conditions.contains`、`conditions.excludes`、`match_type=substring|exact` 和 `action.type=output_text`，命中后会直接复用统一 turn complete 路径结束 pending turn，而不是额外实现一套旁路写消息逻辑。
+- 当前最小自动执行内核已开始支持 `conditions.contains`、`conditions.excludes`、`match_type=substring|exact`，并支持 `output_text`/`assistant_message`、`thinking`、`tool_call`、`tool_result` 这些动作；命中后会直接复用统一 turn complete 路径结束 pending turn，而不是额外实现一套旁路写消息逻辑。
 - 所有应用 API 响应都使用稳定 JSON，方便脚本调用。
 - `complete` 和 `abort` 与 Web 控制台操作共享同一个 Turn Manager 状态机，避免双写和竞态。
 

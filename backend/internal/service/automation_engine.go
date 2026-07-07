@@ -73,11 +73,8 @@ func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest
 	if err != nil {
 		return nil, "parse_invalid", false
 	}
-	if rule.Action.Type != "output_text" {
-		return nil, "action_invalid", false
-	}
-	outputText := strings.TrimSpace(rule.Action.Text)
-	if outputText == "" {
+	input, ok := automationActionToCompleteInput(rule.Action, conversationID, responseID)
+	if !ok {
 		return nil, "empty_output", false
 	}
 	matched, reason := matchesRuleConditions(rule.Conditions, request)
@@ -86,13 +83,64 @@ func matchAutomationRule(item store.AutomationRule, request protocol.TurnRequest
 	}
 	return &AutomationMatch{
 		RuleID: item.ID,
-		Input: store.CompletePendingInput{
-			ConversationID: conversationID,
-			ResponseID:     strings.TrimSpace(responseID),
-			OutputText:     truncateRunes(outputText, automationMaxOutputLength),
-			Mode:           "assistant_message",
-		},
+		Input:  input,
 	}, "", true
+}
+
+func automationActionToCompleteInput(action AutomationAction, conversationID string, responseID string) (store.CompletePendingInput, bool) {
+	base := store.CompletePendingInput{
+		ConversationID: strings.TrimSpace(conversationID),
+		ResponseID:     strings.TrimSpace(responseID),
+	}
+	switch action.Type {
+	case "output_text", "assistant_message":
+		text := truncateRunes(strings.TrimSpace(action.Text), automationMaxOutputLength)
+		if text == "" {
+			return store.CompletePendingInput{}, false
+		}
+		base.Mode = "assistant_message"
+		base.OutputText = text
+		return base, true
+	case "thinking":
+		text := truncateRunes(strings.TrimSpace(action.Text), automationMaxOutputLength)
+		if text == "" {
+			return store.CompletePendingInput{}, false
+		}
+		base.Mode = "thinking"
+		base.OutputText = text
+		base.ReasoningStreamMode = strings.TrimSpace(action.ReasoningStreamMode)
+		return base, true
+	case "tool_call":
+		text := truncateRunes(strings.TrimSpace(action.Text), automationMaxOutputLength)
+		if text == "" || strings.TrimSpace(action.ToolName) == "" {
+			return store.CompletePendingInput{}, false
+		}
+		base.Mode = "tool_call"
+		base.OutputText = text
+		base.ToolName = strings.TrimSpace(action.ToolName)
+		base.ToolCallID = strings.TrimSpace(action.ToolCallID)
+		return base, true
+	case "tool_result":
+		text := strings.TrimSpace(action.Text)
+		toolOutput := strings.TrimSpace(action.ToolOutput)
+		if text == "" {
+			text = toolOutput
+		}
+		text = truncateRunes(text, automationMaxOutputLength)
+		toolOutput = truncateRunes(toolOutput, automationMaxOutputLength)
+		if text == "" {
+			return store.CompletePendingInput{}, false
+		}
+		base.Mode = "tool_result"
+		base.OutputText = text
+		base.ToolCallID = strings.TrimSpace(action.ToolCallID)
+		if toolOutput != "" {
+			base.ToolOutput = toolOutput
+		}
+		return base, true
+	default:
+		return store.CompletePendingInput{}, false
+	}
 }
 
 func matchesRuleConditions(conditions AutomationConditions, request protocol.TurnRequest) (bool, string) {

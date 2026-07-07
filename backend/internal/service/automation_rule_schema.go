@@ -29,15 +29,27 @@ type AutomationCondition struct {
 }
 
 type AutomationAction struct {
-	Type string
-	Text string
+	Type                string
+	Text                string
+	ToolName            string
+	ToolCallID          string
+	ToolOutput          string
+	ReasoningStreamMode string
 }
 
 type AutomationRuleSchema struct {
 	ActionTypes         []string                        `json:"action_types"`
+	ActionTypeSchemas   []AutomationActionTypeSchema    `json:"action_type_schemas,omitempty"`
 	LegacyMatchTypes    []string                        `json:"legacy_match_types"`
 	LegacyFields        []string                        `json:"legacy_fields"`
 	TypedConditionTypes []AutomationConditionTypeSchema `json:"typed_condition_types"`
+}
+
+type AutomationActionTypeSchema struct {
+	Type           string   `json:"type"`
+	Description    string   `json:"description,omitempty"`
+	RequiredFields []string `json:"required_fields,omitempty"`
+	OptionalFields []string `json:"optional_fields,omitempty"`
 }
 
 type AutomationConditionTypeSchema struct {
@@ -65,10 +77,14 @@ func ParseAutomationRulePayload(payload map[string]any) (AutomationRuleDocument,
 		return AutomationRuleDocument{}, ErrInvalidAutomationRule
 	}
 	rule.Action = AutomationAction{
-		Type: stringFromMap(action, "type"),
-		Text: stringFromMap(action, "text"),
+		Type:                normalizeAutomationActionType(stringFromMap(action, "type")),
+		Text:                stringFromMap(action, "text"),
+		ToolName:            stringFromMap(action, "tool_name"),
+		ToolCallID:          stringFromMap(action, "tool_call_id"),
+		ToolOutput:          stringFromMap(action, "tool_output"),
+		ReasoningStreamMode: stringFromMap(action, "reasoning_stream_mode"),
 	}
-	if rule.Action.Type != "output_text" || rule.Action.Text == "" {
+	if !rule.Action.Valid() {
 		return AutomationRuleDocument{}, ErrInvalidAutomationRule
 	}
 	conditions, _ := payload["conditions"].(map[string]any)
@@ -86,7 +102,14 @@ func ParseAutomationRulePayload(payload map[string]any) (AutomationRuleDocument,
 
 func BuildAutomationRuleSchema() AutomationRuleSchema {
 	return AutomationRuleSchema{
-		ActionTypes:      []string{"output_text"},
+		ActionTypes: []string{"output_text", "assistant_message", "thinking", "tool_call", "tool_result"},
+		ActionTypeSchemas: []AutomationActionTypeSchema{
+			{Type: "output_text", Description: "Legacy alias of assistant_message. Completes the pending turn with plain assistant text.", RequiredFields: []string{"text"}},
+			{Type: "assistant_message", Description: "Completes the pending turn with plain assistant text.", RequiredFields: []string{"text"}},
+			{Type: "thinking", Description: "Completes the pending turn in thinking mode and stores the text as a <think> block.", RequiredFields: []string{"text"}, OptionalFields: []string{"reasoning_stream_mode"}},
+			{Type: "tool_call", Description: "Completes the pending turn with a tool call draft.", RequiredFields: []string{"tool_name", "text"}, OptionalFields: []string{"tool_call_id"}},
+			{Type: "tool_result", Description: "Completes the pending turn with a tool result payload.", RequiredFields: []string{"text"}, OptionalFields: []string{"tool_output", "tool_call_id"}},
+		},
 		LegacyMatchTypes: []string{"substring", "exact"},
 		LegacyFields: []string{
 			"text",
@@ -234,15 +257,47 @@ func normalizeAutomationMatchType(value string) string {
 	}
 }
 
+func normalizeAutomationActionType(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	switch value {
+	case "output_text", "assistant_message", "thinking", "tool_call", "tool_result":
+		return value
+	default:
+		return ""
+	}
+}
+
+func (a AutomationAction) Valid() bool {
+	switch a.Type {
+	case "output_text", "assistant_message":
+		return strings.TrimSpace(a.Text) != ""
+	case "thinking":
+		if strings.TrimSpace(a.Text) == "" {
+			return false
+		}
+		return a.ReasoningStreamMode == "" || strings.TrimSpace(a.ReasoningStreamMode) != ""
+	case "tool_call":
+		return strings.TrimSpace(a.ToolName) != "" && strings.TrimSpace(a.Text) != ""
+	case "tool_result":
+		return strings.TrimSpace(a.Text) != "" || strings.TrimSpace(a.ToolOutput) != ""
+	default:
+		return false
+	}
+}
+
 func (r AutomationRuleDocument) ToMap() map[string]any {
 	payload := map[string]any{
 		"id":      r.ID,
 		"enabled": r.Enabled,
 		"action": map[string]any{
 			"type": r.Action.Type,
-			"text": r.Action.Text,
 		},
 	}
+	setAutomationField(payload["action"].(map[string]any), "text", r.Action.Text)
+	setAutomationField(payload["action"].(map[string]any), "tool_name", r.Action.ToolName)
+	setAutomationField(payload["action"].(map[string]any), "tool_call_id", r.Action.ToolCallID)
+	setAutomationField(payload["action"].(map[string]any), "tool_output", r.Action.ToolOutput)
+	setAutomationField(payload["action"].(map[string]any), "reasoning_stream_mode", r.Action.ReasoningStreamMode)
 	conditions := map[string]any{}
 	if items := automationConditionsToAny(r.Conditions.Contains); len(items) > 0 {
 		conditions["contains"] = items

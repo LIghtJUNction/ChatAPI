@@ -103,6 +103,133 @@ func TestAutomationRuleServiceMatchTurnTruncatesLongOutput(t *testing.T) {
 	}
 }
 
+func TestAutomationRuleServiceMatchTurnBuildsToolCallCompletion(t *testing.T) {
+	st := newAutomationTestStore(t)
+	svc := NewAutomationRuleService(st)
+	if _, err := st.ReplaceAutomationRulesForUser(context.Background(), "user_auto", nil, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_tool_call",
+			UserID:  "user_auto",
+			Enabled: true,
+			Payload: map[string]any{
+				"id":      "rule_tool_call",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "weather tool"}},
+				},
+				"action": map[string]any{
+					"type":         "tool_call",
+					"text":         "{\"city\":\"Shanghai\"}",
+					"tool_name":    "lookup_weather",
+					"tool_call_id": "call_auto_1",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed tool_call automation rule: %v", err)
+	}
+
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		UserContent: "please trigger weather tool",
+	}, "conv_tool_call", "resp_tool_call")
+	if err != nil {
+		t.Fatalf("match tool_call turn: %v", err)
+	}
+	if decision.Status != automationStatusMatched || decision.Match == nil {
+		t.Fatalf("unexpected tool_call automation decision: %#v", decision)
+	}
+	if decision.Match.Input.Mode != "tool_call" ||
+		decision.Match.Input.ToolName != "lookup_weather" ||
+		decision.Match.Input.ToolCallID != "call_auto_1" ||
+		decision.Match.Input.OutputText != "{\"city\":\"Shanghai\"}" {
+		t.Fatalf("unexpected tool_call completion input: %#v", decision.Match.Input)
+	}
+}
+
+func TestAutomationRuleServiceMatchTurnBuildsToolResultCompletion(t *testing.T) {
+	st := newAutomationTestStore(t)
+	svc := NewAutomationRuleService(st)
+	if _, err := st.ReplaceAutomationRulesForUser(context.Background(), "user_auto", nil, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_tool_result",
+			UserID:  "user_auto",
+			Enabled: true,
+			Payload: map[string]any{
+				"id":      "rule_tool_result",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "tool output"}},
+				},
+				"action": map[string]any{
+					"type":         "tool_result",
+					"text":         "tool result summary",
+					"tool_output":  "{\"ok\":true}",
+					"tool_call_id": "call_auto_2",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed tool_result automation rule: %v", err)
+	}
+
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		UserContent: "please use tool output",
+	}, "conv_tool_result", "resp_tool_result")
+	if err != nil {
+		t.Fatalf("match tool_result turn: %v", err)
+	}
+	if decision.Status != automationStatusMatched || decision.Match == nil {
+		t.Fatalf("unexpected tool_result automation decision: %#v", decision)
+	}
+	if decision.Match.Input.Mode != "tool_result" ||
+		decision.Match.Input.ToolCallID != "call_auto_2" ||
+		decision.Match.Input.OutputText != "tool result summary" ||
+		decision.Match.Input.ToolOutput != "{\"ok\":true}" {
+		t.Fatalf("unexpected tool_result completion input: %#v", decision.Match.Input)
+	}
+}
+
+func TestAutomationRuleServiceMatchTurnBuildsThinkingCompletion(t *testing.T) {
+	st := newAutomationTestStore(t)
+	svc := NewAutomationRuleService(st)
+	if _, err := st.ReplaceAutomationRulesForUser(context.Background(), "user_auto", nil, []store.UpsertAutomationRuleInput{
+		{
+			ID:      "rule_thinking",
+			UserID:  "user_auto",
+			Enabled: true,
+			Payload: map[string]any{
+				"id":      "rule_thinking",
+				"enabled": true,
+				"conditions": map[string]any{
+					"contains": []map[string]any{{"match_type": "substring", "pattern": "think aloud"}},
+				},
+				"action": map[string]any{
+					"type":                  "thinking",
+					"text":                  "reason internally",
+					"reasoning_stream_mode": "summary",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed thinking automation rule: %v", err)
+	}
+
+	decision, err := svc.MatchTurn(context.Background(), "user_auto", protocol.TurnRequest{
+		UserContent: "please think aloud",
+	}, "conv_thinking", "resp_thinking")
+	if err != nil {
+		t.Fatalf("match thinking turn: %v", err)
+	}
+	if decision.Status != automationStatusMatched || decision.Match == nil {
+		t.Fatalf("unexpected thinking automation decision: %#v", decision)
+	}
+	if decision.Match.Input.Mode != "thinking" ||
+		decision.Match.Input.OutputText != "reason internally" ||
+		decision.Match.Input.ReasoningStreamMode != "summary" {
+		t.Fatalf("unexpected thinking completion input: %#v", decision.Match.Input)
+	}
+}
+
 func TestAutomationRuleServiceMatchTurnMatchesStructuredFields(t *testing.T) {
 	st := newAutomationTestStore(t)
 	svc := NewAutomationRuleService(st)

@@ -68,8 +68,14 @@ func NewRouter(
 	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
 	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
 	userPasswordHandler := handlers.UserPasswordHandler{Config: cfg, Password: service.NewUserPasswordService(dataStore), Audit: auditService}
-	kirariIntegrationHandler := handlers.KirariIntegrationHandler{Config: cfg, Service: service.NewKirariIntegrationService(dataStore, cfg, nil), Audit: auditService}
-	workspaceToolCallHandler := handlers.WorkspaceToolCallHandler{Config: cfg, Service: service.NewWorkspaceToolCallService(dataStore)}
+	workspaceToolCallService := service.NewWorkspaceToolCallService(dataStore)
+	kirariIntegrationService := service.NewKirariIntegrationService(dataStore, cfg, nil)
+	workspaceToolCallHandler := handlers.WorkspaceToolCallHandler{
+		Config:        cfg,
+		Service:       workspaceToolCallService,
+		AssistService: service.NewToolCallAssistService(workspaceToolCallService, kirariIntegrationService),
+	}
+	kirariIntegrationHandler := handlers.KirariIntegrationHandler{Config: cfg, Service: kirariIntegrationService, Audit: auditService}
 	configAutomationRulesHandler := handlers.ConfigAutomationRulesHandler{Config: cfg, Service: automationRuleService, Audit: auditService}
 	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
 	configSystemHandler := handlers.ConfigSystemHandler{Config: cfg, Service: service.NewSystemSettingsService(dataStore, cfg), Audit: auditService}
@@ -149,6 +155,7 @@ func NewRouter(
 	router.Mount("/api/user", userRouter)
 	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/schema", workspaceToolCallHandler.Schema)
 	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/assist-context", workspaceToolCallHandler.AssistContext)
+	router.With(middleware.RequireUserActor()).Post("/api/workspace/tool-call/assist", workspaceToolCallHandler.Assist)
 	router.Get("/api/config/automation-rules", configAutomationRulesHandler.Get)
 	router.Get("/api/config/automation-rules/schema", configAutomationRulesHandler.Schema)
 	router.Post("/api/config/automation-rules", configAutomationRulesHandler.Post)

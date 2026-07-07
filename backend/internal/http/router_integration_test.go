@@ -1488,7 +1488,7 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	schemaResp := env.getJSON(t, "/api/workspace/tool-call/schema", http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 1 {
+	if len(operations) != 2 {
 		t.Fatalf("unexpected tool-call schema response: %#v", schemaResp)
 	}
 	operation := operations[0].(map[string]any)
@@ -1497,6 +1497,13 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	}
 	if !containsMapItemWithStringField(operation["fields"], "key", "candidate_base_url") {
 		t.Fatalf("expected candidate_base_url field in tool-call schema: %#v", schemaResp)
+	}
+	assistOperation := operations[1].(map[string]any)
+	if nestedString(assistOperation, "name") != "assist_execute" || nestedString(assistOperation, "path") != "/api/workspace/tool-call/assist" {
+		t.Fatalf("unexpected tool-call assist operation: %#v", schemaResp)
+	}
+	if !containsMapItemWithStringField(assistOperation["fields"], "key", "provider") {
+		t.Fatalf("expected provider field in tool-call assist schema: %#v", schemaResp)
 	}
 
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
@@ -1717,6 +1724,16 @@ func TestWorkspaceToolCallAssistContextRejectsProgrammaticActors(t *testing.T) {
 	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
 		t.Fatalf("expected app key tool-call schema rejection: status=%d body=%q", status, body)
 	}
+	status, body, _ = env.postJSONWithCookieText(t, "/api/workspace/tool-call/assist", map[string]any{
+		"provider":   "kirari",
+		"model":      "demo",
+		"request_id": "req_demo",
+	}, nil, map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected app key tool-call assist rejection: status=%d body=%q", status, body)
+	}
 
 	status, body = env.getTextWithHeaders(t, "/api/workspace/tool-call/assist-context?request_id=req_demo", map[string]string{
 		"Authorization": "Bearer " + modelKey,
@@ -1730,6 +1747,159 @@ func TestWorkspaceToolCallAssistContextRejectsProgrammaticActors(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
 		t.Fatalf("expected model key tool-call schema rejection: status=%d body=%q", status, body)
+	}
+	status, body, _ = env.postJSONWithCookieText(t, "/api/workspace/tool-call/assist", map[string]any{
+		"provider":   "kirari",
+		"model":      "demo",
+		"request_id": "req_demo",
+	}, nil, map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected model key tool-call assist rejection: status=%d body=%q", status, body)
+	}
+}
+
+func TestWorkspaceToolCallAssistKirariLifecycle(t *testing.T) {
+	provider := newTestKirariProvider(t)
+	provider.chatCompletionsResponse = map[string]any{
+		"choices": []map[string]any{
+			{
+				"message": map[string]any{
+					"content": `{"explanation":"使用天气查询工具读取北京天气。","tool_call":{"name":"lookup_weather","arguments":{"city":"Beijing","unit":"c"}},"confidence":"high","warnings":["city inferred from recent user message"]}`,
+				},
+			},
+		},
+	}
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.KirariEnabled = true
+		cfg.KirariIssuerURL = provider.Issuer()
+		cfg.KirariClientID = "chatapi"
+		cfg.KirariClientSecret = "secret"
+		cfg.KirariRedirectURL = "http://chat.example.com/api/integrations/kirari/callback"
+		cfg.KirariAllowedIssuers = []string{provider.Issuer()}
+		cfg.KirariScopes = []string{"openid", "profile", "email", "offline_access", "llm:read", "llm:stream"}
+	})
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-kirari-assist",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "帮我查一下北京天气，先准备 tool call"},
+				},
+			},
+		},
+		"tools": []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name":        "lookup_weather",
+					"description": "Lookup the weather.",
+					"parameters": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"city": map[string]any{"type": "string"},
+							"unit": map[string]any{"type": "string"},
+						},
+					},
+				},
+			},
+		},
+	})
+	conversation := env.waitForWaitingConversation(t, "帮我查一下北京天气，先准备 tool call")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+
+	_, location, cookies := env.getRedirect(t, "/api/user/integrations/kirari/connect")
+	locationURL, err := neturl.Parse(location)
+	if err != nil {
+		t.Fatalf("parse kirari redirect: %v", err)
+	}
+	provider.idTokenClaims["nonce"] = locationURL.Query().Get("nonce")
+	env.getJSONAndCookiesWithCookies(t, "/api/integrations/kirari/callback?code=kirari-code&state="+neturl.QueryEscape(locationURL.Query().Get("state")), cookies, http.StatusOK)
+
+	assistResp := env.postJSON(t, "/api/workspace/tool-call/assist", map[string]any{
+		"provider":   "kirari",
+		"model":      "kirari-model",
+		"request_id": requestID,
+	}, http.StatusOK)
+	if nestedPathString(assistResp, "assist", "provider") != "kirari" || nestedPathString(assistResp, "assist", "model") != "kirari-model" {
+		t.Fatalf("unexpected assist provider/model: %#v", assistResp)
+	}
+	if !nestedPathBool(assistResp, "assist", "valid_draft") {
+		t.Fatalf("expected valid kirari assist draft: %#v", assistResp)
+	}
+	if nestedPathString(assistResp, "assist", "tool_call", "name") != "lookup_weather" {
+		t.Fatalf("unexpected assist tool call name: %#v", assistResp)
+	}
+	arguments, _ := nestedPath(assistResp, "assist", "tool_call", "arguments").(map[string]any)
+	if nestedString(arguments, "city") != "Beijing" || nestedString(arguments, "unit") != "c" {
+		t.Fatalf("unexpected assist tool call arguments: %#v", assistResp)
+	}
+	if !containsStringValue(nestedPath(assistResp, "assist", "warnings"), "city inferred from recent user message") {
+		t.Fatalf("unexpected assist warnings: %#v", assistResp)
+	}
+	if provider.chatCompletionsCalls != 1 {
+		t.Fatalf("expected one kirari chat completions call, got %d", provider.chatCompletionsCalls)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "done",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
+func TestWorkspaceToolCallAssistKirariRequiresConnection(t *testing.T) {
+	provider := newTestKirariProvider(t)
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.KirariEnabled = true
+		cfg.KirariIssuerURL = provider.Issuer()
+		cfg.KirariClientID = "chatapi"
+		cfg.KirariClientSecret = "secret"
+		cfg.KirariRedirectURL = "http://chat.example.com/api/integrations/kirari/callback"
+		cfg.KirariAllowedIssuers = []string{provider.Issuer()}
+	})
+
+	conversation, _, err := env.store.CreatePendingTurn(context.Background(), store.CreatePendingInput{
+		ConversationID: "conv_kirari_unconnected",
+		RequestID:      "req_kirari_unconnected",
+		ResponseID:     "resp_kirari_unconnected",
+		OwnerID:        "lab-user",
+		RequestFormat:  "responses",
+		Model:          "kirari-model",
+		UserContent:    "kirari assist without connection",
+		RequestBody:    map[string]any{"model": "kirari-model"},
+		ToolSchemas: []any{
+			map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name":       "lookup_weather",
+					"parameters": map[string]any{"type": "object"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create pending turn: %v", err)
+	}
+	if conversation.ID == "" {
+		t.Fatalf("expected conversation id for kirari unconnected test")
+	}
+
+	status, body := env.postText(t, "/api/workspace/tool-call/assist", map[string]any{
+		"provider":   "kirari",
+		"model":      "kirari-model",
+		"request_id": "req_kirari_unconnected",
+	})
+	if status != http.StatusConflict || !strings.Contains(body, service.ErrKirariNotConnected.Error()) {
+		t.Fatalf("expected kirari not connected rejection: status=%d body=%q", status, body)
 	}
 }
 
@@ -7587,12 +7757,14 @@ func newTestOIDCProvider(t *testing.T, cfg testOIDCProviderConfig) *testOIDCProv
 }
 
 type testKirariProvider struct {
-	server         *httptest.Server
-	privateKey     *rsa.PrivateKey
-	keyID          string
-	idTokenClaims  map[string]any
-	userInfoClaims map[string]any
-	metaCalls      int
+	server                  *httptest.Server
+	privateKey              *rsa.PrivateKey
+	keyID                   string
+	idTokenClaims           map[string]any
+	userInfoClaims          map[string]any
+	metaCalls               int
+	chatCompletionsCalls    int
+	chatCompletionsResponse map[string]any
 }
 
 func newTestKirariProvider(t *testing.T) *testKirariProvider {
@@ -7674,7 +7846,20 @@ func newTestKirariProvider(t *testing.T) *testKirariProvider {
 				},
 			})
 		case "/api/llm/chat/completions":
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+			provider.chatCompletionsCalls++
+			response := provider.chatCompletionsResponse
+			if response == nil {
+				response = map[string]any{
+					"choices": []map[string]any{
+						{
+							"message": map[string]any{
+								"content": `{"explanation":"default kirari assist response","tool_call":{"name":"lookup_weather","arguments":{}}}`,
+							},
+						},
+					},
+				}
+			}
+			_ = json.NewEncoder(w).Encode(response)
 		default:
 			http.NotFound(w, r)
 		}

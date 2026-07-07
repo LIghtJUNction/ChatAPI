@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -215,37 +216,13 @@ func (s *KirariIntegrationService) Meta(ctx context.Context, userID string, forc
 	if !forceRefresh && len(connection.ModelMetaCache) > 0 && connection.ModelMetaCacheExpiresAt != nil && connection.ModelMetaCacheExpiresAt.After(now) {
 		return cloneAnyMap(connection.ModelMetaCache), true, nil
 	}
-	accessToken, err := secretbox.Open(connection.AccessTokenCiphertext, s.cfg.MasterKey)
-	if err != nil {
-		return nil, false, fmt.Errorf("open kirari access token: %w", err)
-	}
-	refreshToken := ""
-	if strings.TrimSpace(connection.RefreshTokenCiphertext) != "" {
-		refreshToken, err = secretbox.Open(connection.RefreshTokenCiphertext, s.cfg.MasterKey)
-		if err != nil {
-			return nil, false, fmt.Errorf("open kirari refresh token: %w", err)
-		}
-	}
 	client, err := s.newClient()
 	if err != nil {
 		return nil, false, err
 	}
-	if connection.ExpiresAt != nil && !connection.ExpiresAt.IsZero() && connection.ExpiresAt.Before(now.Add(30*time.Second)) {
-		if strings.TrimSpace(refreshToken) == "" {
-			return nil, false, ErrKirariNotConnected
-		}
-		refreshed, err := client.RefreshToken(ctx, refreshToken)
-		if err != nil {
-			return nil, false, err
-		}
-		connection, err = s.updateConnectionTokens(ctx, userID, connection, refreshed)
-		if err != nil {
-			return nil, false, err
-		}
-		accessToken, err = secretbox.Open(connection.AccessTokenCiphertext, s.cfg.MasterKey)
-		if err != nil {
-			return nil, false, fmt.Errorf("open refreshed kirari access token: %w", err)
-		}
+	accessToken, _, connection, err := s.activeAccessToken(ctx, client, userID, connection)
+	if err != nil {
+		return nil, false, err
 	}
 	meta, err := client.Meta(ctx, accessToken)
 	if err != nil {
@@ -262,6 +239,41 @@ func (s *KirariIntegrationService) Meta(ctx context.Context, userID string, forc
 		return nil, false, err
 	}
 	return cloneAnyMap(meta), false, nil
+}
+
+func (s *KirariIntegrationService) ChatCompletions(ctx context.Context, userID string, body any) (map[string]any, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, ErrKirariMissingUser
+	}
+	if !s.cfg.KirariEnabled {
+		return nil, ErrKirariDisabled
+	}
+	connection, err := s.loadConnection(ctx, userID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, ErrKirariNotConnected
+		}
+		return nil, err
+	}
+	client, err := s.newClient()
+	if err != nil {
+		return nil, err
+	}
+	accessToken, _, _, err := s.activeAccessToken(ctx, client, userID, connection)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.ChatCompletions(ctx, accessToken, body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode kirari chat completions response: %w", err)
+	}
+	return payload, nil
 }
 
 func (s *KirariIntegrationService) newClient() (*platformkirari.Client, error) {
@@ -341,6 +353,40 @@ func (s *KirariIntegrationService) updateConnectionTokens(ctx context.Context, u
 		return kirariStoredConnection{}, err
 	}
 	return connection, nil
+}
+
+func (s *KirariIntegrationService) activeAccessToken(ctx context.Context, client *platformkirari.Client, userID string, connection kirariStoredConnection) (string, bool, kirariStoredConnection, error) {
+	accessToken, err := secretbox.Open(connection.AccessTokenCiphertext, s.cfg.MasterKey)
+	if err != nil {
+		return "", false, kirariStoredConnection{}, fmt.Errorf("open kirari access token: %w", err)
+	}
+	now := s.now().UTC()
+	if connection.ExpiresAt == nil || connection.ExpiresAt.IsZero() || connection.ExpiresAt.After(now.Add(30*time.Second)) {
+		return accessToken, false, connection, nil
+	}
+	refreshToken := ""
+	if strings.TrimSpace(connection.RefreshTokenCiphertext) != "" {
+		refreshToken, err = secretbox.Open(connection.RefreshTokenCiphertext, s.cfg.MasterKey)
+		if err != nil {
+			return "", false, kirariStoredConnection{}, fmt.Errorf("open kirari refresh token: %w", err)
+		}
+	}
+	if strings.TrimSpace(refreshToken) == "" {
+		return "", false, kirariStoredConnection{}, ErrKirariNotConnected
+	}
+	refreshed, err := client.RefreshToken(ctx, refreshToken)
+	if err != nil {
+		return "", false, kirariStoredConnection{}, err
+	}
+	connection, err = s.updateConnectionTokens(ctx, userID, connection, refreshed)
+	if err != nil {
+		return "", false, kirariStoredConnection{}, err
+	}
+	accessToken, err = secretbox.Open(connection.AccessTokenCiphertext, s.cfg.MasterKey)
+	if err != nil {
+		return "", false, kirariStoredConnection{}, fmt.Errorf("open refreshed kirari access token: %w", err)
+	}
+	return accessToken, true, connection, nil
 }
 
 func decodeKirariStoredConnection(value map[string]any) (kirariStoredConnection, error) {

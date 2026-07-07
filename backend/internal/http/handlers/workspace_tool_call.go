@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -12,8 +13,9 @@ import (
 )
 
 type WorkspaceToolCallHandler struct {
-	Config  config.Config
-	Service *service.WorkspaceToolCallService
+	Config        config.Config
+	Service       *service.WorkspaceToolCallService
+	AssistService *service.ToolCallAssistService
 }
 
 func (h WorkspaceToolCallHandler) Schema(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +62,48 @@ func (h WorkspaceToolCallHandler) AssistContext(w http.ResponseWriter, r *http.R
 			"text":   contextPayload.DraftText,
 			"length": contextPayload.DraftLength,
 		},
+	})
+}
+
+func (h WorkspaceToolCallHandler) Assist(w http.ResponseWriter, r *http.Request) {
+	actor, ok := service.RequestActorFromContext(r.Context())
+	if !ok || !service.IsInteractiveUserActor(actor) {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Provider       string `json:"provider"`
+		Model          string `json:"model"`
+		RequestID      string `json:"request_id"`
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	result, err := h.AssistService.Execute(r.Context(), actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrToolCallAssistProviderRequired),
+			errors.Is(err, service.ErrToolCallAssistModelRequired),
+			errors.Is(err, service.ErrToolCallAssistTargetRequired),
+			errors.Is(err, service.ErrToolCallAssistUnsupported),
+			errors.Is(err, service.ErrToolCallAssistNoTools):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, service.ErrKirariNotConnected):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, service.ErrForbidden):
+			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		default:
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"assist": result,
 	})
 }
 

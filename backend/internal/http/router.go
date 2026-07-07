@@ -13,11 +13,16 @@ import (
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
 	appkey "github.com/zyf/chatapi/internal/service/auth/appkey"
+	"github.com/zyf/chatapi/internal/service/auth/geetest"
 	"github.com/zyf/chatapi/internal/service/auth/identity"
 	localauth "github.com/zyf/chatapi/internal/service/auth/local"
 	modelkey "github.com/zyf/chatapi/internal/service/auth/modelkey"
+	oidcsvc "github.com/zyf/chatapi/internal/service/auth/oidc"
 	"github.com/zyf/chatapi/internal/service/auth/policy"
+	"github.com/zyf/chatapi/internal/service/auth/ratelimit"
 	"github.com/zyf/chatapi/internal/service/auth/session"
+	authsettings "github.com/zyf/chatapi/internal/service/auth/settings"
+	totpsvc "github.com/zyf/chatapi/internal/service/auth/totp"
 	"github.com/zyf/chatapi/internal/service/auth/verification"
 	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
 	"github.com/zyf/chatapi/internal/service/chat/turn"
@@ -34,6 +39,11 @@ type RouterDeps struct {
 	LocalAuth     *localauth.Service
 	Verification  *verification.Service
 	Policy        *policy.Service
+	AuthSettings  *authsettings.Service
+	GeeTest       *geetest.Service
+	TOTP          *totpsvc.Service
+	OIDC          *oidcsvc.Service
+	LoginLimiter  *ratelimit.Service
 	AdminUsers    *authadmin.Service
 	AdminChat     *chatadmin.Service
 	Audit         *auditsvc.Service
@@ -63,8 +73,16 @@ func NewRouter(deps RouterDeps) http.Handler {
 		Logger: deps.logger(logging.LayerTurnQuery),
 	}
 	authHandler := AuthHandler{
+		Config:       deps.Config,
 		LocalAuth:    deps.LocalAuth,
 		Verification: deps.Verification,
+		Policy:       deps.Policy,
+		Settings:     deps.AuthSettings,
+		GeeTest:      deps.GeeTest,
+		TOTP:         deps.TOTP,
+		OIDC:         deps.OIDC,
+		Audit:        deps.Audit,
+		LoginLimiter: deps.LoginLimiter,
 		Sessions:     deps.UserSessions,
 		Logger:       deps.logger(logging.LayerAuth),
 	}
@@ -76,13 +94,16 @@ func NewRouter(deps RouterDeps) http.Handler {
 		Turn:      deps.Turn,
 		Policy:    deps.Policy,
 		LocalAuth: deps.LocalAuth,
+		Settings:  deps.AuthSettings,
+		TOTP:      deps.TOTP,
 		Logger:    deps.logger(logging.LayerAuth),
 	}
 	adminHandler := AdminHandler{
-		Users:  deps.AdminUsers,
-		Chat:   deps.AdminChat,
-		Audit:  deps.Audit,
-		Logger: deps.logger(logging.LayerAudit),
+		Users:        deps.AdminUsers,
+		Chat:         deps.AdminChat,
+		Audit:        deps.Audit,
+		AuthSettings: deps.AuthSettings,
+		Logger:       deps.logger(logging.LayerAudit),
 	}
 
 	modelAuth := httpmiddleware.RequireModelAPIKey(deps.ModelAPIKeys, authLogger)
@@ -102,13 +123,24 @@ func NewRouter(deps RouterDeps) http.Handler {
 	router.With(modelAuth).Post("/v1/messages", chatHandler.AnthropicMessages)
 
 	router.Post("/api/auth/register", authHandler.Register)
+	router.Get("/api/auth/register/config", authHandler.RegisterConfig)
+	router.Post("/api/auth/register/send-code", authHandler.RegisterSendCode)
 	router.Post("/api/auth/login", authHandler.Login)
 	router.Post("/api/auth/logout", authHandler.Logout)
 	router.Get("/api/auth/session", userHandler.Session)
+	router.Get("/api/auth/oidc/config", authHandler.OIDCConfig)
+	router.Get("/api/auth/oidc/login", authHandler.OIDCLogin)
+	router.With(userAuth).Get("/api/auth/oidc/link", authHandler.OIDCLink)
+	router.Get("/api/auth/oidc/callback", authHandler.OIDCCallback)
+	router.Get("/api/auth/password/config", authHandler.PasswordConfig)
+	router.Post("/api/auth/password/send-code", authHandler.PasswordSendCode)
 	router.Post("/api/auth/verification/send", authHandler.SendVerification)
 	router.Post("/api/auth/verification/verify", authHandler.VerifyCode)
 	router.Post("/api/auth/password/forgot", authHandler.ForgotPassword)
 	router.Post("/api/auth/password/reset", authHandler.ResetPassword)
+	router.With(userAuth).Get("/api/auth/totp/setup", authHandler.TOTPSetup)
+	router.With(userAuth).Post("/api/auth/totp/confirm", authHandler.TOTPConfirm)
+	router.With(userAuth).Post("/api/auth/totp/reset", authHandler.TOTPReset)
 
 	router.With(userOrAppAuth("conversations:read")).Get("/api/conversations", userHandler.ListConversations)
 	router.With(userOrAppAuth("conversations:read")).Get("/api/conversations/{conversationID}/messages", userHandler.ListConversationMessages)
@@ -159,6 +191,8 @@ func NewRouter(deps RouterDeps) http.Handler {
 	router.With(adminAuth).Post("/api/admin/conversations/{conversationID}/complete", adminHandler.CompleteConversation)
 	router.With(adminAuth).Delete("/api/admin/conversations/{conversationID}", adminHandler.DeleteConversation)
 	router.With(adminAuth).Get("/api/admin/audit/logs", adminHandler.ListAuditLogs)
+	router.With(adminAuth).Get("/api/admin/auth/settings", adminHandler.GetAuthSettings)
+	router.With(adminAuth).Post("/api/admin/auth/settings", adminHandler.SetAuthSettings)
 
 	router.With(appAuth("requests:read")).Get("/api/requests", appHandler.ListRequests)
 	router.With(appAuth("requests:read")).Get("/api/requests/{requestID}", appHandler.GetRequest)

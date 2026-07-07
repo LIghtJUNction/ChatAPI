@@ -81,6 +81,7 @@ func TestRouterLocalAuthFlow(t *testing.T) {
 	userService := usersvc.NewService(st, appkey.NewService(st), modelkey.NewService(st, "test-master-key"))
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
+	cfg.SMTPEnabled = true
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
 		LocalAuth:     localService,

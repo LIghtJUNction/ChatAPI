@@ -12,16 +12,18 @@ import (
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
+	authsettings "github.com/zyf/chatapi/internal/service/auth/settings"
 	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
 type AdminHandler struct {
-	Users  *authadmin.Service
-	Chat   *chatadmin.Service
-	Audit  *auditsvc.Service
-	Logger *zap.Logger
+	Users        *authadmin.Service
+	Chat         *chatadmin.Service
+	Audit        *auditsvc.Service
+	AuthSettings *authsettings.Service
+	Logger       *zap.Logger
 }
 
 func (h AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -352,6 +354,40 @@ func (h AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+}
+
+func (h AdminHandler) GetAuthSettings(w http.ResponseWriter, r *http.Request) {
+	if h.AuthSettings == nil {
+		http.Error(w, "auth settings service not configured", http.StatusInternalServerError)
+		return
+	}
+	item, err := h.AuthSettings.Get(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	item["ok"] = true
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h AdminHandler) SetAuthSettings(w http.ResponseWriter, r *http.Request) {
+	if h.AuthSettings == nil {
+		http.Error(w, "auth settings service not configured", http.StatusInternalServerError)
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	item, err := h.AuthSettings.Set(r.Context(), body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h.record(r, "admin.auth", "auth_settings", "system_settings", "update", "success", nil)
+	item["ok"] = true
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (h AdminHandler) record(r *http.Request, eventType string, resourceType string, resourceID string, action string, outcome string, metadata map[string]any) {

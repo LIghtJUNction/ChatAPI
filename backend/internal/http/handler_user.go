@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"github.com/zyf/chatapi/internal/service/auth/identity"
 	localauth "github.com/zyf/chatapi/internal/service/auth/local"
 	"github.com/zyf/chatapi/internal/service/auth/policy"
+	authsettings "github.com/zyf/chatapi/internal/service/auth/settings"
+	totpsvc "github.com/zyf/chatapi/internal/service/auth/totp"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
 	usersvc "github.com/zyf/chatapi/internal/service/user"
@@ -29,21 +32,32 @@ type UserHandler struct {
 	Turn      *turnsvc.Service
 	Policy    *policy.Service
 	LocalAuth *localauth.Service
+	Settings  *authsettings.Service
+	TOTP      *totpsvc.Service
 	Logger    *zap.Logger
 }
 
 func (h UserHandler) Session(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.publicSettings(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	pr, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context())
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"authenticated":                     false,
 			"user":                              nil,
 			"totp_enabled":                      false,
-			"registration_enabled":              true,
-			"geetest_enabled":                   strings.TrimSpace(h.Config.GeetestCaptchaID) != "",
-			"geetest_captcha_id":                h.Config.GeetestCaptchaID,
+			"registration_enabled":              settings.RegistrationEnabled,
+			"geetest_enabled":                   settings.GeeTestEnabled,
+			"geetest_captcha_id":                settings.GeeTestCaptchaID,
 			"current_connection_count":          0,
 			"realtime_max_connections_per_user": h.Config.RealtimeMaxConnectionsPerUser,
+			"oidc_enabled":                      settings.OIDCEnabled,
+			"oidc_provider_name":                settings.OIDCProviderName,
+			"local_password_login_enabled":      settings.LocalPasswordLoginEnabled,
+			"email_verification_enabled":        settings.EmailVerificationEnabled,
 		})
 		return
 	}
@@ -59,12 +73,16 @@ func (h UserHandler) Session(w http.ResponseWriter, r *http.Request) {
 			"username": user.Username,
 			"role":     h.Policy.EffectiveRole(user),
 		},
-		"totp_enabled":                      false,
-		"registration_enabled":              true,
-		"geetest_enabled":                   strings.TrimSpace(h.Config.GeetestCaptchaID) != "",
-		"geetest_captcha_id":                h.Config.GeetestCaptchaID,
+		"totp_enabled":                      h.TOTP != nil && h.TOTP.IsEnabled(r.Context(), pr.UserID),
+		"registration_enabled":              settings.RegistrationEnabled,
+		"geetest_enabled":                   settings.GeeTestEnabled,
+		"geetest_captcha_id":                settings.GeeTestCaptchaID,
 		"current_connection_count":          0,
 		"realtime_max_connections_per_user": h.Config.RealtimeMaxConnectionsPerUser,
+		"oidc_enabled":                      settings.OIDCEnabled,
+		"oidc_provider_name":                settings.OIDCProviderName,
+		"local_password_login_enabled":      settings.LocalPasswordLoginEnabled,
+		"email_verification_enabled":        settings.EmailVerificationEnabled,
 	})
 }
 
@@ -496,4 +514,17 @@ func (h UserHandler) ownerIDFromContext(r *http.Request) (string, bool) {
 		return strings.TrimSpace(principal.UserID), true
 	}
 	return "", false
+}
+
+func (h UserHandler) publicSettings(ctx context.Context) (authsettings.PublicSettings, error) {
+	if h.Settings == nil {
+		return authsettings.PublicSettings{
+			LocalPasswordLoginEnabled: true,
+			RegistrationEnabled:       true,
+			GeeTestEnabled:            strings.TrimSpace(h.Config.GeetestCaptchaID) != "",
+			GeeTestCaptchaID:          strings.TrimSpace(h.Config.GeetestCaptchaID),
+			OIDCEnabled:               h.Config.Mode != config.ModeLab && h.Config.OIDCEnabled,
+		}, nil
+	}
+	return h.Settings.Public(ctx)
 }

@@ -13,8 +13,11 @@ type UpstreamProviderDescriptor struct {
 	Protocols         []string            `json:"protocols,omitempty"`
 	SupportsStreaming bool                `json:"supports_streaming"`
 	RequiresUserLink  bool                `json:"requires_user_link"`
+	Capabilities      map[string]any      `json:"capabilities,omitempty"`
 	Notes             []string            `json:"notes,omitempty"`
 	ErrorCodes        []UpstreamErrorCode `json:"error_codes,omitempty"`
+	RequestHints      map[string]any      `json:"request_hints,omitempty"`
+	ResponseHints     map[string]any      `json:"response_hints,omitempty"`
 }
 
 type ToolCallAssistProviderError struct {

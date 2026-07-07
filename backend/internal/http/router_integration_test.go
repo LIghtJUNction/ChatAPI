@@ -1604,6 +1604,12 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	if !containsMapItemWithStringField(resp["backend_assistant_providers"], "name", "kirari") {
 		t.Fatalf("unexpected backend assistant providers: %#v", resp)
 	}
+	kirariProvider := resp["backend_assistant_providers"].([]any)[0].(map[string]any)
+	if !nestedPathBool(map[string]any{"provider": kirariProvider}, "provider", "capabilities", "backend_delegated") ||
+		!nestedPathBool(map[string]any{"provider": kirariProvider}, "provider", "capabilities", "supports_native_json_schema") ||
+		nestedPathString(map[string]any{"provider": kirariProvider}, "provider", "request_hints", "default_protocol") != "chat_completions" {
+		t.Fatalf("unexpected backend assistant provider capability matrix: %#v", resp)
+	}
 	if !containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "responses") ||
 		!containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "chat_completions") ||
 		!containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "anthropic_messages") {
@@ -1723,6 +1729,11 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	}
 	if !containsMapItemWithStringField(resp["backend_assistant_providers"], "name", "kirari") {
 		t.Fatalf("unexpected session backend assistant providers: %#v", resp)
+	}
+	sessionKirariProvider := resp["backend_assistant_providers"].([]any)[0].(map[string]any)
+	if !nestedPathBool(map[string]any{"provider": sessionKirariProvider}, "provider", "capabilities", "supports_model_meta") ||
+		nestedPathString(map[string]any{"provider": sessionKirariProvider}, "provider", "response_hints", "stream_event_format") == "" {
+		t.Fatalf("unexpected session backend provider hints: %#v", resp)
 	}
 	if !containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "responses") {
 		t.Fatalf("unexpected session upstream protocol templates: %#v", resp)

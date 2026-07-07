@@ -44,6 +44,17 @@ func (s *KirariIntegrationService) ProviderDescriptor() UpstreamProviderDescript
 		Protocols:         []string{"chat_completions"},
 		SupportsStreaming: true,
 		RequiresUserLink:  true,
+		Capabilities: map[string]any{
+			"backend_delegated":            true,
+			"browser_direct_recommended":   false,
+			"supports_structured_output":   true,
+			"supports_native_json_schema":  true,
+			"supports_tool_schemas":        true,
+			"supports_cancel":              false,
+			"supports_model_meta":          true,
+			"supports_stream_assist":       true,
+			"requires_provider_connection": true,
+		},
 		Notes: []string{
 			"Requires the current user to complete delegated OIDC authorization before backend-side assist can call Kirari.",
 			"Uses the provider registry and shared Tool Call assist chat-completions adapter.",
@@ -51,6 +62,25 @@ func (s *KirariIntegrationService) ProviderDescriptor() UpstreamProviderDescript
 		ErrorCodes: []UpstreamErrorCode{
 			{Code: "provider_not_connected", Description: "The current user has not connected the delegated Kirari provider yet."},
 			{Code: "provider_request_failed", Description: "The delegated provider request failed or returned an unreadable response."},
+		},
+		RequestHints: map[string]any{
+			"default_protocol":       "chat_completions",
+			"supports_stream_toggle": true,
+			"supports_response_format": map[string]any{
+				"type":         "json_schema",
+				"required":     true,
+				"schema_field": "response_format.json_schema",
+			},
+		},
+		ResponseHints: map[string]any{
+			"stream_event_format": "openai_chat_completions_sse",
+			"final_text_paths": []string{
+				"choices[0].message.content",
+			},
+			"stream_delta_paths": []string{
+				"choices[0].delta.content",
+				"choices[0].delta.content[].text",
+			},
 		},
 	}
 }

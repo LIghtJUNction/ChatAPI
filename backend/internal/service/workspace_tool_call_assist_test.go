@@ -41,6 +41,10 @@ func (s stubUpstreamProvider) ProviderDescriptor() UpstreamProviderDescriptor {
 		DisplayName:       "Stub Provider",
 		Protocols:         []string{"chat_completions"},
 		SupportsStreaming: false,
+		Capabilities: map[string]any{
+			"backend_delegated":          true,
+			"supports_structured_output": true,
+		},
 		ErrorCodes: []UpstreamErrorCode{
 			{Code: "provider_request_failed", Description: "stub"},
 		},
@@ -99,6 +103,9 @@ func TestToolCallAssistServiceProvidersExposeDescriptors(t *testing.T) {
 	if len(providers) != 1 || providers[0].Name != "kirari" || providers[0].DisplayName == "" {
 		t.Fatalf("unexpected provider descriptors: %#v", providers)
 	}
+	if !boolValueAny(providers[0].Capabilities["backend_delegated"]) {
+		t.Fatalf("expected provider capabilities in descriptors: %#v", providers)
+	}
 }
 
 func TestNormalizeToolCallAssistProviderErrorMapsKirariConnection(t *testing.T) {
@@ -110,6 +117,11 @@ func TestNormalizeToolCallAssistProviderErrorMapsKirariConnection(t *testing.T) 
 	if providerErr.Code != "provider_not_connected" || providerErr.HTTPStatus != http.StatusConflict || providerErr.Provider != "kirari" {
 		t.Fatalf("unexpected provider error mapping: %#v", providerErr)
 	}
+}
+
+func boolValueAny(value any) bool {
+	typed, _ := value.(bool)
+	return typed
 }
 
 func TestExtractAssistChatCompletionDeltaSupportsOpenAIStyleChunk(t *testing.T) {

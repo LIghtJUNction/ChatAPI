@@ -112,6 +112,104 @@
 
 第一阶段完成后，再按模块补齐认证、会话、pending turn、协议兼容、自动化规则、管理后台和 PostgreSQL 仓储。
 
+### 1.0.1 当前未完成事项与后续分阶段执行清单
+
+以下清单不是最初规划里的理想态路线，而是基于当前 `refactor/migrate-to-go` 分支的实际落地状态整理出的“还没做完什么”和“接下来按什么顺序收口”。
+
+当前仍未完成或只完成到一半的核心事项：
+
+- Kirari delegated upstream 目前只有 `ChatCompletionsRaw` 与 Tool Call assist 侧最小接线，真正面向产品入口的统一流式 delegated upstream 链路还没彻底收口。
+- 工作台 Tool Call 标签页“请求大模型”整条产品链路还没做完；后端已有 assist context / assist execute / assist stream / assist parse 契约与 Kirari 特例接线，但浏览器端上游配置 UI、结构化输出消费、草稿回填和完整交互还没完成。
+- delegated upstream 抽象还处于第一阶段；provider registry 已有，但多 provider 的统一 schema、能力矩阵、错误模型、stream adapter 和更稳定的 provider contract 还没有完全做实。
+- 自动化规则目前是“最小可用版”，已经支持读写、基础匹配和基本执行，但更完整的执行语义、更细审计、更复杂联网调试场景和更强的规则诊断还没有补齐。
+- 管理后台后端能力先走在前面，运行时监控、存储清理、请求态势、队列摘要等接口多数已经有了，但前端管理页和完整运营体验还没跟上。
+- 存储/清理/配额目前已具备基础能力，但更细的保留策略、即时清理触发、更多可视化和更强的超限治理仍待继续完善。
+- 迁移与运维能力还没到最终版；已有 migration、doctor、config print、SQLite 到 PostgreSQL 迁移工具，但距离文档里目标的长期运维形态还有差距。
+- 用户级通知与消息限流这条线目前正在接入运行时：用户配置语义、ntfy 安全校验、发送服务和每用户 messages-per-minute 限流已开始落地，但还处在本地未提交的收口阶段。
+
+建议按下面几个阶段继续推进，每个阶段尽量收成用户视角或运维视角完整的功能块，而不是继续切成过细的小提交：
+
+#### 阶段 A：收口当前运行时接线
+
+- 完成用户级 ntfy 通知和每用户消息限流的运行时接线。
+- 补全 SQLite / PostgreSQL 双后端测试，确认用户配置、限流和通知失败审计闭环。
+- 把这条能力的接口语义、审计行为和运行时限制补回文档。
+
+完成标志：
+
+- 用户可通过 `/api/user/config` 配置 ntfy URL 和每分钟消息数限制。
+- `/v1/*` 协议入口能真实触发限流，返回稳定错误码。
+- pending 请求、手动 delta / complete / abort 的通知行为和失败审计稳定可测。
+
+#### 阶段 B：收口 delegated upstream 内核
+
+- 把当前 Tool Call assist 使用的 provider registry、provider descriptor、错误归一化、stream 读取器继续沉淀成更稳定的 delegated upstream 内核。
+- 明确非流/流式的统一 contract，补齐 provider 能力声明、错误码矩阵和结构化输出约束。
+- 为后续 Kirari 之外的 provider 接入预留明确扩展点。
+
+完成标志：
+
+- delegated upstream 不再只是“给 Tool Call assist 临时服务”的逻辑集合。
+- 新 provider 接入主要通过实现接口和 descriptor，而不是复制 handler/service 分支。
+- 非流和流式路径都具备稳定测试。
+
+#### 阶段 C：做完 Tool Call“请求大模型”完整链路
+
+- 保持“用户自配上游模型 key 默认只存在浏览器本地”的原则。
+- 完成前端上游配置分区、三套协议模板、结构化输出解析、说明文字展示和 Tool Call 表单草稿回填。
+- 保留 Kirari delegated 作为后端代请求特例，并与浏览器直连路径在 UI 上明确区分“上游模型”和“虚拟模型”。
+
+完成标志：
+
+- 用户在工作台点击“请求大模型”后，可以真实请求浏览器端上游模型或已连接的 Kirari delegated upstream。
+- 模型先输出说明文字，再生成可校验的 Tool Call 草稿。
+- 草稿只填表单，不自动发出。
+
+#### 阶段 D：补齐统一 Turn Manager 边界
+
+- 继续把 pending turn 状态机做成真正的核心模块，减少 `ChatAPIService` 内继续堆积职责。
+- 把 WebUI、应用 API、自动化规则、Lab 模式对 pending turn 的修改统一收口到同一执行内核。
+- 继续推进 WebSocket/SSE 与数据库事务解耦、事件广播背压和连接配额的系统化治理。
+
+完成标志：
+
+- pending turn 生命周期由单一模块管理。
+- `delta` / `complete` / `abort` / timeout / automation completion 不再分散在多处拼状态。
+- 连接限额、事件投递和状态变更的边界更清楚。
+
+#### 阶段 E：补齐自动化规则与应用 API 的“真实自动化调试”能力
+
+- 继续扩展应用 API Key 的 scope / resource limit 语义。
+- 补齐更强的自动化规则执行语义、规则诊断、联网调试场景和更细粒度审计。
+- 确保应用 API 能稳定覆盖查看请求、规则读写、手动回复和虚拟模型 key 管理。
+
+完成标志：
+
+- 应用 API Key 能支撑真实联网自动化调试，而不只是 WebUI 的旁路接口。
+- 自动化规则在“命中、跳过、失败、超时”几个状态上都有稳定可观测性。
+
+#### 阶段 F：补齐管理后台与运营能力
+
+- 把现有 runtime/storage/requests/audit 后端能力补到完整管理页。
+- 继续做设备性能监控、ChatAPI 内存占用、队列/请求态势、清理策略和管理员运维操作闭环。
+- 把首次启动向导、配置诊断命令、SQLite 生产降级提示、运维文档一并做实。
+
+完成标志：
+
+- 管理员可以不看日志文件也能在后台完成主要诊断和维护动作。
+- 生产运行中常见问题有标准化诊断入口和明确的降级提示。
+
+#### 阶段 G：结构收口与长期维护整理
+
+- 回头治理当前已经暴露出来的结构问题，重点是 `router.go` 过重和 `ChatAPIService` 职责膨胀。
+- 拆清装配层、编排层、策略层、副作用模块的边界。
+- 对文档、契约、测试矩阵和发布面做一次长期维护视角的整理。
+
+完成标志：
+
+- 核心模块职责边界更稳定，不再继续向单点 service 吸附功能。
+- 新功能接入优先走既有抽象，而不是继续往核心 service 和 router 中堆逻辑。
+
 ### 1.1 必须保持的产品能力
 
 - 保持现有 Web 控制台可用：登录、注册、TOTP、会话列表、消息查看、人工输出、自动化规则、系统设置、用户设置、API Key 管理、统计页、图片上传。

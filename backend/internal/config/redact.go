@@ -19,6 +19,7 @@ type RedactedConfig struct {
 	LabPassword                           string   `json:"lab_password"`
 	AdminPassword                         string   `json:"admin_password"`
 	LogLevel                              string   `json:"log_level"`
+	LogFormat                             string   `json:"log_format"`
 	CORSOrigins                           []string `json:"cors_origins"`
 	TrustedProxies                        []string `json:"trusted_proxies,omitempty"`
 	MetricsEnabled                        bool     `json:"metrics_enabled"`
@@ -82,6 +83,7 @@ func (c Config) Redacted() RedactedConfig {
 		LabPassword:                           redactSecret(c.LabPassword),
 		AdminPassword:                         redactSecret(c.AdminPassword),
 		LogLevel:                              c.LogLevel,
+		LogFormat:                             c.LogFormat,
 		CORSOrigins:                           append([]string(nil), c.CORSOrigins...),
 		TrustedProxies:                        append([]string(nil), c.TrustedProxies...),
 		MetricsEnabled:                        c.MetricsEnabled,

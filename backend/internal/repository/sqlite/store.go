@@ -13,15 +13,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	_ "modernc.org/sqlite"
 
+	"github.com/zyf/chatapi/internal/observability/logging"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	"github.com/zyf/chatapi/internal/store"
 )
 
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	Logger *zap.Logger
 }
 
 var errNotFound = store.ErrNotFound
@@ -57,6 +60,10 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+func (s *Store) logger(ctx context.Context) *zap.Logger {
+	return logging.BindContext(s.Logger, ctx)
 }
 
 func (s *Store) Ping(ctx context.Context) error {
@@ -168,8 +175,10 @@ func (s *Store) GetConversation(ctx context.Context, conversationID string) (sto
 		&item.ResponseID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logger(ctx).Warn("sqlite get conversation not found", zap.String("conversation.id", conversationID))
 			return store.Conversation{}, errNotFound
 		}
+		s.logger(ctx).Warn("sqlite get conversation failed", zap.String("conversation.id", conversationID), zap.Error(err))
 		return store.Conversation{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
@@ -194,6 +203,7 @@ func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
 		ORDER BY c.updated_at DESC, m.created_at DESC, m.id DESC
 	`)
 	if err != nil {
+		s.logger(ctx).Warn("sqlite list requests failed", zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -206,7 +216,11 @@ func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		s.logger(ctx).Warn("sqlite list requests row iteration failed", zap.Error(err))
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
@@ -228,8 +242,10 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request
 	item, err := scanRequestRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logger(ctx).Warn("sqlite get request not found", zap.String("request.id", requestID))
 			return store.Request{}, errNotFound
 		}
+		s.logger(ctx).Warn("sqlite get request failed", zap.String("request.id", requestID), zap.Error(err))
 		return store.Request{}, err
 	}
 	if item.RequestID == "" {
@@ -347,6 +363,9 @@ func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKe
 			id, app_api_key_id, user_id, route, status_code, error_code, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, item.ID, item.AppAPIKeyID, item.UserID, item.Route, item.StatusCode, item.ErrorCode, formatTime(item.CreatedAt))
+	if err != nil {
+		s.logger(ctx).Warn("sqlite create app api key audit log failed", zap.String("app_api_key.id", item.AppAPIKeyID), zap.Error(err))
+	}
 	return err
 }
 
@@ -372,6 +391,7 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppA
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
+		s.logger(ctx).Warn("sqlite list app api key audit logs failed", zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -384,7 +404,11 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppA
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		s.logger(ctx).Warn("sqlite list app api key audit logs row iteration failed", zap.Error(err))
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogInput) (store.AuditLog, error) {
@@ -409,6 +433,7 @@ func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogIn
 		mustJSON(ensureMap(input.Metadata)),
 		formatTime(createdAt),
 	); err != nil {
+		s.logger(ctx).Warn("sqlite create audit log failed", zap.String("audit.event_type", input.EventType), zap.String("audit.action", input.Action), zap.Error(err))
 		return store.AuditLog{}, err
 	}
 	return store.AuditLog{
@@ -459,6 +484,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
+		s.logger(ctx).Warn("sqlite list audit logs failed", zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -471,7 +497,11 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		s.logger(ctx).Warn("sqlite list audit logs row iteration failed", zap.Error(err))
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsInput) (int, error) {
@@ -503,6 +533,7 @@ func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsIn
 	}
 	var count int
 	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		s.logger(ctx).Warn("sqlite count audit logs failed", zap.Error(err))
 		return 0, err
 	}
 	return count, nil
@@ -1657,6 +1688,7 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 		ORDER BY created_at ASC, id ASC
 	`, conversationID)
 	if err != nil {
+		s.logger(ctx).Warn("sqlite list messages failed", zap.String("conversation.id", conversationID), zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -1679,7 +1711,11 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 		item.Metadata = parseJSONMap(metadataJSON)
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		s.logger(ctx).Warn("sqlite list messages row iteration failed", zap.String("conversation.id", conversationID), zap.Error(err))
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (store.DeleteConversationsResult, error) {
@@ -1846,6 +1882,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		s.logger(ctx).Warn("sqlite create pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -1887,8 +1924,10 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 	}
 
 	if err := tx.Commit(); err != nil {
+		s.logger(ctx).Warn("sqlite create pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
+	s.logger(ctx).Debug("sqlite pending turn created", zap.String("conversation.id", input.ConversationID), zap.String("request.id", input.RequestID), zap.String("owner.id", input.OwnerID))
 	return conversation, message, nil
 }
 
@@ -1911,8 +1950,10 @@ func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (
 		SET updated_at = ?, metadata_json = ?
 		WHERE id = ?
 	`, formatTime(conversation.UpdatedAt), mustJSON(metadata), conversation.ID); err != nil {
+		s.logger(ctx).Warn("sqlite update draft failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, err
 	}
+	s.logger(ctx).Debug("sqlite draft updated", zap.String("conversation.id", input.ConversationID), zap.Int("draft.length", len([]rune(input.DraftText))))
 	return conversation, nil
 }
 
@@ -1975,6 +2016,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		s.logger(ctx).Warn("sqlite complete pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -1996,8 +2038,10 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 	}
 
 	if err := tx.Commit(); err != nil {
+		s.logger(ctx).Warn("sqlite complete pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
+	s.logger(ctx).Debug("sqlite pending turn completed", zap.String("conversation.id", input.ConversationID), zap.String("response.id", input.ResponseID), zap.String("mode", input.Mode))
 	return conversation, message, nil
 }
 
@@ -2032,6 +2076,7 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		s.logger(ctx).Warn("sqlite abort pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -2051,8 +2096,10 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 		return store.Conversation{}, store.Message{}, err
 	}
 	if err := tx.Commit(); err != nil {
+		s.logger(ctx).Warn("sqlite abort pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
+	s.logger(ctx).Debug("sqlite pending turn aborted", zap.String("conversation.id", input.ConversationID))
 	return conversation, message, nil
 }
 

@@ -39,6 +39,7 @@ type Config struct {
 	LabPassword                           string
 	AdminPassword                         string
 	LogLevel                              string
+	LogFormat                             string
 	CORSOrigins                           []string
 	TrustedProxies                        []string
 	MetricsEnabled                        bool
@@ -137,6 +138,7 @@ func Default(mode Mode, backendRoot string) Config {
 		LabPassword:                           "",
 		AdminPassword:                         "",
 		LogLevel:                              "info",
+		LogFormat:                             defaultLogFormat(mode),
 		CORSOrigins:                           []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		TrustedProxies:                        nil,
 		MetricsEnabled:                        false,
@@ -216,6 +218,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.MasterKey = firstNonEmpty(os.Getenv("CHATAPI_MASTER_KEY"), cfg.MasterKey)
 	cfg.SessionSecret = firstNonEmpty(os.Getenv("CHATAPI_SESSION_SECRET"), cfg.SessionSecret)
 	cfg.LogLevel = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_LEVEL"), cfg.LogLevel))
+	cfg.LogFormat = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_FORMAT"), cfg.LogFormat))
 	cfg.LabToken = strings.TrimSpace(os.Getenv("CHATAPI_LAB_TOKEN"))
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))
 	cfg.AdminPassword = strings.TrimSpace(os.Getenv("CHATAPI_ADMIN_PASSWORD"))
@@ -396,6 +399,11 @@ func (c Config) Validate() error {
 	if c.Mode == ModeLab && strings.TrimSpace(c.LabToken) == "" && strings.TrimSpace(c.LabPassword) == "" && c.Host != "127.0.0.1" {
 		return errors.New("remote lab requires token or password")
 	}
+	switch c.LogFormat {
+	case "console", "json":
+	default:
+		return errors.New("log format must be console or json")
+	}
 	if c.DatabaseDriver == "sqlite" && strings.TrimSpace(c.DatabaseDSN) == "" {
 		return errors.New("sqlite database dsn is required")
 	}
@@ -525,6 +533,13 @@ func splitCSV(raw string) []string {
 		}
 	}
 	return result
+}
+
+func defaultLogFormat(mode Mode) string {
+	if mode == ModeLab {
+		return "console"
+	}
+	return "json"
 }
 
 func ParseDailyTime(value string) (hour int, minute int, err error) {

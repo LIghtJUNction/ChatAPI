@@ -12,13 +12,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/zap"
 
+	"github.com/zyf/chatapi/internal/observability/logging"
 	"github.com/zyf/chatapi/internal/repository/migrationplan"
 	"github.com/zyf/chatapi/internal/store"
 )
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	Logger *zap.Logger
 }
 
 var errConflict = store.ErrTurnConflict
@@ -56,6 +59,10 @@ func (s *Store) Close() {
 
 func (s *Store) Ping(ctx context.Context) error {
 	return s.pool.Ping(ctx)
+}
+
+func (s *Store) logger(ctx context.Context) *zap.Logger {
+	return logging.BindContext(s.Logger, ctx)
 }
 
 func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {

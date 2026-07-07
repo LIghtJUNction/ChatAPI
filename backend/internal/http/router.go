@@ -1,373 +1,104 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/cors"
+	"go.uber.org/zap"
 
+	appkey "github.com/zyf/chatapi/internal/apikey/app"
+	modelkey "github.com/zyf/chatapi/internal/apikey/model"
 	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/http/handlers"
-	"github.com/zyf/chatapi/internal/http/middleware"
-	"github.com/zyf/chatapi/internal/platform/email"
-	"github.com/zyf/chatapi/internal/service"
-	"github.com/zyf/chatapi/internal/store"
+	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
+	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/service/chat/turn"
+	"github.com/zyf/chatapi/internal/service/chat/turnquery"
 )
 
-func NewRouter(
-	cfg config.Config,
-	dataStore store.Store,
-	chatService *service.ChatAPIService,
-	realtimeHub *service.RealtimeHub,
-	pending *service.PendingRegistry,
-) http.Handler {
+type RouterDeps struct {
+	Config        config.Config
+	Turn          *turn.Service
+	Query         *turnquery.Service
+	ModelAPIKeys  *modelkey.Service
+	AppAPIKeys    *appkey.Service
+	LoggerFactory *logging.Factory
+}
+
+func NewRouter(deps RouterDeps) http.Handler {
 	router := chi.NewRouter()
-	httpMetrics := service.NewHTTPMetricsRegistry()
-	router.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   cfg.CORSOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
-	router.Use(middleware.RecordHTTPMetrics(httpMetrics))
-	router.Use(middleware.InjectLabRequestActor(cfg))
-	router.Use(middleware.InjectSessionRequestActor(cfg))
-	router.Use(middleware.RequireSessionCSRF(cfg))
-	router.Use(middleware.RequireLabAccess(cfg))
 
-	healthHandler := handlers.HealthHandler{Config: cfg, Store: dataStore}
-	readinessHandler := handlers.ReadinessHandler{Service: service.NewReadinessService(cfg, dataStore)}
-	labHandler := handlers.LabHandler{Config: cfg, Store: dataStore, Service: chatService}
-	auditService := service.NewAuditService(dataStore)
-	authSettingsService := service.NewAuthSettingsService(dataStore, cfg)
-	emailCodeService := service.NewEmailCodeService(dataStore, cfg.MasterKey, email.SMTPConfigFromConfig(cfg), nil)
-	geetestService := service.NewGeeTestService(cfg, nil)
-	authHandler := handlers.AuthHandler{
-		Config:       cfg,
-		Audit:        auditService,
-		GeeTest:      geetestService,
-		LocalAuth:    service.NewLocalAuthService(dataStore),
-		OIDCAuth:     service.NewOIDCAuthService(dataStore, cfg),
-		TOTP:         service.NewTOTPService(dataStore, cfg.MasterKey, "ChatAPI"),
-		Settings:     authSettingsService,
-		Registration: service.NewRegistrationService(dataStore, authSettingsService, emailCodeService),
-		Passwords:    service.NewPasswordResetService(dataStore, authSettingsService, emailCodeService),
-		LoginLimiter: service.NewLoginRateLimiter(5, time.Minute),
-	}
-	uploadsHandler := handlers.UploadsHandler{Service: service.NewUploadService(cfg, dataStore), Audit: auditService}
-	appAPIKeyService := service.NewAppAPIKeyService(dataStore)
-	modelAPIKeyService := service.NewModelAPIKeyService(dataStore, cfg.MasterKey)
-	automationRuleService := service.NewAutomationRuleService(dataStore)
-	appAPIHandler := handlers.AppAPIHandler{Service: chatService, ModelAPIKeys: modelAPIKeyService, AutomationRules: automationRuleService}
-	userAppAPIKeysHandler := handlers.UserAppAPIKeysHandler{Config: cfg, AppAPIKeys: appAPIKeyService, Audit: auditService}
-	userModelAPIKeysHandler := handlers.UserModelAPIKeysHandler{Config: cfg, ModelAPIKeys: modelAPIKeyService, Audit: auditService}
-	userConfigHandler := handlers.UserConfigHandler{Config: cfg, Service: service.NewUserConfigService(dataStore), Audit: auditService}
-	userPasswordHandler := handlers.UserPasswordHandler{Config: cfg, Password: service.NewUserPasswordService(dataStore), Audit: auditService}
-	workspaceToolCallService := service.NewWorkspaceToolCallService(dataStore)
-	kirariIntegrationService := service.NewKirariIntegrationService(dataStore, cfg, nil)
-	workspaceToolCallHandler := handlers.WorkspaceToolCallHandler{
-		Config:        cfg,
-		Service:       workspaceToolCallService,
-		AssistService: service.NewToolCallAssistService(workspaceToolCallService, kirariIntegrationService),
-		KirariService: kirariIntegrationService,
-		Audit:         auditService,
-	}
-	kirariIntegrationHandler := handlers.KirariIntegrationHandler{Config: cfg, Service: kirariIntegrationService, Audit: auditService}
-	configAutomationRulesHandler := handlers.ConfigAutomationRulesHandler{Config: cfg, Service: automationRuleService, Audit: auditService}
-	configModelsHandler := handlers.ConfigModelsHandler{Config: cfg, Service: service.NewVirtualModelService(dataStore), Audit: auditService}
-	configSystemHandler := handlers.ConfigSystemHandler{Config: cfg, Service: service.NewSystemSettingsService(dataStore, cfg), Audit: auditService}
-	userIdentitiesHandler := handlers.UserIdentitiesHandler{Service: service.NewUserIdentityService(dataStore), Audit: auditService}
-	adminEmailHandler := handlers.AdminEmailHandler{Email: service.NewAdminEmailService(email.SMTPConfigFromConfig(cfg), nil), Audit: auditService}
-	runtimeMonitor := service.NewRuntimeMonitorService(cfg, dataStore, realtimeHub, pending)
-	runtimeMonitor.SetAutomationObserver(chatService.AutomationObserver())
-	adminRuntimeHandler := handlers.AdminRuntimeHandler{Monitor: runtimeMonitor, Audit: auditService}
-	setupHandler := handlers.SetupHandler{Service: service.NewSetupService(dataStore, cfg), Audit: auditService}
-	metricsHandler := handlers.MetricsHandler{Service: service.NewMetricsService(runtimeMonitor, httpMetrics)}
-	storageMonitor := service.NewStorageMonitorService(cfg, dataStore)
-	adminStorageHandler := handlers.AdminStorageHandler{Config: cfg, Monitor: storageMonitor, Audit: auditService}
-	adminRequestsHandler := handlers.AdminRequestsHandler{Service: chatService}
-	adminAuditHandler := handlers.AdminAuditHandler{Audit: auditService}
-	adminUsersHandler := handlers.AdminUsersHandler{
-		Users:      service.NewAdminUserService(dataStore),
-		History:    service.NewAdminUserHistoryService(dataStore),
-		Identities: service.NewAdminUserIdentityService(dataStore),
-		Deletion:   service.NewAdminUserDeletionService(dataStore),
-		Overview:   service.NewAdminUserDeleteOverviewService(dataStore),
-		Ownership:  service.NewAdminUserOwnershipService(dataStore),
-		Storage:    storageMonitor,
-		Audit:      auditService,
-	}
-	adminConfigHandler := handlers.AdminConfigHandler{Service: service.NewSystemConfigService(dataStore), Audit: auditService}
-	chatHandler := handlers.ChatAPIHandler{Service: chatService, Pending: pending, Hub: realtimeHub}
-	realtimeHandler := handlers.RealtimeHandler{Hub: realtimeHub}
+	httpLogger := deps.logger(logging.LayerHTTP)
+	authLogger := deps.logger(logging.LayerAuth)
 
-	router.Get("/api/health", healthHandler.ServeHTTP)
-	router.Get("/api/ready", readinessHandler.ServeHTTP)
-	router.Get("/api/setup/status", setupHandler.Status)
-	router.Get("/setup", setupHandler.HTML)
-	router.Post("/setup", setupHandler.Create)
-	if cfg.MetricsEnabled {
-		router.Get("/metrics", metricsHandler.ServeHTTP)
+	router.Use(requestLoggingMiddleware(httpLogger))
+
+	chatHandler := ChatAPIHandler{
+		Turn:   deps.Turn,
+		Query:  deps.Query,
+		Logger: deps.logger(logging.LayerHTTP),
 	}
-	router.Get("/api/auth/schema", authHandler.Schema)
-	router.Get("/api/auth/session", authHandler.Session)
-	router.Post("/api/auth/login", authHandler.Login)
-	router.Post("/api/auth/logout", authHandler.Logout)
-	router.Get("/api/auth/register/config", authHandler.RegisterConfig)
-	router.Post("/api/auth/register/send-code", authHandler.RegisterSendCode)
-	router.Post("/api/auth/register", authHandler.Register)
-	router.Get("/api/auth/password/config", authHandler.PasswordConfig)
-	router.Post("/api/auth/password/send-code", authHandler.PasswordSendCode)
-	router.Post("/api/auth/password/reset", authHandler.PasswordReset)
-	router.Get("/api/auth/totp/setup", authHandler.TOTPSetup)
-	router.Post("/api/auth/totp/confirm", authHandler.TOTPConfirm)
-	router.Post("/api/auth/totp/reset", authHandler.TOTPReset)
-	router.Get("/api/auth/oidc/config", authHandler.OIDCConfig)
-	router.Get("/api/auth/oidc/login", authHandler.OIDCLogin)
-	router.With(middleware.RequireUserActor()).Get("/api/auth/oidc/link", authHandler.OIDCLink)
-	router.Get("/api/auth/oidc/callback", authHandler.OIDCCallback)
-	router.Get("/api/integrations/kirari/callback", kirariIntegrationHandler.Callback)
-	userRouter := chi.NewRouter()
-	userRouter.Use(middleware.RequireUserActor())
-	userRouter.Get("/app-api-keys", userAppAPIKeysHandler.List)
-	userRouter.Get("/app-api-keys/schema", userAppAPIKeysHandler.Schema)
-	userRouter.Post("/app-api-keys", userAppAPIKeysHandler.Create)
-	userRouter.Delete("/app-api-keys/{keyID}", userAppAPIKeysHandler.Delete)
-	userRouter.Get("/model-api-keys", userModelAPIKeysHandler.List)
-	userRouter.Get("/model-api-keys/schema", userModelAPIKeysHandler.Schema)
-	userRouter.Post("/model-api-keys", userModelAPIKeysHandler.Create)
-	userRouter.Delete("/model-api-keys/{keyID}", userModelAPIKeysHandler.Delete)
-	userRouter.Get("/config/schema", userConfigHandler.Schema)
-	userRouter.Get("/config", userConfigHandler.Get)
-	userRouter.Post("/config", userConfigHandler.Set)
-	userRouter.Post("/password", userPasswordHandler.Post)
-	userRouter.Get("/identities/schema", userIdentitiesHandler.Schema)
-	userRouter.Get("/identities", userIdentitiesHandler.List)
-	userRouter.Delete("/identities/{identityID}", userIdentitiesHandler.Delete)
-	userRouter.Get("/integrations/kirari/schema", kirariIntegrationHandler.Schema)
-	userRouter.Get("/integrations/kirari", kirariIntegrationHandler.Status)
-	userRouter.Get("/integrations/kirari/connect", kirariIntegrationHandler.Connect)
-	userRouter.Get("/integrations/kirari/meta", kirariIntegrationHandler.Meta)
-	userRouter.Delete("/integrations/kirari", kirariIntegrationHandler.Disconnect)
-	router.Mount("/api/user", userRouter)
-	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/schema", workspaceToolCallHandler.Schema)
-	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/assist-context", workspaceToolCallHandler.AssistContext)
-	router.With(middleware.RequireUserActor()).Post("/api/workspace/tool-call/assist", workspaceToolCallHandler.Assist)
-	router.With(middleware.RequireUserActor()).Post("/api/workspace/tool-call/assist/parse", workspaceToolCallHandler.ParseAssistOutput)
-	router.With(middleware.RequireUserActor()).Post("/api/workspace/tool-call/assist/stream", workspaceToolCallHandler.AssistStream)
-	router.Get("/api/config/automation-rules", configAutomationRulesHandler.Get)
-	router.Get("/api/config/automation-rules/schema", configAutomationRulesHandler.Schema)
-	router.Post("/api/config/automation-rules", configAutomationRulesHandler.Post)
-	router.Get("/api/config/models", configModelsHandler.Get)
-	router.Get("/api/config/models/schema", configModelsHandler.Schema)
-	router.Post("/api/config/models", configModelsHandler.Post)
-	router.Delete("/api/config/models/{modelID}", configModelsHandler.Delete)
-	router.Get("/api/config/system", configSystemHandler.Get)
-	router.Get("/api/config/system/schema", configSystemHandler.Schema)
-	router.Post("/api/config/system", configSystemHandler.Post)
-	router.Get("/api/lab/workspace", labHandler.Workspace)
-	router.Get("/api/ws-info", labHandler.PingInfo)
-	router.Post("/api/uploads/imgs", uploadsHandler.CreateImage)
-	router.Get("/api/uploads/imgs/usage", uploadsHandler.Usage)
-	router.Get("/api/uploads/imgs/{filename}", uploadsHandler.Image)
-	router.Get("/lab/requests", labHandler.ListRequests)
-	router.Get("/lab/requests/schema", labHandler.RequestsSchema)
-	router.Get("/lab/requests/{requestID}", labHandler.GetRequest)
-	router.Post("/lab/requests/{requestID}/copy-curl", labHandler.CopyRequestCurl)
-	router.Post("/lab/requests/{requestID}/delta", labHandler.RequestDelta)
-	router.Post("/lab/requests/{requestID}/complete", labHandler.RequestComplete)
-	router.Post("/lab/requests/{requestID}/abort", labHandler.RequestAbort)
-	router.Get("/api/ws", realtimeHandler.WebSocket)
-	appRouter := chi.NewRouter()
+	appHandler := AppAPIHandler{
+		Turn:   deps.Turn,
+		Query:  deps.Query,
+		Logger: deps.logger(logging.LayerTurnQuery),
+	}
+
+	modelAuth := httpmiddleware.RequireModelAPIKey(deps.ModelAPIKeys, authLogger)
 	appAuth := func(scopes ...string) func(http.Handler) http.Handler {
-		return middleware.RequireAppAPIKey(appAPIKeyService, cfg.TrustedProxies, scopes...)
+		return httpmiddleware.RequireAppAPIKey(deps.AppAPIKeys, deps.Config.TrustedProxies, authLogger, scopes...)
 	}
-	appRouter.With(
-		appAuth("requests:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/me/schema", appAPIHandler.MeSchema)
-	appRouter.With(
-		appAuth("requests:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/me", appAPIHandler.Me)
-	appRouter.With(
-		appAuth("requests:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/requests/schema", appAPIHandler.RequestsSchema)
-	appRouter.With(
-		appAuth("requests:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/requests", appAPIHandler.ListRequests)
-	appRouter.With(
-		appAuth("requests:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/requests/{requestID}", appAPIHandler.GetRequest)
-	appRouter.With(
-		appAuth("requests:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Post("/requests/{requestID}/copy-curl", appAPIHandler.CopyRequestCurl)
-	appRouter.With(
-		appAuth("conversations:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/conversations/schema", appAPIHandler.ConversationsSchema)
-	appRouter.With(
-		appAuth("conversations:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/conversations", appAPIHandler.ListConversations)
-	appRouter.With(
-		appAuth("conversations:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/conversations/{conversationID}/messages", appAPIHandler.ListConversationMessages)
-	appRouter.With(
-		appAuth("automation:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/automation-rules", appAPIHandler.ListAutomationRules)
-	appRouter.With(
-		appAuth("automation:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/automation-rules/schema", appAPIHandler.AutomationRuleSchema)
-	appRouter.With(
-		appAuth("automation:write"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Put("/automation-rules", appAPIHandler.PutAutomationRules)
-	appRouter.With(
-		appAuth("statistics:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/statistics/schema", appAPIHandler.StatisticsSchema)
-	appRouter.With(
-		appAuth("statistics:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/statistics/summary", appAPIHandler.StatisticsSummary)
-	appRouter.With(
-		appAuth("model_keys:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/model-keys", appAPIHandler.ListModelAPIKeys)
-	appRouter.With(
-		appAuth("model_keys:read"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Get("/model-keys/schema", appAPIHandler.ModelAPIKeySchema)
-	appRouter.With(
-		appAuth("model_keys:write"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Post("/model-keys", appAPIHandler.CreateModelAPIKey)
-	appRouter.With(
-		appAuth("model_keys:delete"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Delete("/model-keys/{keyID}", appAPIHandler.DeleteModelAPIKey)
-	appRouter.With(
-		appAuth("requests:respond"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Post("/requests/{requestID}/delta", appAPIHandler.RequestDelta)
-	appRouter.With(
-		appAuth("requests:respond"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Post("/requests/{requestID}/complete", appAPIHandler.RequestComplete)
-	appRouter.With(
-		appAuth("requests:respond"),
-		middleware.AuditAppAPIRequests(appAPIKeyService),
-	).Post("/requests/{requestID}/abort", appAPIHandler.RequestAbort)
-	router.Mount("/api/app", appRouter)
-	adminRouter := chi.NewRouter()
-	adminRouter.Use(middleware.RequireAdminActor())
-	adminRouter.Get("/runtime/summary", adminRuntimeHandler.Summary)
-	adminRouter.Get("/runtime/automation", adminRuntimeHandler.Automation)
-	adminRouter.Get("/runtime/memory", adminRuntimeHandler.Memory)
-	adminRouter.Get("/runtime/system", adminRuntimeHandler.System)
-	adminRouter.Get("/runtime/connections", adminRuntimeHandler.Connections)
-	adminRouter.Get("/runtime/queue", adminRuntimeHandler.Queue)
-	adminRouter.Get("/runtime/schema", adminRuntimeHandler.Schema)
-	adminRouter.Get("/runtime/settings", adminRuntimeHandler.Settings)
-	adminRouter.Put("/runtime/settings", adminRuntimeHandler.UpdateSettings)
-	adminRouter.Post("/runtime/gc", adminRuntimeHandler.GC)
-	adminRouter.Get("/storage/summary", adminStorageHandler.Summary)
-	adminRouter.Get("/storage/users", adminStorageHandler.Users)
-	adminRouter.Get("/storage/schema", adminStorageHandler.Schema)
-	adminRouter.Put("/storage/users/{ownerID}/quota", adminStorageHandler.SetUserQuota)
-	adminRouter.Delete("/storage/users/{ownerID}/quota", adminStorageHandler.DeleteUserQuota)
-	adminRouter.Get("/storage/orphans", adminStorageHandler.Orphans)
-	adminRouter.Post("/storage/orphans/cleanup", adminStorageHandler.CleanupOrphans)
-	adminRouter.Post("/storage/cleanup", adminStorageHandler.Cleanup)
-	adminRouter.Post("/storage/vacuum", adminStorageHandler.Vacuum)
-	adminRouter.Get("/requests/schema", adminRequestsHandler.Schema)
-	adminRouter.Get("/requests/overview", adminRequestsHandler.Overview)
-	adminRouter.Get("/audit/schema", adminAuditHandler.Schema)
-	adminRouter.Get("/audit/logs", adminAuditHandler.List)
-	adminRouter.Get("/config", adminConfigHandler.Get)
-	adminRouter.Post("/config", adminConfigHandler.Set)
-	adminRouter.Get("/send-test-email/schema", adminEmailHandler.Schema)
-	adminRouter.Post("/send-test-email", adminEmailHandler.SendTestEmail)
-	adminRouter.Get("/users/schema", adminUsersHandler.Schema)
-	adminRouter.Get("/users", adminUsersHandler.List)
-	adminRouter.Get("/users/{userID}/history", adminUsersHandler.HistoryList)
-	adminRouter.Get("/users/{userID}/identities", adminUsersHandler.IdentityList)
-	adminRouter.Get("/users/{userID}/delete-preview", adminUsersHandler.DeletePreview)
-	adminRouter.Get("/users/{userID}/delete-overview", adminUsersHandler.DeleteOverview)
-	adminRouter.Get("/users/{userID}/ownership-items", adminUsersHandler.OwnershipItems)
-	adminRouter.Post("/users/{userID}/transfer-ownership", adminUsersHandler.TransferOwnership)
-	adminRouter.Post("/users/{userID}/transfer-ownership-selection", adminUsersHandler.TransferOwnershipSelection)
-	adminRouter.Post("/users/{userID}/cleanup-selection", adminUsersHandler.CleanupSelection)
-	adminRouter.Post("/users", adminUsersHandler.Create)
-	adminRouter.Put("/users/{userID}/password", adminUsersHandler.ResetPassword)
-	adminRouter.Delete("/users/{userID}/identities/{identityID}", adminUsersHandler.IdentityDelete)
-	adminRouter.Delete("/users/{userID}", adminUsersHandler.Delete)
-	adminRouter.Post("/users/{userID}/purge", adminUsersHandler.Purge)
-	adminRouter.Get("/config/schema", adminConfigHandler.Schema)
-	router.Mount("/api/admin", adminRouter)
-	router.Get("/api/conversations/schema", chatHandler.Schema)
-	router.Get("/api/conversations/{conversationID}/messages", chatHandler.ListConversationMessages)
-	router.Post("/api/conversations/{conversationID}/abort", chatHandler.AbortConversation)
-	router.Post("/api/conversations/{conversationID}/respond", chatHandler.RespondConversation)
-	router.Post("/api/conversations/{conversationID}/stream/delta", chatHandler.StreamDeltaConversation)
-	router.Post("/api/conversations/{conversationID}/stream/complete", chatHandler.RespondConversation)
-	router.Get("/api/chat/output/schema", chatHandler.Schema)
-	router.Post("/api/chat/output/delta", chatHandler.DeltaOutput)
-	router.Post("/api/chat/output/complete", chatHandler.CompleteOutput)
-	modelRouter := router.With(middleware.RequireModelAPIKey(cfg, modelAPIKeyService))
-	modelRouter.Post("/responses", chatHandler.Responses)
-	modelRouter.Post("/v1/responses", chatHandler.Responses)
-	modelRouter.Post("/chat/completions", chatHandler.ChatCompletions)
-	modelRouter.Post("/v1/chat/completions", chatHandler.ChatCompletions)
-	modelRouter.Post("/messages", chatHandler.AnthropicMessages)
-	modelRouter.Post("/v1/messages", chatHandler.AnthropicMessages)
 
-	virtualModelService := service.NewVirtualModelService(dataStore)
-	modelRouter.Get("/models", func(w http.ResponseWriter, r *http.Request) {
-		userID := service.OwnerIDFromContext(r.Context())
-		items, err := virtualModelService.OpenAIList(r.Context(), userID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"object": "list",
-			"data":   items,
-		})
-	})
-	modelRouter.Get("/v1/models", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/models", http.StatusTemporaryRedirect)
-	})
+	router.With(modelAuth).Post("/v1/responses", chatHandler.Responses)
+	router.With(modelAuth).Post("/v1/chat/completions", chatHandler.ChatCompletions)
+	router.With(modelAuth).Post("/v1/messages", chatHandler.AnthropicMessages)
 
-	if info, err := os.Stat(cfg.WebDistDir); err == nil && info.IsDir() {
-		fs := http.FileServer(http.Dir(cfg.WebDistDir))
-		router.Handle("/*", spaFallback(fs, cfg.WebDistDir))
-	}
+	router.With(appAuth("requests:read")).Get("/api/requests", appHandler.ListRequests)
+	router.With(appAuth("requests:read")).Get("/api/requests/{requestID}", appHandler.GetRequest)
+	router.With(appAuth("conversations:read")).Get("/api/conversations", appHandler.ListConversations)
+	router.With(appAuth("conversations:read")).Get("/api/conversations/{conversationID}/messages", appHandler.ListConversationMessages)
+
+	router.With(appAuth("requests:respond")).Post("/api/chat/output/delta", chatHandler.DeltaOutput)
+	router.With(appAuth("requests:respond")).Post("/api/chat/output/complete", chatHandler.CompleteOutput)
+	router.With(appAuth("requests:respond")).Post("/api/chat/output/abort", chatHandler.AbortOutput)
 
 	return router
 }
 
-func spaFallback(next http.Handler, webDistDir string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := filepath.Join(webDistDir, filepath.Clean(r.URL.Path))
-		if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
-			next.ServeHTTP(w, r)
-			return
-		}
-		http.ServeFile(w, r, filepath.Join(webDistDir, "index.html"))
-	})
+func (d RouterDeps) logger(layer string) *zap.Logger {
+	if d.LoggerFactory == nil {
+		return zap.NewNop()
+	}
+	return d.LoggerFactory.Layer(layer)
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func requestLoggingMiddleware(base *zap.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			logger := base.With(
+				zap.String("http.method", r.Method),
+				zap.String("http.path", r.URL.Path),
+				zap.String("http.remote_addr", r.RemoteAddr),
+			)
+			ctx := logging.WithLogger(r.Context(), logger)
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rec, r.WithContext(ctx))
+			logger = logger.With(
+				zap.Int("http.status_code", rec.status),
+				zap.Duration("http.duration", time.Since(start)),
+			)
+			logger.Info("http request completed")
+		})
+	}
 }

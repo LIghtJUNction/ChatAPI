@@ -1,10 +1,6 @@
 package protocol
 
-import (
-	"strings"
-
-	"github.com/zyf/chatapi/internal/store"
-)
+import "strings"
 
 type Protocol string
 
@@ -23,7 +19,7 @@ type TurnRequest struct {
 	AssistantContent string
 	UserContent      string
 	InputParts       []InputPart
-	ToolSchemas      []any
+	ToolSchemas      []ToolSchema
 	ToolChoice       ToolChoice
 	ResponseFormat   ResponseFormat
 }
@@ -76,6 +72,14 @@ type NormalizedToolSchema struct {
 	Type        string         `json:"type"`
 }
 
+type ToolSchema struct {
+	Type        string         `json:"type"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+	Raw         map[string]any `json:"raw,omitempty"`
+}
+
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
@@ -83,14 +87,15 @@ type Usage struct {
 }
 
 func ParseRequest(protocolValue string, body map[string]any) TurnRequest {
-	inputParts := extractInputParts(body)
+	proto := ParseProtocol(protocolValue)
+	inputParts := extractRequestInputParts(proto, body)
 	return TurnRequest{
-		Protocol:         ParseProtocol(protocolValue),
+		Protocol:         proto,
 		Model:            stringValue(body["model"], "chatapi-lab"),
 		Stream:           boolValue(body["stream"]),
-		SystemContent:    extractRoleContent(body, "system"),
-		DeveloperContent: extractRoleContent(body, "developer"),
-		AssistantContent: extractRoleContent(body, "assistant"),
+		SystemContent:    extractRequestRoleContent(proto, body, "system"),
+		DeveloperContent: extractRequestRoleContent(proto, body, "developer"),
+		AssistantContent: extractRequestRoleContent(proto, body, "assistant"),
 		UserContent:      joinInputPartText(inputParts),
 		InputParts:       inputParts,
 		ToolSchemas:      extractToolSchemas(body),
@@ -116,14 +121,6 @@ func (p Protocol) String() string {
 
 func (p Protocol) IsAnthropicMessages() bool {
 	return p == ProtocolAnthropicMessages
-}
-
-func ConversationMetaFromConversation(conversation store.Conversation) ConversationMeta {
-	return ConversationMeta{
-		Protocol:   ParseProtocol(stringValue(conversation.Metadata["request_format"], string(ProtocolResponses))),
-		Model:      stringValue(conversation.Metadata["model"], "chatapi-lab"),
-		ResponseID: stringValue(conversation.ResponseID, ""),
-	}
 }
 
 func (meta ConversationMeta) BuildStreamStart() []StreamEvent {
@@ -176,360 +173,24 @@ func (meta ConversationMeta) BuildPendingStreamEvents(event PendingStreamEvent, 
 	}
 }
 
-func boolValue(value any) bool {
-	flag, _ := value.(bool)
-	return flag
-}
-
-func stringValue(value any, fallback string) string {
-	if raw, ok := value.(string); ok && strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw)
-	}
-	return fallback
-}
-
-func extractToolSchemas(body map[string]any) []any {
-	if tools, ok := body["tools"].([]any); ok {
-		return tools
-	}
-	return nil
-}
-
-func NormalizeToolSchemas(items []any) []NormalizedToolSchema {
-	if len(items) == 0 {
-		return nil
-	}
-	normalized := make([]NormalizedToolSchema, 0, len(items))
-	for _, raw := range items {
-		record, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		toolType := defaultString(stringValue(record["type"], ""), "function")
-		if function, ok := record["function"].(map[string]any); ok {
-			name := stringValue(function["name"], "")
-			if name == "" {
-				continue
-			}
-			normalized = append(normalized, NormalizedToolSchema{
-				Name:        name,
-				Description: stringValue(function["description"], ""),
-				Parameters:  firstMap(function["parameters"], function["input_schema"]),
-				Type:        toolType,
-			})
-			continue
-		}
-
-		name := stringValue(record["name"], "")
-		if name == "" {
-			continue
-		}
-		normalized = append(normalized, NormalizedToolSchema{
-			Name:        name,
-			Description: stringValue(record["description"], ""),
-			Parameters:  firstMap(record["parameters"], record["input_schema"]),
-			Type:        toolType,
-		})
-	}
-	if len(normalized) == 0 {
-		return nil
-	}
-	return normalized
-}
-
-func extractInputParts(body map[string]any) []InputPart {
-	if input, ok := body["input"].(string); ok && strings.TrimSpace(input) != "" {
-		return []InputPart{{Type: "text", Text: strings.TrimSpace(input)}}
-	}
-	if input, ok := body["input"].([]any); ok {
-		return extractPartsFromTurnInput(input)
-	}
-	if messages, ok := body["messages"].([]any); ok {
-		for i := len(messages) - 1; i >= 0; i-- {
-			record, ok := messages[i].(map[string]any)
-			if !ok {
-				continue
-			}
-			role := stringValue(record["role"], "")
-			switch role {
-			case "user":
-				return extractPartsFromMessageContent(record["content"])
-			case "tool":
-				return extractToolResultParts(record["content"])
-			}
-		}
-	}
-	return nil
-}
-
-func firstMap(values ...any) map[string]any {
-	for _, value := range values {
-		record, ok := value.(map[string]any)
-		if ok {
-			return record
-		}
-	}
-	return nil
-}
-
-func defaultString(value string, fallback string) string {
-	value = stringValue(value, "")
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func extractRoleContent(body map[string]any, role string) string {
-	role = strings.TrimSpace(role)
-	if role == "" {
-		return ""
-	}
-	if role == "system" {
-		if direct := flattenMessageContent(body["system"]); direct != "" {
-			return direct
-		}
-	}
-	items := make([]string, 0)
-	if input, ok := body["input"].([]any); ok {
-		for _, item := range input {
-			record, ok := item.(map[string]any)
-			if !ok || stringValue(record["role"], "") != role {
-				continue
-			}
-			if content := flattenMessageContent(record["content"]); content != "" {
-				items = append(items, content)
-			}
-		}
-	}
-	if messages, ok := body["messages"].([]any); ok {
-		for _, item := range messages {
-			record, ok := item.(map[string]any)
-			if !ok || stringValue(record["role"], "") != role {
-				continue
-			}
-			if content := flattenMessageContent(record["content"]); content != "" {
-				items = append(items, content)
-			}
-		}
-	}
-	return strings.Join(items, "\n")
-}
-
-func extractPartsFromTurnInput(input []any) []InputPart {
-	parts := make([]InputPart, 0)
-	for _, item := range input {
-		record, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		part := extractInputPart(record)
-		if part.Type != "" {
-			parts = append(parts, part)
-			continue
-		}
-		role := stringValue(record["role"], stringValue(record["type"], ""))
-		switch role {
-		case "user":
-			parts = append(parts, extractPartsFromMessageContent(record["content"])...)
-		case "tool":
-			parts = append(parts, extractToolResultParts(record["content"])...)
-		}
-	}
-	return parts
-}
-
-func extractPartsFromMessageContent(content any) []InputPart {
-	switch typed := content.(type) {
-	case string:
-		if strings.TrimSpace(typed) == "" {
-			return nil
-		}
-		return []InputPart{{Type: "text", Text: strings.TrimSpace(typed)}}
-	case []any:
-		parts := make([]InputPart, 0, len(typed))
-		for _, item := range typed {
-			record, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			part := extractInputPart(record)
-			if part.Type != "" {
-				parts = append(parts, part)
-			}
-		}
-		return parts
+func extractRequestInputParts(proto Protocol, body map[string]any) []InputPart {
+	switch proto {
+	case ProtocolChatCompletions:
+		return extractChatCompletionsInputParts(body)
+	case ProtocolAnthropicMessages:
+		return extractAnthropicInputParts(body)
 	default:
-		return nil
+		return extractResponsesInputParts(body)
 	}
 }
 
-func flattenMessageContent(content any) string {
-	switch typed := content.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case []any:
-		parts := make([]string, 0, len(typed))
-		for _, item := range typed {
-			record, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			part := extractInputPart(record)
-			if part.Type == "text" && strings.TrimSpace(part.Text) != "" {
-				parts = append(parts, strings.TrimSpace(part.Text))
-				continue
-			}
-			text := firstNonEmptyText(
-				record["text"],
-				record["input_text"],
-				nestedStringValue(record, "text", "value"),
-			)
-			if strings.TrimSpace(text) != "" {
-				parts = append(parts, strings.TrimSpace(text))
-			}
-		}
-		return strings.Join(parts, "\n")
+func extractRequestRoleContent(proto Protocol, body map[string]any, role string) string {
+	switch proto {
+	case ProtocolChatCompletions:
+		return extractChatCompletionsRoleContent(body, role)
+	case ProtocolAnthropicMessages:
+		return extractAnthropicRoleContent(body, role)
 	default:
-		return ""
+		return extractResponsesRoleContent(body, role)
 	}
-}
-
-func extractInputPart(record map[string]any) InputPart {
-	partType := stringValue(record["type"], "")
-	text := firstNonEmptyText(
-		record["text"],
-		record["input_text"],
-		nestedStringValue(record, "text", "value"),
-	)
-	switch partType {
-	case "input_text", "output_text", "text":
-		if text == "" {
-			return InputPart{}
-		}
-		return InputPart{Type: "text", Text: text}
-	case "input_image", "image", "image_url":
-		return InputPart{
-			Type:      "image",
-			MediaType: firstNonEmptyText(record["media_type"], nestedStringValue(record, "source", "media_type")),
-			URL:       firstNonEmptyText(record["image_url"], nestedStringValue(record, "image_url", "url"), nestedStringValue(record, "source", "data"), nestedStringValue(record, "source", "url")),
-		}
-	case "function_call_output", "tool_result":
-		text = firstNonEmptyText(record["output"], text, flattenToolResultContent(record["content"]))
-		if text == "" {
-			return InputPart{}
-		}
-		return InputPart{Type: "tool_result", Text: text}
-	default:
-		if text != "" {
-			return InputPart{Type: "text", Text: text}
-		}
-		return InputPart{}
-	}
-}
-
-func joinInputPartText(parts []InputPart) string {
-	texts := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if (part.Type == "text" || part.Type == "tool_result") && strings.TrimSpace(part.Text) != "" {
-			texts = append(texts, strings.TrimSpace(part.Text))
-		}
-	}
-	return strings.Join(texts, "\n")
-}
-
-func extractToolResultParts(content any) []InputPart {
-	text := flattenToolResultContent(content)
-	if text == "" {
-		return nil
-	}
-	return []InputPart{{Type: "tool_result", Text: text}}
-}
-
-func flattenToolResultContent(content any) string {
-	switch typed := content.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case []any:
-		parts := make([]string, 0, len(typed))
-		for _, item := range typed {
-			record, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			text := firstNonEmptyText(
-				record["text"],
-				record["output"],
-				record["input_text"],
-				nestedStringValue(record, "text", "value"),
-			)
-			if strings.TrimSpace(text) != "" {
-				parts = append(parts, strings.TrimSpace(text))
-			}
-		}
-		return strings.Join(parts, "\n")
-	case map[string]any:
-		return strings.TrimSpace(firstNonEmptyText(
-			typed["text"],
-			typed["output"],
-			typed["input_text"],
-			nestedStringValue(typed, "text", "value"),
-		))
-	default:
-		return ""
-	}
-}
-
-func extractToolChoice(body map[string]any) ToolChoice {
-	switch typed := body["tool_choice"].(type) {
-	case string:
-		return ToolChoice{Type: strings.TrimSpace(typed)}
-	case map[string]any:
-		choice := ToolChoice{
-			Type: stringValue(typed["type"], ""),
-		}
-		choice.Name = firstNonEmptyText(typed["name"], nestedStringValue(typed, "function", "name"))
-		return choice
-	default:
-		return ToolChoice{}
-	}
-}
-
-func extractResponseFormat(body map[string]any) ResponseFormat {
-	record, ok := body["response_format"].(map[string]any)
-	if !ok {
-		return ResponseFormat{}
-	}
-	format := ResponseFormat{
-		Type: stringValue(record["type"], ""),
-	}
-	if schemaRecord, ok := record["json_schema"].(map[string]any); ok {
-		format.Name = stringValue(schemaRecord["name"], "")
-		if schema, ok := schemaRecord["schema"].(map[string]any); ok {
-			format.Schema = schema
-		}
-	}
-	return format
-}
-
-func nestedStringValue(record map[string]any, keys ...string) string {
-	current := any(record)
-	for _, key := range keys {
-		next, ok := current.(map[string]any)
-		if !ok {
-			return ""
-		}
-		current = next[key]
-	}
-	return stringValue(current, "")
-}
-
-func firstNonEmptyText(values ...any) string {
-	for _, value := range values {
-		if text := stringValue(value, ""); text != "" {
-			return text
-		}
-	}
-	return ""
 }

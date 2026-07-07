@@ -2,16 +2,7 @@ package protocol
 
 import (
 	"github.com/google/uuid"
-
-	"github.com/zyf/chatapi/internal/store"
 )
-
-func BuildResponse(conversation store.Conversation, result TurnResult) map[string]any {
-	meta := ConversationMetaFromConversation(conversation)
-	body := BuildResponseForMeta(meta, result)
-	body["conversation"] = conversation
-	return body
-}
 
 func BuildResponseForMeta(meta ConversationMeta, result TurnResult) map[string]any {
 	usage := normalizeUsage(result.Usage)

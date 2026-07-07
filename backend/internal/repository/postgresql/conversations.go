@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.uber.org/zap"
 
 	"github.com/zyf/chatapi/internal/store"
 )
@@ -20,6 +21,7 @@ func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, er
 		ORDER BY updated_at DESC
 	`)
 	if err != nil {
+		s.logger(ctx).Warn("postgresql list requests failed", zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -32,7 +34,11 @@ func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, er
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		s.logger(ctx).Warn("postgresql list requests row iteration failed", zap.Error(err))
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) GetConversation(ctx context.Context, conversationID string) (store.Conversation, error) {
@@ -89,6 +95,7 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request
 		LIMIT 1
 	`, strings.TrimSpace(requestID)))
 	if err != nil {
+		s.logger(ctx).Warn("postgresql get request failed", zap.String("request.id", requestID), zap.Error(err))
 		return store.Request{}, err
 	}
 	if item.RequestID == "" {
@@ -105,6 +112,7 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 		ORDER BY created_at ASC, id ASC
 	`, strings.TrimSpace(conversationID))
 	if err != nil {
+		s.logger(ctx).Warn("postgresql list messages failed", zap.String("conversation.id", conversationID), zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -117,7 +125,11 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		s.logger(ctx).Warn("postgresql list messages row iteration failed", zap.String("conversation.id", conversationID), zap.Error(err))
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (store.DeleteConversationsResult, error) {
@@ -267,6 +279,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		s.logger(ctx).Warn("postgresql create pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -308,8 +321,10 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 	}
 
 	if err := tx.Commit(ctx); err != nil {
+		s.logger(ctx).Warn("postgresql create pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
+	s.logger(ctx).Debug("postgresql pending turn created", zap.String("conversation.id", input.ConversationID), zap.String("request.id", input.RequestID), zap.String("owner.id", input.OwnerID))
 	return conversation, message, nil
 }
 
@@ -332,8 +347,10 @@ func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (
 		SET updated_at = $1, metadata_json = $2::jsonb
 		WHERE id = $3
 	`, conversation.UpdatedAt, mustJSON(metadata), conversation.ID); err != nil {
+		s.logger(ctx).Warn("postgresql update draft failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, err
 	}
+	s.logger(ctx).Debug("postgresql draft updated", zap.String("conversation.id", input.ConversationID), zap.Int("draft.length", len([]rune(input.DraftText))))
 	return conversation, nil
 }
 
@@ -396,6 +413,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		s.logger(ctx).Warn("postgresql complete pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -415,8 +433,10 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 		return store.Conversation{}, store.Message{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
+		s.logger(ctx).Warn("postgresql complete pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
+	s.logger(ctx).Debug("postgresql pending turn completed", zap.String("conversation.id", input.ConversationID), zap.String("response.id", input.ResponseID), zap.String("mode", input.Mode))
 	return conversation, message, nil
 }
 
@@ -451,6 +471,7 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		s.logger(ctx).Warn("postgresql abort pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -470,8 +491,10 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 		return store.Conversation{}, store.Message{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
+		s.logger(ctx).Warn("postgresql abort pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return store.Conversation{}, store.Message{}, err
 	}
+	s.logger(ctx).Debug("postgresql pending turn aborted", zap.String("conversation.id", input.ConversationID))
 	return conversation, message, nil
 }
 

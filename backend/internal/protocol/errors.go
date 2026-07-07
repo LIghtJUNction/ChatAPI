@@ -84,6 +84,13 @@ func ValidateRequest(protocolValue string, body map[string]any) error {
 	return nil
 }
 
+func NormalizeRequest(protocolValue string, body map[string]any) (TurnRequest, error) {
+	if err := ValidateRequest(protocolValue, body); err != nil {
+		return TurnRequest{}, err
+	}
+	return ParseRequest(protocolValue, body), nil
+}
+
 func validateToolChoice(body map[string]any, request TurnRequest) error {
 	rawChoice, exists := body["tool_choice"]
 	if !exists {
@@ -145,21 +152,13 @@ func validateResponseFormat(body map[string]any, request TurnRequest) error {
 	return nil
 }
 
-func toolSchemaContains(items []any, target string) bool {
+func toolSchemaContains(items []ToolSchema, target string) bool {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return false
 	}
 	for _, item := range items {
-		record, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		if strings.TrimSpace(stringValue(record["name"], "")) == target {
-			return true
-		}
-		function, ok := record["function"].(map[string]any)
-		if ok && strings.TrimSpace(stringValue(function["name"], "")) == target {
+		if strings.TrimSpace(item.Name) == target {
 			return true
 		}
 	}

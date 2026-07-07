@@ -1,11 +1,14 @@
 package protocol
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/store"
+	anthropic "github.com/anthropics/anthropic-sdk-go"
+	openai "github.com/openai/openai-go"
+	"github.com/openai/openai-go/responses"
 )
 
 type responseFixture struct {
@@ -51,6 +54,9 @@ func TestParseRequestReturnsTypedProtocol(t *testing.T) {
 	}
 	if len(request.InputParts) != 2 || request.InputParts[1].Type != "image" {
 		t.Fatalf("unexpected input parts: %#v", request.InputParts)
+	}
+	if request.ToolSchemas[0].Name != "lookup" || request.ToolSchemas[0].Type != "function" || request.ToolSchemas[0].Raw["name"] != "lookup" {
+		t.Fatalf("unexpected normalized tool schema: %#v", request.ToolSchemas[0])
 	}
 	if request.ToolChoice.Type != "function" || request.ToolChoice.Name != "lookup" {
 		t.Fatalf("unexpected tool choice: %#v", request.ToolChoice)
@@ -283,15 +289,52 @@ func TestNormalizeToolSchemasSupportsOpenAIAndAnthropicShapes(t *testing.T) {
 	}
 }
 
-func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
-	conversation := store.Conversation{
-		ResponseID: "resp_1",
-		Metadata: map[string]any{
-			"request_format": "anthropic_messages",
-			"model":          "claude-test",
+func TestRawToolSchemasRetainsOriginalDefinitions(t *testing.T) {
+	tools := normalizeToolSchemasDetailed([]any{
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "lookup_weather",
+				"description": "lookup weather",
+				"parameters": map[string]any{
+					"type": "object",
+				},
+			},
+			"x-provider-hint": "openai",
 		},
+		map[string]any{
+			"type":        "custom",
+			"name":        "write_note",
+			"description": "write note",
+			"input_schema": map[string]any{
+				"type": "object",
+			},
+			"x-provider-hint": "anthropic",
+		},
+	})
+	raw := RawToolSchemas(tools)
+	if len(raw) != 2 {
+		t.Fatalf("unexpected raw tool schema count: %#v", raw)
 	}
-	meta := ConversationMetaFromConversation(conversation)
+	first := raw[0].(map[string]any)
+	second := raw[1].(map[string]any)
+	if first["x-provider-hint"] != "openai" {
+		t.Fatalf("unexpected first raw tool schema: %#v", first)
+	}
+	if second["x-provider-hint"] != "anthropic" {
+		t.Fatalf("unexpected second raw tool schema: %#v", second)
+	}
+	if tools[0].Parameters["type"] != "object" || tools[1].Parameters["type"] != "object" {
+		t.Fatalf("unexpected normalized parameters: %#v", tools)
+	}
+}
+
+func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
+	meta := ConversationMeta{
+		Protocol:   ProtocolAnthropicMessages,
+		Model:      "claude-test",
+		ResponseID: "resp_1",
+	}
 	events, started := meta.BuildPendingStreamEvents(PendingStreamEvent{
 		Type:      "delta",
 		DeltaText: "partial",
@@ -310,14 +353,11 @@ func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
 }
 
 func TestBuildResponseToolResultResponses(t *testing.T) {
-	conversation := store.Conversation{
+	body := BuildResponseForMeta(ConversationMeta{
+		Protocol:   ProtocolResponses,
+		Model:      "chatapi-lab",
 		ResponseID: "resp_2",
-		Metadata: map[string]any{
-			"request_format": "responses",
-			"model":          "chatapi-lab",
-		},
-	}
-	body := BuildResponse(conversation, TurnResult{
+	}, TurnResult{
 		ResponseID: "resp_2",
 		OutputText: "done",
 		Mode:       "tool_result",
@@ -382,14 +422,11 @@ func TestBuildResponseIncludesUsageAcrossProtocols(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			conversation := store.Conversation{
+			body := BuildResponseForMeta(ConversationMeta{
+				Protocol:   ParseProtocol(tc.requestFormat),
+				Model:      "test-model",
 				ResponseID: tc.result.ResponseID,
-				Metadata: map[string]any{
-					"request_format": tc.requestFormat,
-					"model":          "test-model",
-				},
-			}
-			body := BuildResponse(conversation, tc.result)
+			}, tc.result)
 			usage, ok := body["usage"].(map[string]any)
 			if !ok {
 				t.Fatalf("missing usage payload: %#v", body)
@@ -438,13 +475,7 @@ func TestBuildStreamCompleteIncludesUsageForResponsesAndAnthropic(t *testing.T) 
 }
 
 func TestBuildResponseForMetaMatchesStoredConversationEncoding(t *testing.T) {
-	conversation := store.Conversation{
-		ResponseID: "resp_meta_match",
-		Metadata: map[string]any{
-			"request_format": "responses",
-			"model":          "chatapi-lab",
-		},
-	}
+	meta := ConversationMeta{Protocol: ProtocolResponses, Model: "chatapi-lab", ResponseID: "resp_meta_match"}
 	result := TurnResult{
 		ResponseID: "resp_meta_match",
 		OutputText: "{\"city\":\"tokyo\"}",
@@ -453,11 +484,148 @@ func TestBuildResponseForMetaMatchesStoredConversationEncoding(t *testing.T) {
 		ToolCallID: "call_meta_match",
 		Usage:      Usage{InputTokens: 1, OutputTokens: 2},
 	}
-	withConversation := BuildResponse(conversation, result)
-	metaOnly := BuildResponseForMeta(ConversationMetaFromConversation(conversation), result)
-	delete(withConversation, "conversation")
-	if !reflect.DeepEqual(withConversation, metaOnly) {
-		t.Fatalf("meta-only response diverged\nwith=%#v\nmeta=%#v", withConversation, metaOnly)
+	metaOnly := BuildResponseForMeta(meta, result)
+	second := BuildResponseForMeta(meta, result)
+	if !reflect.DeepEqual(metaOnly, second) {
+		t.Fatalf("meta-only response diverged\nfirst=%#v\nsecond=%#v", metaOnly, second)
+	}
+}
+
+func TestNormalizeRequestSupportsOpenAIResponsesSDKJSON(t *testing.T) {
+	bodyBytes, err := json.Marshal(responses.ResponseNewParams{
+		Model: "gpt-4.1-mini",
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: responses.ResponseInputParam{
+				responses.ResponseInputItemParamOfMessage(
+					responses.ResponseInputMessageContentListParam{
+						responses.ResponseInputContentParamOfInputText("look at this"),
+						{
+							OfInputImage: &responses.ResponseInputImageParam{
+								ImageURL: openai.String("https://example.com/demo.png"),
+								Detail:   responses.ResponseInputImageDetailHigh,
+							},
+						},
+					},
+					responses.EasyInputMessageRoleUser,
+				),
+			},
+		},
+		Tools: []responses.ToolUnionParam{{
+			OfFunction: &responses.FunctionToolParam{
+				Name:        "lookup_weather",
+				Description: openai.String("lookup weather"),
+				Parameters:  map[string]any{"type": "object"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal responses params: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		t.Fatalf("unmarshal responses body: %v", err)
+	}
+	request, err := NormalizeRequest("responses", body)
+	if err != nil {
+		t.Fatalf("normalize responses sdk body: %v", err)
+	}
+	if request.Protocol != ProtocolResponses || request.UserContent != "look at this" {
+		t.Fatalf("unexpected normalized responses request: %#v", request)
+	}
+	if len(request.InputParts) != 2 || request.InputParts[1].Type != "image" || request.InputParts[1].URL != "https://example.com/demo.png" {
+		t.Fatalf("unexpected normalized responses input parts: %#v", request.InputParts)
+	}
+	if len(request.ToolSchemas) != 1 || request.ToolSchemas[0].Name != "lookup_weather" {
+		t.Fatalf("unexpected normalized responses tools: %#v", request.ToolSchemas)
+	}
+}
+
+func TestNormalizeRequestSupportsOpenAIChatSDKJSON(t *testing.T) {
+	bodyBytes, err := json.Marshal(openai.ChatCompletionNewParams{
+		Model: "gpt-4.1-mini",
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
+				openai.TextContentPart("describe image"),
+				openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+					URL: "https://example.com/cat.png",
+				}),
+			}),
+		},
+		Tools: []openai.ChatCompletionToolParam{{
+			Function: openai.FunctionDefinitionParam{
+				Name:        "describe_image",
+				Description: openai.String("describe image"),
+				Parameters:  map[string]any{"type": "object"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal chat completion params: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		t.Fatalf("unmarshal chat completion body: %v", err)
+	}
+	request, err := NormalizeRequest("chat_completions", body)
+	if err != nil {
+		t.Fatalf("normalize chat sdk body: %v", err)
+	}
+	if request.Protocol != ProtocolChatCompletions || request.UserContent != "describe image" {
+		t.Fatalf("unexpected normalized chat request: %#v", request)
+	}
+	if len(request.InputParts) != 2 || request.InputParts[1].Type != "image" || request.InputParts[1].URL != "https://example.com/cat.png" {
+		t.Fatalf("unexpected normalized chat input parts: %#v", request.InputParts)
+	}
+	if len(request.ToolSchemas) != 1 || request.ToolSchemas[0].Name != "describe_image" {
+		t.Fatalf("unexpected normalized chat tools: %#v", request.ToolSchemas)
+	}
+}
+
+func TestNormalizeRequestSupportsAnthropicSDKJSON(t *testing.T) {
+	bodyBytes, err := json.Marshal(anthropic.MessageNewParams{
+		Model:     anthropic.ModelClaudeSonnet4_6,
+		MaxTokens: 128,
+		System:    []anthropic.TextBlockParam{{Text: "follow policy"}},
+		Messages: []anthropic.MessageParam{{
+			Role: anthropic.MessageParamRoleUser,
+			Content: []anthropic.ContentBlockParamUnion{
+				{OfText: &anthropic.TextBlockParam{Text: "what is in image?"}},
+				{OfImage: &anthropic.ImageBlockParam{
+					Source: anthropic.ImageBlockParamSourceUnion{
+						OfURL: &anthropic.URLImageSourceParam{
+							URL: "https://example.com/tree.png",
+						},
+					},
+				}},
+			},
+		}},
+		Tools: []anthropic.ToolUnionParam{{
+			OfTool: &anthropic.ToolParam{
+				Name:        "inspect_image",
+				Description: anthropic.String("inspect image"),
+				InputSchema: anthropic.ToolInputSchemaParam{Properties: map[string]any{"type": "object"}},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal anthropic params: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		t.Fatalf("unmarshal anthropic body: %v", err)
+	}
+	request, err := NormalizeRequest("anthropic_messages", body)
+	if err != nil {
+		t.Fatalf("normalize anthropic sdk body: %v", err)
+	}
+	if request.Protocol != ProtocolAnthropicMessages || request.SystemContent != "follow policy" || request.UserContent != "what is in image?" {
+		t.Fatalf("unexpected normalized anthropic request: %#v", request)
+	}
+	if len(request.InputParts) != 2 || request.InputParts[1].Type != "image" || request.InputParts[1].URL != "https://example.com/tree.png" {
+		t.Fatalf("unexpected normalized anthropic input parts: %#v", request.InputParts)
+	}
+	if len(request.ToolSchemas) != 1 || request.ToolSchemas[0].Name != "inspect_image" {
+		t.Fatalf("unexpected normalized anthropic tools: %#v", request.ToolSchemas)
 	}
 }
 

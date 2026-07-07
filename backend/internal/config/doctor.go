@@ -377,6 +377,11 @@ func (r *DiagnosticReport) checkLogLevel(cfg Config) {
 	default:
 		r.add(DiagnosticWarn, "log.level_unknown", "未知 CHATAPI_LOG_LEVEL，将回退到 info 语义。")
 	}
+	switch cfg.LogFormat {
+	case "console", "json":
+	default:
+		r.add(DiagnosticWarn, "log.format_unknown", "未知 CHATAPI_LOG_FORMAT，将回退到默认格式。")
+	}
 }
 
 func isSafeRedirectURL(raw string) bool {

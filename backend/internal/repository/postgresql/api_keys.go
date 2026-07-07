@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"go.uber.org/zap"
 
 	"github.com/zyf/chatapi/internal/store"
 )
@@ -106,6 +107,9 @@ func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKe
 		INSERT INTO app_api_key_audit_logs(id, app_api_key_id, user_id, route, status_code, error_code, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, item.ID, item.AppAPIKeyID, item.UserID, item.Route, item.StatusCode, item.ErrorCode, item.CreatedAt)
+	if err != nil {
+		s.logger(ctx).Warn("postgresql create app api key audit log failed", zap.String("app_api_key.id", item.AppAPIKeyID), zap.Error(err))
+	}
 	return err
 }
 
@@ -129,6 +133,7 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppA
 	query += " ORDER BY created_at DESC, id DESC LIMIT $1"
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
+		s.logger(ctx).Warn("postgresql list app api key audit logs failed", zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -141,7 +146,11 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppA
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		s.logger(ctx).Warn("postgresql list app api key audit logs row iteration failed", zap.Error(err))
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAPIKeyInput) (store.ModelAPIKey, error) {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"go.uber.org/zap"
 
 	"github.com/zyf/chatapi/internal/store"
 )
@@ -35,6 +36,7 @@ func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogIn
 		createdAt,
 	)
 	if err != nil {
+		s.logger(ctx).Warn("postgresql create audit log failed", zap.String("audit.event_type", input.EventType), zap.String("audit.action", input.Action), zap.Error(err))
 		return store.AuditLog{}, err
 	}
 	return store.AuditLog{
@@ -83,6 +85,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 	query += " ORDER BY created_at DESC, id DESC LIMIT $1"
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
+		s.logger(ctx).Warn("postgresql list audit logs failed", zap.Error(err))
 		return nil, err
 	}
 	defer rows.Close()
@@ -95,7 +98,11 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		s.logger(ctx).Warn("postgresql list audit logs row iteration failed", zap.Error(err))
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsInput) (int, error) {
@@ -127,6 +134,7 @@ func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsIn
 	}
 	var count int
 	if err := s.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		s.logger(ctx).Warn("postgresql count audit logs failed", zap.Error(err))
 		return 0, err
 	}
 	return count, nil

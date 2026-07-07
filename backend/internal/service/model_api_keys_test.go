@@ -16,6 +16,19 @@ func TestModelAPIKeySchema(t *testing.T) {
 	if schema.CreateFields[1].Name != "model" || !schema.CreateFields[1].Required {
 		t.Fatalf("unexpected required model field: %#v", schema.CreateFields)
 	}
+	if len(schema.Operations) != 0 || len(schema.Authentication.Headers) != 0 {
+		t.Fatalf("interactive model schema should stay transport-agnostic: %#v", schema)
+	}
+}
+
+func TestModelAPIKeyAppSchema(t *testing.T) {
+	schema := NewModelAPIKeyService(nil, "test-master-key").AppSchema()
+	if len(schema.Authentication.Headers) != 2 || len(schema.Operations) != 3 || len(schema.ErrorCodes) == 0 {
+		t.Fatalf("unexpected app model schema: %#v", schema)
+	}
+	if schema.Operations[1].Name != "create_model_key" || schema.Operations[1].ResponseShape != "{ok, item, raw_key}" {
+		t.Fatalf("unexpected app model schema operation: %#v", schema.Operations[1])
+	}
 }
 
 func TestModelAPIKeyCreateRequiresModel(t *testing.T) {

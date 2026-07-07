@@ -27,8 +27,13 @@ type ModelAPIKeyService struct {
 }
 
 type ModelAPIKeySchema struct {
-	KeyPrefix    string                   `json:"key_prefix"`
-	CreateFields []ModelAPIKeyCreateField `json:"create_fields"`
+	KeyPrefix            string                             `json:"key_prefix"`
+	CreateFields         []ModelAPIKeyCreateField           `json:"create_fields"`
+	Authentication       AppAPIAuthenticationSchema         `json:"authentication,omitempty"`
+	ResourceLimitKeys    []string                           `json:"resource_limit_keys,omitempty"`
+	Operations           []AppAPIOperationContract          `json:"operations,omitempty"`
+	ErrorCodes           []AppAPIErrorCodeSchema            `json:"error_codes,omitempty"`
+	ResourceLimitBinding []AppAPIResourceLimitBindingSchema `json:"resource_limit_bindings,omitempty"`
 }
 
 type ModelAPIKeyCreateField struct {
@@ -56,6 +61,24 @@ func (s *ModelAPIKeyService) Schema() ModelAPIKeySchema {
 			{Name: "model", Required: true, Description: "Virtual model name that the key is bound to."},
 		},
 	}
+}
+
+func (s *ModelAPIKeyService) AppSchema() ModelAPIKeySchema {
+	schema := s.Schema()
+	schema.Authentication = BuildAppAPIAuthenticationSchema()
+	schema.ResourceLimitKeys = []string{"allowed_model_key_ids", "allowed_virtual_models", "max_model_keys"}
+	schema.Operations = []AppAPIOperationContract{
+		{Name: "list_model_keys", Method: "GET", Path: "/api/app/model-keys", Description: "List virtual model API keys visible to the application API key owner.", RequiredScopes: []string{"model_keys:read"}, ResourceLimitKeys: []string{"allowed_model_key_ids"}, ErrorCodes: appAPIErrorCodeList("app_api_key_unauthorized", "source_ip_forbidden", "forbidden", "rate_limited", "internal_error"), ResponseShape: "{ok, items}", ConsumesRateLimit: true},
+		{Name: "create_model_key", Method: "POST", Path: "/api/app/model-keys", Description: "Create a new virtual model API key and return the raw key once.", RequiredScopes: []string{"model_keys:write"}, ResourceLimitKeys: []string{"allowed_virtual_models", "max_model_keys"}, ErrorCodes: appAPIErrorCodeList("app_api_key_unauthorized", "source_ip_forbidden", "forbidden", "rate_limited", "invalid_json_body", "invalid_request", "internal_error"), ResponseShape: "{ok, item, raw_key}", ConsumesRateLimit: true},
+		{Name: "delete_model_key", Method: "DELETE", Path: "/api/app/model-keys/{key_id}", Description: "Revoke one visible virtual model API key.", RequiredScopes: []string{"model_keys:delete"}, ResourceLimitKeys: []string{"allowed_model_key_ids"}, ErrorCodes: appAPIErrorCodeList("app_api_key_unauthorized", "source_ip_forbidden", "forbidden", "rate_limited", "not_found", "internal_error"), ResponseShape: "{ok}", ConsumesRateLimit: true},
+	}
+	schema.ResourceLimitBinding = []AppAPIResourceLimitBindingSchema{
+		{Name: "allowed_model_key_ids", AffectsOperations: []string{"list_model_keys", "delete_model_key"}, Behavior: "Only the listed virtual model key ids remain visible or deletable."},
+		{Name: "allowed_virtual_models", AffectsOperations: []string{"create_model_key"}, Behavior: "Create operations may only mint keys bound to the listed virtual model names."},
+		{Name: "max_model_keys", AffectsOperations: []string{"create_model_key"}, Behavior: "Create operations are rejected once the number of active virtual model keys reaches the configured cap."},
+	}
+	schema.ErrorCodes = BuildCommonAppAPIErrorCodes()
+	return schema
 }
 
 func (s *ModelAPIKeyService) CreateKey(ctx context.Context, userID string, name string, model string) (store.ModelAPIKey, string, error) {

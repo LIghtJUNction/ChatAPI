@@ -16,6 +16,9 @@ func TestBuildLabRequestsSchema(t *testing.T) {
 	if schema.ParsedDetailFields[11].Key != "request_method" || schema.ReplayFields[5].Key != "curl" {
 		t.Fatalf("unexpected debug/replay field ordering: %#v", schema)
 	}
+	if len(schema.Authentication.Headers) != 0 || len(schema.ErrorCodes) != 0 || schema.Operations[0].ConsumesRateLimit {
+		t.Fatalf("lab schema should not expose app api auth contract: %#v", schema)
+	}
 }
 
 func TestBuildAppRequestsSchema(t *testing.T) {
@@ -31,6 +34,12 @@ func TestBuildAppRequestsSchema(t *testing.T) {
 	if schema.ParsedItemFields[0].Key != "request_id" || schema.ParsedDetailFields[16].Key != "replay" {
 		t.Fatalf("unexpected app parsed field metadata: %#v", schema)
 	}
+	if len(schema.Authentication.Headers) != 2 || len(schema.ErrorCodes) == 0 {
+		t.Fatalf("expected auth and error metadata in app request schema: %#v", schema)
+	}
+	if !schema.Operations[0].ConsumesRateLimit || schema.Operations[3].ResponseShape == "" || len(schema.Operations[3].ResourceLimitKeys) == 0 {
+		t.Fatalf("unexpected app request operation contract: %#v", schema.Operations[3])
+	}
 }
 
 func TestBuildAppConversationsSchema(t *testing.T) {
@@ -40,5 +49,11 @@ func TestBuildAppConversationsSchema(t *testing.T) {
 	}
 	if schema.Operations[1].Name != "list_conversation_messages" {
 		t.Fatalf("unexpected app conversations schema operations: %#v", schema)
+	}
+	if len(schema.Authentication.Headers) != 2 || len(schema.ErrorCodes) == 0 {
+		t.Fatalf("expected auth and error metadata in app conversations schema: %#v", schema)
+	}
+	if schema.Operations[1].ResponseShape != "{ok, items}" || !schema.Operations[1].ConsumesRateLimit {
+		t.Fatalf("unexpected app conversations operation contract: %#v", schema.Operations[1])
 	}
 }

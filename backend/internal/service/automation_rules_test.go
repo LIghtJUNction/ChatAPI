@@ -110,6 +110,16 @@ func TestAutomationRuleServiceSchemaIncludesTypedConditions(t *testing.T) {
 	}
 }
 
+func TestAutomationRuleServiceAppSchemaIncludesOperationContract(t *testing.T) {
+	schema := NewAutomationRuleService(nil).AppSchema()
+	if len(schema.Authentication.Headers) != 2 || len(schema.Operations) != 2 || len(schema.ErrorCodes) == 0 {
+		t.Fatalf("unexpected app automation schema: %#v", schema)
+	}
+	if schema.Operations[1].Name != "replace_automation_rules" || schema.Operations[1].ResponseShape != "{ok, rules}" {
+		t.Fatalf("unexpected app automation operation contract: %#v", schema.Operations[1])
+	}
+}
+
 func TestParseAutomationRulePayloadSupportsToolCallAction(t *testing.T) {
 	rule, err := ParseAutomationRulePayload(map[string]any{
 		"id":      "rule_tool_call",

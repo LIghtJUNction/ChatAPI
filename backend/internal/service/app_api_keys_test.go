@@ -123,9 +123,13 @@ func TestAppAPIKeySchema(t *testing.T) {
 	if len(schema.Scopes) == 0 || len(schema.ResourceLimits) == 0 {
 		t.Fatalf("unexpected empty app api key schema: %#v", schema)
 	}
+	if len(schema.Authentication.Headers) != 2 || len(schema.Operations) == 0 || len(schema.ErrorCodes) == 0 || len(schema.ResourceLimitBinding) == 0 {
+		t.Fatalf("expected app api contract metadata in schema: %#v", schema)
+	}
 
 	foundRespondScope := false
 	foundRequestActions := false
+	foundRequestCompleteOp := false
 	for _, item := range schema.Scopes {
 		if item.Name == "requests:respond" {
 			foundRespondScope = true
@@ -144,7 +148,13 @@ func TestAppAPIKeySchema(t *testing.T) {
 			t.Fatalf("unexpected allowed_request_actions values: %#v", item)
 		}
 	}
-	if !foundRespondScope || !foundRequestActions {
+	for _, item := range schema.Operations {
+		if item.Name == "request_complete" {
+			foundRequestCompleteOp = len(item.ResourceLimitKeys) > 0 && item.ResponseShape == "{ok, ...turn_control_result}"
+			break
+		}
+	}
+	if !foundRespondScope || !foundRequestActions || !foundRequestCompleteOp {
 		t.Fatalf("unexpected app api key schema: %#v", schema)
 	}
 }

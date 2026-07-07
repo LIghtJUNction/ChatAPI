@@ -207,7 +207,7 @@ func (h AppAPIHandler) ModelAPIKeySchema(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "schema": h.ModelAPIKeys.Schema()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "schema": h.ModelAPIKeys.AppSchema()})
 }
 
 func (h AppAPIHandler) CreateModelAPIKey(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +308,7 @@ func (h AppAPIHandler) AutomationRuleSchema(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "schema": h.AutomationRules.Schema()})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "schema": h.AutomationRules.AppSchema()})
 }
 
 func (h AppAPIHandler) PutAutomationRules(w http.ResponseWriter, r *http.Request) {

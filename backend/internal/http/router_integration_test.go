@@ -649,6 +649,10 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 	if len(meOperations) != 2 || nestedString(meOperations[0].(map[string]any), "name") != "me" {
 		t.Fatalf("unexpected app overview schema response: %#v", meSchemaResp)
 	}
+	if !containsMapItemWithStringField(meSchema["error_codes"], "code", "rate_limited") ||
+		!containsMapItemWithStringField(nestedPath(meSchema, "authentication", "headers"), "name", "X-ChatAPI-App-Key") {
+		t.Fatalf("unexpected app overview contract metadata: %#v", meSchemaResp)
+	}
 
 	schemaResp := env.appGetJSON(t, "/api/app/requests/schema", appKey, http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
@@ -663,6 +667,10 @@ func TestAppAPIRequestsReadAndRespond(t *testing.T) {
 		!containsMapItemWithStringField(schema["parsed_detail_fields"], "key", "replay") ||
 		!containsMapItemWithStringField(schema["replay_fields"], "key", "headers") {
 		t.Fatalf("unexpected app requests parsed/replay schema metadata: %#v", schemaResp)
+	}
+	if !containsMapItemWithStringField(schema["error_codes"], "code", "pending_conflict") ||
+		!containsMapItemWithStringField(nestedPath(schema, "authentication", "headers"), "name", "Authorization") {
+		t.Fatalf("unexpected app requests auth/error contract: %#v", schemaResp)
 	}
 
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/chat/completions", map[string]any{
@@ -953,6 +961,10 @@ func TestAppAPIConversationsRead(t *testing.T) {
 		nestedString(operations[0].(map[string]any), "name") != "list_conversations" ||
 		nestedString(operations[1].(map[string]any), "name") != "list_conversation_messages" {
 		t.Fatalf("unexpected app conversations schema response: %#v", schemaResp)
+	}
+	if !containsMapItemWithStringField(schema["error_codes"], "code", "not_found") ||
+		!containsMapItemWithStringField(nestedPath(schema, "authentication", "headers"), "name", "Authorization") {
+		t.Fatalf("unexpected app conversations contract metadata: %#v", schemaResp)
 	}
 
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
@@ -1272,6 +1284,10 @@ func TestUserAppAPIKeysSchema(t *testing.T) {
 	}
 	if !foundRespondScope || !foundRequestActions {
 		t.Fatalf("unexpected app api key schema response: %#v", resp)
+	}
+	if !containsMapItemWithStringField(schema["operations"], "name", "request_complete") ||
+		!containsMapItemWithStringField(schema["resource_limit_bindings"], "name", "allowed_source_ips") {
+		t.Fatalf("unexpected app api key contract metadata: %#v", resp)
 	}
 }
 
@@ -3787,6 +3803,10 @@ func TestAppAPIModelKeySchema(t *testing.T) {
 	if !containsMapItemWithStringField(schema["create_fields"], "name", "model") {
 		t.Fatalf("unexpected app model key schema fields: %#v", resp)
 	}
+	if !containsMapItemWithStringField(schema["operations"], "name", "create_model_key") ||
+		!containsMapItemWithStringField(schema["error_codes"], "code", "invalid_request") {
+		t.Fatalf("unexpected app model key contract metadata: %#v", resp)
+	}
 }
 
 func TestAppAPIModelKeysRejectMissingModel(t *testing.T) {
@@ -3915,6 +3935,10 @@ func TestAppAPIAutomationRulesSchema(t *testing.T) {
 	if !containsStringValue(schema["action_types"], "output_text") || !containsStringValue(schema["action_types"], "thinking") || !containsStringValue(schema["legacy_match_types"], "substring") {
 		t.Fatalf("unexpected automation schema response: %#v", resp)
 	}
+	if !containsMapItemWithStringField(schema["operations"], "name", "replace_automation_rules") ||
+		!containsMapItemWithStringField(schema["error_codes"], "code", "invalid_request") {
+		t.Fatalf("unexpected automation contract metadata: %#v", resp)
+	}
 }
 
 func TestAppAPIAutomationRulesSchemaRejectsMissingScope(t *testing.T) {
@@ -3937,6 +3961,10 @@ func TestAppAPIStatisticsSummary(t *testing.T) {
 	operations := schema["operations"].([]any)
 	if len(operations) != 2 || nestedString(operations[1].(map[string]any), "name") != "statistics_summary" {
 		t.Fatalf("unexpected app statistics schema response: %#v", schemaResp)
+	}
+	if !containsMapItemWithStringField(schema["error_codes"], "code", "rate_limited") ||
+		!containsMapItemWithStringField(nestedPath(schema, "authentication", "headers"), "name", "X-ChatAPI-App-Key") {
+		t.Fatalf("unexpected app statistics contract metadata: %#v", schemaResp)
 	}
 
 	env.postJSON(t, "/api/config/automation-rules", map[string]any{

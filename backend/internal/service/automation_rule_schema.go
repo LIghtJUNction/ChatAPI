@@ -38,11 +38,16 @@ type AutomationAction struct {
 }
 
 type AutomationRuleSchema struct {
-	ActionTypes         []string                        `json:"action_types"`
-	ActionTypeSchemas   []AutomationActionTypeSchema    `json:"action_type_schemas,omitempty"`
-	LegacyMatchTypes    []string                        `json:"legacy_match_types"`
-	LegacyFields        []string                        `json:"legacy_fields"`
-	TypedConditionTypes []AutomationConditionTypeSchema `json:"typed_condition_types"`
+	ActionTypes          []string                           `json:"action_types"`
+	ActionTypeSchemas    []AutomationActionTypeSchema       `json:"action_type_schemas,omitempty"`
+	LegacyMatchTypes     []string                           `json:"legacy_match_types"`
+	LegacyFields         []string                           `json:"legacy_fields"`
+	TypedConditionTypes  []AutomationConditionTypeSchema    `json:"typed_condition_types"`
+	Authentication       AppAPIAuthenticationSchema         `json:"authentication,omitempty"`
+	ResourceLimitKeys    []string                           `json:"resource_limit_keys,omitempty"`
+	Operations           []AppAPIOperationContract          `json:"operations,omitempty"`
+	ErrorCodes           []AppAPIErrorCodeSchema            `json:"error_codes,omitempty"`
+	ResourceLimitBinding []AppAPIResourceLimitBindingSchema `json:"resource_limit_bindings,omitempty"`
 }
 
 type AutomationActionTypeSchema struct {
@@ -152,6 +157,21 @@ func BuildAutomationRuleSchema() AutomationRuleSchema {
 			{Type: "input_url_contains", Description: "Case-insensitive substring match against any input part URL.", Fields: []string{"value"}},
 		},
 	}
+}
+
+func BuildAppAutomationRuleSchema() AutomationRuleSchema {
+	schema := BuildAutomationRuleSchema()
+	schema.Authentication = BuildAppAPIAuthenticationSchema()
+	schema.ResourceLimitKeys = []string{"allowed_automation_rule_ids"}
+	schema.Operations = []AppAPIOperationContract{
+		{Name: "list_automation_rules", Method: "GET", Path: "/api/app/automation-rules", Description: "List automation rules visible to the application API key owner.", RequiredScopes: []string{"automation:read"}, ResourceLimitKeys: []string{"allowed_automation_rule_ids"}, ErrorCodes: appAPIErrorCodeList("app_api_key_unauthorized", "source_ip_forbidden", "forbidden", "rate_limited", "internal_error"), ResponseShape: "{ok, rules}", ConsumesRateLimit: true},
+		{Name: "replace_automation_rules", Method: "PUT", Path: "/api/app/automation-rules", Description: "Replace the visible automation rule set for the application API key owner.", RequiredScopes: []string{"automation:write"}, ResourceLimitKeys: []string{"allowed_automation_rule_ids"}, ErrorCodes: appAPIErrorCodeList("app_api_key_unauthorized", "source_ip_forbidden", "forbidden", "rate_limited", "invalid_json_body", "invalid_request", "internal_error"), ResponseShape: "{ok, rules}", ConsumesRateLimit: true},
+	}
+	schema.ResourceLimitBinding = []AppAPIResourceLimitBindingSchema{
+		{Name: "allowed_automation_rule_ids", AffectsOperations: []string{"list_automation_rules", "replace_automation_rules"}, Behavior: "Automation rule reads and writes are limited to the listed rule ids."},
+	}
+	schema.ErrorCodes = BuildCommonAppAPIErrorCodes()
+	return schema
 }
 
 func parseAutomationConditions(value any) ([]AutomationCondition, error) {

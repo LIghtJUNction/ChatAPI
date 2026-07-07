@@ -22,6 +22,10 @@ func (s *AutomationRuleService) Schema() AutomationRuleSchema {
 	return BuildAutomationRuleSchema()
 }
 
+func (s *AutomationRuleService) AppSchema() AutomationRuleSchema {
+	return BuildAppAutomationRuleSchema()
+}
+
 func (s *AutomationRuleService) ListRules(ctx context.Context, userID string, allowedIDs map[string]struct{}) ([]map[string]any, error) {
 	items, err := s.store.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
 	if err != nil {

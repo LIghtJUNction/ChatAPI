@@ -242,6 +242,19 @@ func (s *KirariIntegrationService) Meta(ctx context.Context, userID string, forc
 }
 
 func (s *KirariIntegrationService) ChatCompletions(ctx context.Context, userID string, body any) (map[string]any, error) {
+	resp, err := s.ChatCompletionsRaw(ctx, userID, body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode kirari chat completions response: %w", err)
+	}
+	return payload, nil
+}
+
+func (s *KirariIntegrationService) ChatCompletionsRaw(ctx context.Context, userID string, body any) (*http.Response, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, ErrKirariMissingUser
@@ -264,16 +277,7 @@ func (s *KirariIntegrationService) ChatCompletions(ctx context.Context, userID s
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.ChatCompletions(ctx, accessToken, body)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode kirari chat completions response: %w", err)
-	}
-	return payload, nil
+	return client.ChatCompletions(ctx, accessToken, body)
 }
 
 func (s *KirariIntegrationService) newClient() (*platformkirari.Client, error) {

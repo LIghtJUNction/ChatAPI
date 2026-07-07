@@ -25,10 +25,14 @@ type UpstreamErrorCode struct {
 }
 
 type UpstreamProtocolTemplate struct {
-	Protocol         string         `json:"protocol"`
-	DefaultPath      string         `json:"default_path"`
-	RequestShape     map[string]any `json:"request_shape"`
-	ConstructionTips []string       `json:"construction_tips"`
+	Protocol           string         `json:"protocol"`
+	DefaultPath        string         `json:"default_path"`
+	Method             string         `json:"method"`
+	AuthHeaderTemplate string         `json:"auth_header_template,omitempty"`
+	RequestShape       map[string]any `json:"request_shape"`
+	RequestHeaders     map[string]any `json:"request_headers,omitempty"`
+	ConstructionTips   []string       `json:"construction_tips"`
+	ResponseExtraction map[string]any `json:"response_extraction,omitempty"`
 }
 
 type UpstreamAssistantHints struct {
@@ -99,8 +103,10 @@ func BuildUpstreamAssistantSchema() UpstreamAssistantSchema {
 func BuildUpstreamProtocolTemplates() []UpstreamProtocolTemplate {
 	return []UpstreamProtocolTemplate{
 		{
-			Protocol:    "responses",
-			DefaultPath: "/v1/responses",
+			Protocol:           "responses",
+			DefaultPath:        "/v1/responses",
+			Method:             "POST",
+			AuthHeaderTemplate: "Authorization: Bearer $config.api_key",
 			RequestShape: map[string]any{
 				"model":             "$config.model",
 				"input":             "$recommended_messages",
@@ -110,15 +116,30 @@ func BuildUpstreamProtocolTemplates() []UpstreamProtocolTemplate {
 				"max_output_tokens": "$optional.max_output_tokens",
 				"stream":            false,
 			},
+			RequestHeaders: map[string]any{
+				"Content-Type": "application/json",
+			},
 			ConstructionTips: []string{
 				"Map recommended_messages into Responses input message items.",
 				"Pass normalized tool schemas directly as tools when the upstream supports OpenAI-style function tools.",
 				"Keep stream=false for the first browser-side assistant implementation.",
 			},
+			ResponseExtraction: map[string]any{
+				"mode": "final_text",
+				"primary_paths": []string{
+					"output_text",
+					"output[0].content[0].text",
+				},
+				"notes": []string{
+					"If the upstream returns native structured output, still preserve the raw text form for assist_parse fallback.",
+				},
+			},
 		},
 		{
-			Protocol:    "chat_completions",
-			DefaultPath: "/v1/chat/completions",
+			Protocol:           "chat_completions",
+			DefaultPath:        "/v1/chat/completions",
+			Method:             "POST",
+			AuthHeaderTemplate: "Authorization: Bearer $config.api_key",
 			RequestShape: map[string]any{
 				"model":       "$config.model",
 				"messages":    "$recommended_messages",
@@ -130,15 +151,31 @@ func BuildUpstreamProtocolTemplates() []UpstreamProtocolTemplate {
 				},
 				"stream": false,
 			},
+			RequestHeaders: map[string]any{
+				"Content-Type": "application/json",
+			},
 			ConstructionTips: []string{
 				"Convert recommended_messages into Chat Completions messages preserving role and content order.",
 				"Inject the explanation/JSON output instruction as a system or developer message if the upstream requires explicit prompting.",
 				"Use normalized_tool_schemas as the source of tools instead of raw request tool payloads.",
 			},
+			ResponseExtraction: map[string]any{
+				"mode": "chat_completions_message",
+				"primary_paths": []string{
+					"choices[0].message.content",
+					"choices[0].delta.content",
+				},
+				"stream_delta_paths": []string{
+					"choices[0].delta.content",
+					"choices[0].delta.content[].text",
+				},
+			},
 		},
 		{
-			Protocol:    "anthropic_messages",
-			DefaultPath: "/messages",
+			Protocol:           "anthropic_messages",
+			DefaultPath:        "/messages",
+			Method:             "POST",
+			AuthHeaderTemplate: "x-api-key: $config.api_key",
 			RequestShape: map[string]any{
 				"model":      "$config.model",
 				"messages":   "$recommended_messages",
@@ -147,10 +184,27 @@ func BuildUpstreamProtocolTemplates() []UpstreamProtocolTemplate {
 				"max_tokens": "$optional.max_output_tokens",
 				"stream":     false,
 			},
+			RequestHeaders: map[string]any{
+				"Content-Type":      "application/json",
+				"anthropic-version": "2023-06-01",
+			},
 			ConstructionTips: []string{
 				"Convert recommended_messages into Anthropic messages with text blocks.",
 				"Translate normalized_tool_schemas into Anthropic tool definitions with input_schema.",
 				"Ask the upstream to emit explanation text plus JSON in plain assistant output, then validate against assist_schema client-side.",
+			},
+			ResponseExtraction: map[string]any{
+				"mode": "anthropic_message_text",
+				"primary_paths": []string{
+					"content[0].text",
+				},
+				"stream_delta_paths": []string{
+					"delta.text",
+					"content_block_delta.delta.text",
+				},
+				"notes": []string{
+					"Anthropic plain text mode should still emit explanation plus one JSON object in assistant text.",
+				},
 			},
 		},
 	}

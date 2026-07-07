@@ -1,10 +1,13 @@
 package service
 
 type ToolCallAssistSchema struct {
-	OutputJSONSchema map[string]any `json:"output_json_schema"`
-	ConfidenceLevels []string       `json:"confidence_levels"`
-	ValidationRules  []string       `json:"validation_rules"`
-	Notes            []string       `json:"notes"`
+	OutputJSONSchema      map[string]any   `json:"output_json_schema"`
+	ConfidenceLevels      []string         `json:"confidence_levels"`
+	ValidationRules       []string         `json:"validation_rules"`
+	Notes                 []string         `json:"notes"`
+	PromptContract        map[string]any   `json:"prompt_contract"`
+	StructuredOutputModes []map[string]any `json:"structured_output_modes"`
+	OutputExamples        []map[string]any `json:"output_examples,omitempty"`
 }
 
 func BuildToolCallAssistSchema() ToolCallAssistSchema {
@@ -57,6 +60,51 @@ func BuildToolCallAssistSchema() ToolCallAssistSchema {
 			"Render explanation for the user before showing the prefilled tool call draft.",
 			"Do not auto-submit the draft tool call.",
 			"If JSON parsing fails, keep the raw explanation text only.",
+		},
+		PromptContract: map[string]any{
+			"required_goals": []string{
+				"Explain which tool should be called and why before presenting the draft.",
+				"Return exactly one tool_call draft that matches the current tool schema set.",
+				"Call out ambiguity or inferred arguments in warnings instead of silently inventing facts.",
+			},
+			"required_output_order": []string{
+				"explanation",
+				"tool_call",
+				"confidence",
+				"warnings",
+			},
+			"recommended_instruction_lines": []string{
+				"First explain your reasoning in the explanation field.",
+				"Then output one JSON object that matches the provided schema exactly.",
+				"Do not wrap the final JSON object in markdown unless the caller explicitly allows it.",
+				"Do not auto-submit or pretend the tool has already been executed.",
+			},
+		},
+		StructuredOutputModes: []map[string]any{
+			{
+				"name":        "native_json_schema",
+				"description": "Preferred when the upstream supports JSON schema / structured output natively.",
+				"requires":    []string{"response_format"},
+			},
+			{
+				"name":        "prompted_json",
+				"description": "Fallback when the upstream only supports plain text output; caller should parse and validate the final JSON object.",
+				"requires":    []string{"prompt_contract", "assist_parse"},
+			},
+		},
+		OutputExamples: []map[string]any{
+			{
+				"explanation": "The user explicitly asked for a weather lookup, so prefilling lookup_weather with the inferred city is the safest draft.",
+				"tool_call": map[string]any{
+					"name": "lookup_weather",
+					"arguments": map[string]any{
+						"city": "Beijing",
+						"unit": "c",
+					},
+				},
+				"confidence": "high",
+				"warnings":   []string{"city inferred from recent user message"},
+			},
 		},
 	}
 }

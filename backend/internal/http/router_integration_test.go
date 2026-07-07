@@ -1585,6 +1585,13 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	if !containsStringValue(resp["assist_schema"].(map[string]any)["confidence_levels"], "medium") {
 		t.Fatalf("unexpected assist schema confidence levels: %#v", resp)
 	}
+	if !containsMapItemWithStringField(resp["assist_schema"].(map[string]any)["structured_output_modes"], "name", "native_json_schema") {
+		t.Fatalf("unexpected assist structured output modes: %#v", resp)
+	}
+	promptContract := nestedPath(resp, "assist_schema", "prompt_contract").(map[string]any)
+	if !containsStringValue(promptContract["required_output_order"], "explanation") {
+		t.Fatalf("unexpected assist prompt contract: %#v", resp)
+	}
 	if !containsMapItemWithStringField(resp["upstream_assistant_schema"].(map[string]any)["fields"], "key", "base_url") {
 		t.Fatalf("unexpected upstream assistant schema: %#v", resp)
 	}
@@ -1601,6 +1608,12 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 		!containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "chat_completions") ||
 		!containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "anthropic_messages") {
 		t.Fatalf("unexpected upstream protocol templates: %#v", resp)
+	}
+	firstTemplate := resp["upstream_protocol_templates"].([]any)[0].(map[string]any)
+	if nestedString(firstTemplate, "method") != "POST" ||
+		nestedString(firstTemplate, "auth_header_template") == "" ||
+		nestedPathString(map[string]any{"template": firstTemplate}, "template", "response_extraction", "mode") == "" {
+		t.Fatalf("unexpected upstream protocol request/extraction contract: %#v", resp)
 	}
 	if !nestedPathBool(resp, "upstream_hints", "candidate_recursive") {
 		t.Fatalf("expected recursive upstream hint: %#v", resp)
@@ -1699,6 +1712,9 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	if !containsStringValue(resp["assist_schema"].(map[string]any)["notes"], "Do not auto-submit the draft tool call.") {
 		t.Fatalf("unexpected session assist schema notes: %#v", resp)
 	}
+	if !containsMapItemWithStringField(resp["assist_schema"].(map[string]any)["output_examples"], "confidence", "high") {
+		t.Fatalf("unexpected assist schema examples: %#v", resp)
+	}
 	if !containsStringValue(resp["upstream_assistant_schema"].(map[string]any)["sensitive_fields"], "api_key") {
 		t.Fatalf("unexpected upstream assistant sensitive fields: %#v", resp)
 	}
@@ -1710,6 +1726,10 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	}
 	if !containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "responses") {
 		t.Fatalf("unexpected session upstream protocol templates: %#v", resp)
+	}
+	thirdTemplate := resp["upstream_protocol_templates"].([]any)[2].(map[string]any)
+	if nestedPathString(map[string]any{"template": thirdTemplate}, "template", "request_headers", "anthropic-version") != "2023-06-01" {
+		t.Fatalf("unexpected anthropic request headers in upstream protocol template: %#v", resp)
 	}
 	if nestedPathBool(resp, "upstream_hints", "candidate_recursive") {
 		t.Fatalf("did not expect recursive upstream hint: %#v", resp)

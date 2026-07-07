@@ -34,11 +34,17 @@ func TestBuildUpstreamProtocolTemplates(t *testing.T) {
 	if len(templates) != 3 {
 		t.Fatalf("unexpected protocol template count: %#v", templates)
 	}
-	if templates[0].Protocol != "responses" || templates[0].DefaultPath != "/v1/responses" {
+	if templates[0].Protocol != "responses" || templates[0].DefaultPath != "/v1/responses" || templates[0].Method != "POST" {
 		t.Fatalf("unexpected responses template: %#v", templates[0])
+	}
+	if templates[0].AuthHeaderTemplate == "" || len(templates[0].ResponseExtraction) == 0 {
+		t.Fatalf("expected auth and extraction hints in responses template: %#v", templates[0])
 	}
 	if templates[2].Protocol != "anthropic_messages" || len(templates[2].ConstructionTips) == 0 {
 		t.Fatalf("unexpected anthropic template: %#v", templates[2])
+	}
+	if templates[2].RequestHeaders["anthropic-version"] != "2023-06-01" {
+		t.Fatalf("unexpected anthropic headers: %#v", templates[2])
 	}
 }
 

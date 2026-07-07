@@ -1207,7 +1207,7 @@ GC 设置：
 实现要求：
 
 - 前端提示词必须要求模型输出“说明文字 + 结构化 JSON”，并对 JSON 做严格校验。
-- 当前 Go 重构分支已通过 `assist_context.assist_schema` 显式暴露推荐输出 JSON Schema、confidence 枚举和校验说明，前端应直接复用这份契约，而不是在页面里再维护一份字符串常量。
+- 当前 Go 重构分支已通过 `assist_context.assist_schema` 显式暴露推荐输出 JSON Schema、confidence 枚举、校验说明、提示词契约（`prompt_contract`）、结构化输出模式（`structured_output_modes`）和示例输出（`output_examples`），前端应直接复用这份契约，而不是在页面里再维护一份字符串常量或本地示例。
 - 当前 Go 重构分支还额外提供 `POST /api/workspace/tool-call/assist/parse`：浏览器直连上游模型后，可把 `raw_output` 连同 `request_id|conversation_id` 发给 ChatAPI，由后端统一执行 explanation/tool_call 解析、围栏 JSON 提取、工具名校验和 validation errors 生成，前端不必再自己维护一套独立的草稿解析器。
 - 如果模型输出无法解析，只展示说明/原文，不填写表单。
 - 如果工具名称不在当前请求 tools schema 内，不能填写表单。
@@ -1216,14 +1216,14 @@ GC 设置：
 - 上游请求默认不进入 ChatAPI 的公开 `/v1/*` pending turn 流程，避免递归调用自身。
 - 如果 base URL 指向当前 ChatAPI 实例，应提示递归风险并拒绝或要求显式确认。当前 Go 重构分支已通过 `assist-context.upstream_hints` 返回 `current_instance_urls`、`candidate_recursive` 和 warning 文本；递归判断优先按浏览器当前访问的实例入口（request host / forwarded proto）计算，而不是只依赖服务端监听地址。
 - 当前 Go 重构分支还会通过 `assist-context.upstream_input_hints` 返回默认 `max_input_messages=20`、按时间顺序保留最近消息窗口的 `recommended_messages`、`truncated` / `excluded_messages` 标记，以及“草稿文本如需传给上游应单独传，不应伪装成已提交 assistant message”的构造规则。
-- 当前 Go 重构分支还会通过 `assist-context.upstream_protocol_templates` 返回三套上游协议的默认 endpoint path、请求体形状占位符和构造提示，前端应优先复用这份模板，而不是在页面里再手写 Responses / Chat Completions / Anthropic Messages 的字段映射差异。
+- 当前 Go 重构分支还会通过 `assist-context.upstream_protocol_templates` 返回三套上游协议的默认 endpoint path、HTTP method、认证 header 模板、请求头模板、请求体形状占位符、构造提示以及响应文本提取规则（`response_extraction`），前端应优先复用这份模板，而不是在页面里再手写 Responses / Chat Completions / Anthropic Messages 的字段映射差异、header 约定和文本提取逻辑。
 - 当前 Go 重构分支还会通过 `assist-context.upstream_assistant_schema` 返回浏览器本地上游配置默认值、跨字段校验规则和稳定错误码，例如 `upstream_assistant.invalid_base_url`、`upstream_assistant.recursive_base_url`、`upstream_assistant.invalid_extra_headers`。前端本地表单校验和错误展示应优先复用这份契约，而不是继续把校验逻辑分散在多个组件里。
 - 浏览器直连会受 CORS 限制；文档应说明如果云厂商不允许浏览器跨域请求，用户需要使用允许 CORS 的兼容网关、本地代理或未来可选的服务端上游代理。
 
 建议路由：
 
 - 首版默认不需要服务端配置路由和 assist 路由，上游配置由浏览器本地保存。
-- 当前 Go 重构分支已先提供 `GET /api/workspace/tool-call/assist-context`：返回当前用户可见的上下文、原始 `tool_schemas`、标准化后的 `normalized_tool_schemas`、草稿、`assist_schema`、`upstream_assistant_schema`、`upstream_protocol_templates`、`upstream_hints` 和 `upstream_input_hints`，不接收上游 key，不请求上游模型。
+- 当前 Go 重构分支已先提供 `GET /api/workspace/tool-call/assist-context`：返回当前用户可见的上下文、原始 `tool_schemas`、标准化后的 `normalized_tool_schemas`、草稿、`assist_schema`、`backend_assistant_providers`、`upstream_assistant_schema`、`upstream_protocol_templates`、`upstream_hints` 和 `upstream_input_hints`，不接收上游 key，不请求上游模型。
 - 当前 Go 重构分支还额外提供 `POST /api/workspace/tool-call/assist`、`POST /api/workspace/tool-call/assist/stream` 和 `POST /api/workspace/tool-call/assist/parse` 作为辅助入口，但其中只有前两者会代请求 Kirari，上游自定义 URL 仍不经过 ChatAPI 服务端。`assist/parse` 只消费浏览器已经拿到的原始模型输出，统一返回 explanation、tool call draft、validation errors 和原始输出摘要，方便浏览器直连路径复用后端校验逻辑。
 - 任意用户自定义上游模型仍维持浏览器直连默认策略；如果未来要扩展为通用服务端代理，仍应要求管理员显式开启，并继续沿用更严格的 URL safety / allowlist 约束。
 

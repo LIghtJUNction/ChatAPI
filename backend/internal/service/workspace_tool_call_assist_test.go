@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/zyf/chatapi/internal/protocol"
@@ -23,7 +26,9 @@ func TestToolCallAssistServiceRegistersProvidersByNormalizedName(t *testing.T) {
 }
 
 type stubUpstreamProvider struct {
-	name string
+	name    string
+	payload map[string]any
+	err     error
 }
 
 func (s stubUpstreamProvider) ProviderName() string {
@@ -31,7 +36,27 @@ func (s stubUpstreamProvider) ProviderName() string {
 }
 
 func (s stubUpstreamProvider) ChatCompletions(ctx context.Context, userID string, body any) (map[string]any, error) {
-	return nil, nil
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.payload, nil
+}
+
+type stubStreamingUpstreamProvider struct {
+	stubUpstreamProvider
+	rawBody string
+	rawErr  error
+}
+
+func (s stubStreamingUpstreamProvider) ChatCompletionsRaw(ctx context.Context, userID string, body any) (*http.Response, error) {
+	if s.rawErr != nil {
+		return nil, s.rawErr
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(s.rawBody)),
+	}, nil
 }
 
 func TestDecodeAssistOutputSupportsFencedJSON(t *testing.T) {
@@ -53,5 +78,49 @@ func TestFinalizeAssistResultValidatesDeclaredTool(t *testing.T) {
 	}
 	if result.ToolCall == nil || stringValueAny(result.ToolCall["name"]) != "lookup_weather" {
 		t.Fatalf("unexpected tool call: %#v", result)
+	}
+}
+
+func TestExtractAssistChatCompletionDeltaSupportsOpenAIStyleChunk(t *testing.T) {
+	delta := extractAssistChatCompletionDelta(`{"choices":[{"delta":{"content":"hello "}}]}`)
+	if delta != "hello " {
+		t.Fatalf("unexpected delta: %q", delta)
+	}
+}
+
+func TestExtractAssistChatCompletionDeltaSupportsContentArrayChunk(t *testing.T) {
+	delta := extractAssistChatCompletionDelta(`{"choices":[{"delta":{"content":[{"text":"tool "},{"content":"draft"}]}}]}`)
+	if delta != "tool draft" {
+		t.Fatalf("unexpected content array delta: %q", delta)
+	}
+}
+
+func TestStreamAssistChatCompletionResponseCompletesWithParsedDraft(t *testing.T) {
+	events := make(chan protocol.StreamEvent, 8)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`data: {"choices":[{"delta":{"content":"{\"explanation\":\"ok\","}}]}`,
+			"",
+			`data: {"choices":[{"delta":{"content":"\"tool_call\":{\"name\":\"lookup_weather\",\"arguments\":{\"city\":\"Beijing\"}}}"}}]}`,
+			"",
+			`data: [DONE]`,
+			"",
+		}, "\n"))),
+	}
+	go streamAssistChatCompletionResponse(resp, "test_provider", "demo-model", map[string]any{"request_id": "req_demo"}, []protocol.NormalizedToolSchema{{Name: "lookup_weather"}}, events)
+
+	collected := make([]protocol.StreamEvent, 0, 4)
+	for event := range events {
+		collected = append(collected, event)
+	}
+	if len(collected) < 3 || collected[0].Event != "assist.started" || collected[1].Event != "assist.delta" || collected[len(collected)-1].Event != "assist.completed" {
+		t.Fatalf("unexpected assist stream events: %#v", collected)
+	}
+	completedData, _ := collected[len(collected)-1].Data.(map[string]any)
+	completedAssist, _ := completedData["assist"].(ToolCallAssistResult)
+	if !completedAssist.ValidDraft || stringValueAny(completedAssist.ToolCall["name"]) != "lookup_weather" {
+		t.Fatalf("unexpected completed assist result: %#v", completedAssist)
 	}
 }

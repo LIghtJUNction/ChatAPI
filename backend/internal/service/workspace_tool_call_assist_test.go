@@ -35,6 +35,18 @@ func (s stubUpstreamProvider) ProviderName() string {
 	return s.name
 }
 
+func (s stubUpstreamProvider) ProviderDescriptor() UpstreamProviderDescriptor {
+	return UpstreamProviderDescriptor{
+		Name:              normalizeProviderName(s.name),
+		DisplayName:       "Stub Provider",
+		Protocols:         []string{"chat_completions"},
+		SupportsStreaming: false,
+		ErrorCodes: []UpstreamErrorCode{
+			{Code: "provider_request_failed", Description: "stub"},
+		},
+	}
+}
+
 func (s stubUpstreamProvider) ChatCompletions(ctx context.Context, userID string, body any) (map[string]any, error) {
 	if s.err != nil {
 		return nil, s.err
@@ -78,6 +90,25 @@ func TestFinalizeAssistResultValidatesDeclaredTool(t *testing.T) {
 	}
 	if result.ToolCall == nil || stringValueAny(result.ToolCall["name"]) != "lookup_weather" {
 		t.Fatalf("unexpected tool call: %#v", result)
+	}
+}
+
+func TestToolCallAssistServiceProvidersExposeDescriptors(t *testing.T) {
+	svc := NewToolCallAssistService(&WorkspaceToolCallService{}, stubUpstreamProvider{name: " Kirari "})
+	providers := svc.Providers()
+	if len(providers) != 1 || providers[0].Name != "kirari" || providers[0].DisplayName == "" {
+		t.Fatalf("unexpected provider descriptors: %#v", providers)
+	}
+}
+
+func TestNormalizeToolCallAssistProviderErrorMapsKirariConnection(t *testing.T) {
+	err := NormalizeToolCallAssistProviderError("kirari", ErrKirariNotConnected)
+	providerErr, ok := err.(*ToolCallAssistProviderError)
+	if !ok {
+		t.Fatalf("expected provider error type, got %T", err)
+	}
+	if providerErr.Code != "provider_not_connected" || providerErr.HTTPStatus != http.StatusConflict || providerErr.Provider != "kirari" {
+		t.Fatalf("unexpected provider error mapping: %#v", providerErr)
 	}
 }
 

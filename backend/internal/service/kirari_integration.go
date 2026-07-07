@@ -37,6 +37,24 @@ func (s *KirariIntegrationService) ProviderName() string {
 	return providerKirari
 }
 
+func (s *KirariIntegrationService) ProviderDescriptor() UpstreamProviderDescriptor {
+	return UpstreamProviderDescriptor{
+		Name:              providerKirari,
+		DisplayName:       "KirariNetwork",
+		Protocols:         []string{"chat_completions"},
+		SupportsStreaming: true,
+		RequiresUserLink:  true,
+		Notes: []string{
+			"Requires the current user to complete delegated OIDC authorization before backend-side assist can call Kirari.",
+			"Uses the provider registry and shared Tool Call assist chat-completions adapter.",
+		},
+		ErrorCodes: []UpstreamErrorCode{
+			{Code: "provider_not_connected", Description: "The current user has not connected the delegated Kirari provider yet."},
+			{Code: "provider_request_failed", Description: "The delegated provider request failed or returned an unreadable response."},
+		},
+	}
+}
+
 type KirariStatus struct {
 	Enabled                bool           `json:"enabled"`
 	Connected              bool           `json:"connected"`

@@ -1594,6 +1594,9 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	if !containsMapItemWithStringField(resp["upstream_assistant_schema"].(map[string]any)["error_codes"], "code", "upstream_assistant.recursive_base_url") {
 		t.Fatalf("unexpected upstream assistant error codes: %#v", resp)
 	}
+	if !containsMapItemWithStringField(resp["backend_assistant_providers"], "name", "kirari") {
+		t.Fatalf("unexpected backend assistant providers: %#v", resp)
+	}
 	if !containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "responses") ||
 		!containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "chat_completions") ||
 		!containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "anthropic_messages") {
@@ -1701,6 +1704,9 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	}
 	if !containsStringValue(resp["upstream_assistant_schema"].(map[string]any)["validation_rules"], "base_url must be an absolute http or https URL.") {
 		t.Fatalf("unexpected upstream assistant validation rules: %#v", resp)
+	}
+	if !containsMapItemWithStringField(resp["backend_assistant_providers"], "name", "kirari") {
+		t.Fatalf("unexpected session backend assistant providers: %#v", resp)
 	}
 	if !containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "responses") {
 		t.Fatalf("unexpected session upstream protocol templates: %#v", resp)

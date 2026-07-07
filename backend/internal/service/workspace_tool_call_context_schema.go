@@ -36,6 +36,7 @@ func BuildWorkspaceToolCallContextSchema() WorkspaceToolCallContextSchema {
 					"messages",
 					"draft",
 					"assist_schema",
+					"backend_assistant_providers",
 					"upstream_assistant_schema",
 					"upstream_protocol_templates",
 					"upstream_hints",
@@ -44,6 +45,7 @@ func BuildWorkspaceToolCallContextSchema() WorkspaceToolCallContextSchema {
 				Notes: []string{
 					"At least one of request_id or conversation_id must be provided.",
 					"parsed.normalized_tool_schemas is the stable tool schema projection intended for frontend rendering.",
+					"backend_assistant_providers declares which delegated upstream providers are currently wired into the backend-side assist path.",
 					"The endpoint does not accept or persist upstream API keys and does not call upstream models.",
 					"candidate_base_url only affects upstream_hints and is not stored.",
 				},
@@ -55,7 +57,7 @@ func BuildWorkspaceToolCallContextSchema() WorkspaceToolCallContextSchema {
 				Description:   "Request a backend-side Tool Call draft assistant for the current workspace target without submitting the draft.",
 				RequiresActor: "interactive_user",
 				Fields: []ConfigFieldSchema{
-					{Key: "provider", ValueType: "string", DefaultValue: "kirari", Public: false, AdminWriteOnly: true, Description: "Backend-side upstream provider identifier. Current supported value: kirari."},
+					{Key: "provider", ValueType: "string", DefaultValue: "kirari", Public: false, AdminWriteOnly: true, Description: "Backend-side upstream provider identifier. See assist-context.backend_assistant_providers for currently available values."},
 					{Key: "model", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Provider model id used for the assist request."},
 					{Key: "request_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional request id target. Required when conversation_id is omitted."},
 					{Key: "conversation_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional conversation id target. Required when request_id is omitted."},
@@ -74,7 +76,7 @@ func BuildWorkspaceToolCallContextSchema() WorkspaceToolCallContextSchema {
 				},
 				Notes: []string{
 					"At least one of request_id or conversation_id must be provided.",
-					"Current backend-side assist support is limited to provider=kirari.",
+					"The set of backend-side provider values is runtime-defined by backend_assistant_providers.",
 					"The endpoint returns a draft only and never auto-submits a tool call.",
 					"Browser-direct upstream assistant remains the default path for arbitrary user-configured upstream models.",
 				},
@@ -86,7 +88,7 @@ func BuildWorkspaceToolCallContextSchema() WorkspaceToolCallContextSchema {
 				Description:   "Request a backend-side Tool Call draft assistant as a normalized SSE stream without submitting the draft.",
 				RequiresActor: "interactive_user",
 				Fields: []ConfigFieldSchema{
-					{Key: "provider", ValueType: "string", DefaultValue: "kirari", Public: false, AdminWriteOnly: true, Description: "Backend-side upstream provider identifier. Current supported value: kirari."},
+					{Key: "provider", ValueType: "string", DefaultValue: "kirari", Public: false, AdminWriteOnly: true, Description: "Backend-side upstream provider identifier. See assist-context.backend_assistant_providers for currently available values."},
 					{Key: "model", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Provider model id used for the assist request."},
 					{Key: "request_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional request id target. Required when conversation_id is omitted."},
 					{Key: "conversation_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional conversation id target. Required when request_id is omitted."},
@@ -99,7 +101,7 @@ func BuildWorkspaceToolCallContextSchema() WorkspaceToolCallContextSchema {
 				},
 				Notes: []string{
 					"At least one of request_id or conversation_id must be provided.",
-					"Current backend-side streaming assist support is limited to provider=kirari.",
+					"The set of backend-side provider values is runtime-defined by backend_assistant_providers.",
 					"The assist.completed payload matches the non-stream assist result shape.",
 					"Browser-direct upstream assistant remains the default path for arbitrary user-configured upstream models.",
 				},

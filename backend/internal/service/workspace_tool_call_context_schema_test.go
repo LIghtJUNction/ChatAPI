@@ -14,6 +14,16 @@ func TestBuildWorkspaceToolCallContextSchema(t *testing.T) {
 	if len(operation.Fields) != 3 {
 		t.Fatalf("unexpected workspace tool-call context schema fields: %#v", operation)
 	}
+	foundProvidersSection := false
+	for _, section := range operation.ResponseSections {
+		if section == "backend_assistant_providers" {
+			foundProvidersSection = true
+			break
+		}
+	}
+	if !foundProvidersSection {
+		t.Fatalf("expected backend_assistant_providers in assist-context schema: %#v", operation)
+	}
 	assistOperation := schema.Operations[1]
 	if assistOperation.Name != "assist_execute" || assistOperation.Path != "/api/workspace/tool-call/assist" {
 		t.Fatalf("unexpected workspace tool-call assist operation: %#v", assistOperation)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/zyf/chatapi/internal/protocol"
@@ -63,6 +64,31 @@ func NewToolCallAssistService(workspace *WorkspaceToolCallService, providers ...
 		service.providers[name] = provider
 	}
 	return service
+}
+
+func (s *ToolCallAssistService) Providers() []UpstreamProviderDescriptor {
+	if s == nil || len(s.providers) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(s.providers))
+	for name := range s.providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]UpstreamProviderDescriptor, 0, len(names))
+	for _, name := range names {
+		provider := s.providers[name]
+		if provider == nil {
+			continue
+		}
+		desc := provider.ProviderDescriptor()
+		desc.Name = normalizeProviderName(firstNonEmptyStrings(desc.Name, provider.ProviderName(), name))
+		if desc.DisplayName == "" {
+			desc.DisplayName = desc.Name
+		}
+		out = append(out, desc)
+	}
+	return out
 }
 
 func (s *ToolCallAssistService) Execute(ctx context.Context, userID string, provider string, model string, requestID string, conversationID string) (ToolCallAssistResult, error) {
@@ -142,7 +168,7 @@ func (s *ToolCallAssistService) executeProvider(ctx context.Context, userID stri
 	body := buildAssistChatCompletionsBody(model, false, contextPayload, normalizedTools, s.workspace.AssistSchema())
 	payload, err := provider.ChatCompletions(ctx, userID, body)
 	if err != nil {
-		return ToolCallAssistResult{}, err
+		return ToolCallAssistResult{}, NormalizeToolCallAssistProviderError(providerName, err)
 	}
 	return finalizeAssistResult(providerName, model, requestMeta, firstChatCompletionContent(payload), normalizedTools), nil
 }
@@ -166,7 +192,7 @@ func (s *ToolCallAssistService) executeProviderStream(ctx context.Context, userI
 	body := buildAssistChatCompletionsBody(model, true, contextPayload, normalizedTools, s.workspace.AssistSchema())
 	resp, err := streamingProvider.ChatCompletionsRaw(ctx, userID, body)
 	if err != nil {
-		return nil, err
+		return nil, NormalizeToolCallAssistProviderError(providerName, err)
 	}
 	events := make(chan protocol.StreamEvent, 32)
 	go streamAssistChatCompletionResponse(resp, providerName, model, requestMeta, normalizedTools, events)
@@ -230,7 +256,13 @@ func finalizeAssistResult(provider string, model string, requestMeta map[string]
 func streamAssistChatCompletionResponse(resp *http.Response, provider string, model string, requestMeta map[string]any, normalizedTools []protocol.NormalizedToolSchema, events chan<- protocol.StreamEvent) {
 	defer close(events)
 	if resp == nil {
-		events <- protocol.StreamEvent{Event: "assist.failed", Data: map[string]any{"error": "upstream response is nil"}, Done: true}
+		events <- protocol.StreamEvent{Event: "assist.failed", Data: assistErrorEventData(&ToolCallAssistProviderError{
+			Provider:   provider,
+			Code:       "upstream_nil_response",
+			Message:    "upstream response is nil",
+			HTTPStatus: http.StatusBadGateway,
+			Retryable:  true,
+		}), Done: true}
 		return
 	}
 	defer resp.Body.Close()
@@ -248,7 +280,13 @@ func streamAssistChatCompletionResponse(resp *http.Response, provider string, mo
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
-			events <- protocol.StreamEvent{Event: "assist.failed", Data: map[string]any{"error": err.Error()}, Done: true}
+			events <- protocol.StreamEvent{Event: "assist.failed", Data: assistErrorEventData(&ToolCallAssistProviderError{
+				Provider:   provider,
+				Code:       "upstream_stream_read_failed",
+				Message:    err.Error(),
+				HTTPStatus: http.StatusBadGateway,
+				Retryable:  true,
+			}), Done: true}
 			return
 		}
 		line = strings.TrimRight(line, "\r\n")
@@ -286,6 +324,19 @@ func streamAssistChatCompletionResponse(resp *http.Response, provider string, mo
 		Event: "assist.completed",
 		Data:  map[string]any{"assist": result},
 		Done:  true,
+	}
+}
+
+func assistErrorEventData(err *ToolCallAssistProviderError) map[string]any {
+	if err == nil {
+		return map[string]any{"error": "assist stream failed"}
+	}
+	return map[string]any{
+		"error":       err.Message,
+		"error_code":  err.Code,
+		"provider":    err.Provider,
+		"retryable":   err.Retryable,
+		"http_status": err.HTTPStatus,
 	}
 }
 

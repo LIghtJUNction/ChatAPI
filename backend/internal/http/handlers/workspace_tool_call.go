@@ -57,6 +57,7 @@ func (h WorkspaceToolCallHandler) AssistContext(w http.ResponseWriter, r *http.R
 		"conversation":                contextPayload.Conversation,
 		"messages":                    contextPayload.Messages,
 		"assist_schema":               h.Service.AssistSchema(),
+		"backend_assistant_providers": h.AssistService.Providers(),
 		"upstream_assistant_schema":   service.BuildUpstreamAssistantSchema(),
 		"upstream_protocol_templates": service.BuildUpstreamProtocolTemplates(),
 		"upstream_hints":              service.BuildUpstreamAssistantHints(h.Config, requestBaseURL(r), strings.TrimSpace(r.URL.Query().Get("candidate_base_url"))),
@@ -95,14 +96,18 @@ func (h WorkspaceToolCallHandler) Assist(w http.ResponseWriter, r *http.Request)
 			errors.Is(err, service.ErrToolCallAssistUnsupported),
 			errors.Is(err, service.ErrToolCallAssistNoTools):
 			http.Error(w, err.Error(), http.StatusBadRequest)
-		case errors.Is(err, service.ErrKirariNotConnected):
-			http.Error(w, err.Error(), http.StatusConflict)
-		case errors.Is(err, service.ErrForbidden):
-			http.Error(w, err.Error(), http.StatusForbidden)
-		case errors.Is(err, store.ErrNotFound):
-			http.Error(w, err.Error(), http.StatusNotFound)
 		default:
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			var providerErr *service.ToolCallAssistProviderError
+			switch {
+			case errors.As(err, &providerErr):
+				http.Error(w, providerErr.Error(), providerErr.HTTPStatus)
+			case errors.Is(err, service.ErrForbidden):
+				http.Error(w, err.Error(), http.StatusForbidden)
+			case errors.Is(err, store.ErrNotFound):
+				http.Error(w, err.Error(), http.StatusNotFound)
+			default:
+				http.Error(w, err.Error(), http.StatusBadGateway)
+			}
 		}
 		return
 	}
@@ -187,14 +192,18 @@ func (h WorkspaceToolCallHandler) AssistStream(w http.ResponseWriter, r *http.Re
 			errors.Is(err, service.ErrToolCallAssistUnsupported),
 			errors.Is(err, service.ErrToolCallAssistNoTools):
 			http.Error(w, err.Error(), http.StatusBadRequest)
-		case errors.Is(err, service.ErrKirariNotConnected):
-			http.Error(w, err.Error(), http.StatusConflict)
-		case errors.Is(err, service.ErrForbidden):
-			http.Error(w, err.Error(), http.StatusForbidden)
-		case errors.Is(err, store.ErrNotFound):
-			http.Error(w, err.Error(), http.StatusNotFound)
 		default:
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			var providerErr *service.ToolCallAssistProviderError
+			switch {
+			case errors.As(err, &providerErr):
+				http.Error(w, providerErr.Error(), providerErr.HTTPStatus)
+			case errors.Is(err, service.ErrForbidden):
+				http.Error(w, err.Error(), http.StatusForbidden)
+			case errors.Is(err, store.ErrNotFound):
+				http.Error(w, err.Error(), http.StatusNotFound)
+			default:
+				http.Error(w, err.Error(), http.StatusBadGateway)
+			}
 		}
 		return
 	}
@@ -230,7 +239,13 @@ func (h WorkspaceToolCallHandler) AssistStream(w http.ResponseWriter, r *http.Re
 			}
 			if event.Event == "assist.failed" {
 				if data, _ := event.Data.(map[string]any); data != nil {
-					streamErr = errors.New(stringValue(data["error"], "assist stream failed"))
+					streamErr = &service.ToolCallAssistProviderError{
+						Provider:   stringValue(data["provider"], ""),
+						Code:       stringValue(data["error_code"], ""),
+						Message:    stringValue(data["error"], "assist stream failed"),
+						HTTPStatus: intValue(data["http_status"], 0),
+						Retryable:  boolValue(data["retryable"], false),
+					}
 				} else {
 					streamErr = errors.New("assist stream failed")
 				}
@@ -341,6 +356,19 @@ func boolValue(value any, fallback bool) bool {
 		return fallback
 	}
 	return typed
+}
+
+func intValue(value any, fallback int) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return fallback
+	}
 }
 
 func requestBaseURL(r *http.Request) string {

@@ -33,14 +33,25 @@ type ToolCallAssistResult struct {
 
 type ToolCallAssistService struct {
 	workspace *WorkspaceToolCallService
-	kirari    *KirariIntegrationService
+	providers map[string]UpstreamProvider
 }
 
-func NewToolCallAssistService(workspace *WorkspaceToolCallService, kirari *KirariIntegrationService) *ToolCallAssistService {
-	return &ToolCallAssistService{
+func NewToolCallAssistService(workspace *WorkspaceToolCallService, providers ...UpstreamProvider) *ToolCallAssistService {
+	service := &ToolCallAssistService{
 		workspace: workspace,
-		kirari:    kirari,
+		providers: make(map[string]UpstreamProvider, len(providers)),
 	}
+	for _, provider := range providers {
+		if provider == nil {
+			continue
+		}
+		name := normalizeProviderName(provider.ProviderName())
+		if name == "" {
+			continue
+		}
+		service.providers[name] = provider
+	}
+	return service
 }
 
 func (s *ToolCallAssistService) Execute(ctx context.Context, userID string, provider string, model string, requestID string, conversationID string) (ToolCallAssistResult, error) {
@@ -68,7 +79,8 @@ func (s *ToolCallAssistService) Execute(ctx context.Context, userID string, prov
 }
 
 func (s *ToolCallAssistService) executeKirari(ctx context.Context, userID string, model string, contextPayload ToolCallAssistContext) (ToolCallAssistResult, error) {
-	if s.kirari == nil {
+	provider, ok := s.providers[providerKirari]
+	if !ok || provider == nil {
 		return ToolCallAssistResult{}, ErrToolCallAssistUnsupported
 	}
 	normalizedTools := protocol.NormalizeToolSchemas(contextPayload.Request.ToolSchemas)
@@ -87,7 +99,7 @@ func (s *ToolCallAssistService) executeKirari(ctx context.Context, userID string
 			},
 		},
 	}
-	payload, err := s.kirari.ChatCompletions(ctx, userID, body)
+	payload, err := provider.ChatCompletions(ctx, userID, body)
 	if err != nil {
 		return ToolCallAssistResult{}, err
 	}

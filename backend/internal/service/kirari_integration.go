@@ -33,6 +33,10 @@ type KirariIntegrationService struct {
 	now        func() time.Time
 }
 
+func (s *KirariIntegrationService) ProviderName() string {
+	return providerKirari
+}
+
 type KirariStatus struct {
 	Enabled                bool           `json:"enabled"`
 	Connected              bool           `json:"connected"`

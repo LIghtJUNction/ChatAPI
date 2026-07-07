@@ -1488,7 +1488,7 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	schemaResp := env.getJSON(t, "/api/workspace/tool-call/schema", http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 2 {
+	if len(operations) != 3 {
 		t.Fatalf("unexpected tool-call schema response: %#v", schemaResp)
 	}
 	operation := operations[0].(map[string]any)
@@ -1504,6 +1504,13 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	}
 	if !containsMapItemWithStringField(assistOperation["fields"], "key", "provider") {
 		t.Fatalf("expected provider field in tool-call assist schema: %#v", schemaResp)
+	}
+	streamOperation := operations[2].(map[string]any)
+	if nestedString(streamOperation, "name") != "assist_stream" || nestedString(streamOperation, "path") != "/api/workspace/tool-call/assist/stream" {
+		t.Fatalf("unexpected tool-call assist stream operation: %#v", schemaResp)
+	}
+	if !containsStringValue(streamOperation["response_sections"], "event: assist.completed") {
+		t.Fatalf("expected assist.completed event in tool-call stream schema: %#v", schemaResp)
 	}
 
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
@@ -1734,6 +1741,16 @@ func TestWorkspaceToolCallAssistContextRejectsProgrammaticActors(t *testing.T) {
 	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
 		t.Fatalf("expected app key tool-call assist rejection: status=%d body=%q", status, body)
 	}
+	status, body, _ = env.postJSONWithCookieText(t, "/api/workspace/tool-call/assist/stream", map[string]any{
+		"provider":   "kirari",
+		"model":      "demo",
+		"request_id": "req_demo",
+	}, nil, map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected app key tool-call assist stream rejection: status=%d body=%q", status, body)
+	}
 
 	status, body = env.getTextWithHeaders(t, "/api/workspace/tool-call/assist-context?request_id=req_demo", map[string]string{
 		"Authorization": "Bearer " + modelKey,
@@ -1757,6 +1774,16 @@ func TestWorkspaceToolCallAssistContextRejectsProgrammaticActors(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
 		t.Fatalf("expected model key tool-call assist rejection: status=%d body=%q", status, body)
+	}
+	status, body, _ = env.postJSONWithCookieText(t, "/api/workspace/tool-call/assist/stream", map[string]any{
+		"provider":   "kirari",
+		"model":      "demo",
+		"request_id": "req_demo",
+	}, nil, map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected model key tool-call assist stream rejection: status=%d body=%q", status, body)
 	}
 }
 
@@ -1856,6 +1883,101 @@ func TestWorkspaceToolCallAssistKirariLifecycle(t *testing.T) {
 	}
 	if nestedString(assistMetadata, "issuer_url") != provider.Issuer() || nestedString(assistMetadata, "subject") != "kirari-test-sub" {
 		t.Fatalf("unexpected kirari audit identity metadata: %#v", assistMetadata)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "done",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
+func TestWorkspaceToolCallAssistKirariStreamLifecycle(t *testing.T) {
+	provider := newTestKirariProvider(t)
+	provider.chatCompletionsStreamBody = strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"{\"explanation\":\"使用天气查询工具读取北京天气。\""}}]}`,
+		"",
+		`data: {"choices":[{"delta":{"content":",\"tool_call\":{\"name\":\"lookup_weather\",\"arguments\":{\"city\":\"Beijing\",\"unit\":\"c\"}},\"confidence\":\"high\",\"warnings\":[\"city inferred from recent user message\"]}"}}]}`,
+		"",
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	defer provider.Close()
+
+	env := newTestEnvWithConfig(t, config.ModeLab, func(cfg *config.Config) {
+		cfg.KirariEnabled = true
+		cfg.KirariIssuerURL = provider.Issuer()
+		cfg.KirariClientID = "chatapi"
+		cfg.KirariClientSecret = "secret"
+		cfg.KirariRedirectURL = "http://chat.example.com/api/integrations/kirari/callback"
+		cfg.KirariAllowedIssuers = []string{provider.Issuer()}
+		cfg.KirariScopes = []string{"openid", "profile", "email", "offline_access", "llm:read", "llm:stream"}
+	})
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-kirari-assist-stream",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "帮我查一下北京天气，先准备 tool call"},
+				},
+			},
+		},
+		"tools": []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name":        "lookup_weather",
+					"description": "Lookup the weather.",
+					"parameters": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"city": map[string]any{"type": "string"},
+							"unit": map[string]any{"type": "string"},
+						},
+					},
+				},
+			},
+		},
+	})
+	conversation := env.waitForWaitingConversation(t, "帮我查一下北京天气，先准备 tool call")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+
+	_, location, cookies := env.getRedirect(t, "/api/user/integrations/kirari/connect")
+	locationURL, err := neturl.Parse(location)
+	if err != nil {
+		t.Fatalf("parse kirari redirect: %v", err)
+	}
+	provider.idTokenClaims["nonce"] = locationURL.Query().Get("nonce")
+	env.getJSONAndCookiesWithCookies(t, "/api/integrations/kirari/callback?code=kirari-code&state="+neturl.QueryEscape(locationURL.Query().Get("state")), cookies, http.StatusOK)
+
+	status, streamBody := env.postStreamText(t, "/api/workspace/tool-call/assist/stream", map[string]any{
+		"provider":   "kirari",
+		"model":      "kirari-model",
+		"request_id": requestID,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("unexpected assist stream status: %d body=%q", status, streamBody)
+	}
+	if !strings.Contains(streamBody, "event: assist.started") ||
+		!strings.Contains(streamBody, "event: assist.delta") ||
+		!strings.Contains(streamBody, "event: assist.completed") {
+		t.Fatalf("unexpected assist stream lifecycle: %q", streamBody)
+	}
+	if !strings.Contains(streamBody, `"valid_draft":true`) ||
+		!strings.Contains(streamBody, `"lookup_weather"`) ||
+		!strings.Contains(streamBody, `"Beijing"`) {
+		t.Fatalf("unexpected assist stream payload: %q", streamBody)
+	}
+	assertAuditCountForActor(t, env, "lab-user", "user.tool_call", "workspace_tool_call", requestID, "assist_stream", "success", 1)
+	assistMetadata := latestAuditMetadataForActorAction(t, env, "lab-user", "user.tool_call", "assist_stream", "success")
+	if nestedString(assistMetadata, "provider") != "kirari" || nestedString(assistMetadata, "model") != "kirari-model" {
+		t.Fatalf("unexpected stream assist audit metadata: %#v", assistMetadata)
+	}
+	if nestedString(assistMetadata, "tool_name") != "lookup_weather" || !nestedPathBool(map[string]any{"metadata": assistMetadata}, "metadata", "valid_draft") {
+		t.Fatalf("unexpected stream assist draft audit metadata: %#v", assistMetadata)
 	}
 
 	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
@@ -7776,14 +7898,15 @@ func newTestOIDCProvider(t *testing.T, cfg testOIDCProviderConfig) *testOIDCProv
 }
 
 type testKirariProvider struct {
-	server                  *httptest.Server
-	privateKey              *rsa.PrivateKey
-	keyID                   string
-	idTokenClaims           map[string]any
-	userInfoClaims          map[string]any
-	metaCalls               int
-	chatCompletionsCalls    int
-	chatCompletionsResponse map[string]any
+	server                    *httptest.Server
+	privateKey                *rsa.PrivateKey
+	keyID                     string
+	idTokenClaims             map[string]any
+	userInfoClaims            map[string]any
+	metaCalls                 int
+	chatCompletionsCalls      int
+	chatCompletionsStreamBody string
+	chatCompletionsResponse   map[string]any
 }
 
 func newTestKirariProvider(t *testing.T) *testKirariProvider {
@@ -7866,6 +7989,24 @@ func newTestKirariProvider(t *testing.T) *testKirariProvider {
 			})
 		case "/api/llm/chat/completions":
 			provider.chatCompletionsCalls++
+			var requestBody map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&requestBody)
+			if stream, _ := requestBody["stream"].(bool); stream {
+				w.Header().Set("Content-Type", "text/event-stream")
+				streamBody := provider.chatCompletionsStreamBody
+				if strings.TrimSpace(streamBody) == "" {
+					streamBody = strings.Join([]string{
+						`data: {"choices":[{"delta":{"content":"{\"explanation\":\"default kirari assist response\"}"}}]}`,
+						"",
+						`data: {"choices":[{"delta":{"content":",\"tool_call\":{\"name\":\"lookup_weather\",\"arguments\":{}}}"}}]}`,
+						"",
+						`data: [DONE]`,
+						"",
+					}, "\n")
+				}
+				_, _ = io.WriteString(w, streamBody)
+				return
+			}
 			response := provider.chatCompletionsResponse
 			if response == nil {
 				response = map[string]any{
@@ -8197,6 +8338,29 @@ func (e *testEnv) postText(t *testing.T, path string, body map[string]any) (int,
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read response %s: %v", path, err)
+	}
+	return resp.StatusCode, string(data)
+}
+
+func (e *testEnv) postStreamText(t *testing.T, path string, body map[string]any) (int, string) {
+	t.Helper()
+	rawBody, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, e.server.URL+path, bytes.NewReader(rawBody))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := e.client.Do(req)
+	if err != nil {
+		t.Fatalf("do stream post %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read stream response %s: %v", path, err)
 	}
 	return resp.StatusCode, string(data)
 }

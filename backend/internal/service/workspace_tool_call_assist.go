@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 
 	"github.com/zyf/chatapi/internal/protocol"
@@ -29,6 +32,13 @@ type ToolCallAssistResult struct {
 	ValidDraft       bool           `json:"valid_draft"`
 	RawOutput        string         `json:"raw_output,omitempty"`
 	Request          map[string]any `json:"request,omitempty"`
+}
+
+type ToolCallAssistStream struct {
+	Provider string
+	Model    string
+	Request  map[string]any
+	Events   <-chan protocol.StreamEvent
 }
 
 type ToolCallAssistService struct {
@@ -78,6 +88,30 @@ func (s *ToolCallAssistService) Execute(ctx context.Context, userID string, prov
 	}
 }
 
+func (s *ToolCallAssistService) ExecuteStream(ctx context.Context, userID string, provider string, model string, requestID string, conversationID string) (*ToolCallAssistStream, error) {
+	if s == nil || s.workspace == nil {
+		return nil, ErrForbidden
+	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	model = strings.TrimSpace(model)
+	if provider == "" {
+		return nil, ErrToolCallAssistProviderRequired
+	}
+	if model == "" {
+		return nil, ErrToolCallAssistModelRequired
+	}
+	contextPayload, err := s.workspace.AssistContext(ctx, userID, requestID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	switch provider {
+	case providerKirari:
+		return s.executeKirariStream(ctx, userID, model, contextPayload)
+	default:
+		return nil, ErrToolCallAssistUnsupported
+	}
+}
+
 func (s *ToolCallAssistService) executeKirari(ctx context.Context, userID string, model string, contextPayload ToolCallAssistContext) (ToolCallAssistResult, error) {
 	provider, ok := s.providers[providerKirari]
 	if !ok || provider == nil {
@@ -87,6 +121,7 @@ func (s *ToolCallAssistService) executeKirari(ctx context.Context, userID string
 	if len(normalizedTools) == 0 {
 		return ToolCallAssistResult{}, ErrToolCallAssistNoTools
 	}
+	requestMeta := assistRequestMeta(contextPayload)
 	body := map[string]any{
 		"model":    model,
 		"stream":   false,
@@ -103,25 +138,75 @@ func (s *ToolCallAssistService) executeKirari(ctx context.Context, userID string
 	if err != nil {
 		return ToolCallAssistResult{}, err
 	}
-	result := ToolCallAssistResult{
-		Provider: providerKirari,
-		Model:    model,
-		Request: map[string]any{
-			"request_id":      contextPayload.Request.RequestID,
-			"conversation_id": contextPayload.Request.ConversationID,
+	return finalizeAssistResult(providerKirari, model, requestMeta, firstChatCompletionContent(payload), normalizedTools), nil
+}
+
+const providerKirari = "kirari"
+
+func (s *ToolCallAssistService) executeKirariStream(ctx context.Context, userID string, model string, contextPayload ToolCallAssistContext) (*ToolCallAssistStream, error) {
+	providerRaw, ok := s.providers[providerKirari]
+	if !ok || providerRaw == nil {
+		return nil, ErrToolCallAssistUnsupported
+	}
+	streamingProvider, ok := providerRaw.(UpstreamStreamingProvider)
+	if !ok {
+		return nil, ErrToolCallAssistUnsupported
+	}
+	normalizedTools := protocol.NormalizeToolSchemas(contextPayload.Request.ToolSchemas)
+	if len(normalizedTools) == 0 {
+		return nil, ErrToolCallAssistNoTools
+	}
+	requestMeta := assistRequestMeta(contextPayload)
+	body := map[string]any{
+		"model":    model,
+		"stream":   true,
+		"messages": buildKirariAssistMessages(contextPayload, normalizedTools, s.workspace.AssistSchema()),
+		"response_format": map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "tool_call_assist",
+				"schema": s.workspace.AssistSchema().OutputJSONSchema,
+			},
 		},
 	}
-	content := firstChatCompletionContent(payload)
+	resp, err := streamingProvider.ChatCompletionsRaw(ctx, userID, body)
+	if err != nil {
+		return nil, err
+	}
+	events := make(chan protocol.StreamEvent, 32)
+	go streamKirariAssistResponse(resp, providerKirari, model, requestMeta, normalizedTools, events)
+	return &ToolCallAssistStream{
+		Provider: providerKirari,
+		Model:    model,
+		Request:  requestMeta,
+		Events:   events,
+	}, nil
+}
+
+func assistRequestMeta(contextPayload ToolCallAssistContext) map[string]any {
+	return map[string]any{
+		"request_id":      contextPayload.Request.RequestID,
+		"conversation_id": contextPayload.Request.ConversationID,
+	}
+}
+
+func finalizeAssistResult(provider string, model string, requestMeta map[string]any, content string, normalizedTools []protocol.NormalizedToolSchema) ToolCallAssistResult {
+	result := ToolCallAssistResult{
+		Provider: provider,
+		Model:    model,
+		Request:  cloneAnyMap(requestMeta),
+	}
+	content = strings.TrimSpace(content)
 	result.RawOutput = content
-	if strings.TrimSpace(content) == "" {
+	if content == "" {
 		result.ValidationErrors = []string{"assistant output is empty"}
-		return result, nil
+		return result
 	}
 	parsed, err := decodeAssistOutput(content)
 	if err != nil {
-		result.Explanation = strings.TrimSpace(content)
+		result.Explanation = content
 		result.ValidationErrors = []string{err.Error()}
-		return result, nil
+		return result
 	}
 	result.Explanation = stringValueFromMap(parsed, "explanation")
 	result.ToolCall = objectValueFromMap(parsed, "tool_call")
@@ -129,10 +214,112 @@ func (s *ToolCallAssistService) executeKirari(ctx context.Context, userID string
 	result.Warnings = stringArrayValueFromMap(parsed, "warnings")
 	result.ValidationErrors = validateAssistDraft(result.ToolCall, normalizedTools)
 	result.ValidDraft = len(result.ValidationErrors) == 0
-	return result, nil
+	return result
 }
 
-const providerKirari = "kirari"
+func streamKirariAssistResponse(resp *http.Response, provider string, model string, requestMeta map[string]any, normalizedTools []protocol.NormalizedToolSchema, events chan<- protocol.StreamEvent) {
+	defer close(events)
+	if resp == nil {
+		events <- protocol.StreamEvent{Event: "assist.failed", Data: map[string]any{"error": "upstream response is nil"}, Done: true}
+		return
+	}
+	defer resp.Body.Close()
+	events <- protocol.StreamEvent{
+		Event: "assist.started",
+		Data: map[string]any{
+			"provider": provider,
+			"model":    model,
+			"request":  cloneAnyMap(requestMeta),
+		},
+	}
+	reader := bufio.NewReader(resp.Body)
+	var dataLines []string
+	var rawOutput strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			events <- protocol.StreamEvent{Event: "assist.failed", Data: map[string]any{"error": err.Error()}, Done: true}
+			return
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if len(dataLines) > 0 {
+				chunk := strings.Join(dataLines, "\n")
+				dataLines = dataLines[:0]
+				if chunk != "[DONE]" {
+					if delta := extractKirariAssistDelta(chunk); delta != "" {
+						rawOutput.WriteString(delta)
+						events <- protocol.StreamEvent{
+							Event: "assist.delta",
+							Data: map[string]any{
+								"delta":      delta,
+								"raw_output": rawOutput.String(),
+							},
+						}
+					}
+				}
+			}
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+	}
+	result := finalizeAssistResult(provider, model, requestMeta, rawOutput.String(), normalizedTools)
+	events <- protocol.StreamEvent{
+		Event: "assist.completed",
+		Data:  map[string]any{"assist": result},
+		Done:  true,
+	}
+}
+
+func extractKirariAssistDelta(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return ""
+	}
+	choices, _ := payload["choices"].([]any)
+	if len(choices) == 0 {
+		return ""
+	}
+	firstChoice, _ := choices[0].(map[string]any)
+	if delta, _ := firstChoice["delta"].(map[string]any); delta != nil {
+		switch content := delta["content"].(type) {
+		case string:
+			return content
+		case []any:
+			parts := make([]string, 0, len(content))
+			for _, item := range content {
+				block, _ := item.(map[string]any)
+				if block == nil {
+					continue
+				}
+				text := stringValueAny(block["text"])
+				if text == "" {
+					text = stringValueAny(block["content"])
+				}
+				if text != "" {
+					parts = append(parts, text)
+				}
+			}
+			return strings.Join(parts, "")
+		}
+	}
+	if message, _ := firstChoice["message"].(map[string]any); message != nil {
+		return firstChatCompletionContent(map[string]any{"choices": []any{map[string]any{"message": message}}})
+	}
+	return ""
+}
 
 func buildKirariAssistMessages(contextPayload ToolCallAssistContext, tools []protocol.NormalizedToolSchema, schema ToolCallAssistSchema) []map[string]any {
 	messages := make([]map[string]any, 0, len(contextPayload.Messages)+3)

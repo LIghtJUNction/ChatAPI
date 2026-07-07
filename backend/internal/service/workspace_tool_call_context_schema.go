@@ -79,6 +79,31 @@ func BuildWorkspaceToolCallContextSchema() WorkspaceToolCallContextSchema {
 					"Browser-direct upstream assistant remains the default path for arbitrary user-configured upstream models.",
 				},
 			},
+			{
+				Name:          "assist_stream",
+				Method:        "POST",
+				Path:          "/api/workspace/tool-call/assist/stream",
+				Description:   "Request a backend-side Tool Call draft assistant as a normalized SSE stream without submitting the draft.",
+				RequiresActor: "interactive_user",
+				Fields: []ConfigFieldSchema{
+					{Key: "provider", ValueType: "string", DefaultValue: "kirari", Public: false, AdminWriteOnly: true, Description: "Backend-side upstream provider identifier. Current supported value: kirari."},
+					{Key: "model", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Provider model id used for the assist request."},
+					{Key: "request_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional request id target. Required when conversation_id is omitted."},
+					{Key: "conversation_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional conversation id target. Required when request_id is omitted."},
+				},
+				ResponseSections: []string{
+					"event: assist.started",
+					"event: assist.delta",
+					"event: assist.completed",
+					"event: assist.failed",
+				},
+				Notes: []string{
+					"At least one of request_id or conversation_id must be provided.",
+					"Current backend-side streaming assist support is limited to provider=kirari.",
+					"The assist.completed payload matches the non-stream assist result shape.",
+					"Browser-direct upstream assistant remains the default path for arbitrary user-configured upstream models.",
+				},
+			},
 		},
 	}
 }

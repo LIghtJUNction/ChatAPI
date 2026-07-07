@@ -87,7 +87,7 @@ func (h WorkspaceToolCallHandler) Assist(w http.ResponseWriter, r *http.Request)
 	startedAt := time.Now()
 	result, err := h.AssistService.Execute(r.Context(), actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID)
 	if err != nil {
-		h.recordAssist(r, actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, nil, err)
+		h.recordAssist(r, actor.UserID, "assist", body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, nil, err)
 		switch {
 		case errors.Is(err, service.ErrToolCallAssistProviderRequired),
 			errors.Is(err, service.ErrToolCallAssistModelRequired),
@@ -106,16 +106,105 @@ func (h WorkspaceToolCallHandler) Assist(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
-	h.recordAssist(r, actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, &result, nil)
+	h.recordAssist(r, actor.UserID, "assist", body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, &result, nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"assist": result,
 	})
 }
 
+func (h WorkspaceToolCallHandler) AssistStream(w http.ResponseWriter, r *http.Request) {
+	actor, ok := service.RequestActorFromContext(r.Context())
+	if !ok || !service.IsInteractiveUserActor(actor) {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	var body struct {
+		Provider       string `json:"provider"`
+		Model          string `json:"model"`
+		RequestID      string `json:"request_id"`
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	startedAt := time.Now()
+	stream, err := h.AssistService.ExecuteStream(r.Context(), actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID)
+	if err != nil {
+		h.recordAssist(r, actor.UserID, "assist_stream", body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, nil, err)
+		switch {
+		case errors.Is(err, service.ErrToolCallAssistProviderRequired),
+			errors.Is(err, service.ErrToolCallAssistModelRequired),
+			errors.Is(err, service.ErrToolCallAssistTargetRequired),
+			errors.Is(err, service.ErrToolCallAssistUnsupported),
+			errors.Is(err, service.ErrToolCallAssistNoTools):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, service.ErrKirariNotConnected):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, service.ErrForbidden):
+			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		default:
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	var completedResult *service.ToolCallAssistResult
+	var streamErr error
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-stream.Events:
+			if !ok {
+				h.recordAssist(r, actor.UserID, "assist_stream", body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, completedResult, streamErr)
+				return
+			}
+			if event.Event == "assist.completed" {
+				if data, _ := event.Data.(map[string]any); data != nil {
+					switch assist := data["assist"].(type) {
+					case map[string]any:
+						completedResult = decodeAssistResultMap(assist)
+					case service.ToolCallAssistResult:
+						result := assist
+						completedResult = &result
+					case *service.ToolCallAssistResult:
+						completedResult = assist
+					}
+				}
+			}
+			if event.Event == "assist.failed" {
+				if data, _ := event.Data.(map[string]any); data != nil {
+					streamErr = errors.New(stringValue(data["error"], "assist stream failed"))
+				} else {
+					streamErr = errors.New("assist stream failed")
+				}
+			}
+			if err := writeSSEEvent(w, event); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
 func (h WorkspaceToolCallHandler) recordAssist(
 	r *http.Request,
 	userID string,
+	action string,
 	provider string,
 	model string,
 	requestID string,
@@ -161,12 +250,55 @@ func (h WorkspaceToolCallHandler) recordAssist(
 		EventType:    "user.tool_call",
 		ResourceType: "workspace_tool_call",
 		ResourceID:   resourceID,
-		Action:       "assist",
+		Action:       strings.TrimSpace(action),
 		Outcome:      outcome,
 		IPAddress:    clientIP(r),
 		UserAgent:    r.UserAgent(),
 		Metadata:     metadata,
 	})
+}
+
+func decodeAssistResultMap(record map[string]any) *service.ToolCallAssistResult {
+	if record == nil {
+		return nil
+	}
+	result := &service.ToolCallAssistResult{
+		Provider:    stringValue(record["provider"], ""),
+		Model:       stringValue(record["model"], ""),
+		Explanation: stringValue(record["explanation"], ""),
+		Confidence:  stringValue(record["confidence"], ""),
+		RawOutput:   stringValue(record["raw_output"], ""),
+		ValidDraft:  boolValue(record["valid_draft"], false),
+	}
+	if request, _ := record["request"].(map[string]any); request != nil {
+		result.Request = request
+	}
+	if toolCall, _ := record["tool_call"].(map[string]any); toolCall != nil {
+		result.ToolCall = toolCall
+	}
+	if warnings, _ := record["warnings"].([]any); len(warnings) > 0 {
+		for _, item := range warnings {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				result.Warnings = append(result.Warnings, text)
+			}
+		}
+	}
+	if validationErrors, _ := record["validation_errors"].([]any); len(validationErrors) > 0 {
+		for _, item := range validationErrors {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				result.ValidationErrors = append(result.ValidationErrors, text)
+			}
+		}
+	}
+	return result
+}
+
+func boolValue(value any, fallback bool) bool {
+	typed, ok := value.(bool)
+	if !ok {
+		return fallback
+	}
+	return typed
 }
 
 func requestBaseURL(r *http.Request) string {

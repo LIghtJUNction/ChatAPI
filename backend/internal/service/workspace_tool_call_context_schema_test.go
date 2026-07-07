@@ -4,7 +4,7 @@ import "testing"
 
 func TestBuildWorkspaceToolCallContextSchema(t *testing.T) {
 	schema := BuildWorkspaceToolCallContextSchema()
-	if len(schema.Operations) != 2 {
+	if len(schema.Operations) != 3 {
 		t.Fatalf("unexpected workspace tool-call context schema operations: %#v", schema)
 	}
 	operation := schema.Operations[0]
@@ -20,5 +20,12 @@ func TestBuildWorkspaceToolCallContextSchema(t *testing.T) {
 	}
 	if len(assistOperation.Fields) != 4 {
 		t.Fatalf("unexpected workspace tool-call assist fields: %#v", assistOperation)
+	}
+	streamOperation := schema.Operations[2]
+	if streamOperation.Name != "assist_stream" || streamOperation.Path != "/api/workspace/tool-call/assist/stream" {
+		t.Fatalf("unexpected workspace tool-call assist stream operation: %#v", streamOperation)
+	}
+	if len(streamOperation.Fields) != 4 {
+		t.Fatalf("unexpected workspace tool-call assist stream fields: %#v", streamOperation)
 	}
 }

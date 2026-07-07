@@ -122,7 +122,7 @@ func Run(ctx context.Context, args []string) error {
 		cfg.RealtimeMaxConnectionsPerUser,
 		cfg.RealtimeWebUIReservedPerUser,
 	))
-	chatService := service.NewChatAPIService(dataStore, pendingRegistry, realtimeHub)
+	chatService := service.NewChatAPIService(cfg, dataStore, pendingRegistry, realtimeHub)
 	emailCodeService := service.NewEmailCodeService(dataStore, cfg.MasterKey, email.SMTPConfigFromConfig(cfg), nil)
 	startPendingExpirationWorker(ctx, cfg, chatService, logger)
 	startEmailCodeCleanupWorker(ctx, emailCodeService, logger)

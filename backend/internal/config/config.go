@@ -44,6 +44,7 @@ type Config struct {
 	MetricsEnabled                        bool
 	UploadMaxBytes                        int64
 	StorageDefaultQuotaBytes              int64
+	StorageBlockNewConversations          bool
 	StorageCleanupEnabled                 bool
 	StorageCleanupTime                    string
 	StorageCleanupKeepRecentConversations int
@@ -141,6 +142,7 @@ func Default(mode Mode, backendRoot string) Config {
 		MetricsEnabled:                        false,
 		UploadMaxBytes:                        10 << 20,
 		StorageDefaultQuotaBytes:              0,
+		StorageBlockNewConversations:          false,
 		StorageCleanupEnabled:                 false,
 		StorageCleanupTime:                    "03:00",
 		StorageCleanupKeepRecentConversations: 100,
@@ -232,6 +234,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 		}
 		cfg.StorageDefaultQuotaBytes = value
 	}
+	cfg.StorageBlockNewConversations = parseBool(os.Getenv("CHATAPI_STORAGE_BLOCK_NEW_CONVERSATIONS"), cfg.StorageBlockNewConversations)
 	cfg.StorageCleanupEnabled = parseBool(os.Getenv("CHATAPI_STORAGE_CLEANUP_ENABLED"), cfg.StorageCleanupEnabled)
 	cfg.StorageCleanupTime = firstNonEmpty(os.Getenv("CHATAPI_STORAGE_CLEANUP_TIME"), cfg.StorageCleanupTime)
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_CONVERSATIONS")); raw != "" {

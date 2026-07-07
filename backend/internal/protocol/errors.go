@@ -48,6 +48,15 @@ func RateLimitError(message string, code string) *RequestError {
 	}
 }
 
+func InsufficientStorageError(message string, code string) *RequestError {
+	return &RequestError{
+		StatusCode: 507,
+		Type:       "insufficient_storage",
+		Code:       code,
+		Message:    message,
+	}
+}
+
 func ValidateRequest(protocolValue string, body map[string]any) error {
 	if body == nil {
 		return InvalidRequest("request body must be a JSON object", "")

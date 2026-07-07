@@ -31,6 +31,7 @@ type SystemSettings struct {
 	ImageMaxSingleBytes                       int64          `json:"image_max_single_bytes"`
 	ImageMaxRequestBytes                      int64          `json:"image_max_request_bytes"`
 	ImageMaxTotalBytes                        int64          `json:"image_max_total_bytes"`
+	StorageBlockNewConversations              bool           `json:"storage_block_new_conversations"`
 	PendingMaxPerUser                         int            `json:"pending_max_per_user"`
 	PendingMaxAgeHours                        int            `json:"pending_max_age_hours"`
 	PendingMaxOutputChars                     int            `json:"pending_max_output_chars"`
@@ -86,6 +87,7 @@ func (s *SystemSettingsService) Schema() ConfigSchema {
 			{Key: "image_max_single_bytes", ValueType: "integer", DefaultValue: defaults.ImageMaxSingleBytes, Public: true, AdminWriteOnly: true, Description: "Maximum bytes for a single uploaded image.", Validation: map[string]any{"min": 0}},
 			{Key: "image_max_request_bytes", ValueType: "integer", DefaultValue: defaults.ImageMaxRequestBytes, Public: true, AdminWriteOnly: true, Description: "Maximum bytes accepted by one image upload request.", Validation: map[string]any{"min": 0}},
 			{Key: "image_max_total_bytes", ValueType: "integer", DefaultValue: defaults.ImageMaxTotalBytes, Public: true, AdminWriteOnly: true, Description: "Default total image storage quota per user.", Validation: map[string]any{"min": 0}},
+			{Key: "storage_block_new_conversations", ValueType: "boolean", DefaultValue: defaults.StorageBlockNewConversations, Public: true, AdminWriteOnly: true, Description: "Block new conversations when a user is already over the effective storage quota."},
 			{Key: "pending_max_per_user", ValueType: "integer", DefaultValue: defaults.PendingMaxPerUser, Public: true, AdminWriteOnly: true, Description: "Maximum active pending turns per user.", Validation: map[string]any{"min": 0}},
 			{Key: "pending_max_age_hours", ValueType: "integer", DefaultValue: defaults.PendingMaxAgeHours, Public: true, AdminWriteOnly: true, Description: "Maximum pending turn age before cleanup.", Validation: map[string]any{"min": 0}},
 			{Key: "pending_max_output_chars", ValueType: "integer", DefaultValue: defaults.PendingMaxOutputChars, Public: true, AdminWriteOnly: true, Description: "Maximum draft output length kept in memory.", Validation: map[string]any{"min": 0}},
@@ -173,6 +175,7 @@ func defaultSystemSettings(cfg config.Config) SystemSettings {
 		ImageMaxSingleBytes:                       cfg.UploadMaxBytes,
 		ImageMaxRequestBytes:                      cfg.UploadMaxBytes,
 		ImageMaxTotalBytes:                        cfg.StorageDefaultQuotaBytes,
+		StorageBlockNewConversations:              cfg.StorageBlockNewConversations,
 		PendingMaxPerUser:                         10,
 		PendingMaxAgeHours:                        pendingAgeHours,
 		PendingMaxOutputChars:                     300,
@@ -233,6 +236,9 @@ func applySystemSettingsMap(target *SystemSettings, values map[string]any) {
 	if value, ok := values["image_max_total_bytes"]; ok {
 		target.ImageMaxTotalBytes = settingsInt64(value, target.ImageMaxTotalBytes)
 	}
+	if value, ok := values["storage_block_new_conversations"]; ok {
+		target.StorageBlockNewConversations = settingsBool(value, target.StorageBlockNewConversations)
+	}
 	if value, ok := values["pending_max_per_user"]; ok {
 		target.PendingMaxPerUser = settingsInt(value, target.PendingMaxPerUser)
 	}
@@ -265,6 +271,7 @@ func systemSettingsMap(input SystemSettings) map[string]any {
 		"image_max_single_bytes":                        input.ImageMaxSingleBytes,
 		"image_max_request_bytes":                       input.ImageMaxRequestBytes,
 		"image_max_total_bytes":                         input.ImageMaxTotalBytes,
+		"storage_block_new_conversations":               input.StorageBlockNewConversations,
 		"pending_max_per_user":                          input.PendingMaxPerUser,
 		"pending_max_age_hours":                         input.PendingMaxAgeHours,
 		"pending_max_output_chars":                      input.PendingMaxOutputChars,

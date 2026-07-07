@@ -24,6 +24,7 @@ type RedactedConfig struct {
 	MetricsEnabled                        bool     `json:"metrics_enabled"`
 	UploadMaxBytes                        int64    `json:"upload_max_bytes"`
 	StorageDefaultQuotaBytes              int64    `json:"storage_default_quota_bytes"`
+	StorageBlockNewConversations          bool     `json:"storage_block_new_conversations"`
 	StorageCleanupEnabled                 bool     `json:"storage_cleanup_enabled"`
 	StorageCleanupTime                    string   `json:"storage_cleanup_time"`
 	StorageCleanupKeepRecentConversations int      `json:"storage_cleanup_keep_recent_conversations"`
@@ -86,6 +87,7 @@ func (c Config) Redacted() RedactedConfig {
 		MetricsEnabled:                        c.MetricsEnabled,
 		UploadMaxBytes:                        c.UploadMaxBytes,
 		StorageDefaultQuotaBytes:              c.StorageDefaultQuotaBytes,
+		StorageBlockNewConversations:          c.StorageBlockNewConversations,
 		StorageCleanupEnabled:                 c.StorageCleanupEnabled,
 		StorageCleanupTime:                    c.StorageCleanupTime,
 		StorageCleanupKeepRecentConversations: c.StorageCleanupKeepRecentConversations,

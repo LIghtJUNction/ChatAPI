@@ -86,6 +86,7 @@ func writeSystemSettingsResponse(w http.ResponseWriter, settings service.SystemS
 		"image_max_single_bytes":                        settings.ImageMaxSingleBytes,
 		"image_max_request_bytes":                       settings.ImageMaxRequestBytes,
 		"image_max_total_bytes":                         settings.ImageMaxTotalBytes,
+		"storage_block_new_conversations":               settings.StorageBlockNewConversations,
 		"pending_max_per_user":                          settings.PendingMaxPerUser,
 		"pending_max_age_hours":                         settings.PendingMaxAgeHours,
 		"pending_max_output_chars":                      settings.PendingMaxOutputChars,

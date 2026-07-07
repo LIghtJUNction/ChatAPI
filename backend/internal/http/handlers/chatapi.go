@@ -65,7 +65,11 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 
 	responseBody, err := h.Service.CreatePendingResponse(r.Context(), parsed, body, requestMeta)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, protocol.BuildErrorBody(requestFormat, protocol.InternalError(err.Error())))
+		requestErr := protocol.InternalError(err.Error())
+		if errors.Is(err, service.ErrStorageConversationQuotaExceeded) {
+			requestErr = protocol.InsufficientStorageError(err.Error(), "storage_quota_exceeded")
+		}
+		writeJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(requestFormat, requestErr))
 		return
 	}
 	writeJSON(w, http.StatusOK, responseBody)
@@ -202,7 +206,11 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 
 	turn, conversation, err := h.Service.CreatePendingStream(r.Context(), request, body, requestMeta)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, protocol.BuildErrorBody(request.Protocol.String(), protocol.InternalError(err.Error())))
+		requestErr := protocol.InternalError(err.Error())
+		if errors.Is(err, service.ErrStorageConversationQuotaExceeded) {
+			requestErr = protocol.InsufficientStorageError(err.Error(), "storage_quota_exceeded")
+		}
+		writeJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(request.Protocol.String(), requestErr))
 		return
 	}
 

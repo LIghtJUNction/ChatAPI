@@ -182,6 +182,18 @@ func TestFromEnvLoadsStorageQuota(t *testing.T) {
 	}
 }
 
+func TestFromEnvLoadsStorageBlockNewConversations(t *testing.T) {
+	t.Setenv("CHATAPI_STORAGE_BLOCK_NEW_CONVERSATIONS", "1")
+
+	cfg, err := FromEnvUnchecked(ModeLab, t.TempDir())
+	if err != nil {
+		t.Fatalf("load storage block new conversations config: %v", err)
+	}
+	if !cfg.StorageBlockNewConversations {
+		t.Fatalf("expected storage block new conversations to be enabled: %#v", cfg)
+	}
+}
+
 func TestFromEnvLoadsStorageCleanupConfig(t *testing.T) {
 	t.Setenv("CHATAPI_STORAGE_CLEANUP_ENABLED", "1")
 	t.Setenv("CHATAPI_STORAGE_CLEANUP_TIME", "04:30")

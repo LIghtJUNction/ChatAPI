@@ -45,6 +45,7 @@ func TestSystemSettingsServiceSchema(t *testing.T) {
 	}
 	foundEmailProvider := false
 	foundImageUsage := false
+	foundStorageBlockNewConversations := false
 	for _, field := range schema.Fields {
 		switch field.Key {
 		case "email_provider":
@@ -58,9 +59,11 @@ func TestSystemSettingsServiceSchema(t *testing.T) {
 			if !field.ReadOnly {
 				t.Fatalf("expected image_usage to be read only: %#v", field)
 			}
+		case "storage_block_new_conversations":
+			foundStorageBlockNewConversations = true
 		}
 	}
-	if !foundEmailProvider || !foundImageUsage {
+	if !foundEmailProvider || !foundImageUsage || !foundStorageBlockNewConversations {
 		t.Fatalf("expected email_provider and image_usage fields in schema: %#v", schema.Fields)
 	}
 }

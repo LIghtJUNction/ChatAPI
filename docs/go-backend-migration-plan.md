@@ -1110,7 +1110,7 @@ GC 设置：
 - 支持超额策略：
   - `block_new_uploads`：阻止新图片上传。当前 Go 重构分支已实现。
   - `auto_prune_old_conversations`：自动清理旧会话。当前 Go 重构分支已在每日存储维护中实现，按用户有效配额找出超额用户，并复用 `keep_recent_conversations` / `keep_recent_days` 保留策略删除旧会话。
-  - `block_new_conversations`：阻止新会话。当前尚未实现，需谨慎评估是否会破坏调试流程。
+  - `block_new_conversations`：阻止新会话。当前 Go 重构分支已实现首版：管理员可通过 `POST /api/config/system` 设置 `storage_block_new_conversations=true`，或通过 `.env` 默认值 `CHATAPI_STORAGE_BLOCK_NEW_CONVERSATIONS=1` 启用；当用户当前估算占用已超过其有效配额时，新进入 `/v1/responses`、`/v1/chat/completions`、`/v1/messages` 的会话创建会直接返回 `507 storage_quota_exceeded`，而不是继续创建 waiting conversation。
 - 自动清理必须优先删除最旧、最久未活跃的会话，并同步清理孤儿图片。当前 Go 重构分支按每用户最近活跃时间排序并保留最近 N 个或最近 N 天，孤儿图片清理由每日维护同批执行。
 - 每次自动清理都要写审计日志，包括用户、释放空间、删除会话数、删除图片数和触发原因。当前每日存储维护已记录 `scheduled_cleanup` 审计 metadata，后续可进一步拆出 per-user quota prune 审计事件。
 

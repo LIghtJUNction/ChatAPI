@@ -2128,10 +2128,11 @@ func TestConfigSystemRoutes(t *testing.T) {
 	}
 
 	updateResp := env.postJSON(t, "/api/config/system", map[string]any{
-		"title_enabled":           true,
-		"title":                   "ChatAPI Test",
-		"public_statistics":       true,
-		"ntfy_private_url_policy": "admin",
+		"title_enabled":                   true,
+		"title":                           "ChatAPI Test",
+		"public_statistics":               true,
+		"ntfy_private_url_policy":         "admin",
+		"storage_block_new_conversations": true,
 		"registration_email_domain_restriction_enabled": true,
 		"registration_email_domains":                    "example.com,example.org",
 		"pending_max_output_chars":                      512,
@@ -2141,6 +2142,9 @@ func TestConfigSystemRoutes(t *testing.T) {
 	}
 	if nestedPathString(updateResp, "ntfy_private_url_policy") != "admin" {
 		t.Fatalf("unexpected ntfy policy in updated config: %#v", updateResp)
+	}
+	if !nestedPathBool(updateResp, "storage_block_new_conversations") {
+		t.Fatalf("unexpected storage_block_new_conversations in updated config: %#v", updateResp)
 	}
 
 	getResp := env.getJSON(t, "/api/config/system", http.StatusOK)
@@ -2160,6 +2164,106 @@ func TestConfigSystemSchemaRoute(t *testing.T) {
 	}
 	if !containsMapItemWithStringField(schema["fields"], "key", "image_usage") {
 		t.Fatalf("expected image_usage in system settings schema: %#v", resp)
+	}
+	if !containsMapItemWithStringField(schema["fields"], "key", "storage_block_new_conversations") {
+		t.Fatalf("expected storage_block_new_conversations in system settings schema: %#v", resp)
+	}
+}
+
+func TestProtocolRequestsRejectNewConversationsWhenStorageOverQuota(t *testing.T) {
+	env := newTestEnv(t)
+
+	uploadResp := env.postMultipart(t, "/api/uploads/imgs", "file", "quota.png", tinyPNG(), http.StatusOK)
+	if nestedPathString(uploadResp, "upload", "filename") == "" {
+		t.Fatalf("expected uploaded file before quota block test: %#v", uploadResp)
+	}
+	env.putJSON(t, "/api/admin/storage/users/lab-user/quota", map[string]any{
+		"quota_bytes": len(tinyPNG()) - 1,
+	}, http.StatusOK)
+	env.postJSON(t, "/api/config/system", map[string]any{
+		"storage_block_new_conversations": true,
+	}, http.StatusOK)
+
+	cases := []struct {
+		name         string
+		path         string
+		body         map[string]any
+		validateBody func(t *testing.T, payload map[string]any)
+	}{
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: map[string]any{
+				"model": "quota-block-model",
+				"input": "new conversation should be blocked",
+			},
+			validateBody: func(t *testing.T, payload map[string]any) {
+				t.Helper()
+				if nestedPathString(payload, "error", "code") != "storage_quota_exceeded" {
+					t.Fatalf("unexpected responses quota error payload: %#v", payload)
+				}
+			},
+		},
+		{
+			name: "chat_completions_stream",
+			path: "/v1/chat/completions",
+			body: map[string]any{
+				"model":  "quota-block-model",
+				"stream": true,
+				"messages": []map[string]any{
+					{"role": "user", "content": "streamed conversation should be blocked"},
+				},
+			},
+			validateBody: func(t *testing.T, payload map[string]any) {
+				t.Helper()
+				if nestedPathString(payload, "error", "type") != "insufficient_storage" {
+					t.Fatalf("unexpected chat completions quota error payload: %#v", payload)
+				}
+			},
+		},
+		{
+			name: "anthropic_messages",
+			path: "/v1/messages",
+			body: map[string]any{
+				"model": "quota-block-model",
+				"messages": []map[string]any{
+					{
+						"role": "user",
+						"content": []map[string]any{
+							{"type": "text", "text": "anthropic conversation should be blocked"},
+						},
+					},
+				},
+			},
+			validateBody: func(t *testing.T, payload map[string]any) {
+				t.Helper()
+				if nestedPathString(payload, "type") != "error" || nestedPathString(payload, "error", "type") != "insufficient_storage" {
+					t.Fatalf("unexpected anthropic quota error payload: %#v", payload)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, body := postExternalText(t, env.server.URL+tc.path, nil, tc.body)
+			if status != http.StatusInsufficientStorage {
+				t.Fatalf("expected insufficient storage rejection: status=%d body=%q", status, body)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(body), &payload); err != nil {
+				t.Fatalf("decode quota rejection payload: %v body=%q", err, body)
+			}
+			tc.validateBody(t, payload)
+		})
+	}
+
+	conversations, err := env.store.ListConversations(context.Background())
+	if err != nil {
+		t.Fatalf("list conversations after quota rejection: %v", err)
+	}
+	if len(conversations) != 0 {
+		t.Fatalf("expected no conversations to be created when quota blocks new conversations: %#v", conversations)
 	}
 }
 
@@ -7742,7 +7846,7 @@ func newTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*config.Co
 		cfg.RealtimeMaxConnectionsPerUser,
 		cfg.RealtimeWebUIReservedPerUser,
 	))
-	chatService := service.NewChatAPIService(sqliteStore, pendingRegistry, realtimeHub)
+	chatService := service.NewChatAPIService(cfg, sqliteStore, pendingRegistry, realtimeHub)
 	appKeyService := service.NewAppAPIKeyService(sqliteStore)
 	modelKeyService := service.NewModelAPIKeyService(sqliteStore, cfg.MasterKey)
 
@@ -7807,7 +7911,7 @@ func newPostgresTestEnvWithConfig(t *testing.T, mode config.Mode, mutate func(*c
 		cfg.RealtimeMaxConnectionsPerUser,
 		cfg.RealtimeWebUIReservedPerUser,
 	))
-	chatService := service.NewChatAPIService(pgStore, pendingRegistry, realtimeHub)
+	chatService := service.NewChatAPIService(cfg, pgStore, pendingRegistry, realtimeHub)
 	appKeyService := service.NewAppAPIKeyService(pgStore)
 	modelKeyService := service.NewModelAPIKeyService(pgStore, cfg.MasterKey)
 

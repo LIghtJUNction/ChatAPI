@@ -9,11 +9,15 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/protocol"
 	"github.com/zyf/chatapi/internal/store"
 )
 
+var ErrStorageConversationQuotaExceeded = errors.New("storage quota exceeded for new conversations")
+
 type ChatAPIService struct {
+	cfg      config.Config
 	store    store.Store
 	pending  *PendingRegistry
 	realtime *RealtimeHub
@@ -26,8 +30,9 @@ type ExpirePendingTurnsResult struct {
 	ExpiredActiveTurns   int `json:"expired_active_turns"`
 }
 
-func NewChatAPIService(dataStore store.Store, pending *PendingRegistry, realtime *RealtimeHub) *ChatAPIService {
+func NewChatAPIService(cfg config.Config, dataStore store.Store, pending *PendingRegistry, realtime *RealtimeHub) *ChatAPIService {
 	return &ChatAPIService{
+		cfg:      cfg,
 		store:    dataStore,
 		pending:  pending,
 		realtime: realtime,
@@ -64,6 +69,10 @@ func (s *ChatAPIService) CreatePendingStream(ctx context.Context, request protoc
 }
 
 func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.TurnRequest, body map[string]any, requestMeta store.Request) (*PendingTurn, store.Conversation, store.Message, error) {
+	ownerID := OwnerIDFromContext(ctx)
+	if err := s.ensureConversationAdmission(ctx, ownerID); err != nil {
+		return nil, store.Conversation{}, store.Message{}, err
+	}
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
 	conversationID := "conv_" + uuid.NewString()
@@ -72,7 +81,7 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 		ConversationID:   conversationID,
 		RequestID:        requestID,
 		ResponseID:       responseID,
-		OwnerID:          OwnerIDFromContext(ctx),
+		OwnerID:          ownerID,
 		RequestFormat:    parsed.Protocol.String(),
 		Model:            parsed.Model,
 		SystemContent:    parsed.SystemContent,
@@ -111,6 +120,50 @@ func (s *ChatAPIService) createPendingTurn(ctx context.Context, parsed protocol.
 	s.realtime.PublishConversationUpsert(conversation, []store.Message{message})
 	s.tryAutomationComplete(ctx, parsed, conversationID, responseID)
 	return turn, conversation, message, nil
+}
+
+func (s *ChatAPIService) ensureConversationAdmission(ctx context.Context, ownerID string) error {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return nil
+	}
+	enabled, err := s.storageBlockNewConversationsEnabled(ctx)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	monitor := NewStorageMonitorService(s.cfg, s.store)
+	usage, err := monitor.UserUsage(ctx, ownerID)
+	if err != nil {
+		return err
+	}
+	if usage.StorageQuotaBytes <= 0 || !usage.StorageOverQuota {
+		return nil
+	}
+	return ErrStorageConversationQuotaExceeded
+}
+
+func (s *ChatAPIService) storageBlockNewConversationsEnabled(ctx context.Context) (bool, error) {
+	enabled := s.cfg.StorageBlockNewConversations
+	if s == nil || s.store == nil {
+		return enabled, nil
+	}
+	item, err := s.store.GetSystemConfig(ctx, systemSettingsConfigKey)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return enabled, nil
+		}
+		return false, err
+	}
+	if raw, ok := item.Value["storage_block_new_conversations"]; ok {
+		enabled = settingsBool(raw, enabled)
+	}
+	return enabled, nil
 }
 
 func (s *ChatAPIService) tryAutomationComplete(ctx context.Context, request protocol.TurnRequest, conversationID string, responseID string) {

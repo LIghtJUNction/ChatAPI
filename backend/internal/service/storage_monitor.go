@@ -256,6 +256,27 @@ func (s *StorageMonitorService) Users(ctx context.Context) ([]UserStorageUsage, 
 	return items, nil
 }
 
+func (s *StorageMonitorService) UserUsage(ctx context.Context, ownerID string) (UserStorageUsage, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return UserStorageUsage{}, errors.New("owner_id is required")
+	}
+	users, err := s.Users(ctx)
+	if err != nil {
+		return UserStorageUsage{}, err
+	}
+	for _, item := range users {
+		if item.UserID == ownerID {
+			return item, nil
+		}
+	}
+	return UserStorageUsage{
+		UserID:                   ownerID,
+		StorageQuotaDefaultBytes: s.cfg.StorageDefaultQuotaBytes,
+		StorageQuotaBytes:        s.cfg.StorageDefaultQuotaBytes,
+	}, nil
+}
+
 func (s *StorageMonitorService) SetUserQuota(ctx context.Context, ownerID string, quotaBytes int64) (store.StorageUserQuota, error) {
 	ownerID = strings.TrimSpace(ownerID)
 	if ownerID == "" {

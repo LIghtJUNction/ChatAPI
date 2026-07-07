@@ -104,6 +104,37 @@ func BuildWorkspaceToolCallContextSchema() WorkspaceToolCallContextSchema {
 					"Browser-direct upstream assistant remains the default path for arbitrary user-configured upstream models.",
 				},
 			},
+			{
+				Name:          "assist_parse",
+				Method:        "POST",
+				Path:          "/api/workspace/tool-call/assist/parse",
+				Description:   "Parse and validate browser-side upstream assistant output against the current workspace target without submitting the draft.",
+				RequiresActor: "interactive_user",
+				Fields: []ConfigFieldSchema{
+					{Key: "provider", ValueType: "string", DefaultValue: "browser_upstream", Public: false, AdminWriteOnly: true, Description: "Optional upstream provider identifier used only for metadata echo and audit."},
+					{Key: "model", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional upstream model id used only for metadata echo and audit."},
+					{Key: "request_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional request id target. Required when conversation_id is omitted."},
+					{Key: "conversation_id", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Optional conversation id target. Required when request_id is omitted."},
+					{Key: "raw_output", ValueType: "string", DefaultValue: "", Public: false, AdminWriteOnly: true, Description: "Raw upstream model output captured by the browser-side assistant path."},
+				},
+				ResponseSections: []string{
+					"assist.provider",
+					"assist.model",
+					"assist.explanation",
+					"assist.tool_call",
+					"assist.confidence",
+					"assist.warnings",
+					"assist.validation_errors",
+					"assist.valid_draft",
+					"assist.raw_output",
+					"assist.request",
+				},
+				Notes: []string{
+					"At least one of request_id or conversation_id must be provided.",
+					"The endpoint does not contact any upstream model and never accepts upstream API keys.",
+					"This route is intended for browser-direct upstream assistants so the frontend can reuse backend parsing and validation logic before the user manually submits a tool call.",
+				},
+			},
 		},
 	}
 }

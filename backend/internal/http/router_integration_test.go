@@ -1488,7 +1488,7 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	schemaResp := env.getJSON(t, "/api/workspace/tool-call/schema", http.StatusOK)
 	schema := schemaResp["schema"].(map[string]any)
 	operations := schema["operations"].([]any)
-	if len(operations) != 3 {
+	if len(operations) != 4 {
 		t.Fatalf("unexpected tool-call schema response: %#v", schemaResp)
 	}
 	operation := operations[0].(map[string]any)
@@ -1511,6 +1511,13 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	}
 	if !containsStringValue(streamOperation["response_sections"], "event: assist.completed") {
 		t.Fatalf("expected assist.completed event in tool-call stream schema: %#v", schemaResp)
+	}
+	parseOperation := operations[3].(map[string]any)
+	if nestedString(parseOperation, "name") != "assist_parse" || nestedString(parseOperation, "path") != "/api/workspace/tool-call/assist/parse" {
+		t.Fatalf("unexpected tool-call assist parse operation: %#v", schemaResp)
+	}
+	if !containsMapItemWithStringField(parseOperation["fields"], "key", "raw_output") {
+		t.Fatalf("expected raw_output field in tool-call assist parse schema: %#v", schemaResp)
 	}
 
 	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
@@ -1741,6 +1748,17 @@ func TestWorkspaceToolCallAssistContextRejectsProgrammaticActors(t *testing.T) {
 	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
 		t.Fatalf("expected app key tool-call assist rejection: status=%d body=%q", status, body)
 	}
+	status, body, _ = env.postJSONWithCookieText(t, "/api/workspace/tool-call/assist/parse", map[string]any{
+		"provider":   "browser_upstream",
+		"model":      "demo",
+		"request_id": "req_demo",
+		"raw_output": "{}",
+	}, nil, map[string]string{
+		"Authorization": "Bearer " + appKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected app key tool-call assist parse rejection: status=%d body=%q", status, body)
+	}
 	status, body, _ = env.postJSONWithCookieText(t, "/api/workspace/tool-call/assist/stream", map[string]any{
 		"provider":   "kirari",
 		"model":      "demo",
@@ -1774,6 +1792,17 @@ func TestWorkspaceToolCallAssistContextRejectsProgrammaticActors(t *testing.T) {
 	})
 	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
 		t.Fatalf("expected model key tool-call assist rejection: status=%d body=%q", status, body)
+	}
+	status, body, _ = env.postJSONWithCookieText(t, "/api/workspace/tool-call/assist/parse", map[string]any{
+		"provider":   "browser_upstream",
+		"model":      "demo",
+		"request_id": "req_demo",
+		"raw_output": "{}",
+	}, nil, map[string]string{
+		"Authorization": "Bearer " + modelKey,
+	})
+	if status != http.StatusUnauthorized || !strings.Contains(body, "session required") {
+		t.Fatalf("expected model key tool-call assist parse rejection: status=%d body=%q", status, body)
 	}
 	status, body, _ = env.postJSONWithCookieText(t, "/api/workspace/tool-call/assist/stream", map[string]any{
 		"provider":   "kirari",
@@ -1883,6 +1912,80 @@ func TestWorkspaceToolCallAssistKirariLifecycle(t *testing.T) {
 	}
 	if nestedString(assistMetadata, "issuer_url") != provider.Issuer() || nestedString(assistMetadata, "subject") != "kirari-test-sub" {
 		t.Fatalf("unexpected kirari audit identity metadata: %#v", assistMetadata)
+	}
+
+	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
+		"text": "done",
+		"mode": "assistant_message",
+	}, http.StatusOK)
+	<-resultCh
+}
+
+func TestWorkspaceToolCallAssistParseLifecycle(t *testing.T) {
+	env := newTestEnv(t)
+
+	resultCh := startJSONRequest(t, env.server.URL+"/v1/responses", map[string]any{
+		"model": "demo-browser-assist-parse",
+		"input": []map[string]any{
+			{
+				"type": "message",
+				"role": "user",
+				"content": []map[string]any{
+					{"type": "input_text", "text": "请准备查询北京天气的 tool call"},
+				},
+			},
+		},
+		"tools": []map[string]any{
+			{
+				"type": "function",
+				"function": map[string]any{
+					"name":        "lookup_weather",
+					"description": "Lookup the weather.",
+					"parameters": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"city": map[string]any{"type": "string"},
+							"unit": map[string]any{"type": "string"},
+						},
+					},
+				},
+			},
+		},
+	})
+	conversation := env.waitForWaitingConversation(t, "请准备查询北京天气的 tool call")
+	requestID := env.requestIDForConversation(t, conversation["id"].(string))
+
+	parseResp := env.postJSON(t, "/api/workspace/tool-call/assist/parse", map[string]any{
+		"provider":   "browser_upstream",
+		"model":      "demo-local-model",
+		"request_id": requestID,
+		"raw_output": "```json\n{\"explanation\":\"建议调用天气工具查询北京天气。\",\"tool_call\":{\"name\":\"lookup_weather\",\"arguments\":{\"city\":\"Beijing\",\"unit\":\"c\"}},\"confidence\":\"high\",\"warnings\":[\"city inferred from recent user message\"]}\n```",
+	}, http.StatusOK)
+	if nestedPathString(parseResp, "assist", "provider") != "browser_upstream" || nestedPathString(parseResp, "assist", "model") != "demo-local-model" {
+		t.Fatalf("unexpected assist parse provider/model: %#v", parseResp)
+	}
+	if !nestedPathBool(parseResp, "assist", "valid_draft") {
+		t.Fatalf("expected valid parsed draft: %#v", parseResp)
+	}
+	if nestedPathString(parseResp, "assist", "tool_call", "name") != "lookup_weather" {
+		t.Fatalf("unexpected parsed tool call name: %#v", parseResp)
+	}
+	if !containsStringValue(nestedPath(parseResp, "assist", "warnings"), "city inferred from recent user message") {
+		t.Fatalf("unexpected parsed warnings: %#v", parseResp)
+	}
+	assertAuditCountForActor(t, env, "lab-user", "user.tool_call", "workspace_tool_call", requestID, "assist_parse", "success", 1)
+
+	invalidResp := env.postJSON(t, "/api/workspace/tool-call/assist/parse", map[string]any{
+		"provider":   "browser_upstream",
+		"model":      "demo-local-model",
+		"request_id": requestID,
+		"raw_output": "{\"explanation\":\"wrong tool\",\"tool_call\":{\"name\":\"not_declared\",\"arguments\":{}}}",
+	}, http.StatusOK)
+	if nestedPathBool(invalidResp, "assist", "valid_draft") {
+		t.Fatalf("expected invalid parsed draft for undeclared tool: %#v", invalidResp)
+	}
+	if !strings.Contains(fmt.Sprintf("%v", nestedPath(invalidResp, "assist", "validation_errors")), "not_declared") {
+		t.Fatalf("expected undeclared tool validation error: %#v", invalidResp)
 	}
 
 	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{

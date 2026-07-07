@@ -113,6 +113,48 @@ func (h WorkspaceToolCallHandler) Assist(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (h WorkspaceToolCallHandler) ParseAssistOutput(w http.ResponseWriter, r *http.Request) {
+	actor, ok := service.RequestActorFromContext(r.Context())
+	if !ok || !service.IsInteractiveUserActor(actor) {
+		http.Error(w, "session required", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Provider       string `json:"provider"`
+		Model          string `json:"model"`
+		RequestID      string `json:"request_id"`
+		ConversationID string `json:"conversation_id"`
+		RawOutput      string `json:"raw_output"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	startedAt := time.Now()
+	result, err := h.AssistService.Parse(r.Context(), actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID, body.RawOutput)
+	if err != nil {
+		h.recordAssist(r, actor.UserID, "assist_parse", body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, nil, err)
+		switch {
+		case errors.Is(err, service.ErrToolCallAssistRawOutputRequired),
+			errors.Is(err, service.ErrToolCallAssistTargetRequired),
+			errors.Is(err, service.ErrToolCallAssistNoTools):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, service.ErrForbidden):
+			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, store.ErrNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	h.recordAssist(r, actor.UserID, "assist_parse", body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, &result, nil)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"assist": result,
+	})
+}
+
 func (h WorkspaceToolCallHandler) AssistStream(w http.ResponseWriter, r *http.Request) {
 	actor, ok := service.RequestActorFromContext(r.Context())
 	if !ok || !service.IsInteractiveUserActor(actor) {

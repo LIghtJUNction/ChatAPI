@@ -14,11 +14,12 @@ import (
 )
 
 var (
-	ErrToolCallAssistProviderRequired = errors.New("assist provider is required")
-	ErrToolCallAssistModelRequired    = errors.New("assist model is required")
-	ErrToolCallAssistUnsupported      = errors.New("assist provider is not supported")
-	ErrToolCallAssistNoTools          = errors.New("assist target does not declare any tools")
-	ErrToolCallAssistInvalidOutput    = errors.New("assist output is invalid")
+	ErrToolCallAssistProviderRequired  = errors.New("assist provider is required")
+	ErrToolCallAssistModelRequired     = errors.New("assist model is required")
+	ErrToolCallAssistRawOutputRequired = errors.New("assist raw_output is required")
+	ErrToolCallAssistUnsupported       = errors.New("assist provider is not supported")
+	ErrToolCallAssistNoTools           = errors.New("assist target does not declare any tools")
+	ErrToolCallAssistInvalidOutput     = errors.New("assist output is invalid")
 )
 
 type ToolCallAssistResult struct {
@@ -110,6 +111,26 @@ func (s *ToolCallAssistService) ExecuteStream(ctx context.Context, userID string
 	default:
 		return nil, ErrToolCallAssistUnsupported
 	}
+}
+
+func (s *ToolCallAssistService) Parse(ctx context.Context, userID string, provider string, model string, requestID string, conversationID string, rawOutput string) (ToolCallAssistResult, error) {
+	if s == nil || s.workspace == nil {
+		return ToolCallAssistResult{}, ErrForbidden
+	}
+	rawOutput = strings.TrimSpace(rawOutput)
+	if rawOutput == "" {
+		return ToolCallAssistResult{}, ErrToolCallAssistRawOutputRequired
+	}
+	contextPayload, err := s.workspace.AssistContext(ctx, userID, requestID, conversationID)
+	if err != nil {
+		return ToolCallAssistResult{}, err
+	}
+	normalizedTools := protocol.NormalizeToolSchemas(contextPayload.Request.ToolSchemas)
+	if len(normalizedTools) == 0 {
+		return ToolCallAssistResult{}, ErrToolCallAssistNoTools
+	}
+	requestMeta := assistRequestMeta(contextPayload)
+	return finalizeAssistResult(normalizeProviderName(provider), strings.TrimSpace(model), requestMeta, rawOutput, normalizedTools), nil
 }
 
 func (s *ToolCallAssistService) executeKirari(ctx context.Context, userID string, model string, contextPayload ToolCallAssistContext) (ToolCallAssistResult, error) {
@@ -405,6 +426,11 @@ func decodeAssistOutput(raw string) (map[string]any, error) {
 	if parsed, err := decodeJSONObject(raw); err == nil {
 		return parsed, nil
 	}
+	if fenced := extractFencedJSONObject(raw); fenced != "" {
+		if parsed, err := decodeJSONObject(fenced); err == nil {
+			return parsed, nil
+		}
+	}
 	start := strings.Index(raw, "{")
 	end := strings.LastIndex(raw, "}")
 	if start >= 0 && end > start {
@@ -413,6 +439,31 @@ func decodeAssistOutput(raw string) (map[string]any, error) {
 		}
 	}
 	return nil, ErrToolCallAssistInvalidOutput
+}
+
+func extractFencedJSONObject(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
+	var builder strings.Builder
+	inFence := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			if inFence {
+				break
+			}
+			inFence = true
+			continue
+		}
+		if inFence {
+			builder.WriteString(line)
+			builder.WriteByte('\n')
+		}
+	}
+	return strings.TrimSpace(builder.String())
 }
 
 func decodeJSONObject(raw string) (map[string]any, error) {

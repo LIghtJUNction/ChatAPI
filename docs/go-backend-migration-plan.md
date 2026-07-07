@@ -94,7 +94,7 @@
 - 交互式配置 schema 已开始显式暴露：`GET /api/user/config/schema` 返回当前支持的用户偏好字段、默认值和保留前缀；`GET /api/config/system/schema` 返回系统设置字段、默认值、只读项和枚举/最小值等校验 metadata，避免前端和 CLI 继续硬编码这批设置键。原始 `GET/POST /api/admin/config` 目前仍保留为自由 JSON object 持久化接口，不额外伪造一层 schema。
 - 管理员自由系统配置 schema 已开始显式暴露：`GET /api/admin/config/schema` 当前声明 `GET/POST /api/admin/config` 的操作语义，明确 `POST` 既支持原始顶层对象也支持 `{config:{...}}` 包裹格式，同时要求每个顶层 value 必须是对象，避免外部程序误把标量/数组写入底层 `config` 表。
 - Tool Call 辅助上下文接口已落地最小版本：`GET /api/workspace/tool-call/assist-context` 当前要求交互式用户 actor，接受 `request_id` 或 `conversation_id`，返回当前用户可见的 `request`、解析后的 `parsed` 视图、`conversation`、`messages`、当前 `draft`，以及 `assist_schema`、`upstream_assistant_schema`、`upstream_protocol_templates`、`upstream_hints`、`upstream_input_hints`。其中 `parsed.normalized_tool_schemas` 会把不同协议/客户端风格的原始 `tool_schemas` 统一投影成稳定结构 `{name, description, parameters, type}`，减少前端继续手写协议差异适配。`assist_schema` 会显式描述浏览器端期望的大模型结构化输出 JSON Schema、confidence 枚举和前端校验规则；`upstream_assistant_schema` 会声明浏览器本地上游配置字段、敏感字段、默认配置、跨字段校验规则和稳定错误码；`upstream_protocol_templates` 会按 `responses` / `chat_completions` / `anthropic_messages` 提供默认 path、请求体形状占位符和构造提示，用于统一浏览器端上游请求拼装；`upstream_hints` 会返回当前实例可见 base URL 列表，并可结合可选 `candidate_base_url` 提前判断是否会递归打回当前 ChatAPI；`upstream_input_hints` 会给出默认 `max_input_messages`、推荐消息窗口、是否发生截断和构造规则，避免前端再次各自实现消息裁剪策略。
-- Tool Call 辅助入口 schema 也已开始显式暴露：`GET /api/workspace/tool-call/schema` 当前同时声明 `assist_context`、`assist_execute`、`assist_stream` 三类操作的查询/请求字段、返回块和交互式 actor 边界。`candidate_base_url` 只用于递归风险提示，不会落库或触发任何浏览器直连上游请求；`POST /api/workspace/tool-call/assist` 当前仅支持 `provider=kirari`，由 ChatAPI 后端代用户请求已授权的 Kirari delegated upstream，返回 explanation + tool call draft，但不会自动提交；`POST /api/workspace/tool-call/assist/stream` 则提供同一能力的标准化 SSE 版本，事件固定为 `assist.started`、`assist.delta`、`assist.completed`、`assist.failed`，其中 `assist.completed` 负载与非流式 `assist` 返回结构保持一致。
+- Tool Call 辅助入口 schema 也已开始显式暴露：`GET /api/workspace/tool-call/schema` 当前同时声明 `assist_context`、`assist_execute`、`assist_stream`、`assist_parse` 四类操作的查询/请求字段、返回块和交互式 actor 边界。`candidate_base_url` 只用于递归风险提示，不会落库或触发任何浏览器直连上游请求；`POST /api/workspace/tool-call/assist` 当前仅支持 `provider=kirari`，由 ChatAPI 后端代用户请求已授权的 Kirari delegated upstream，返回 explanation + tool call draft，但不会自动提交；`POST /api/workspace/tool-call/assist/stream` 则提供同一能力的标准化 SSE 版本，事件固定为 `assist.started`、`assist.delta`、`assist.completed`、`assist.failed`，其中 `assist.completed` 负载与非流式 `assist` 返回结构保持一致；`POST /api/workspace/tool-call/assist/parse` 则专门给浏览器直连上游路径复用，把原始模型输出交给后端按当前 tool schema 做统一解析和校验，但不代理上游请求。
 - 管理员 SMTP 测试邮件接口已补上：`POST /api/admin/send-test-email` 当前直接读取 `.env` 派生的 SMTP 运行时配置发送测试邮件，不读取数据库里的 provider 凭据；配置缺失或 SMTP 禁用时返回 `400`，真实发送失败返回 `502`，并记录 `admin.email / send_test_email` 审计事件。这样前端系统设置页可以验证“当前进程实际生效的 SMTP 配置”，而不是仅验证持久化设置值。
 - 管理员 SMTP 测试邮件 schema 已开始显式暴露：`GET /api/admin/send-test-email/schema` 当前声明测试邮件接口的 `email` 字段、运行时 SMTP 配置语义，以及 `400`/`502` 的错误边界，避免前端和 CLI 把“读当前进程配置而不是数据库 provider 凭据”这类约束写死在本地说明里。
 - 用户侧改密最小接口已补上：`POST /api/user/password` 当前按 actor 更新本地 `users.password_hash`，用于前端设置页的“重置密码”表单；这条链路只负责已登录用户的本地密码更新，不包含邮箱找回、验证码或 TOTP 二次确认，后续正式账号恢复流程再单独补齐。
@@ -1207,6 +1207,7 @@ GC 设置：
 
 - 前端提示词必须要求模型输出“说明文字 + 结构化 JSON”，并对 JSON 做严格校验。
 - 当前 Go 重构分支已通过 `assist_context.assist_schema` 显式暴露推荐输出 JSON Schema、confidence 枚举和校验说明，前端应直接复用这份契约，而不是在页面里再维护一份字符串常量。
+- 当前 Go 重构分支还额外提供 `POST /api/workspace/tool-call/assist/parse`：浏览器直连上游模型后，可把 `raw_output` 连同 `request_id|conversation_id` 发给 ChatAPI，由后端统一执行 explanation/tool_call 解析、围栏 JSON 提取、工具名校验和 validation errors 生成，前端不必再自己维护一套独立的草稿解析器。
 - 如果模型输出无法解析，只展示说明/原文，不填写表单。
 - 如果工具名称不在当前请求 tools schema 内，不能填写表单。
 - 如果参数字段不符合 schema，前端应标记校验错误，不能自动修正后发送。
@@ -1222,7 +1223,7 @@ GC 设置：
 
 - 首版默认不需要服务端配置路由和 assist 路由，上游配置由浏览器本地保存。
 - 当前 Go 重构分支已先提供 `GET /api/workspace/tool-call/assist-context`：返回当前用户可见的上下文、原始 `tool_schemas`、标准化后的 `normalized_tool_schemas`、草稿、`assist_schema`、`upstream_assistant_schema`、`upstream_protocol_templates`、`upstream_hints` 和 `upstream_input_hints`，不接收上游 key，不请求上游模型。
-- 当前 Go 重构分支还额外提供 `POST /api/workspace/tool-call/assist` 和 `POST /api/workspace/tool-call/assist/stream` 作为例外入口，但它们都不是通用服务端上游代理：目前只允许 `provider=kirari`，由后端使用该用户已授权的 Kirari delegated token 请求 `/api/llm/chat/completions`；前者返回一次性 explanation、tool call draft、validation errors 和原始输出摘要，后者返回标准化 SSE 事件流，并在 `assist.completed` 里给出同构最终结果。
+- 当前 Go 重构分支还额外提供 `POST /api/workspace/tool-call/assist`、`POST /api/workspace/tool-call/assist/stream` 和 `POST /api/workspace/tool-call/assist/parse` 作为辅助入口，但其中只有前两者会代请求 Kirari，上游自定义 URL 仍不经过 ChatAPI 服务端。`assist/parse` 只消费浏览器已经拿到的原始模型输出，统一返回 explanation、tool call draft、validation errors 和原始输出摘要，方便浏览器直连路径复用后端校验逻辑。
 - 任意用户自定义上游模型仍维持浏览器直连默认策略；如果未来要扩展为通用服务端代理，仍应要求管理员显式开启，并继续沿用更严格的 URL safety / allowlist 约束。
 
 安全边界：

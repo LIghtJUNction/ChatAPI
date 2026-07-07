@@ -158,6 +158,7 @@ func NewRouter(
 	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/schema", workspaceToolCallHandler.Schema)
 	router.With(middleware.RequireUserActor()).Get("/api/workspace/tool-call/assist-context", workspaceToolCallHandler.AssistContext)
 	router.With(middleware.RequireUserActor()).Post("/api/workspace/tool-call/assist", workspaceToolCallHandler.Assist)
+	router.With(middleware.RequireUserActor()).Post("/api/workspace/tool-call/assist/parse", workspaceToolCallHandler.ParseAssistOutput)
 	router.With(middleware.RequireUserActor()).Post("/api/workspace/tool-call/assist/stream", workspaceToolCallHandler.AssistStream)
 	router.Get("/api/config/automation-rules", configAutomationRulesHandler.Get)
 	router.Get("/api/config/automation-rules/schema", configAutomationRulesHandler.Schema)

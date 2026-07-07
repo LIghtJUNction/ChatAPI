@@ -1,13 +1,14 @@
 package service
 
 type ToolCallAssistSchema struct {
-	OutputJSONSchema      map[string]any   `json:"output_json_schema"`
-	ConfidenceLevels      []string         `json:"confidence_levels"`
-	ValidationRules       []string         `json:"validation_rules"`
-	Notes                 []string         `json:"notes"`
-	PromptContract        map[string]any   `json:"prompt_contract"`
-	StructuredOutputModes []map[string]any `json:"structured_output_modes"`
-	OutputExamples        []map[string]any `json:"output_examples,omitempty"`
+	OutputJSONSchema      map[string]any      `json:"output_json_schema"`
+	ConfidenceLevels      []string            `json:"confidence_levels"`
+	ValidationRules       []string            `json:"validation_rules"`
+	Notes                 []string            `json:"notes"`
+	ErrorCodes            []UpstreamErrorCode `json:"error_codes,omitempty"`
+	PromptContract        map[string]any      `json:"prompt_contract"`
+	StructuredOutputModes []map[string]any    `json:"structured_output_modes"`
+	OutputExamples        []map[string]any    `json:"output_examples,omitempty"`
 }
 
 func BuildToolCallAssistSchema() ToolCallAssistSchema {
@@ -60,6 +61,20 @@ func BuildToolCallAssistSchema() ToolCallAssistSchema {
 			"Render explanation for the user before showing the prefilled tool call draft.",
 			"Do not auto-submit the draft tool call.",
 			"If JSON parsing fails, keep the raw explanation text only.",
+		},
+		ErrorCodes: []UpstreamErrorCode{
+			{Code: "assist.provider_required", Description: "The backend-side assist request is missing provider."},
+			{Code: "assist.model_required", Description: "The backend-side assist request is missing model."},
+			{Code: "assist.target_required", Description: "The backend-side assist request must include request_id or conversation_id."},
+			{Code: "assist.provider_not_supported", Description: "The requested backend-side provider is not registered in this ChatAPI instance."},
+			{Code: "assist.no_tools", Description: "The current target request does not declare any tools, so no tool call draft can be generated."},
+			{Code: "assist.invalid_output", Description: "The upstream output could not be parsed into the expected explanation/tool_call JSON structure."},
+			{Code: "provider_not_connected", Description: "The delegated provider requires user authorization but the current user has not connected it yet."},
+			{Code: "provider_timeout", Description: "The delegated provider request timed out before ChatAPI received a usable response."},
+			{Code: "provider_cancelled", Description: "The delegated provider request was cancelled before completion."},
+			{Code: "provider_request_failed", Description: "The delegated provider request failed or returned an unreadable response."},
+			{Code: "upstream_nil_response", Description: "The delegated provider returned no HTTP response body for the assist stream."},
+			{Code: "upstream_stream_read_failed", Description: "The delegated provider stream terminated unexpectedly while ChatAPI was reading it."},
 		},
 		PromptContract: map[string]any{
 			"required_goals": []string{

@@ -1207,7 +1207,7 @@ GC 设置：
 实现要求：
 
 - 前端提示词必须要求模型输出“说明文字 + 结构化 JSON”，并对 JSON 做严格校验。
-- 当前 Go 重构分支已通过 `assist_context.assist_schema` 显式暴露推荐输出 JSON Schema、confidence 枚举、校验说明、提示词契约（`prompt_contract`）、结构化输出模式（`structured_output_modes`）和示例输出（`output_examples`），前端应直接复用这份契约，而不是在页面里再维护一份字符串常量或本地示例。
+- 当前 Go 重构分支已通过 `assist_context.assist_schema` 显式暴露推荐输出 JSON Schema、confidence 枚举、校验说明、提示词契约（`prompt_contract`）、结构化输出模式（`structured_output_modes`）、示例输出（`output_examples`）以及统一错误码矩阵（`error_codes`），前端应直接复用这份契约，而不是在页面里再维护一份字符串常量、本地示例或错误码对照表。
 - 当前 Go 重构分支还额外提供 `POST /api/workspace/tool-call/assist/parse`：浏览器直连上游模型后，可把 `raw_output` 连同 `request_id|conversation_id` 发给 ChatAPI，由后端统一执行 explanation/tool_call 解析、围栏 JSON 提取、工具名校验和 validation errors 生成，前端不必再自己维护一套独立的草稿解析器。
 - 如果模型输出无法解析，只展示说明/原文，不填写表单。
 - 如果工具名称不在当前请求 tools schema 内，不能填写表单。
@@ -1218,7 +1218,7 @@ GC 设置：
 - 当前 Go 重构分支还会通过 `assist-context.upstream_input_hints` 返回默认 `max_input_messages=20`、按时间顺序保留最近消息窗口的 `recommended_messages`、`truncated` / `excluded_messages` 标记，以及“草稿文本如需传给上游应单独传，不应伪装成已提交 assistant message”的构造规则。
 - 当前 Go 重构分支还会通过 `assist-context.upstream_protocol_templates` 返回三套上游协议的默认 endpoint path、HTTP method、认证 header 模板、请求头模板、请求体形状占位符、构造提示以及响应文本提取规则（`response_extraction`），前端应优先复用这份模板，而不是在页面里再手写 Responses / Chat Completions / Anthropic Messages 的字段映射差异、header 约定和文本提取逻辑。
 - 当前 Go 重构分支还会通过 `assist-context.upstream_assistant_schema` 返回浏览器本地上游配置默认值、跨字段校验规则和稳定错误码，例如 `upstream_assistant.invalid_base_url`、`upstream_assistant.recursive_base_url`、`upstream_assistant.invalid_extra_headers`。前端本地表单校验和错误展示应优先复用这份契约，而不是继续把校验逻辑分散在多个组件里。
-- 当前 Go 重构分支还会通过 `assist-context.backend_assistant_providers` 返回后端 delegated provider 的能力矩阵，例如是否支持 backend delegated、是否推荐浏览器直连、是否支持 native json schema、是否支持模型 meta、默认协议、流式事件格式以及 provider 特定错误码。前端选择 provider、展示能力提示和禁用不支持的交互时，应优先复用这份矩阵，而不是继续在页面里写 `if provider === "kirari"` 这类分支。
+- 当前 Go 重构分支还会通过 `assist-context.backend_assistant_providers` 返回后端 delegated provider 的能力矩阵，例如是否支持 backend delegated、是否推荐浏览器直连、是否支持 native json schema、是否支持模型 meta、默认协议、流式事件格式以及 provider 特定错误码（如 `provider_not_connected`、`provider_timeout`、`provider_cancelled`、`provider_response_truncated`、`provider_request_failed`、`upstream_nil_response`、`upstream_stream_read_failed`）。前端选择 provider、展示能力提示和禁用不支持的交互时，应优先复用这份矩阵，而不是继续在页面里写 `if provider === "kirari"` 这类分支。
 - 浏览器直连会受 CORS 限制；文档应说明如果云厂商不允许浏览器跨域请求，用户需要使用允许 CORS 的兼容网关、本地代理或未来可选的服务端上游代理。
 
 建议路由：

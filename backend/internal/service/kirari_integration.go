@@ -61,7 +61,12 @@ func (s *KirariIntegrationService) ProviderDescriptor() UpstreamProviderDescript
 		},
 		ErrorCodes: []UpstreamErrorCode{
 			{Code: "provider_not_connected", Description: "The current user has not connected the delegated Kirari provider yet."},
+			{Code: "provider_timeout", Description: "The delegated Kirari request timed out before ChatAPI received a usable response."},
+			{Code: "provider_cancelled", Description: "The delegated Kirari request was cancelled before completion."},
+			{Code: "provider_response_truncated", Description: "The delegated Kirari response ended unexpectedly before ChatAPI could parse a complete payload."},
 			{Code: "provider_request_failed", Description: "The delegated provider request failed or returned an unreadable response."},
+			{Code: "upstream_nil_response", Description: "The delegated Kirari stream returned no HTTP response body."},
+			{Code: "upstream_stream_read_failed", Description: "The delegated Kirari stream terminated while ChatAPI was reading it."},
 		},
 		RequestHints: map[string]any{
 			"default_protocol":       "chat_completions",

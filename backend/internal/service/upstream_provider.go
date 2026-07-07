@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -80,6 +81,30 @@ func NormalizeToolCallAssistProviderError(provider string, err error) error {
 			Message:    err.Error(),
 			HTTPStatus: http.StatusConflict,
 			Retryable:  false,
+		}
+	case errors.Is(err, context.DeadlineExceeded):
+		return &ToolCallAssistProviderError{
+			Provider:   provider,
+			Code:       "provider_timeout",
+			Message:    err.Error(),
+			HTTPStatus: http.StatusGatewayTimeout,
+			Retryable:  true,
+		}
+	case errors.Is(err, context.Canceled):
+		return &ToolCallAssistProviderError{
+			Provider:   provider,
+			Code:       "provider_cancelled",
+			Message:    err.Error(),
+			HTTPStatus: http.StatusRequestTimeout,
+			Retryable:  false,
+		}
+	case errors.Is(err, io.EOF):
+		return &ToolCallAssistProviderError{
+			Provider:   provider,
+			Code:       "provider_response_truncated",
+			Message:    err.Error(),
+			HTTPStatus: http.StatusBadGateway,
+			Retryable:  true,
 		}
 	default:
 		return &ToolCallAssistProviderError{

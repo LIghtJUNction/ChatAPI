@@ -1592,6 +1592,10 @@ func TestWorkspaceToolCallAssistContextInLab(t *testing.T) {
 	if !containsStringValue(promptContract["required_output_order"], "explanation") {
 		t.Fatalf("unexpected assist prompt contract: %#v", resp)
 	}
+	if !containsMapItemWithStringField(resp["assist_schema"].(map[string]any)["error_codes"], "code", "provider_timeout") ||
+		!containsMapItemWithStringField(resp["assist_schema"].(map[string]any)["error_codes"], "code", "assist.invalid_output") {
+		t.Fatalf("unexpected assist error code matrix: %#v", resp)
+	}
 	if !containsMapItemWithStringField(resp["upstream_assistant_schema"].(map[string]any)["fields"], "key", "base_url") {
 		t.Fatalf("unexpected upstream assistant schema: %#v", resp)
 	}
@@ -1734,6 +1738,9 @@ func TestWorkspaceToolCallAssistContextUsesSessionActor(t *testing.T) {
 	if !nestedPathBool(map[string]any{"provider": sessionKirariProvider}, "provider", "capabilities", "supports_model_meta") ||
 		nestedPathString(map[string]any{"provider": sessionKirariProvider}, "provider", "response_hints", "stream_event_format") == "" {
 		t.Fatalf("unexpected session backend provider hints: %#v", resp)
+	}
+	if !containsMapItemWithStringField(sessionKirariProvider["error_codes"], "code", "provider_response_truncated") {
+		t.Fatalf("unexpected session backend provider error codes: %#v", resp)
 	}
 	if !containsMapItemWithStringField(resp["upstream_protocol_templates"], "protocol", "responses") {
 		t.Fatalf("unexpected session upstream protocol templates: %#v", resp)

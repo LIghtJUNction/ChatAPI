@@ -46,6 +46,7 @@ func (s stubUpstreamProvider) ProviderDescriptor() UpstreamProviderDescriptor {
 			"supports_structured_output": true,
 		},
 		ErrorCodes: []UpstreamErrorCode{
+			{Code: "provider_timeout", Description: "stub timeout"},
 			{Code: "provider_request_failed", Description: "stub"},
 		},
 	}
@@ -116,6 +117,28 @@ func TestNormalizeToolCallAssistProviderErrorMapsKirariConnection(t *testing.T) 
 	}
 	if providerErr.Code != "provider_not_connected" || providerErr.HTTPStatus != http.StatusConflict || providerErr.Provider != "kirari" {
 		t.Fatalf("unexpected provider error mapping: %#v", providerErr)
+	}
+}
+
+func TestNormalizeToolCallAssistProviderErrorMapsTimeout(t *testing.T) {
+	err := NormalizeToolCallAssistProviderError("kirari", context.DeadlineExceeded)
+	providerErr, ok := err.(*ToolCallAssistProviderError)
+	if !ok {
+		t.Fatalf("expected provider error type, got %T", err)
+	}
+	if providerErr.Code != "provider_timeout" || providerErr.HTTPStatus != http.StatusGatewayTimeout || !providerErr.Retryable {
+		t.Fatalf("unexpected timeout provider error mapping: %#v", providerErr)
+	}
+}
+
+func TestNormalizeToolCallAssistProviderErrorMapsCancelled(t *testing.T) {
+	err := NormalizeToolCallAssistProviderError("kirari", context.Canceled)
+	providerErr, ok := err.(*ToolCallAssistProviderError)
+	if !ok {
+		t.Fatalf("expected provider error type, got %T", err)
+	}
+	if providerErr.Code != "provider_cancelled" || providerErr.HTTPStatus != http.StatusRequestTimeout || providerErr.Retryable {
+		t.Fatalf("unexpected cancelled provider error mapping: %#v", providerErr)
 	}
 }
 

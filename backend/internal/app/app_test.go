@@ -395,6 +395,115 @@ func TestDBCheckCommandReportsSQLiteFiles(t *testing.T) {
 	}
 }
 
+func TestDoctorCommandReportsSQLiteDBMetaAndPaths(t *testing.T) {
+	backendRoot := t.TempDir()
+	dbPath := filepath.Join(backendRoot, "data", "chatapi.sqlite3")
+	t.Setenv("CHATAPI_DB_DRIVER", "sqlite")
+	t.Setenv("CHATAPI_DB_DSN", dbPath)
+	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
+	t.Setenv("CHATAPI_MASTER_KEY", "01234567890123456789012345678901")
+	t.Setenv("CHATAPI_SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("CHATAPI_ADMIN_PASSWORD", "not-change-me")
+
+	if _, err := migrateCommand(context.Background(), migrateOptions{command: "up"}, backendRoot); err != nil {
+		t.Fatalf("migrate up before doctor: %v", err)
+	}
+
+	report, err := doctorCommand(backendRoot, config.ModeServe)
+	if err != nil {
+		t.Fatalf("doctor command: %v", err)
+	}
+	if !report.OK {
+		t.Fatalf("unexpected doctor report: %#v", report)
+	}
+	if !report.DBMeta.Reachable || !report.DBMeta.Initialized || report.DBMeta.SchemaVersion != migrations.LatestVersion {
+		t.Fatalf("unexpected doctor db meta: %#v", report.DBMeta)
+	}
+	if report.DBMeta.SQLite.Database.Path != dbPath || !report.DBMeta.SQLite.Database.Exists {
+		t.Fatalf("unexpected doctor sqlite info: %#v", report.DBMeta.SQLite)
+	}
+	if report.Paths.DataDir.Path != filepath.Join(backendRoot, "data") || !report.Paths.DataDir.Exists || !report.Paths.DataDir.Writable {
+		t.Fatalf("unexpected doctor data dir path state: %#v", report.Paths.DataDir)
+	}
+	if report.Paths.UploadsDir.Path != filepath.Join(backendRoot, "data", "uploads", "imgs") || report.Paths.UploadsDir.Note == "" || !report.Paths.UploadsDir.Writable {
+		t.Fatalf("unexpected doctor uploads dir path state: %#v", report.Paths.UploadsDir)
+	}
+}
+
+func TestDoctorCommandWarnsForUninitializedSQLiteSchema(t *testing.T) {
+	backendRoot := t.TempDir()
+	dbPath := filepath.Join(backendRoot, "data", "chatapi.sqlite3")
+	t.Setenv("CHATAPI_DB_DRIVER", "sqlite")
+	t.Setenv("CHATAPI_DB_DSN", dbPath)
+	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
+	t.Setenv("CHATAPI_MASTER_KEY", "01234567890123456789012345678901")
+	t.Setenv("CHATAPI_SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("CHATAPI_ADMIN_PASSWORD", "not-change-me")
+
+	report, err := doctorCommand(backendRoot, config.ModeServe)
+	if err != nil {
+		t.Fatalf("doctor command: %v", err)
+	}
+	if !report.OK {
+		t.Fatalf("uninitialized schema should warn instead of fail: %#v", report)
+	}
+	if report.DBMeta.Reachable != true || report.DBMeta.Initialized {
+		t.Fatalf("unexpected uninitialized db meta: %#v", report.DBMeta)
+	}
+	if !hasDoctorDiagnostic(report, config.DiagnosticWarn, "database.schema_uninitialized") {
+		t.Fatalf("missing schema uninitialized warning: %#v", report)
+	}
+}
+
+func TestDoctorCommandFailsForDirtySQLiteMigration(t *testing.T) {
+	backendRoot := t.TempDir()
+	dbPath := filepath.Join(backendRoot, "data", "chatapi.sqlite3")
+	t.Setenv("CHATAPI_DB_DRIVER", "sqlite")
+	t.Setenv("CHATAPI_DB_DSN", dbPath)
+	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
+	t.Setenv("CHATAPI_MASTER_KEY", "01234567890123456789012345678901")
+	t.Setenv("CHATAPI_SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("CHATAPI_ADMIN_PASSWORD", "not-change-me")
+
+	if _, err := migrateCommand(context.Background(), migrateOptions{command: "up"}, backendRoot); err != nil {
+		t.Fatalf("migrate up before dirty test: %v", err)
+	}
+	st, err := sqlitestore.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite dirty test store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.DB().Exec(`UPDATE db_meta SET value = '1' WHERE key = 'migration_dirty'`); err != nil {
+		t.Fatalf("mark sqlite migration dirty: %v", err)
+	}
+
+	report, err := doctorCommand(backendRoot, config.ModeServe)
+	if err != nil {
+		t.Fatalf("doctor command: %v", err)
+	}
+	if report.OK {
+		t.Fatalf("dirty migration should fail doctor: %#v", report)
+	}
+	if !report.DBMeta.MigrationDirty || !hasDoctorDiagnostic(report, config.DiagnosticError, "database.migration_dirty") {
+		t.Fatalf("missing dirty migration doctor diagnostic: %#v", report)
+	}
+}
+
+func TestDoctorCommandRedactsPostgreSQLDSN(t *testing.T) {
+	backendRoot := t.TempDir()
+	dsn := "postgres://chatapi:secret-password@db.local:5432/chatapi"
+	t.Setenv("CHATAPI_DB_DRIVER", "postgresql")
+	t.Setenv("CHATAPI_DB_DSN", dsn)
+
+	report, err := doctorCommand(backendRoot, config.ModeServe)
+	if err != nil {
+		t.Fatalf("doctor command: %v", err)
+	}
+	if report.Summary.DatabaseDSN != "<redacted>" || report.DBMeta.DSN != "<redacted>" {
+		t.Fatalf("doctor report should redact postgresql dsn: %#v", report)
+	}
+}
+
 func TestMigrateCommandStatusDoesNotBootstrapSQLite(t *testing.T) {
 	backendRoot := t.TempDir()
 	t.Setenv("CHATAPI_DB_DRIVER", "sqlite")
@@ -512,6 +621,35 @@ func TestDBCheckCommandReportsPostgreSQLStatus(t *testing.T) {
 	}
 }
 
+func TestDoctorCommandDetectsBrokenUploadsDir(t *testing.T) {
+	backendRoot := t.TempDir()
+	dbPath := filepath.Join(backendRoot, "data", "chatapi.sqlite3")
+	uploadsParent := filepath.Join(backendRoot, "data", "uploads")
+	if err := os.MkdirAll(filepath.Join(backendRoot, "data"), 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	if err := os.WriteFile(uploadsParent, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("seed uploads blocker file: %v", err)
+	}
+	t.Setenv("CHATAPI_DB_DRIVER", "sqlite")
+	t.Setenv("CHATAPI_DB_DSN", dbPath)
+	t.Setenv("CHATAPI_DATA_DIR", filepath.Join(backendRoot, "data"))
+	t.Setenv("CHATAPI_MASTER_KEY", "01234567890123456789012345678901")
+	t.Setenv("CHATAPI_SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("CHATAPI_ADMIN_PASSWORD", "not-change-me")
+
+	report, err := doctorCommand(backendRoot, config.ModeServe)
+	if err != nil {
+		t.Fatalf("doctor command: %v", err)
+	}
+	if report.OK {
+		t.Fatalf("broken uploads dir should fail doctor: %#v", report)
+	}
+	if !hasDoctorDiagnostic(report, config.DiagnosticError, "path.uploads_dir_unusable") {
+		t.Fatalf("missing uploads dir doctor diagnostic: %#v", report)
+	}
+}
+
 func TestMigrateCommandDownResetsPostgreSQL(t *testing.T) {
 	dsn := pgtest.IsolatedDSN(t)
 	backendRoot := t.TempDir()
@@ -535,6 +673,15 @@ func TestMigrateCommandDownResetsPostgreSQL(t *testing.T) {
 	if statusReport.OK || !strings.Contains(statusReport.Error, "db_meta") {
 		t.Fatalf("unexpected postgres status after down: %#v", statusReport)
 	}
+}
+
+func hasDoctorDiagnostic(report doctorReport, severity string, code string) bool {
+	for _, item := range report.Items {
+		if item.Severity == severity && item.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseMigrateDBOptions(t *testing.T) {

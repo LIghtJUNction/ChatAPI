@@ -73,7 +73,7 @@
 - pending turn 过期清理已落地最小版本：新增 `CHATAPI_PENDING_TURN_TTL`，默认 `0` 表示关闭；启用后后台 worker 会定期把超过 TTL 的 `waiting` / `streaming` 会话标记为 `expired`，并让仍在等待的兼容接口请求收到 `request_timeout` 错误响应。
 - 通用审计日志已开始落地：SQLite bootstrap 会创建 `audit_logs`，当前已记录图片上传成功/失败、用户创建/删除应用 API Key、用户创建/删除虚拟模型 API Key、自动化规则自动完成命中、管理员手动 GC、管理员运行时设置修改、管理员存储 cleanup dry-run 预览和实际执行；`GET /api/admin/audit/logs` 可查询通用审计日志，并支持 `include_app_api=1` 把应用 API 请求细表按统一审计形态聚合到返回列表。
 - 管理员审计查询 schema 已开始显式暴露：`GET /api/admin/audit/schema` 当前返回 `limit`、`event_type`、`actor_user_id`、`include_app_api` 这些过滤字段的默认值、值域和特殊语义，明确 `include_app_api` 只会影响空 `event_type` 或 `event_type=app_api.request` 的查询。
-- 配置诊断命令已落地最小版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出 JSON 诊断报告，并覆盖生产 master key、session secret、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope、realtime 连接预留配置等风险。
+- 配置诊断命令已开始补齐成可运营版本：`chatapi doctor [serve|lab]` 复用 `.env` 加载和 config 解析，输出结构化 JSON 诊断报告，并覆盖生产 master key、session secret、默认管理员密码、SQLite serve 降级、Lab 暴露、OIDC 私密 RP 必填项、OIDC redirect 和 scope、realtime 连接预留配置等风险；当前还会补充 `db_meta`（数据库连通性、schema version、app version、dirty 状态、最近迁移时间）以及 `paths`（data dir、web dist、uploads dir 的存在性/可写性）结构，便于脚本和未来前端运维页直接消费。
 - Lab 访问控制已开始收口为一次校验换 cookie：当前 `CHATAPI_LAB_TOKEN` 会在首次成功访问后写入 `chatapi_lab_access` HttpOnly cookie，并作为一次性 token 失效；`CHATAPI_LAB_PASSWORD` 不再直接拼进自动打开浏览器的 URL，未携带 cookie 的浏览器 GET 会先看到轻量口令页，成功输入后同样换取本地访问 cookie。这样前端无需改动，但 URL 中不再长期暴露口令。
 - `chatapi serve|lab` 当前也已开始支持最小命令行覆盖：`--host`、`--port`、`--data-dir`、`--open-browser`、`--no-open-browser`，其中 `lab` 额外支持 `--allow-remote-lab`、`--password`、`--token`。若 Lab 模式未显式提供 token/password，启动时会自动生成一次性 token；`--password` 会覆盖并清空 token；`chatapi lab --port 0` 也已开始通过预先 `net.Listen` 获取真实端口，再打印/打开正确的 Lab URL，而不是残留 `:0`。
 - 数据库版本诊断已落地最小版本：SQLite 和 PostgreSQL bootstrap 都会维护 `db_meta` 和 `schema_migrations`；当前 `chatapi db check` 已能通过统一 store 打开两种数据库，输出 schema version、dirty 状态、创建来源、最近迁移时间、已应用迁移列表，以及 SQLite 主库/WAL/SHM 文件存在性和字节数。
@@ -1842,8 +1842,8 @@ chatapi version
 配置诊断命令：
 
 - `chatapi doctor`：检查配置、数据库、migration dirty 状态、静态前端目录、uploads 权限、session/master key、SQLite 降级阈值和端口监听建议。
-- 当前 Go 重构分支的 `chatapi doctor [serve|lab]` 输出 JSON 报告，包含 `ok`、`summary` 和 `items`；已覆盖配置校验错误、serve 模式 master key、默认管理员密码、SQLite serve 降级提示、Lab 远程暴露风险、前端 dist 目录、CORS wildcard、OIDC 私密 RP 必填项、OIDC HTTPS redirect、`openid` scope、realtime 连接预留配置和日志等级。存在 `error` 级诊断时命令以非零状态退出；`warn` 只提示不阻止。
-- 当前 `doctor` 尚不连接数据库，不检查 migration dirty、schema version、SQLite WAL、PostgreSQL 连接池和 uploads 归属；数据库状态由 `chatapi db check` 负责。
+- 当前 Go 重构分支的 `chatapi doctor [serve|lab]` 输出 JSON 报告，包含 `ok`、`summary`、`items`、`db_meta` 和 `paths`；已覆盖配置校验错误、serve 模式 master key、默认管理员密码、SQLite serve 降级提示、Lab 远程暴露风险、前端 dist 目录、CORS wildcard、OIDC 私密 RP 必填项、OIDC HTTPS redirect、`openid` scope、realtime 连接预留配置和日志等级。存在 `error` 级诊断时命令以非零状态退出；`warn` 只提示不阻止。
+- 当前 `doctor` 已开始连接数据库并读取 migration 元数据：如果数据库可连但 schema 尚未初始化，会给出 `database.schema_uninitialized` warn，引导先执行 `chatapi migrate up`；如果 migration dirty、数据库不可达、data/uploads 路径不可写，则直接返回 error。更细的 SQLite WAL 字节数和 PostgreSQL 专项状态仍继续由 `chatapi db check` 提供。
 - `chatapi config print --redact`：打印最终配置，敏感字段脱敏。当前 Go 重构分支已支持可选模式参数 `serve|lab`，默认按 `serve` 解析；敏感字段仅显示 `<redacted>` 或空字符串。
 - `chatapi db check`：检查数据库连接、schema version、migration 历史、SQLite WAL 状态或 PostgreSQL 连接池配置。
 - 当前 Go 重构分支的 `chatapi db check` 已支持 SQLite 和 PostgreSQL，输出 JSON，包含 `schema_version`、`migration_dirty`、`migration_lock`、`created_by`、`last_migrated_at`、`applied` migration 列表；SQLite 额外返回 `sqlite.database`、`sqlite.wal`、`sqlite.shm` 的 path / exists / bytes。命令会按 driver 走统一 runtime store 打开并在需要时执行幂等 bootstrap；如果 dirty 为 true、数据库不可打开或 PostgreSQL DSN 缺失，命令以非零状态退出。
@@ -1938,7 +1938,7 @@ Lab 模式建议路由：
 - 在线备份使用 SQLite backup API 或 `VACUUM INTO`。
 - 恢复时版本不能低于备份时的 schema version。
 - 升级前自动提示备份。
-- `chatapi doctor` 应展示 `db_meta.schema_version`、`app_version`、dirty 状态、最近迁移时间。
+- `chatapi doctor` 应展示 `db_meta.schema_version`、`app_version`、dirty 状态、最近迁移时间。当前 Go 重构分支已开始输出这些字段，并补充 data/web dist/uploads 三类路径状态。
 - 如果数据库处于 dirty 状态，服务应拒绝启动，避免在半升级状态继续写入数据。
 
 ## 11. 开源发布设计

@@ -54,7 +54,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 			WebDistDir:     cfg.WebDistDir,
 			DataDir:        cfg.DataDir,
 			DatabaseDriver: cfg.DatabaseDriver,
-			DatabaseDSN:    cfg.DatabaseDSN,
+			DatabaseDSN:    redactDatabaseDSN(cfg),
 			OIDCEnabled:    cfg.OIDCEnabled,
 		},
 	}

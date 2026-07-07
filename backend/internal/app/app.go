@@ -438,12 +438,7 @@ func runDoctor(args []string, backendRoot string) error {
 			return fmt.Errorf("unknown doctor mode %q, supported: serve, lab", args[0])
 		}
 	}
-	cfg, loadErr := config.FromEnvUnchecked(mode, backendRoot)
-	var validationErr error
-	if loadErr == nil {
-		validationErr = cfg.Validate()
-	}
-	report := config.Diagnose(cfg, errors.Join(loadErr, validationErr))
+	report, _ := doctorCommand(backendRoot, mode)
 	if err := writeJSONReport(os.Stdout, report); err != nil {
 		return err
 	}
@@ -457,6 +452,64 @@ type configPrintReport struct {
 	OK     bool                  `json:"ok"`
 	Config config.RedactedConfig `json:"config"`
 	Error  string                `json:"error,omitempty"`
+}
+
+type doctorReport struct {
+	config.DiagnosticReport
+	DBMeta doctorDBMetaReport `json:"db_meta,omitempty"`
+	Paths  doctorPathReport   `json:"paths,omitempty"`
+}
+
+type doctorDBMetaReport struct {
+	Driver         string       `json:"driver"`
+	DSN            string       `json:"dsn"`
+	Reachable      bool         `json:"reachable"`
+	Initialized    bool         `json:"initialized"`
+	SchemaVersion  string       `json:"schema_version,omitempty"`
+	AppVersion     string       `json:"app_version,omitempty"`
+	MigrationDirty bool         `json:"migration_dirty,omitempty"`
+	MigrationLock  string       `json:"migration_lock,omitempty"`
+	CreatedBy      string       `json:"created_by,omitempty"`
+	LastMigratedAt string       `json:"last_migrated_at,omitempty"`
+	SQLite         sqliteDBInfo `json:"sqlite,omitempty"`
+	Error          string       `json:"error,omitempty"`
+}
+
+type doctorPathReport struct {
+	DataDir    doctorPathState `json:"data_dir"`
+	WebDistDir doctorPathState `json:"web_dist_dir"`
+	UploadsDir doctorPathState `json:"uploads_dir"`
+}
+
+type doctorPathState struct {
+	Path     string `json:"path"`
+	Exists   bool   `json:"exists"`
+	IsDir    bool   `json:"is_dir"`
+	Writable bool   `json:"writable,omitempty"`
+	Error    string `json:"error,omitempty"`
+	Note     string `json:"note,omitempty"`
+}
+
+func doctorCommand(backendRoot string, mode config.Mode) (doctorReport, error) {
+	cfg, loadErr := config.FromEnvUnchecked(mode, backendRoot)
+	var validationErr error
+	if loadErr == nil {
+		validationErr = cfg.Validate()
+	}
+	report := doctorReport{
+		DiagnosticReport: config.Diagnose(cfg, errors.Join(loadErr, validationErr)),
+		DBMeta: doctorDBMetaReport{
+			Driver: strings.ToLower(strings.TrimSpace(cfg.DatabaseDriver)),
+			DSN:    cfg.Redacted().DatabaseDSN,
+		},
+		Paths: collectDoctorPaths(cfg),
+	}
+	if loadErr == nil {
+		enrichDoctorDatabase(&report, cfg)
+		enrichDoctorPaths(&report)
+		report.OK = !report.HasErrors()
+	}
+	return report, nil
 }
 
 func runConfig(args []string, backendRoot string) error {
@@ -925,6 +978,193 @@ func sqliteFileStat(path string) sqliteFileInfo {
 	info.Exists = true
 	info.Bytes = stat.Size()
 	return info
+}
+
+func collectDoctorPaths(cfg config.Config) doctorPathReport {
+	return doctorPathReport{
+		DataDir:    inspectPath(cfg.DataDir, true),
+		WebDistDir: inspectPath(cfg.WebDistDir, false),
+		UploadsDir: inspectPath(filepath.Join(cfg.DataDir, "uploads", "imgs"), true),
+	}
+}
+
+func enrichDoctorPaths(report *doctorReport) {
+	if strings.TrimSpace(report.Paths.DataDir.Error) != "" {
+		addDoctorItem(report, config.DiagnosticError, "path.data_dir_unusable", report.Paths.DataDir.Error)
+	}
+	if strings.TrimSpace(report.Paths.UploadsDir.Error) != "" {
+		addDoctorItem(report, config.DiagnosticError, "path.uploads_dir_unusable", report.Paths.UploadsDir.Error)
+	}
+	if strings.TrimSpace(report.Paths.WebDistDir.Error) != "" {
+		addDoctorItem(report, config.DiagnosticWarn, "path.web_dist_unusable", report.Paths.WebDistDir.Error)
+	}
+}
+
+func enrichDoctorDatabase(report *doctorReport, cfg config.Config) {
+	driver := strings.ToLower(strings.TrimSpace(cfg.DatabaseDriver))
+	if driver == "" {
+		return
+	}
+	if driver == "sqlite" {
+		report.DBMeta.SQLite = sqliteDBFileInfo(cfg.DatabaseDSN)
+	}
+	switch driver {
+	case "sqlite":
+		if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+			return
+		}
+	case "postgres", "postgresql":
+		if strings.TrimSpace(cfg.DatabaseDSN) == "" {
+			return
+		}
+	default:
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	dataStore, closeStore, err := openRuntimeStore(ctx, cfg, false)
+	if err != nil {
+		report.DBMeta.Error = err.Error()
+		addDoctorItem(report, config.DiagnosticError, "database.connection_failed", "数据库连接失败: "+err.Error())
+		return
+	}
+	defer closeStore()
+	if err := dataStore.Ping(ctx); err != nil {
+		report.DBMeta.Error = err.Error()
+		addDoctorItem(report, config.DiagnosticError, "database.ping_failed", "数据库连通性检查失败: "+err.Error())
+		return
+	}
+	report.DBMeta.Reachable = true
+
+	status, err := dataStore.MigrationStatus(ctx)
+	if err != nil {
+		report.DBMeta.Error = err.Error()
+		if isUninitializedDatabaseError(err) {
+			addDoctorItem(report, config.DiagnosticWarn, "database.schema_uninitialized", "数据库连接成功，但 schema 尚未初始化；先执行 `chatapi migrate up`。")
+			return
+		}
+		addDoctorItem(report, config.DiagnosticError, "database.status_failed", "无法读取 migration 状态: "+err.Error())
+		return
+	}
+
+	report.DBMeta.Initialized = true
+	report.DBMeta.SchemaVersion = status.SchemaVersion
+	report.DBMeta.AppVersion = status.AppVersion
+	report.DBMeta.MigrationDirty = status.MigrationDirty
+	report.DBMeta.MigrationLock = status.MigrationLock
+	report.DBMeta.CreatedBy = status.CreatedBy
+	report.DBMeta.LastMigratedAt = status.LastMigratedAt
+	if status.MigrationDirty {
+		addDoctorItem(report, config.DiagnosticError, "database.migration_dirty", "数据库 migration 处于 dirty 状态；先修复后再启动服务。")
+		return
+	}
+	addDoctorItem(report, config.DiagnosticInfo, "database.connected", "数据库连接正常，migration 元数据可读。")
+}
+
+func inspectPath(path string, checkWritable bool) doctorPathState {
+	state := doctorPathState{Path: path}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		state.Error = "path is empty"
+		return state
+	}
+	stat, err := os.Stat(path)
+	if err == nil {
+		state.Exists = true
+		state.IsDir = stat.IsDir()
+		if !stat.IsDir() {
+			state.Error = "path exists but is not a directory"
+			return state
+		}
+		if checkWritable {
+			if err := verifyDirWritable(path); err != nil {
+				state.Error = "directory is not writable: " + err.Error()
+				return state
+			}
+			state.Writable = true
+		}
+		return state
+	}
+	if !os.IsNotExist(err) {
+		state.Error = "stat path failed: " + err.Error()
+		return state
+	}
+	parent, parentInfo, parentErr := nearestExistingParent(path)
+	if parentErr != nil {
+		state.Error = "parent directory is unavailable: " + parentErr.Error()
+		return state
+	}
+	if !parentInfo.IsDir() {
+		state.Error = "parent path is not a directory"
+		return state
+	}
+	if checkWritable {
+		if err := verifyDirWritable(parent); err != nil {
+			state.Error = "parent directory is not writable: " + err.Error()
+			return state
+		}
+		state.Writable = true
+	}
+	state.Note = "directory does not exist yet"
+	if checkWritable {
+		state.Note = "directory does not exist yet; service will create it on demand"
+	}
+	return state
+}
+
+func verifyDirWritable(path string) error {
+	file, err := os.CreateTemp(path, ".chatapi-doctor-*")
+	if err != nil {
+		return err
+	}
+	name := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return os.Remove(name)
+}
+
+func nearestExistingParent(path string) (string, os.FileInfo, error) {
+	current := filepath.Clean(path)
+	for {
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		stat, err := os.Stat(parent)
+		if err == nil {
+			return parent, stat, nil
+		}
+		if !os.IsNotExist(err) {
+			return parent, nil, err
+		}
+		current = parent
+	}
+	return "", nil, os.ErrNotExist
+}
+
+func isUninitializedDatabaseError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(message, "read db_meta") ||
+		strings.Contains(message, "no such table: db_meta") ||
+		strings.Contains(message, "relation \"db_meta\" does not exist") ||
+		strings.Contains(message, "schema_migrations")
+}
+
+func addDoctorItem(report *doctorReport, severity string, code string, message string) {
+	if report == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	report.Items = append(report.Items, config.DiagnosticItem{
+		Severity: severity,
+		Code:     code,
+		Message:  strings.TrimSpace(message),
+	})
 }
 
 func runMigrate(ctx context.Context, args []string, backendRoot string) error {

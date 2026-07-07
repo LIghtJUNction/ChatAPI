@@ -74,6 +74,8 @@ func NewRouter(
 		Config:        cfg,
 		Service:       workspaceToolCallService,
 		AssistService: service.NewToolCallAssistService(workspaceToolCallService, kirariIntegrationService),
+		KirariService: kirariIntegrationService,
+		Audit:         auditService,
 	}
 	kirariIntegrationHandler := handlers.KirariIntegrationHandler{Config: cfg, Service: kirariIntegrationService, Audit: auditService}
 	configAutomationRulesHandler := handlers.ConfigAutomationRulesHandler{Config: cfg, Service: automationRuleService, Audit: auditService}

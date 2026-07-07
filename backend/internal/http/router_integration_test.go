@@ -1846,6 +1846,17 @@ func TestWorkspaceToolCallAssistKirariLifecycle(t *testing.T) {
 	if provider.chatCompletionsCalls != 1 {
 		t.Fatalf("expected one kirari chat completions call, got %d", provider.chatCompletionsCalls)
 	}
+	assertAuditCountForActor(t, env, "lab-user", "user.tool_call", "workspace_tool_call", requestID, "assist", "success", 1)
+	assistMetadata := latestAuditMetadataForActorAction(t, env, "lab-user", "user.tool_call", "assist", "success")
+	if nestedString(assistMetadata, "provider") != "kirari" || nestedString(assistMetadata, "model") != "kirari-model" {
+		t.Fatalf("unexpected tool call assist audit metadata: %#v", assistMetadata)
+	}
+	if nestedString(assistMetadata, "tool_name") != "lookup_weather" || !nestedPathBool(map[string]any{"metadata": assistMetadata}, "metadata", "valid_draft") {
+		t.Fatalf("unexpected tool call assist draft audit metadata: %#v", assistMetadata)
+	}
+	if nestedString(assistMetadata, "issuer_url") != provider.Issuer() || nestedString(assistMetadata, "subject") != "kirari-test-sub" {
+		t.Fatalf("unexpected kirari audit identity metadata: %#v", assistMetadata)
+	}
 
 	env.postJSON(t, "/api/conversations/"+conversation["id"].(string)+"/respond", map[string]any{
 		"text": "done",
@@ -1900,6 +1911,14 @@ func TestWorkspaceToolCallAssistKirariRequiresConnection(t *testing.T) {
 	})
 	if status != http.StatusConflict || !strings.Contains(body, service.ErrKirariNotConnected.Error()) {
 		t.Fatalf("expected kirari not connected rejection: status=%d body=%q", status, body)
+	}
+	assertAuditCountForActor(t, env, "lab-user", "user.tool_call", "workspace_tool_call", "req_kirari_unconnected", "assist", "failure", 1)
+	assistMetadata := latestAuditMetadataForActorAction(t, env, "lab-user", "user.tool_call", "assist", "failure")
+	if nestedString(assistMetadata, "provider") != "kirari" || nestedString(assistMetadata, "model") != "kirari-model" {
+		t.Fatalf("unexpected failed tool call assist audit metadata: %#v", assistMetadata)
+	}
+	if !strings.Contains(nestedString(assistMetadata, "error"), service.ErrKirariNotConnected.Error()) {
+		t.Fatalf("unexpected failed tool call assist audit error metadata: %#v", assistMetadata)
 	}
 }
 

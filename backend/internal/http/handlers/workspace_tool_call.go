@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/service"
@@ -16,6 +17,8 @@ type WorkspaceToolCallHandler struct {
 	Config        config.Config
 	Service       *service.WorkspaceToolCallService
 	AssistService *service.ToolCallAssistService
+	KirariService *service.KirariIntegrationService
+	Audit         *service.AuditService
 }
 
 func (h WorkspaceToolCallHandler) Schema(w http.ResponseWriter, r *http.Request) {
@@ -81,8 +84,10 @@ func (h WorkspaceToolCallHandler) Assist(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	startedAt := time.Now()
 	result, err := h.AssistService.Execute(r.Context(), actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID)
 	if err != nil {
+		h.recordAssist(r, actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, nil, err)
 		switch {
 		case errors.Is(err, service.ErrToolCallAssistProviderRequired),
 			errors.Is(err, service.ErrToolCallAssistModelRequired),
@@ -101,9 +106,66 @@ func (h WorkspaceToolCallHandler) Assist(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
+	h.recordAssist(r, actor.UserID, body.Provider, body.Model, body.RequestID, body.ConversationID, startedAt, &result, nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"assist": result,
+	})
+}
+
+func (h WorkspaceToolCallHandler) recordAssist(
+	r *http.Request,
+	userID string,
+	provider string,
+	model string,
+	requestID string,
+	conversationID string,
+	startedAt time.Time,
+	result *service.ToolCallAssistResult,
+	err error,
+) {
+	if h.Audit == nil {
+		return
+	}
+	resourceID := strings.TrimSpace(requestID)
+	if resourceID == "" {
+		resourceID = strings.TrimSpace(conversationID)
+	}
+	metadata := map[string]any{
+		"provider":        strings.ToLower(strings.TrimSpace(provider)),
+		"model":           strings.TrimSpace(model),
+		"request_id":      strings.TrimSpace(requestID),
+		"conversation_id": strings.TrimSpace(conversationID),
+		"duration_ms":     time.Since(startedAt).Milliseconds(),
+	}
+	if result != nil {
+		metadata["valid_draft"] = result.ValidDraft
+		metadata["warning_count"] = len(result.Warnings)
+		metadata["validation_error_count"] = len(result.ValidationErrors)
+		if result.ToolCall != nil {
+			metadata["tool_name"] = stringValue(result.ToolCall["name"], "")
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(provider), "kirari") && h.KirariService != nil {
+		if status, statusErr := h.KirariService.Status(r.Context(), userID); statusErr == nil {
+			metadata["issuer_url"] = status.IssuerURL
+			metadata["subject"] = status.Subject
+		}
+	}
+	outcome := "success"
+	if err != nil {
+		outcome = "failure"
+		metadata["error"] = err.Error()
+	}
+	h.Audit.Record(r.Context(), service.AuditEventInput{
+		EventType:    "user.tool_call",
+		ResourceType: "workspace_tool_call",
+		ResourceID:   resourceID,
+		Action:       "assist",
+		Outcome:      outcome,
+		IPAddress:    clientIP(r),
+		UserAgent:    r.UserAgent(),
+		Metadata:     metadata,
 	})
 }
 

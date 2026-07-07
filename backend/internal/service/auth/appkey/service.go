@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	keyutil "github.com/zyf/chatapi/internal/platform/apikey"
 	"github.com/zyf/chatapi/internal/store"
 )

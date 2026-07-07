@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/repository/migrationplan"
 	"github.com/zyf/chatapi/internal/store"
 )

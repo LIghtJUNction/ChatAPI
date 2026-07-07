@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
-	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
 )

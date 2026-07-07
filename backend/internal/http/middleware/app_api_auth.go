@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/zyf/chatapi/internal/actor"
-	appkey "github.com/zyf/chatapi/internal/apikey/app"
-	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	appkey "github.com/zyf/chatapi/internal/service/auth/appkey"
 	"go.uber.org/zap"
 )
 

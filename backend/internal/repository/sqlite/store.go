@@ -17,7 +17,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	"github.com/zyf/chatapi/internal/store"
 )

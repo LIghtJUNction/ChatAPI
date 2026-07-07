@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/zyf/chatapi/internal/actor"
-	modelkey "github.com/zyf/chatapi/internal/apikey/model"
-	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	modelkey "github.com/zyf/chatapi/internal/service/auth/modelkey"
 	"go.uber.org/zap"
 )
 

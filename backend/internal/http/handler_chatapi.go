@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
-	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/protocol"
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
@@ -198,6 +198,21 @@ func (h ChatAPIHandler) executeTurnControl(w http.ResponseWriter, r *http.Reques
 				zap.String("conversation.id", command.ConversationID),
 				zap.Int("http.status_code", status),
 			).Warn("turn control owner check failed")
+			http.Error(w, err.Error(), status)
+			return
+		}
+	}
+	if principal, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
+		if _, err := h.Query.ListMessagesForOwner(r.Context(), command.ConversationID, principal.UserID); err != nil {
+			status := http.StatusNotFound
+			if errors.Is(err, turnquerysvc.ErrForbidden) {
+				status = http.StatusForbidden
+			}
+			logging.BindContext(h.Logger, r.Context(),
+				zap.String("turn.control", string(kind)),
+				zap.String("conversation.id", command.ConversationID),
+				zap.Int("http.status_code", status),
+			).Warn("session turn control owner check failed")
 			http.Error(w, err.Error(), status)
 			return
 		}

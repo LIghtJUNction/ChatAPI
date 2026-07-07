@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/protocol"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"

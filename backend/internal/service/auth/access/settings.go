@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zyf/chatapi/internal/repository/authrepo"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -30,7 +31,7 @@ type Settings struct {
 }
 
 type SettingsService struct {
-	store       store.Store
+	store       authrepo.SettingsStore
 	defaults    Settings
 	cacheTTL    time.Duration
 	mu          sync.RWMutex
@@ -60,7 +61,7 @@ type ResponseSchema struct {
 	UpdateStrategy string        `json:"update_strategy"`
 }
 
-func NewSettingsService(dataStore store.Store, defaults Settings) *SettingsService {
+func NewSettingsService(dataStore authrepo.SettingsStore, defaults Settings) *SettingsService {
 	return &SettingsService{
 		store:    dataStore,
 		defaults: defaults,

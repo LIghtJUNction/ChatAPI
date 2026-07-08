@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/platform/password"
+	"github.com/zyf/chatapi/internal/repository/authrepo"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -17,7 +18,7 @@ var (
 )
 
 type Service struct {
-	store store.Store
+	store authrepo.Store
 	now   func() time.Time
 }
 
@@ -45,7 +46,7 @@ type UpdateUserInput struct {
 	LastLoginAt  *time.Time
 }
 
-func NewService(dataStore store.Store) *Service {
+func NewService(dataStore authrepo.Store) *Service {
 	return &Service{
 		store: dataStore,
 		now:   func() time.Time { return time.Now().UTC() },

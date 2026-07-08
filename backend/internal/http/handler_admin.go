@@ -10,26 +10,20 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/service/admincontrol"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
-	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
-	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
-	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
-	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
 type AdminHandler struct {
-	Users          *authadmin.Service
-	Chat           *chatadmin.Service
-	Audit          *auditsvc.Service
-	AuthSettings   *authsettings.Service
-	AccessSettings *authaccess.SettingsService
-	Logger         *zap.Logger
+	Control *admincontrol.Service
+	Audit   *auditsvc.Service
+	Logger  *zap.Logger
 }
 
 func (h AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	items, err := h.Users.ListUsers(r.Context())
+	items, err := h.Control.ListUsers(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -39,7 +33,7 @@ func (h AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (h AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
-	item, err := h.Users.GetUser(r.Context(), userID)
+	item, err := h.Control.GetUser(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -64,7 +58,7 @@ func (h AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if body.IsActive != nil {
 		isActive = *body.IsActive
 	}
-	item, err := h.Users.CreateUser(r.Context(), authadmin.CreateUserInput{
+	item, err := h.Control.CreateUser(r.Context(), admincontrol.CreateUserInput{
 		Username:   body.Username,
 		Email:      body.Email,
 		Password:   body.Password,
@@ -87,7 +81,7 @@ func (h AdminHandler) EnableUser(w http.ResponseWriter, r *http.Request) { h.set
 
 func (h AdminHandler) setUserState(w http.ResponseWriter, r *http.Request, isActive bool) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
-	item, err := h.Users.SetUserState(r.Context(), userID, isActive)
+	item, err := h.Control.SetUserState(r.Context(), userID, isActive)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -109,7 +103,7 @@ func (h AdminHandler) ResetUserPassword(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	item, err := h.Users.ResetPassword(r.Context(), userID, body.Password)
+	item, err := h.Control.ResetPassword(r.Context(), userID, body.Password)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -120,7 +114,7 @@ func (h AdminHandler) ResetUserPassword(w http.ResponseWriter, r *http.Request) 
 
 func (h AdminHandler) ListUserIdentities(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
-	items, err := h.Users.ListUserIdentities(r.Context(), userID)
+	items, err := h.Control.ListUserIdentities(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -131,7 +125,7 @@ func (h AdminHandler) ListUserIdentities(w http.ResponseWriter, r *http.Request)
 func (h AdminHandler) DeleteUserIdentity(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
 	identityID := strings.TrimSpace(chi.URLParam(r, "identityID"))
-	if err := h.Users.DeleteUserIdentity(r.Context(), userID, identityID); err != nil {
+	if err := h.Control.DeleteUserIdentity(r.Context(), userID, identityID); err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
@@ -141,7 +135,7 @@ func (h AdminHandler) DeleteUserIdentity(w http.ResponseWriter, r *http.Request)
 
 func (h AdminHandler) ListUserAppKeys(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
-	items, err := h.Users.ListAppKeys(r.Context(), userID)
+	items, err := h.Control.ListAppKeys(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -152,7 +146,7 @@ func (h AdminHandler) ListUserAppKeys(w http.ResponseWriter, r *http.Request) {
 func (h AdminHandler) RevokeUserAppKey(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
 	keyID := strings.TrimSpace(chi.URLParam(r, "keyID"))
-	if err := h.Users.RevokeAppKey(r.Context(), userID, keyID); err != nil {
+	if err := h.Control.RevokeAppKey(r.Context(), userID, keyID); err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
@@ -162,7 +156,7 @@ func (h AdminHandler) RevokeUserAppKey(w http.ResponseWriter, r *http.Request) {
 
 func (h AdminHandler) ListUserModelKeys(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
-	items, err := h.Users.ListModelKeys(r.Context(), userID)
+	items, err := h.Control.ListModelKeys(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -173,7 +167,7 @@ func (h AdminHandler) ListUserModelKeys(w http.ResponseWriter, r *http.Request) 
 func (h AdminHandler) RevokeUserModelKey(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
 	keyID := strings.TrimSpace(chi.URLParam(r, "keyID"))
-	if err := h.Users.RevokeModelKey(r.Context(), userID, keyID); err != nil {
+	if err := h.Control.RevokeModelKey(r.Context(), userID, keyID); err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
@@ -183,7 +177,7 @@ func (h AdminHandler) RevokeUserModelKey(w http.ResponseWriter, r *http.Request)
 
 func (h AdminHandler) DeletePreview(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
-	preview, err := h.Users.DeletePreview(r.Context(), userID)
+	preview, err := h.Control.DeletePreview(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -193,7 +187,7 @@ func (h AdminHandler) DeletePreview(w http.ResponseWriter, r *http.Request) {
 
 func (h AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
-	if err := h.Users.DeleteUser(r.Context(), userID); err != nil {
+	if err := h.Control.DeleteUser(r.Context(), userID); err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
@@ -210,7 +204,7 @@ func (h AdminHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	result, err := h.Users.TransferOwnership(r.Context(), userID, body.TargetUserID)
+	result, err := h.Control.TransferOwnership(r.Context(), userID, body.TargetUserID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -221,7 +215,7 @@ func (h AdminHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) 
 
 func (h AdminHandler) OwnershipItems(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
-	items, err := h.Users.OwnershipItems(r.Context(), userID)
+	items, err := h.Control.OwnershipItems(r.Context(), userID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -240,7 +234,7 @@ func (h AdminHandler) TransferOwnershipSelection(w http.ResponseWriter, r *http.
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	result, err := h.Users.TransferOwnershipSelection(r.Context(), userID, body.TargetUserID, body.ConversationIDs, body.Filenames)
+	result, err := h.Control.TransferOwnershipSelection(r.Context(), userID, body.TargetUserID, body.ConversationIDs, body.Filenames)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -250,7 +244,7 @@ func (h AdminHandler) TransferOwnershipSelection(w http.ResponseWriter, r *http.
 }
 
 func (h AdminHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
-	items, err := h.Chat.ListRequests(r.Context())
+	items, err := h.Control.ListRequests(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -260,7 +254,7 @@ func (h AdminHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 
 func (h AdminHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
-	item, err := h.Chat.GetRequest(r.Context(), requestID)
+	item, err := h.Control.GetRequest(r.Context(), requestID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -269,7 +263,7 @@ func (h AdminHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AdminHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
-	items, err := h.Chat.ListConversations(r.Context())
+	items, err := h.Control.ListConversations(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -279,7 +273,7 @@ func (h AdminHandler) ListConversations(w http.ResponseWriter, r *http.Request) 
 
 func (h AdminHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {
 	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
-	items, err := h.Chat.ListMessages(r.Context(), conversationID)
+	items, err := h.Control.ListMessages(r.Context(), conversationID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -296,7 +290,7 @@ func (h AdminHandler) AbortConversation(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	result, err := h.Chat.AbortConversation(r.Context(), conversationID, body.Reason)
+	result, err := h.Control.AbortConversation(r.Context(), conversationID, body.Reason)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -318,7 +312,7 @@ func (h AdminHandler) CompleteConversation(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	result, err := h.Chat.CompleteConversation(r.Context(), conversationID, body.Text, body.Mode, body.ToolName, body.ToolCallID, body.ToolOutput)
+	result, err := h.Control.CompleteConversation(r.Context(), conversationID, body.Text, body.Mode, body.ToolName, body.ToolCallID, body.ToolOutput)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -329,7 +323,7 @@ func (h AdminHandler) CompleteConversation(w http.ResponseWriter, r *http.Reques
 
 func (h AdminHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
-	result, err := h.Chat.DeleteConversation(r.Context(), conversationID)
+	result, err := h.Control.DeleteConversation(r.Context(), conversationID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -359,11 +353,7 @@ func (h AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AdminHandler) GetAuthSettings(w http.ResponseWriter, r *http.Request) {
-	if h.AuthSettings == nil {
-		http.Error(w, "auth settings service not configured", http.StatusInternalServerError)
-		return
-	}
-	item, err := h.AuthSettings.Get(r.Context())
+	item, err := h.Control.GetAuthSettings(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -373,16 +363,12 @@ func (h AdminHandler) GetAuthSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AdminHandler) SetAuthSettings(w http.ResponseWriter, r *http.Request) {
-	if h.AuthSettings == nil {
-		http.Error(w, "auth settings service not configured", http.StatusInternalServerError)
-		return
-	}
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	item, err := h.AuthSettings.Set(r.Context(), body)
+	item, err := h.Control.SetAuthSettings(r.Context(), body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -393,11 +379,7 @@ func (h AdminHandler) SetAuthSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AdminHandler) GetAccessSettings(w http.ResponseWriter, r *http.Request) {
-	if h.AccessSettings == nil {
-		http.Error(w, "access settings service not configured", http.StatusInternalServerError)
-		return
-	}
-	item, err := h.AccessSettings.GetDocument(r.Context())
+	item, err := h.Control.GetAccessSettings(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -406,28 +388,18 @@ func (h AdminHandler) GetAccessSettings(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h AdminHandler) SetAccessSettings(w http.ResponseWriter, r *http.Request) {
-	if h.AccessSettings == nil {
-		http.Error(w, "access settings service not configured", http.StatusInternalServerError)
-		return
-	}
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	item, err := h.AccessSettings.Set(r.Context(), body)
+	item, err := h.Control.SetAccessSettings(r.Context(), body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	h.record(r, "admin.access", "access_settings", "system_access_settings", "update", "success", nil)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":               true,
-		"key":              "system_access_settings",
-		"current":          item,
-		"schema":           h.AccessSettings.Schema(),
-		"response_version": 1,
-	})
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (h AdminHandler) record(r *http.Request, eventType string, resourceType string, resourceID string, action string, outcome string, metadata map[string]any) {

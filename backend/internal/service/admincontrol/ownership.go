@@ -1,4 +1,4 @@
-package admin
+package admincontrol
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func (s *Service) OwnershipItems(ctx context.Context, userID string) (store.User
 	if err != nil {
 		return store.UserOwnershipSelection{}, err
 	}
-	conversations, err := s.store.ListConversations(ctx)
+	conversations, err := s.chatStore.ListConversations(ctx)
 	if err != nil {
 		return store.UserOwnershipSelection{}, err
 	}
@@ -34,7 +34,7 @@ func (s *Service) OwnershipItems(ctx context.Context, userID string) (store.User
 			})
 		}
 	}
-	uploads, err := s.store.ListUploadedImagesByOwner(ctx, user.ID)
+	uploads, err := s.storageStore.ListUploadedImagesByOwner(ctx, user.ID)
 	if err != nil {
 		return store.UserOwnershipSelection{}, err
 	}

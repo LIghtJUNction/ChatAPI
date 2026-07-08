@@ -5,12 +5,13 @@ import (
 	"time"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/repository/platformrepo"
 	"github.com/zyf/chatapi/internal/store"
 )
 
 type Service struct {
 	cfg   config.Config
-	store store.Store
+	store platformrepo.HealthStore
 }
 
 type Report struct {
@@ -37,7 +38,7 @@ type MigrationCheck struct {
 	Error          string                   `json:"error,omitempty"`
 }
 
-func NewService(cfg config.Config, dataStore store.Store) *Service {
+func NewService(cfg config.Config, dataStore platformrepo.HealthStore) *Service {
 	return &Service{cfg: cfg, store: dataStore}
 }
 

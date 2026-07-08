@@ -67,7 +67,12 @@ func TestRouterLabModeAccessAndEndpoints(t *testing.T) {
 
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
-		Store:         st,
+		ChatRepo:      st,
+		AuthRepo:      st,
+		ConfigRepo:    st,
+		StorageRepo:   st,
+		AuditRepo:     st,
+		PlatformRepo:  st,
 		Turn:          turnService,
 		Query:         queryService,
 		ModelAPIKeys:  modelKeyService,
@@ -165,7 +170,12 @@ func TestRouterGlobalAccessRateLimit(t *testing.T) {
 
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
-		Store:         st,
+		ChatRepo:      st,
+		AuthRepo:      st,
+		ConfigRepo:    st,
+		StorageRepo:   st,
+		AuditRepo:     st,
+		PlatformRepo:  st,
 		LoggerFactory: logFactory,
 	}))
 	defer server.Close()
@@ -224,7 +234,12 @@ func TestRouterPrincipalAccessRateLimitForAppKey(t *testing.T) {
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:         cfg,
-		Store:          st,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
 		Query:          queryService,
 		AppAPIKeys:     appKeyService,
 		Policy:         policy.NewService(),

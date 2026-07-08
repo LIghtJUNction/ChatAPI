@@ -9,14 +9,14 @@ import (
 
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/ops/observability/httpmetrics"
-	"github.com/zyf/chatapi/internal/service/readiness"
-	"github.com/zyf/chatapi/internal/service/setup"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/ops/readiness"
+	"github.com/zyf/chatapi/internal/ops/setup"
+	"github.com/zyf/chatapi/internal/repository/platformrepo"
 )
 
 type HealthHandler struct {
 	Config config.Config
-	Store  store.Store
+	Store  platformrepo.HealthStore
 }
 
 type ReadinessHandler struct {

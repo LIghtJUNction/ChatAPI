@@ -3,6 +3,10 @@ package usercontrol
 import (
 	"context"
 
+	"github.com/zyf/chatapi/internal/repository/authrepo"
+	"github.com/zyf/chatapi/internal/repository/chatrepo"
+	"github.com/zyf/chatapi/internal/repository/configrepo"
+	"github.com/zyf/chatapi/internal/repository/storagerepo"
 	"github.com/zyf/chatapi/internal/service/account"
 	identitysvc "github.com/zyf/chatapi/internal/service/auth/authn/identity"
 	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
@@ -38,7 +42,10 @@ type Deps struct {
 	Policy    *policy.Service
 	Query     *turnquerysvc.Service
 	Turn      *turnsvc.Service
-	Store     store.Store
+	Configs      configrepo.Store
+	Storage      storagerepo.Store
+	Chat         chatrepo.Store
+	AppKeysStore authrepo.KeyStore
 	AppKeys   *appkey.Service
 	ModelKeys *modelkey.Service
 	Accounts  *account.Service
@@ -48,17 +55,17 @@ type Deps struct {
 func New(deps Deps) *Service {
 	return &Service{
 		Profile:  profile.New(profile.Deps{Identity: deps.Identity, LocalAuth: deps.LocalAuth, Settings: deps.Settings, TOTP: deps.TOTP, Policy: deps.Policy, Logger: deps.Logger}),
-		Keys:     keys.New(keys.Deps{Store: deps.Store, AppKeys: deps.AppKeys, ModelKeys: deps.ModelKeys, Logger: deps.Logger}),
-		Config:   config.New(config.Deps{Store: deps.Store, Logger: deps.Logger}),
+		Keys:     keys.New(keys.Deps{Keys: deps.AppKeysStore, AppKeys: deps.AppKeys, ModelKeys: deps.ModelKeys, Logger: deps.Logger}),
+		Config:   config.New(config.Deps{Configs: deps.Configs, Chat: deps.Chat, Logger: deps.Logger}),
 		Identity: identity.New(identity.Deps{Accounts: deps.Accounts, Logger: deps.Logger}),
 		Conversations: conversations.New(conversations.Deps{
 			Query:  deps.Query,
 			Turn:   deps.Turn,
 			Logger: deps.Logger,
 			DeleteOne: func(ctx context.Context, conversationID string) (store.DeleteConversationsResult, error) {
-				return deps.Store.DeleteConversations(ctx, []string{conversationID})
+				return deps.Chat.DeleteConversations(ctx, []string{conversationID})
 			},
-			DeleteMany: deps.Store.DeleteConversations,
+			DeleteMany: deps.Chat.DeleteConversations,
 		}),
 	}
 }

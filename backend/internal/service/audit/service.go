@@ -8,11 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/actor"
+	"github.com/zyf/chatapi/internal/repository/auditrepo"
 	"github.com/zyf/chatapi/internal/store"
 )
 
 type Service struct {
-	store store.Store
+	store auditrepo.Store
 }
 
 type ListInput struct {
@@ -22,7 +23,7 @@ type ListInput struct {
 	IncludeAppAPI bool
 }
 
-func NewService(dataStore store.Store) *Service {
+func NewService(dataStore auditrepo.Store) *Service {
 	return &Service{store: dataStore}
 }
 

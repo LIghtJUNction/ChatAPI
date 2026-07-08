@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/zyf/chatapi/internal/repository/migrations"
+	"github.com/zyf/chatapi/internal/repository/repositorycontract"
 	"github.com/zyf/chatapi/internal/repository/storetest"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestSQLiteRepositoryContracts(t *testing.T) {
@@ -21,7 +21,7 @@ func TestSQLiteRepositoryContracts(t *testing.T) {
 	storetest.RunConversationRepositoryTests(t, openTestStore)
 }
 
-func openTestStore(t *testing.T) store.Store {
+func openTestStore(t *testing.T) repositorycontract.Store {
 	t.Helper()
 	st, err := Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
 	if err != nil {

@@ -6,26 +6,30 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/chatrepo"
+	"github.com/zyf/chatapi/internal/repository/configrepo"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
 type Deps struct {
-	Store  store.Store
+	Configs configrepo.Store
+	Chat    chatrepo.Store
 	Logger *zap.Logger
 }
 
 type Service struct {
-	store  store.Store
+	configs configrepo.Store
+	chat    chatrepo.Store
 	logger *zap.Logger
 }
 
 func New(deps Deps) *Service {
-	return &Service{store: deps.Store, logger: deps.Logger}
+	return &Service{configs: deps.Configs, chat: deps.Chat, logger: deps.Logger}
 }
 
 func (s *Service) GetUserConfig(ctx context.Context, userID string) (store.UserConfig, error) {
-	item, err := s.store.GetUserConfig(ctx, strings.TrimSpace(userID), "settings")
+	item, err := s.configs.GetUserConfig(ctx, strings.TrimSpace(userID), "settings")
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.String("config.key", "settings")).Debug("usercontrol config fetched user config")
 	}
@@ -33,7 +37,7 @@ func (s *Service) GetUserConfig(ctx context.Context, userID string) (store.UserC
 }
 
 func (s *Service) UpdateUserConfig(ctx context.Context, userID string, value map[string]any) (store.UserConfig, error) {
-	item, err := s.store.SetUserConfig(ctx, store.SetUserConfigInput{
+	item, err := s.configs.SetUserConfig(ctx, store.SetUserConfigInput{
 		UserID: strings.TrimSpace(userID),
 		Key:    "settings",
 		Value:  cloneMap(value),
@@ -45,7 +49,7 @@ func (s *Service) UpdateUserConfig(ctx context.Context, userID string, value map
 }
 
 func (s *Service) ListAutomationRules(ctx context.Context, userID string) ([]store.AutomationRule, error) {
-	items, err := s.store.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
+	items, err := s.configs.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.Int("rules.count", len(items))).Debug("usercontrol config listed automation rules")
 	}
@@ -70,7 +74,7 @@ func (s *Service) ReplaceAutomationRules(ctx context.Context, userID string, rul
 			Payload: payload,
 		})
 	}
-	existing, err := s.store.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
+	existing, err := s.configs.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +82,7 @@ func (s *Service) ReplaceAutomationRules(ctx context.Context, userID string, rul
 	for _, item := range existing {
 		replaceIDs[strings.TrimSpace(item.ID)] = struct{}{}
 	}
-	items, err := s.store.ReplaceAutomationRulesForUser(ctx, strings.TrimSpace(userID), replaceIDs, inputs)
+	items, err := s.configs.ReplaceAutomationRulesForUser(ctx, strings.TrimSpace(userID), replaceIDs, inputs)
 	if err == nil {
 		logging.BindContext(s.logger, ctx,
 			zap.String("owner.id", strings.TrimSpace(userID)),
@@ -91,11 +95,11 @@ func (s *Service) ReplaceAutomationRules(ctx context.Context, userID string, rul
 }
 
 func (s *Service) DeleteConversation(ctx context.Context, conversationID string) (store.DeleteConversationsResult, error) {
-	return s.store.DeleteConversations(ctx, []string{strings.TrimSpace(conversationID)})
+	return s.chat.DeleteConversations(ctx, []string{strings.TrimSpace(conversationID)})
 }
 
 func (s *Service) DeleteConversations(ctx context.Context, conversationIDs []string) (store.DeleteConversationsResult, error) {
-	return s.store.DeleteConversations(ctx, conversationIDs)
+	return s.chat.DeleteConversations(ctx, conversationIDs)
 }
 
 func cloneMap(input map[string]any) map[string]any {

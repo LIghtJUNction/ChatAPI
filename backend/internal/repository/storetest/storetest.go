@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zyf/chatapi/internal/repository/repositorycontract"
 	"github.com/zyf/chatapi/internal/store"
 )
 
-type NewStoreFunc func(t *testing.T) store.Store
+type NewStoreFunc func(t *testing.T) repositorycontract.Store
 
 const (
 	httpStatusOK        = 200

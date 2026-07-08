@@ -19,8 +19,9 @@ import (
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service/account"
+	"github.com/zyf/chatapi/internal/service/admincontrol"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
-	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
+	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
 	"github.com/zyf/chatapi/internal/service/auth/authn/identity"
 	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
 	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
@@ -28,7 +29,6 @@ import (
 	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
@@ -92,7 +92,6 @@ func TestRouterAdminFlow(t *testing.T) {
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
 	identityService := identity.NewService(accountService)
 	auditService := auditsvc.NewService(st)
-	adminUserService := authadmin.NewService(accountService, st, policies)
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
@@ -110,7 +109,14 @@ func TestRouterAdminFlow(t *testing.T) {
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
-	adminChatService := chatadmin.NewService(queryService, turnService, st)
+	adminControl := admincontrol.New(admincontrol.Deps{
+		Accounts:     accountService,
+		Query:        queryService,
+		Turn:         turnService,
+		ChatStore:    st,
+		StorageStore: st,
+		KeyStore:     st,
+	})
 
 	_, modelKey, err := modelKeyService.CreateKey(context.Background(), "normal_user", "user-model", "demo-model")
 	if err != nil {
@@ -126,23 +132,41 @@ func TestRouterAdminFlow(t *testing.T) {
 	}
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
+	accessSettings := authaccess.NewSettingsService(st, authaccess.Settings{
+		GlobalRateLimitRequests: cfg.AccessRateLimitRequests,
+		GlobalRateLimitWindow:   cfg.AccessRateLimitWindow,
+	})
+	adminControl = admincontrol.New(admincontrol.Deps{
+		Accounts:       accountService,
+		Query:          queryService,
+		Turn:           turnService,
+		ChatStore:      st,
+		StorageStore:   st,
+		KeyStore:       st,
+		AccessSettings: accessSettings,
+	})
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
-		Store:         st,
-		Turn:          turnService,
-		Query:         queryService,
-		ModelAPIKeys:  modelKeyService,
-		AppAPIKeys:    appKeyService,
-		LocalAuth:     localService,
-		Verification:  verificationService,
-		Policy:        policies,
-		Accounts:      accountService,
-		AdminUsers:    adminUserService,
-		AdminChat:     adminChatService,
-		Audit:         auditService,
-		Identity:      identityService,
-		UserSessions:  sessionService,
-		LoggerFactory: logFactory,
+		Config:         cfg,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		Turn:           turnService,
+		Query:          queryService,
+		ModelAPIKeys:   modelKeyService,
+		AppAPIKeys:     appKeyService,
+		LocalAuth:      localService,
+		Verification:   verificationService,
+		Policy:         policies,
+		AccessSettings: accessSettings,
+		Accounts:       accountService,
+		AdminControl:   adminControl,
+		Audit:          auditService,
+		Identity:       identityService,
+		UserSessions:   sessionService,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/repository/authrepo"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -30,11 +31,11 @@ type PublicSettings struct {
 }
 
 type Service struct {
-	store store.Store
+	store authrepo.SettingsStore
 	cfg   config.Config
 }
 
-func NewService(dataStore store.Store, cfg config.Config) *Service {
+func NewService(dataStore authrepo.SettingsStore, cfg config.Config) *Service {
 	return &Service{store: dataStore, cfg: cfg}
 }
 

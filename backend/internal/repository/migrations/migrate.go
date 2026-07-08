@@ -10,7 +10,7 @@ import (
 )
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0004_sqlite_auth_verification_code_limits"
+const LatestVersion = "0005_media_assets"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS
@@ -21,6 +21,8 @@ var bootstrapSchema = mustBootstrapSchema(registeredMigrations)
 var bootstrapTables = []string{
 	"storage_file_deletion_failures",
 	"storage_user_quotas",
+	"media_asset_refs",
+	"media_assets",
 	"uploaded_images",
 	"audit_logs",
 	"app_api_key_audit_logs",

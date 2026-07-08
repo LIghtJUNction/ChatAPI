@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,15 +15,17 @@ import (
 	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
+	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
 	"github.com/zyf/chatapi/internal/store"
 )
 
 type ChatAPIHandler struct {
-	Turn   *turnsvc.Service
-	Query  *turnquerysvc.Service
-	Logger *zap.Logger
+	Turn       *turnsvc.Service
+	Query      *turnquerysvc.Service
+	Preprocess *preprocesssvc.Service
+	Logger     *zap.Logger
 }
 
 func (h ChatAPIHandler) Responses(w http.ResponseWriter, r *http.Request) {
@@ -73,20 +76,32 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 	requestMeta := captureRequestMeta(r)
+	prepared := preprocesssvc.PreparedRequest{Request: parsed}
+	if h.Preprocess != nil {
+		ownerID := ownerIDForPreprocess(r.Context())
+		prepared, err = h.Preprocess.Prepare(r.Context(), ownerID, parsed)
+		if err != nil {
+			logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("protocol preprocess failed", zap.Error(err))
+			writeJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
+			return
+		}
+	}
+	parsed = prepared.Request
 	logging.BindContext(h.Logger, r.Context(),
 		zap.String("protocol", requestFormat),
 		zap.String("model", parsed.Model),
 		zap.Bool("stream", parsed.Stream),
 	).Info("accepted protocol request")
 	if parsed.Stream {
-		h.handleStreamRequest(w, r, parsed, body, requestMeta)
+		h.handleStreamRequest(w, r, parsed, prepared.PreparedImages, body, requestMeta)
 		return
 	}
 
 	responseBody, err := h.Turn.CreatePendingResponse(r.Context(), turnsvc.SubmitInput{
-		Request:     parsed,
-		RequestMeta: requestMeta,
-		RawBody:     body,
+		Request:        parsed,
+		PreparedImages: prepared.PreparedImages,
+		RequestMeta:    requestMeta,
+		RawBody:        body,
 	})
 	if err != nil {
 		requestErr := protocol.InternalError(err.Error())
@@ -97,7 +112,7 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, responseBody)
 }
 
-func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, body map[string]any, requestMeta store.Request) {
+func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, preparedImages []preprocesssvc.PreparedImage, body map[string]any, requestMeta store.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		logging.BindContext(h.Logger, r.Context()).Error("streaming not supported by response writer")
@@ -106,9 +121,10 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 	}
 
 	turn, conversation, err := h.Turn.CreatePendingStream(r.Context(), turnsvc.SubmitInput{
-		Request:     request,
-		RequestMeta: requestMeta,
-		RawBody:     body,
+		Request:        request,
+		PreparedImages: preparedImages,
+		RequestMeta:    requestMeta,
+		RawBody:        body,
 	})
 	if err != nil {
 		requestErr := protocol.InternalError(err.Error())
@@ -266,6 +282,16 @@ func buildTurnControlCommand(kind turnsvc.TurnControlKind, body map[string]any) 
 		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
 		AbortReason:         stringValue(body["error"], ""),
 	}, nil
+}
+
+func ownerIDForPreprocess(ctx context.Context) string {
+	if principal, ok := appkey.PrincipalFromContext(ctx); ok && strings.TrimSpace(principal.UserID) != "" {
+		return strings.TrimSpace(principal.UserID)
+	}
+	if principal, ok := session.PrincipalFromContext(ctx); ok && strings.TrimSpace(principal.UserID) != "" {
+		return strings.TrimSpace(principal.UserID)
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

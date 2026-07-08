@@ -8,15 +8,15 @@ import (
 	"testing"
 
 	"github.com/zyf/chatapi/internal/repository/migrations"
+	"github.com/zyf/chatapi/internal/repository/repositorycontract"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	userconfig "github.com/zyf/chatapi/internal/service/usercontrol/config"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestConfigServiceGetUpdateAndReplaceRules(t *testing.T) {
 	st := openConfigStore(t)
 	ctx := context.Background()
-	svc := userconfig.New(userconfig.Deps{Store: st})
+	svc := userconfig.New(userconfig.Deps{Configs: st, Chat: st})
 	original := map[string]any{"theme": "dark", "nested": map[string]any{"x": 1}}
 
 	item, err := svc.UpdateUserConfig(ctx, " user_a ", original)
@@ -69,7 +69,7 @@ func TestConfigServiceGetUpdateAndReplaceRules(t *testing.T) {
 func TestConfigServiceReplaceAutomationRulesRandomized(t *testing.T) {
 	st := openConfigStore(t)
 	ctx := context.Background()
-	svc := userconfig.New(userconfig.Deps{Store: st})
+	svc := userconfig.New(userconfig.Deps{Configs: st, Chat: st})
 
 	rng := rand.New(rand.NewSource(42))
 	inputs := make([]map[string]any, 0, 20)
@@ -101,7 +101,7 @@ func TestConfigServiceReplaceAutomationRulesRandomized(t *testing.T) {
 	}
 }
 
-func openConfigStore(t *testing.T) store.Store {
+func openConfigStore(t *testing.T) repositorycontract.Store {
 	t.Helper()
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/zyf/chatapi/internal/protocol"
+	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -23,16 +24,21 @@ type RealtimePublisher interface {
 	PublishConversationUpsert(store.Conversation, []store.Message)
 }
 
+type PreparedImageCleaner interface {
+	DeletePreparedImage(context.Context, string) error
+}
+
 type SubmitHooks struct {
 	AfterCreate   func(ctx context.Context, request protocol.TurnRequest, conversationID string, responseID string)
 	NotifyWaiting func(ctx context.Context, ownerID string, title string, userText string)
 }
 
 type Submitter struct {
-	Store    Store
-	Pending  PendingRegistrar
-	Realtime RealtimePublisher
-	Hooks    SubmitHooks
+	Store              Store
+	Pending            PendingRegistrar
+	Realtime           RealtimePublisher
+	Hooks              SubmitHooks
+	PreparedImageClean PreparedImageCleaner
 }
 
 func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn, store.Conversation, store.Message, error) {
@@ -64,8 +70,10 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 			Name:   input.Request.ResponseFormat.Name,
 			Schema: input.Request.ResponseFormat.Schema,
 		},
+		PreparedImages: toCreatePendingImageAssets(input.PreparedImages),
 	})
 	if err != nil {
+		s.cleanupPreparedImages(ctx, input.PreparedImages)
 		return nil, store.Conversation{}, store.Message{}, err
 	}
 
@@ -94,6 +102,38 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		}
 	}
 	return turn, conversation, message, nil
+}
+
+func toCreatePendingImageAssets(images []preprocesssvc.PreparedImage) []store.CreatePendingImageAssetInput {
+	if len(images) == 0 {
+		return nil
+	}
+	items := make([]store.CreatePendingImageAssetInput, 0, len(images))
+	for _, image := range images {
+		items = append(items, store.CreatePendingImageAssetInput{
+			FileID:            image.FileID,
+			Path:              image.Path,
+			MediaType:         image.MediaType,
+			Bytes:             image.Bytes,
+			SHA256:            image.SHA256,
+			Width:             image.Width,
+			Height:            image.Height,
+			SourceKind:        image.SourceKind,
+			OriginalName:      image.OriginalName,
+			OriginalMediaType: image.OriginalMediaType,
+			InputPartIndex:    image.InputPartIndex,
+		})
+	}
+	return items
+}
+
+func (s *Submitter) cleanupPreparedImages(ctx context.Context, images []preprocesssvc.PreparedImage) {
+	if s.PreparedImageClean == nil {
+		return
+	}
+	for _, image := range images {
+		_ = s.PreparedImageClean.DeletePreparedImage(ctx, image.Path)
+	}
 }
 
 func toStoreInputParts(parts []protocol.InputPart) []store.RequestInputPart {

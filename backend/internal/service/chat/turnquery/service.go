@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/zyf/chatapi/internal/repository/chatrepo"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
@@ -11,7 +12,7 @@ import (
 var ErrForbidden = errors.New("forbidden")
 
 type Service struct {
-	Store  store.Store
+	Store  chatrepo.Store
 	Logger *zap.Logger
 }
 

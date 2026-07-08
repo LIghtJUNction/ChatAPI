@@ -16,6 +16,7 @@ import (
 	"github.com/skip2/go-qrcode"
 
 	"github.com/zyf/chatapi/internal/platform/secretbox"
+	"github.com/zyf/chatapi/internal/repository/authrepo"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -34,7 +35,7 @@ type Setup struct {
 }
 
 type Service struct {
-	store     store.Store
+	store     authrepo.SettingsStore
 	masterKey string
 	issuer    string
 	now       func() time.Time
@@ -45,7 +46,7 @@ type configRecord struct {
 	Enabled          bool
 }
 
-func NewService(dataStore store.Store, masterKey string, issuer string) *Service {
+func NewService(dataStore authrepo.SettingsStore, masterKey string, issuer string) *Service {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {
 		issuer = "ChatAPI"

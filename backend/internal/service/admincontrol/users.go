@@ -1,4 +1,4 @@
-package admin
+package admincontrol
 
 import (
 	"context"
@@ -32,11 +32,11 @@ func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (store.
 }
 
 func (s *Service) SetUserState(ctx context.Context, userID string, isActive bool) (store.User, error) {
-	return s.accounts.SetUserState(ctx, userID, isActive)
+	return s.accounts.SetUserState(ctx, strings.TrimSpace(userID), isActive)
 }
 
 func (s *Service) ResetPassword(ctx context.Context, userID string, newPassword string) (store.User, error) {
-	return s.accounts.SetPassword(ctx, userID, newPassword)
+	return s.accounts.SetPassword(ctx, strings.TrimSpace(userID), newPassword)
 }
 
 func (s *Service) ListUserIdentities(ctx context.Context, userID string) ([]store.UserIdentity, error) {

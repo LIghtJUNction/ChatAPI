@@ -1,0 +1,88 @@
+package media
+
+import (
+	"bytes"
+	"encoding/base64"
+	"image"
+	"image/color"
+	"image/png"
+	"strings"
+	"testing"
+)
+
+func TestParseImageInputAndEncodeAVIF(t *testing.T) {
+	rawPNG := tinyPNG(t)
+	b64 := base64.StdEncoding.EncodeToString(rawPNG)
+
+	parsed, err := ParseImageInput(b64, "image/png", 1<<20)
+	if err != nil {
+		t.Fatalf("parse image input: %v", err)
+	}
+	if parsed.SourceKind != SourceBase64 || parsed.DetectedMediaType != "image/png" || parsed.Width != 2 || parsed.Height != 1 {
+		t.Fatalf("unexpected parsed image: %#v", parsed)
+	}
+
+	encoded, err := EncodeAVIF(parsed, AVIFOptions{Quality: 50})
+	if err != nil {
+		t.Fatalf("encode avif: %v", err)
+	}
+	if len(encoded) == 0 {
+		t.Fatal("expected avif bytes")
+	}
+	if mediaType, width, height, err := InspectImageBytes(encoded); err != nil || mediaType != "image/avif" || width != 2 || height != 1 {
+		t.Fatalf("unexpected avif inspect result: media=%q width=%d height=%d err=%v", mediaType, width, height, err)
+	}
+}
+
+func TestParseImageInputDetectsSVGPayload(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>`))
+	parsed, err := ParseImageInput(payload, "image/svg+xml", 1<<20)
+	if err != nil {
+		t.Fatalf("parse svg base64: %v", err)
+	}
+	if parsed.DetectedMediaType != "image/svg+xml" {
+		t.Fatalf("expected svg media type, got %#v", parsed)
+	}
+}
+
+func TestParseImageInputSupportsDataURL(t *testing.T) {
+	rawPNG := tinyPNG(t)
+	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(rawPNG)
+	parsed, err := ParseImageInput(dataURL, "", 1<<20)
+	if err != nil {
+		t.Fatalf("parse data url: %v", err)
+	}
+	if parsed.SourceKind != SourceDataURL || parsed.DetectedMediaType != "image/png" {
+		t.Fatalf("unexpected parsed data url: %#v", parsed)
+	}
+}
+
+func TestParseImageInputSupportsRemoteURL(t *testing.T) {
+	parsed, err := ParseImageInput("https://example.com/cat.png", "image/png", 1<<20)
+	if err != nil {
+		t.Fatalf("parse remote url: %v", err)
+	}
+	if parsed.SourceKind != SourceRemoteURL || parsed.Raw != "https://example.com/cat.png" {
+		t.Fatalf("unexpected remote parse: %#v", parsed)
+	}
+}
+
+func TestParseImageInputRejectsOversizedInput(t *testing.T) {
+	rawPNG := tinyPNG(t)
+	b64 := base64.StdEncoding.EncodeToString(rawPNG)
+	if _, err := ParseImageInput(b64, "image/png", 4); err == nil || !strings.Contains(err.Error(), ErrImageTooLarge.Error()) {
+		t.Fatalf("expected oversized image error, got %v", err)
+	}
+}
+
+func tinyPNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	img.Set(0, 0, color.NRGBA{R: 255, A: 255})
+	img.Set(1, 0, color.NRGBA{G: 255, A: 255})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
+}

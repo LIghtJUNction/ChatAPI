@@ -99,6 +99,64 @@ func (s *Store) DeleteUploadedImagesByFilenames(ctx context.Context, filenames [
 	return store.DeleteUploadedImagesResult{DeletedImages: int(tag.RowsAffected())}, nil
 }
 
+func (s *Store) ListMediaAssets(ctx context.Context) ([]store.MediaAsset, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
+		FROM media_assets
+		ORDER BY created_at DESC, id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.MediaAsset, 0)
+	for rows.Next() {
+		item, err := scanMediaAsset(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) ListOrphanMediaAssets(ctx context.Context) ([]store.MediaAsset, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT a.id, a.owner_id, a.file_id, a.path, a.media_type, a.bytes, a.sha256, a.width, a.height, a.source_kind, a.original_name, a.original_media_type, a.created_at
+		FROM media_assets a
+		LEFT JOIN media_asset_refs r ON r.asset_id = a.id
+		WHERE r.id IS NULL
+		ORDER BY a.created_at ASC, a.id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]store.MediaAsset, 0)
+	for rows.Next() {
+		item, err := scanMediaAsset(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) DeleteMediaAssetsByIDs(ctx context.Context, ids []string) (int, error) {
+	ids = uniqueNonEmptyStrings(ids)
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM media_assets WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (s *Store) UpsertStorageFileDeletionFailure(ctx context.Context, input store.UpsertStorageFileDeletionFailureInput) (store.StorageFileDeletionFailure, error) {
 	now := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
@@ -407,6 +465,31 @@ func scanUploadedImage(row rowScanner) (store.UploadedImage, error) {
 			return store.UploadedImage{}, store.ErrNotFound
 		}
 		return store.UploadedImage{}, err
+	}
+	return item, nil
+}
+
+func scanMediaAsset(row rowScanner) (store.MediaAsset, error) {
+	var item store.MediaAsset
+	if err := row.Scan(
+		&item.ID,
+		&item.OwnerID,
+		&item.FileID,
+		&item.Path,
+		&item.MediaType,
+		&item.Bytes,
+		&item.SHA256,
+		&item.Width,
+		&item.Height,
+		&item.SourceKind,
+		&item.OriginalName,
+		&item.OriginalMediaType,
+		&item.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.MediaAsset{}, store.ErrNotFound
+		}
+		return store.MediaAsset{}, err
 	}
 	return item, nil
 }

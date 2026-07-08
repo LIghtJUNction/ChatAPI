@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/zyf/chatapi/internal/repository/repositorycontract"
 	"github.com/zyf/chatapi/internal/repository/storetest"
-	"github.com/zyf/chatapi/internal/store"
 	"github.com/zyf/chatapi/internal/testutil/pgtest"
 )
 
@@ -61,7 +61,7 @@ func TestBootstrapAppliesLatestPostgreSQLMigration(t *testing.T) {
 }
 
 func openTestStore() storetest.NewStoreFunc {
-	return func(t *testing.T) store.Store {
+	return func(t *testing.T) repositorycontract.Store {
 		t.Helper()
 		ctx := context.Background()
 		dsn := pgtest.IsolatedDSN(t)

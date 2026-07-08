@@ -14,10 +14,19 @@ import (
 	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
 	"github.com/zyf/chatapi/internal/ops/observability/httpmetrics"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/ops/readiness"
+	"github.com/zyf/chatapi/internal/ops/setup"
+	"github.com/zyf/chatapi/internal/platform/media/localstore"
+	"github.com/zyf/chatapi/internal/repository/auditrepo"
+	"github.com/zyf/chatapi/internal/repository/authrepo"
+	"github.com/zyf/chatapi/internal/repository/chatrepo"
+	"github.com/zyf/chatapi/internal/repository/configrepo"
+	"github.com/zyf/chatapi/internal/repository/platformrepo"
+	"github.com/zyf/chatapi/internal/repository/storagerepo"
 	"github.com/zyf/chatapi/internal/service/account"
+	"github.com/zyf/chatapi/internal/service/admincontrol"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
-	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
 	"github.com/zyf/chatapi/internal/service/auth/authn/geetest"
 	"github.com/zyf/chatapi/internal/service/auth/authn/identity"
 	labauth "github.com/zyf/chatapi/internal/service/auth/authn/lab"
@@ -32,18 +41,20 @@ import (
 	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
+	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
 	"github.com/zyf/chatapi/internal/service/chat/turn"
 	"github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/service/readiness"
-	"github.com/zyf/chatapi/internal/service/setup"
 	"github.com/zyf/chatapi/internal/service/usercontrol"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type RouterDeps struct {
 	Config         config.Config
-	Store          store.Store
+	ChatRepo       chatrepo.Store
+	AuthRepo       authrepo.Store
+	ConfigRepo     configrepo.Store
+	StorageRepo    storagerepo.Store
+	AuditRepo      auditrepo.Store
+	PlatformRepo   platformrepo.MaintenanceStore
 	Turn           *turn.Service
 	Query          *turnquery.Service
 	ModelAPIKeys   *modelkey.Service
@@ -59,8 +70,7 @@ type RouterDeps struct {
 	TOTP           *totpsvc.Service
 	OIDC           *oidcsvc.Service
 	LoginLimiter   *ratelimit.Service
-	AdminUsers     *authadmin.Service
-	AdminChat      *chatadmin.Service
+	AdminControl   *admincontrol.Service
 	Audit          *auditsvc.Service
 	Accounts       *account.Service
 	Identity       *identity.Service
@@ -77,8 +87,8 @@ func NewRouter(deps RouterDeps) http.Handler {
 	if deps.Lab == nil {
 		deps.Lab = labauth.NewService(deps.Config)
 	}
-	if deps.AccessSettings == nil && deps.Store != nil {
-		deps.AccessSettings = authaccess.NewSettingsService(deps.Store, authaccess.Settings{
+	if deps.AccessSettings == nil && deps.AuthRepo != nil {
+		deps.AccessSettings = authaccess.NewSettingsService(deps.AuthRepo, authaccess.Settings{
 			GlobalRateLimitRequests: deps.Config.AccessRateLimitRequests,
 			GlobalRateLimitWindow:   deps.Config.AccessRateLimitWindow,
 		})
@@ -106,24 +116,42 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	if deps.UserControl == nil {
 		deps.UserControl = usercontrol.New(usercontrol.Deps{
-			Identity:  deps.Identity,
-			LocalAuth: deps.LocalAuth,
-			Settings:  deps.AuthSettings,
-			TOTP:      deps.TOTP,
-			Policy:    deps.Policy,
-			Query:     deps.Query,
-			Turn:      deps.Turn,
-			Store:     deps.Store,
-			AppKeys:   deps.AppAPIKeys,
-			ModelKeys: deps.ModelAPIKeys,
-			Accounts:  deps.Accounts,
-			Logger:    deps.logger(logging.LayerUserControl),
+			Identity:     deps.Identity,
+			LocalAuth:    deps.LocalAuth,
+			Settings:     deps.AuthSettings,
+			TOTP:         deps.TOTP,
+			Policy:       deps.Policy,
+			Query:        deps.Query,
+			Turn:         deps.Turn,
+			Configs:      deps.ConfigRepo,
+			Storage:      deps.StorageRepo,
+			Chat:         deps.ChatRepo,
+			AppKeysStore: deps.AuthRepo,
+			AppKeys:      deps.AppAPIKeys,
+			ModelKeys:    deps.ModelAPIKeys,
+			Accounts:     deps.Accounts,
+			Logger:       deps.logger(logging.LayerUserControl),
+		})
+	}
+	if deps.AdminControl == nil {
+		deps.AdminControl = admincontrol.New(admincontrol.Deps{
+			Accounts:       deps.Accounts,
+			Query:          deps.Query,
+			Turn:           deps.Turn,
+			ChatStore:      deps.ChatRepo,
+			StorageStore:   deps.StorageRepo,
+			KeyStore:       deps.AuthRepo,
+			AuthSettings:   deps.AuthSettings,
+			AccessSettings: deps.AccessSettings,
 		})
 	}
 
 	chatHandler := ChatAPIHandler{
-		Turn:   deps.Turn,
-		Query:  deps.Query,
+		Turn:  deps.Turn,
+		Query: deps.Query,
+		Preprocess: preprocesssvc.New(deps.Config, localstore.Store{
+			RootDir: deps.Config.MediaDerivedDir,
+		}),
 		Logger: deps.logger(logging.LayerHTTP),
 	}
 	appHandler := AppAPIHandler{
@@ -151,12 +179,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 		Logger:      deps.logger(logging.LayerAuth),
 	}
 	adminHandler := AdminHandler{
-		Users:          deps.AdminUsers,
-		Chat:           deps.AdminChat,
-		Audit:          deps.Audit,
-		AuthSettings:   deps.AuthSettings,
-		AccessSettings: deps.AccessSettings,
-		Logger:         deps.logger(logging.LayerAudit),
+		Control: deps.AdminControl,
+		Audit:   deps.Audit,
+		Logger:  deps.logger(logging.LayerAudit),
 	}
 	labHandler := LabHandler{
 		Config: deps.Config,
@@ -164,9 +189,9 @@ func NewRouter(deps RouterDeps) http.Handler {
 		Turn:   deps.Turn,
 		Logger: deps.logger(logging.LayerHTTP),
 	}
-	healthHandler := HealthHandler{Config: deps.Config, Store: deps.Store}
-	readinessHandler := ReadinessHandler{Service: readiness.NewService(deps.Config, deps.Store)}
-	setupHandler := SetupHandler{Service: setup.NewService(deps.Store, deps.Config)}
+	healthHandler := HealthHandler{Config: deps.Config, Store: deps.PlatformRepo}
+	readinessHandler := ReadinessHandler{Service: readiness.NewService(deps.Config, deps.PlatformRepo)}
+	setupHandler := SetupHandler{Service: setup.NewService(deps.AuthRepo, deps.Config)}
 	metricsHandler := MetricsHandler{Registry: metricsRegistry}
 
 	modelAuth := httpmiddleware.RequireModelAPIKey(deps.ModelAPIKeys, authLogger)

@@ -27,8 +27,9 @@ import (
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service/account"
+	"github.com/zyf/chatapi/internal/service/admincontrol"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
-	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
+	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
 	"github.com/zyf/chatapi/internal/service/auth/authn/geetest"
 	"github.com/zyf/chatapi/internal/service/auth/authn/identity"
 	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
@@ -41,7 +42,6 @@ import (
 	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
@@ -378,29 +378,48 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
+	accessSettings := authaccess.NewSettingsService(st, authaccess.Settings{
+		GlobalRateLimitRequests: cfg.AccessRateLimitRequests,
+		GlobalRateLimitWindow:   cfg.AccessRateLimitWindow,
+	})
+	adminControl := admincontrol.New(admincontrol.Deps{
+		Accounts:       accountService,
+		Query:          queryService,
+		Turn:           turnService,
+		ChatStore:      st,
+		StorageStore:   st,
+		KeyStore:       st,
+		AuthSettings:   authSettings,
+		AccessSettings: accessSettings,
+	})
 
 	return httpapi.RouterDeps{
-		Config:        cfg,
-		Store:         st,
-		Turn:          turnService,
-		Query:         queryService,
-		ModelAPIKeys:  modelKeyService,
-		AppAPIKeys:    appKeyService,
-		LocalAuth:     localService,
-		Verification:  verificationService,
-		Policy:        policies,
-		AuthSettings:  authSettings,
-		GeeTest:       geetestService,
-		TOTP:          totpService,
-		OIDC:          oidcService,
-		LoginLimiter:  loginLimiter,
-		Accounts:      accountService,
-		AdminUsers:    authadmin.NewService(accountService, st, policies),
-		AdminChat:     chatadmin.NewService(queryService, turnService, st),
-		Audit:         auditService,
-		Identity:      identityService,
-		UserSessions:  sessionService,
-		LoggerFactory: logFactory,
+		Config:         cfg,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		Turn:           turnService,
+		Query:          queryService,
+		ModelAPIKeys:   modelKeyService,
+		AppAPIKeys:     appKeyService,
+		LocalAuth:      localService,
+		Verification:   verificationService,
+		Policy:         policies,
+		AccessSettings: accessSettings,
+		AuthSettings:   authSettings,
+		GeeTest:        geetestService,
+		TOTP:           totpService,
+		OIDC:           oidcService,
+		LoginLimiter:   loginLimiter,
+		Accounts:       accountService,
+		AdminControl:   adminControl,
+		Audit:          auditService,
+		Identity:       identityService,
+		UserSessions:   sessionService,
+		LoggerFactory:  logFactory,
 	}
 }
 

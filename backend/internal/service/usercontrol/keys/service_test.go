@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zyf/chatapi/internal/repository/migrations"
+	"github.com/zyf/chatapi/internal/repository/repositorycontract"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service/account"
 	appkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
@@ -25,7 +26,7 @@ func TestKeysServiceCreateListRevoke(t *testing.T) {
 	_ = accountService
 	appKeys := appkeysvc.NewService(st)
 	modelKeys := modelkeysvc.NewService(st, "test-master-key")
-	svc := userkeys.New(userkeys.Deps{Store: st, AppKeys: appKeys, ModelKeys: modelKeys})
+	svc := userkeys.New(userkeys.Deps{Keys: st, AppKeys: appKeys, ModelKeys: modelKeys})
 
 	expiresAt := time.Now().UTC().Add(2 * time.Hour)
 	appItem, rawAppKey, err := svc.CreateAppKey(ctx, " user_a ", " my-app ", []string{"requests:read"}, map[string]any{"max_requests_per_minute": 5}, &expiresAt)
@@ -76,7 +77,7 @@ func TestKeysServiceCreateListRevoke(t *testing.T) {
 	}
 }
 
-func openKeysStore(t *testing.T) store.Store {
+func openKeysStore(t *testing.T) repositorycontract.Store {
 	t.Helper()
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
 	if err != nil {

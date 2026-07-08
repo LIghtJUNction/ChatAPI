@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/platform/password"
+	"github.com/zyf/chatapi/internal/repository/auditrepo"
 	"github.com/zyf/chatapi/internal/service/account"
 	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
@@ -31,7 +32,7 @@ var (
 
 type Service struct {
 	accounts     *account.Service
-	store        store.Store
+	auditStore   auditrepo.Store
 	policies     *policy.Service
 	sessions     *session.Service
 	verification *verification.Service
@@ -63,10 +64,10 @@ type AuthResult struct {
 	Claims    session.Claims      `json:"claims"`
 }
 
-func NewService(accounts *account.Service, dataStore store.Store, policies *policy.Service, sessions *session.Service, verificationService *verification.Service) *Service {
+func NewService(accounts *account.Service, auditStore auditrepo.Store, policies *policy.Service, sessions *session.Service, verificationService *verification.Service) *Service {
 	return &Service{
 		accounts:     accounts,
-		store:        dataStore,
+		auditStore:   auditStore,
 		policies:     policies,
 		sessions:     sessions,
 		verification: verificationService,
@@ -117,7 +118,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (store.User
 		}
 		return store.User{}, err
 	}
-	_, _ = s.store.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	_, _ = s.auditStore.CreateAuditLog(ctx, store.CreateAuditLogInput{
 		ID:           "audit_" + uuid.NewString(),
 		ActorUserID:  user.ID,
 		ActorRole:    user.Role,
@@ -198,7 +199,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (AuthResult, erro
 	if err != nil {
 		return AuthResult{}, err
 	}
-	_, _ = s.store.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	_, _ = s.auditStore.CreateAuditLog(ctx, store.CreateAuditLogInput{
 		ID:           "audit_" + uuid.NewString(),
 		ActorUserID:  user.ID,
 		ActorRole:    pr.Role,
@@ -262,7 +263,7 @@ func (s *Service) ResetPassword(ctx context.Context, input ResetPasswordInput) e
 	if err != nil {
 		return err
 	}
-	_, _ = s.store.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	_, _ = s.auditStore.CreateAuditLog(ctx, store.CreateAuditLogInput{
 		ID:           "audit_" + uuid.NewString(),
 		ActorUserID:  user.ID,
 		ActorRole:    user.Role,
@@ -293,7 +294,7 @@ func (s *Service) UpdatePasswordForUser(ctx context.Context, userID string, newP
 	if err != nil {
 		return err
 	}
-	_, _ = s.store.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	_, _ = s.auditStore.CreateAuditLog(ctx, store.CreateAuditLogInput{
 		ID:           "audit_" + uuid.NewString(),
 		ActorUserID:  user.ID,
 		ActorRole:    user.Role,

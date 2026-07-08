@@ -4,18 +4,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/authrepo"
 	"go.uber.org/zap"
 )
 
 type Service struct {
-	store     store.Store
+	store     authrepo.ModelKeyStore
 	masterKey string
 	Logger    *zap.Logger
 }
 
 const lastUsedMinInterval = 5 * time.Minute
 
-func NewService(dataStore store.Store, masterKey string) *Service {
+func NewService(dataStore authrepo.ModelKeyStore, masterKey string) *Service {
 	return &Service{store: dataStore, masterKey: strings.TrimSpace(masterKey)}
 }

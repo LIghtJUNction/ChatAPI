@@ -8,6 +8,7 @@ import (
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/protocol"
+	"github.com/zyf/chatapi/internal/repository/chatrepo"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
@@ -27,7 +28,7 @@ type ExpireResult struct {
 type Service struct {
 	Submitter                   *Submitter
 	Pending                     pendingRegistryLike
-	Store                       store.Store
+	Store                       chatrepo.Store
 	ResolveMutationError        MutationErrorResolver
 	NotifyText                  TextNotifier
 	EnsureMessageAdmission      AdmissionHook

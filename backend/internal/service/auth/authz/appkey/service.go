@@ -4,12 +4,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/authrepo"
 	"go.uber.org/zap"
 )
 
 type Service struct {
-	store         store.Store
+	store         authrepo.AppKeyStore
 	rateLimitMu   sync.Mutex
 	rateLimitHits map[string][]time.Time
 	Logger        *zap.Logger
@@ -17,6 +17,6 @@ type Service struct {
 
 const appLastUsedMinInterval = 5 * time.Minute
 
-func NewService(dataStore store.Store) *Service {
+func NewService(dataStore authrepo.AppKeyStore) *Service {
 	return &Service{store: dataStore, rateLimitHits: map[string][]time.Time{}}
 }

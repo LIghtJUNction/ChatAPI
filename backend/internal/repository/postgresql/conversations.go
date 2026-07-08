@@ -148,6 +148,9 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE conversation_id = ANY($1)`, conversationIDs).Scan(&result.DeletedMessages); err != nil {
 		return store.DeleteConversationsResult{}, err
 	}
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id = ANY($1)`, conversationIDs).Scan(&result.DeletedAssetRefs); err != nil {
+		return store.DeleteConversationsResult{}, err
+	}
 	tag, err := tx.Exec(ctx, `DELETE FROM conversations WHERE id = ANY($1)`, conversationIDs)
 	if err != nil {
 		return store.DeleteConversationsResult{}, err
@@ -318,6 +321,49 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		mustJSON(userMessageMetadata),
 	); err != nil {
 		return store.Conversation{}, store.Message{}, err
+	}
+
+	for _, asset := range input.PreparedImages {
+		assetID := "asset_" + uuid.NewString()
+		refID := "assetref_" + uuid.NewString()
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO media_assets(
+				id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		`,
+			assetID,
+			strings.TrimSpace(input.OwnerID),
+			strings.TrimSpace(asset.FileID),
+			strings.TrimSpace(asset.Path),
+			strings.TrimSpace(asset.MediaType),
+			asset.Bytes,
+			strings.TrimSpace(asset.SHA256),
+			asset.Width,
+			asset.Height,
+			strings.TrimSpace(asset.SourceKind),
+			strings.TrimSpace(asset.OriginalName),
+			strings.TrimSpace(asset.OriginalMediaType),
+			now,
+		); err != nil {
+			return store.Conversation{}, store.Message{}, err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO media_asset_refs(
+				id, asset_id, file_id, owner_id, request_id, conversation_id, message_id, input_part_index, created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`,
+			refID,
+			assetID,
+			strings.TrimSpace(asset.FileID),
+			strings.TrimSpace(input.OwnerID),
+			strings.TrimSpace(input.RequestID),
+			conversation.ID,
+			message.ID,
+			asset.InputPartIndex,
+			now,
+		); err != nil {
+			return store.Conversation{}, store.Message{}, err
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -81,7 +81,12 @@ func TestRouterLocalAuthFlow(t *testing.T) {
 	cfg.SMTPEnabled = true
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
-		Store:         st,
+		ChatRepo:      st,
+		AuthRepo:      st,
+		ConfigRepo:    st,
+		StorageRepo:   st,
+		AuditRepo:     st,
+		PlatformRepo:  st,
 		LocalAuth:     localService,
 		Verification:  verificationService,
 		Policy:        policies,

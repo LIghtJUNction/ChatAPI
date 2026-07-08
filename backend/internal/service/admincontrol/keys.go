@@ -1,4 +1,4 @@
-package admin
+package admincontrol
 
 import (
 	"context"
@@ -8,17 +8,17 @@ import (
 )
 
 func (s *Service) ListAppKeys(ctx context.Context, userID string) ([]store.AppAPIKey, error) {
-	return s.store.ListAppAPIKeysByUser(ctx, strings.TrimSpace(userID))
+	return s.keyStore.ListAppAPIKeysByUser(ctx, strings.TrimSpace(userID))
 }
 
 func (s *Service) RevokeAppKey(ctx context.Context, userID string, keyID string) error {
-	return s.store.RevokeAppAPIKey(ctx, strings.TrimSpace(keyID), strings.TrimSpace(userID))
+	return s.keyStore.RevokeAppAPIKey(ctx, strings.TrimSpace(keyID), strings.TrimSpace(userID))
 }
 
 func (s *Service) ListModelKeys(ctx context.Context, userID string) ([]store.ModelAPIKey, error) {
-	return s.store.ListModelAPIKeysByUser(ctx, strings.TrimSpace(userID))
+	return s.keyStore.ListModelAPIKeysByUser(ctx, strings.TrimSpace(userID))
 }
 
 func (s *Service) RevokeModelKey(ctx context.Context, userID string, keyID string) error {
-	return s.store.RevokeModelAPIKey(ctx, strings.TrimSpace(keyID), strings.TrimSpace(userID))
+	return s.keyStore.RevokeModelAPIKey(ctx, strings.TrimSpace(keyID), strings.TrimSpace(userID))
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/platform/email"
+	"github.com/zyf/chatapi/internal/repository/authrepo"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
@@ -34,7 +35,7 @@ var (
 )
 
 type Service struct {
-	store          store.Store
+	store          authrepo.VerificationStore
 	sender         email.Sender
 	now            func() time.Time
 	generateCode   func() (string, error)
@@ -50,7 +51,7 @@ type SendResult struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-func NewService(dataStore store.Store, sender email.Sender) *Service {
+func NewService(dataStore authrepo.VerificationStore, sender email.Sender) *Service {
 	return &Service{
 		store:          dataStore,
 		sender:         sender,

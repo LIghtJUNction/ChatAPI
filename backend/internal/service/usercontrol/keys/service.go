@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/authrepo"
 	appkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	modelkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
 	"github.com/zyf/chatapi/internal/store"
@@ -13,21 +14,21 @@ import (
 )
 
 type Deps struct {
-	Store     store.Store
+	Keys      authrepo.KeyStore
 	AppKeys   *appkeysvc.Service
 	ModelKeys *modelkeysvc.Service
 	Logger    *zap.Logger
 }
 
 type Service struct {
-	store     store.Store
+	store     authrepo.KeyStore
 	appKeys   *appkeysvc.Service
 	modelKeys *modelkeysvc.Service
 	logger    *zap.Logger
 }
 
 func New(deps Deps) *Service {
-	return &Service{store: deps.Store, appKeys: deps.AppKeys, modelKeys: deps.ModelKeys, logger: deps.Logger}
+	return &Service{store: deps.Keys, appKeys: deps.AppKeys, modelKeys: deps.ModelKeys, logger: deps.Logger}
 }
 
 func (s *Service) ListAppKeys(ctx context.Context, userID string) ([]store.AppAPIKey, error) {

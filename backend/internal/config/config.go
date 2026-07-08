@@ -46,6 +46,15 @@ type Config struct {
 	AccessRateLimitRequests               int
 	AccessRateLimitWindow                 time.Duration
 	UploadMaxBytes                        int64
+	MediaProcessEnabled                   bool
+	MediaAllowRemoteURL                   bool
+	MediaAllowDataURL                     bool
+	MediaAllowBase64                      bool
+	MediaAllowSVG                         bool
+	MediaMaxBytes                         int64
+	MediaMaxImagesPerRequest              int
+	MediaDerivedDir                       string
+	MediaAVIFQuality                      int
 	StorageDefaultQuotaBytes              int64
 	StorageBlockNewConversations          bool
 	StorageCleanupEnabled                 bool
@@ -147,6 +156,15 @@ func Default(mode Mode, backendRoot string) Config {
 		AccessRateLimitRequests:               0,
 		AccessRateLimitWindow:                 time.Minute,
 		UploadMaxBytes:                        10 << 20,
+		MediaProcessEnabled:                   true,
+		MediaAllowRemoteURL:                   true,
+		MediaAllowDataURL:                     true,
+		MediaAllowBase64:                      true,
+		MediaAllowSVG:                         false,
+		MediaMaxBytes:                         10 << 20,
+		MediaMaxImagesPerRequest:              8,
+		MediaDerivedDir:                       filepath.Join(dataDir, "derived", "request_media"),
+		MediaAVIFQuality:                      60,
 		StorageDefaultQuotaBytes:              0,
 		StorageBlockNewConversations:          false,
 		StorageCleanupEnabled:                 false,
@@ -247,6 +265,33 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 			return Config{}, fmt.Errorf("invalid CHATAPI_UPLOAD_MAX_BYTES: %w", err)
 		}
 		cfg.UploadMaxBytes = value
+	}
+	cfg.MediaProcessEnabled = parseBool(os.Getenv("CHATAPI_MEDIA_PROCESS_ENABLED"), cfg.MediaProcessEnabled)
+	cfg.MediaAllowRemoteURL = parseBool(os.Getenv("CHATAPI_MEDIA_ALLOW_REMOTE_URL"), cfg.MediaAllowRemoteURL)
+	cfg.MediaAllowDataURL = parseBool(os.Getenv("CHATAPI_MEDIA_ALLOW_DATA_URL"), cfg.MediaAllowDataURL)
+	cfg.MediaAllowBase64 = parseBool(os.Getenv("CHATAPI_MEDIA_ALLOW_BASE64"), cfg.MediaAllowBase64)
+	cfg.MediaAllowSVG = parseBool(os.Getenv("CHATAPI_MEDIA_ALLOW_SVG"), cfg.MediaAllowSVG)
+	cfg.MediaDerivedDir = firstNonEmpty(os.Getenv("CHATAPI_MEDIA_DERIVED_DIR"), cfg.MediaDerivedDir)
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_MEDIA_MAX_BYTES")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_MEDIA_MAX_BYTES: %w", err)
+		}
+		cfg.MediaMaxBytes = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_MEDIA_MAX_IMAGES_PER_REQUEST")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_MEDIA_MAX_IMAGES_PER_REQUEST: %w", err)
+		}
+		cfg.MediaMaxImagesPerRequest = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_MEDIA_AVIF_QUALITY")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_MEDIA_AVIF_QUALITY: %w", err)
+		}
+		cfg.MediaAVIFQuality = value
 	}
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_STORAGE_DEFAULT_QUOTA_BYTES")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)

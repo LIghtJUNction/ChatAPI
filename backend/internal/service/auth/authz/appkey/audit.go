@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"go.uber.org/zap"
 )
 

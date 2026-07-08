@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/migrations"
-	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
-	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
+	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
+	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
+	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
 )
 
 func TestAccessSettingsRoundTrip(t *testing.T) {

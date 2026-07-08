@@ -3,9 +3,9 @@ package policy_test
 import (
 	"testing"
 
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
-	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/principal"
 )
 
 func TestSessionPrincipalMarksAdminUser(t *testing.T) {

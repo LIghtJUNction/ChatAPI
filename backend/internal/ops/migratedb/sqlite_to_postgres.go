@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	pgstore "github.com/zyf/chatapi/internal/repository/postgresql"
-	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
+	pgstore "github.com/zyf2007/ChatAPI/internal/repository/postgresql"
+	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
 )
 
 type Report struct {

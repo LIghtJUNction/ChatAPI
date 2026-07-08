@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/platform/email"
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/platform/email"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"go.uber.org/zap"
 )
 

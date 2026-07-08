@@ -10,8 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/config"
 )
 
 const AccessCookieName = "chatapi_lab_access"

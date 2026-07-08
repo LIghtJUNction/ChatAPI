@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 func (s *Service) ListAppKeys(ctx context.Context, userID string) ([]common.AppAPIKey, error) {

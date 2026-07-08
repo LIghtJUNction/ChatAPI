@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zyf/chatapi/internal/platform/password"
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/platform/password"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 var (

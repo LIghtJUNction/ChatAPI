@@ -1,10 +1,10 @@
 package turn
 
 import (
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/protocol"
-	"github.com/zyf/chatapi/internal/repository/common"
-	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 )
 
 type SubmitInput struct {
@@ -14,4 +14,11 @@ type SubmitInput struct {
 	PreparedImages []preprocesssvc.PreparedImage
 	RequestMeta    common.Request
 	RawBody        map[string]any
+	Target         SubmitTarget
+}
+
+type SubmitTarget struct {
+	ConversationID string
+	Reuse          bool
+	Source         string
 }

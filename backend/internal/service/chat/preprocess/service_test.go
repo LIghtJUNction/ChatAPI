@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/platform/media/localstore"
-	"github.com/zyf/chatapi/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
 )
 
 func TestPrepareTranscodesBase64ImageToStoredAVIF(t *testing.T) {

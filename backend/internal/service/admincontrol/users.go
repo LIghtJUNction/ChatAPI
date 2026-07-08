@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/service/account"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/service/account"
 )
 
 func (s *Service) ListUsers(ctx context.Context) ([]common.User, error) {

@@ -1,9 +1,9 @@
 package policy
 
 import (
-	app "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	"github.com/zyf/chatapi/internal/service/auth/authz/decision"
-	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
+	app "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/decision"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/principal"
 )
 
 func (s *Service) CanAccessWeb(pr principal.Principal) bool {

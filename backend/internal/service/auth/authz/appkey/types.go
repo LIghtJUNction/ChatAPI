@@ -1,6 +1,6 @@
 package app
 
-import "github.com/zyf/chatapi/internal/actor"
+import "github.com/zyf2007/ChatAPI/internal/actor"
 
 type Principal struct {
 	KeyID                string

@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 var filteredRequestHeaders = map[string]struct{}{

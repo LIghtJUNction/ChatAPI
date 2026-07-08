@@ -3,9 +3,9 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
-	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"go.uber.org/zap"
 )
 

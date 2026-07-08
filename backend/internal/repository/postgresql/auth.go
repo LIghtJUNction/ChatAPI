@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 func (s *Store) CreateUser(ctx context.Context, input common.CreateUserInput) (common.User, error) {

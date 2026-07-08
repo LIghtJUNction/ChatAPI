@@ -3,8 +3,8 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/zyf/chatapi/internal/http/httpx"
-	"github.com/zyf/chatapi/internal/service/auth/authz/decision"
+	"github.com/zyf2007/ChatAPI/internal/http/httpx"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/decision"
 )
 
 func writeDecisionError(w http.ResponseWriter, result decision.Result) {

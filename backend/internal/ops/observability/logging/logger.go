@@ -7,8 +7,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/config"
 )
 
 const (

@@ -8,11 +8,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/http/httpx"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
-	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
+	"github.com/zyf2007/ChatAPI/internal/http/httpx"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
 
 type AppAPIHandler struct {

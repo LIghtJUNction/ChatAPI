@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/service/auth/authz/decision"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/decision"
 	"go.uber.org/zap"
 )
 

@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"path"
 	"strings"
+
+	"github.com/zyf2007/ChatAPI/internal/config"
 )
 
 func isLabPublicPath(r *http.Request) bool {
@@ -51,6 +53,23 @@ func requestOrigin(r *http.Request) string {
 		host = strings.ToLower(strings.TrimSpace(r.Host))
 	}
 	return scheme + "://" + host
+}
+
+func buildTrustedOrigins(cfg config.Config) map[string]struct{} {
+	items := map[string]struct{}{}
+	addTrustedOrigin(items, cfg.BaseURL)
+	for _, origin := range cfg.CORSOrigins {
+		addTrustedOrigin(items, origin)
+	}
+	return items
+}
+
+func addTrustedOrigin(items map[string]struct{}, raw string) {
+	origin := normalizedOrigin(raw)
+	if origin == "" {
+		return
+	}
+	items[origin] = struct{}{}
 }
 
 func normalizedOrigin(raw string) string {

@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 func (s *Store) ListConversations(ctx context.Context) ([]common.Conversation, error) {
@@ -47,6 +47,18 @@ func (s *Store) GetConversation(ctx context.Context, conversationID string) (com
 		FROM conversations
 		WHERE id = $1
 	`, strings.TrimSpace(conversationID)))
+}
+
+func (s *Store) FindConversationByToolCallID(ctx context.Context, ownerID string, toolCallID string) (common.Conversation, error) {
+	return scanConversation(s.pool.QueryRow(ctx, `
+		SELECT c.id, c.title, c.created_at, c.updated_at, c.last_message_at, c.message_count, c.last_message_preview, c.last_user_text, c.metadata_json, COALESCE(c.metadata_json->>'response_id', '')
+		FROM conversations c
+		JOIN messages m ON m.conversation_id = c.id
+		WHERE COALESCE(c.metadata_json->>'owner_id', '') = $1
+			AND COALESCE(m.metadata_json->>'tool_call_id', '') = $2
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT 1
+	`, strings.TrimSpace(ownerID), strings.TrimSpace(toolCallID)))
 }
 
 func (s *Store) ListRequests(ctx context.Context) ([]common.Request, error) {
@@ -225,13 +237,25 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (commo
 
 func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendingInput) (common.Conversation, common.Message, error) {
 	now := time.Now().UTC()
-	metadata := map[string]any{
-		"owner_id":            strings.TrimSpace(input.OwnerID),
-		"request_format":      strings.TrimSpace(input.RequestFormat),
-		"realtime_status":     "waiting",
-		"realtime_draft_text": "",
-		"response_id":         strings.TrimSpace(input.ResponseID),
-		"model":               strings.TrimSpace(input.Model),
+	metadata := map[string]any{}
+	if input.ReuseConversation {
+		existing, err := s.GetConversation(ctx, input.ConversationID)
+		if err != nil {
+			return common.Conversation{}, common.Message{}, err
+		}
+		metadata = ensureMap(existing.Metadata)
+	} else {
+		metadata = map[string]any{
+			"owner_id":       strings.TrimSpace(input.OwnerID),
+			"request_format": strings.TrimSpace(input.RequestFormat),
+			"model":          strings.TrimSpace(input.Model),
+		}
+	}
+	metadata["realtime_status"] = "waiting"
+	metadata["realtime_draft_text"] = ""
+	metadata["response_id"] = strings.TrimSpace(input.ResponseID)
+	if strings.TrimSpace(input.Model) != "" {
+		metadata["model"] = strings.TrimSpace(input.Model)
 	}
 	userMessageMetadata := map[string]any{
 		"request_format": strings.TrimSpace(input.RequestFormat),
@@ -258,16 +282,34 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 		},
 	}
 	conversation := common.Conversation{
-		ID:                 strings.TrimSpace(input.ConversationID),
-		Title:              buildConversationTitle(input.UserContent),
-		LastUserText:       input.UserContent,
-		CreatedAt:          now,
-		UpdatedAt:          now,
-		LastMessageAt:      now,
-		MessageCount:       1,
-		LastMessagePreview: input.UserContent,
-		Metadata:           metadata,
-		ResponseID:         strings.TrimSpace(input.ResponseID),
+		ID:         strings.TrimSpace(input.ConversationID),
+		Metadata:   metadata,
+		ResponseID: strings.TrimSpace(input.ResponseID),
+	}
+	if input.ReuseConversation {
+		existing, err := s.GetConversation(ctx, input.ConversationID)
+		if err != nil {
+			return common.Conversation{}, common.Message{}, err
+		}
+		conversation = existing
+		conversation.Metadata = metadata
+		conversation.ResponseID = strings.TrimSpace(input.ResponseID)
+		conversation.UpdatedAt = now
+		conversation.LastMessageAt = now
+		conversation.MessageCount += 1
+		conversation.LastUserText = input.UserContent
+		conversation.LastMessagePreview = input.UserContent
+		if strings.TrimSpace(conversation.Title) == "" {
+			conversation.Title = buildConversationTitle(input.UserContent)
+		}
+	} else {
+		conversation.Title = buildConversationTitle(input.UserContent)
+		conversation.LastUserText = input.UserContent
+		conversation.CreatedAt = now
+		conversation.UpdatedAt = now
+		conversation.LastMessageAt = now
+		conversation.MessageCount = 1
+		conversation.LastMessagePreview = input.UserContent
 	}
 	responseID := strings.TrimSpace(input.ResponseID)
 	message := common.Message{
@@ -287,23 +329,42 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO conversations(
-			id, title, created_at, updated_at, last_message_at,
-			message_count, last_message_preview, last_user_text, metadata_json
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
-	`,
-		conversation.ID,
-		conversation.Title,
-		now,
-		now,
-		now,
-		conversation.MessageCount,
-		conversation.LastMessagePreview,
-		conversation.LastUserText,
-		mustJSON(metadata),
-	); err != nil {
-		return common.Conversation{}, common.Message{}, err
+	if input.ReuseConversation {
+		if _, err := tx.Exec(ctx, `
+			UPDATE conversations
+			SET title = $1, updated_at = $2, last_message_at = $3, message_count = $4, last_message_preview = $5, last_user_text = $6, metadata_json = $7::jsonb
+			WHERE id = $8
+		`,
+			conversation.Title,
+			conversation.UpdatedAt,
+			conversation.LastMessageAt,
+			conversation.MessageCount,
+			conversation.LastMessagePreview,
+			conversation.LastUserText,
+			mustJSON(metadata),
+			conversation.ID,
+		); err != nil {
+			return common.Conversation{}, common.Message{}, err
+		}
+	} else {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO conversations(
+				id, title, created_at, updated_at, last_message_at,
+				message_count, last_message_preview, last_user_text, metadata_json
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+		`,
+			conversation.ID,
+			conversation.Title,
+			now,
+			now,
+			now,
+			conversation.MessageCount,
+			conversation.LastMessagePreview,
+			conversation.LastUserText,
+			mustJSON(metadata),
+		); err != nil {
+			return common.Conversation{}, common.Message{}, err
+		}
 	}
 
 	if _, err := tx.Exec(ctx, `

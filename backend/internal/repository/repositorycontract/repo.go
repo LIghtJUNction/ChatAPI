@@ -1,12 +1,12 @@
 package repositorycontract
 
 import (
-	"github.com/zyf/chatapi/internal/repository/audit"
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/chat"
-	"github.com/zyf/chatapi/internal/repository/config"
-	"github.com/zyf/chatapi/internal/repository/platform"
-	"github.com/zyf/chatapi/internal/repository/storage"
+	"github.com/zyf2007/ChatAPI/internal/repository/audit"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/chat"
+	"github.com/zyf2007/ChatAPI/internal/repository/config"
+	"github.com/zyf2007/ChatAPI/internal/repository/platform"
+	"github.com/zyf2007/ChatAPI/internal/repository/storage"
 )
 
 type Store interface {

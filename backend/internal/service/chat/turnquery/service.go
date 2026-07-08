@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/zyf/chatapi/internal/repository/chat"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/chat"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"go.uber.org/zap"
 )
 

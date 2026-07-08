@@ -4,12 +4,13 @@ import (
 	"context"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 type Reader interface {
 	ListConversations(context.Context) ([]common.Conversation, error)
 	GetConversation(context.Context, string) (common.Conversation, error)
+	FindConversationByToolCallID(context.Context, string, string) (common.Conversation, error)
 	ListRequests(context.Context) ([]common.Request, error)
 	GetRequest(context.Context, string) (common.Request, error)
 	ListMessages(context.Context, string) ([]common.Message, error)

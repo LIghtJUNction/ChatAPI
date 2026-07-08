@@ -1,12 +1,15 @@
 package router
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 )
 
 func (d Deps) logger(layer string) *zap.Logger {
@@ -33,6 +36,27 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Write(data []byte) (int, error) {
+	if r.status == 0 {
+		r.status = http.StatusOK
+	}
+	return r.ResponseWriter.Write(data)
+}
+
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not support hijacking")
+	}
+	return hijacker.Hijack()
 }
 
 func requestLoggingMiddleware(base *zap.Logger) func(http.Handler) http.Handler {

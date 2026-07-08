@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
 	"go.uber.org/zap"
 )
 

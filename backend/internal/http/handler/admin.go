@@ -8,12 +8,12 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/http/httpx"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/service/admincontrol"
-	auditsvc "github.com/zyf/chatapi/internal/service/audit"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/http/httpx"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/service/admincontrol"
+	auditsvc "github.com/zyf2007/ChatAPI/internal/service/audit"
 	"go.uber.org/zap"
 )
 

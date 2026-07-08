@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
 )
 
 var ErrUnavailable = errors.New("setup is unavailable")
@@ -33,6 +33,7 @@ type Status struct {
 }
 
 type ApplyInput struct {
+	AdminUsername string
 	AdminPassword string
 	WriteEnv      bool
 	Force         bool
@@ -62,6 +63,7 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		GeneratedKeys: []string{
 			"CHATAPI_MASTER_KEY",
 			"CHATAPI_SESSION_SECRET",
+			"CHATAPI_ADMIN_USERNAME",
 			"CHATAPI_ADMIN_PASSWORD",
 		},
 	}
@@ -96,6 +98,7 @@ func (s *Service) Run(ctx context.Context, input ApplyInput) (Report, error) {
 		GeneratedKeys: []string{
 			"CHATAPI_MASTER_KEY",
 			"CHATAPI_SESSION_SECRET",
+			"CHATAPI_ADMIN_USERNAME",
 			"CHATAPI_ADMIN_PASSWORD",
 		},
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano),
@@ -111,7 +114,7 @@ func (s *Service) Run(ctx context.Context, input ApplyInput) (Report, error) {
 		report.Error = status.Reason
 		return report, statusErr
 	}
-	template, err := BuildEnvTemplate(strings.TrimSpace(input.AdminPassword))
+	template, err := BuildEnvTemplate(strings.TrimSpace(input.AdminUsername), strings.TrimSpace(input.AdminPassword))
 	if err != nil {
 		report.OK = false
 		report.Error = err.Error()
@@ -142,7 +145,11 @@ func (s *Service) Run(ctx context.Context, input ApplyInput) (Report, error) {
 	return report, nil
 }
 
-func BuildEnvTemplate(adminPassword string) (string, error) {
+func BuildEnvTemplate(adminUsername string, adminPassword string) (string, error) {
+	adminUsername = strings.TrimSpace(adminUsername)
+	if adminUsername == "" {
+		adminUsername = "superadmin"
+	}
 	adminPassword = strings.TrimSpace(adminPassword)
 	if adminPassword == "" {
 		value, err := randomURLToken(24)
@@ -162,6 +169,7 @@ func BuildEnvTemplate(adminPassword string) (string, error) {
 	return strings.Join([]string{
 		"CHATAPI_MASTER_KEY=" + masterKey,
 		"CHATAPI_SESSION_SECRET=" + sessionSecret,
+		"CHATAPI_ADMIN_USERNAME=" + adminUsername,
 		"CHATAPI_ADMIN_PASSWORD=" + adminPassword,
 		"CHATAPI_DB_DRIVER=sqlite",
 		"CHATAPI_DB_DSN=./data/chatapi.sqlite3",
@@ -174,6 +182,9 @@ func BuildEnvTemplate(adminPassword string) (string, error) {
 
 func (s *Service) hasAdminAccess(ctx context.Context) (bool, error) {
 	if strings.TrimSpace(s.cfg.AdminPassword) != "" {
+		return true, nil
+	}
+	if strings.TrimSpace(s.cfg.AdminUsername) != "" {
 		return true, nil
 	}
 	if envHasAdminPassword(strings.TrimSpace(s.cfg.EnvFilePath)) {

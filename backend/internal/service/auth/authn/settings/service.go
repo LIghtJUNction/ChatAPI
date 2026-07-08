@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 const systemSettingsKey = "system_settings"

@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/repository/common"
-	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
-	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
-	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	localauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/local"
+	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"go.uber.org/zap"
 )
 

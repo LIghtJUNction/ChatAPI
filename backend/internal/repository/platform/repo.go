@@ -3,7 +3,7 @@ package platform
 import (
 	"context"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 type HealthStore interface {

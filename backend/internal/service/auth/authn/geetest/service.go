@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/config"
 )
 
 var (

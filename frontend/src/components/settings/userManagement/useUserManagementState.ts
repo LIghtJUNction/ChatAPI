@@ -3,7 +3,7 @@ import { Form } from 'antd'
 
 import { appMessage } from '../../../lib/antdApp'
 import { requestJson } from '../../../lib/api'
-import type { AdminUserHistoryMessage, AdminUserHistoryResponse, User } from '../../../types/chat'
+import type { User } from '../../../types/chat'
 
 type CreateUserValues = {
   username: string
@@ -36,9 +36,9 @@ export function useUserManagementState(open: boolean) {
     async function loadUsers() {
       setLoading(true)
       try {
-        const data = await requestJson<{ ok: boolean; users: User[] }>('/api/admin/users')
+        const data = await requestJson<{ ok: boolean; items: User[] }>('/api/admin/users')
         if (!active) return
-        setUsers(data.users)
+        setUsers(Array.isArray(data.items) ? data.items : [])
       } catch (error) {
         if (!active) return
         appMessage.error(error instanceof Error ? error.message : '加载用户列表失败')
@@ -52,33 +52,6 @@ export function useUserManagementState(open: boolean) {
       active = false
     }
   }, [open])
-
-  useEffect(() => {
-    const userId = detailUser?.id
-    if (!detailModalOpen || !userId) return
-    let active = true
-
-    async function loadHistory() {
-      setHistoryLoading(true)
-      try {
-        const data = await requestJson<AdminUserHistoryResponse>(
-          `/api/admin/users/${userId}/history?limit=30`,
-        )
-        if (!active) return
-        setHistoryMessages(data.recent_messages)
-      } catch (error) {
-        if (!active) return
-        appMessage.error(error instanceof Error ? error.message : '加载历史消息失败')
-      } finally {
-        if (active) setHistoryLoading(false)
-      }
-    }
-
-    void loadHistory()
-    return () => {
-      active = false
-    }
-  }, [detailModalOpen, detailUser?.id])
 
   async function handleCreate(values: CreateUserValues) {
     setCreating(true)
@@ -127,6 +100,7 @@ export function useUserManagementState(open: boolean) {
   function openDetailModal(user: User) {
     setDetailUser(user)
     setHistoryMessages([])
+    setHistoryLoading(false)
     setDetailModalOpen(true)
   }
 

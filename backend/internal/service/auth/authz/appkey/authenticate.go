@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	keyutil "github.com/zyf/chatapi/internal/platform/apikey"
-	"github.com/zyf/chatapi/internal/repository/common"
+	keyutil "github.com/zyf2007/ChatAPI/internal/platform/apikey"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 func (s *Service) Authenticate(ctx context.Context, rawKey string) (Principal, error) {

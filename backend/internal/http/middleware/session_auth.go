@@ -3,10 +3,10 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	sessionrestore "github.com/zyf/chatapi/internal/service/auth/authn/sessionrestore"
-	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
-	"github.com/zyf/chatapi/internal/service/auth/authz/session"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	sessionrestore "github.com/zyf2007/ChatAPI/internal/service/auth/authn/sessionrestore"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	"go.uber.org/zap"
 )
 

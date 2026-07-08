@@ -15,9 +15,9 @@ import (
 	"github.com/pquerna/otp/totp"
 	"github.com/skip2/go-qrcode"
 
-	"github.com/zyf/chatapi/internal/platform/secretbox"
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/platform/secretbox"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 const userConfigKey = "security.totp"

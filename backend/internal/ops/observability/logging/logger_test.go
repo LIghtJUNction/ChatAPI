@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
-	"github.com/zyf/chatapi/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/actor"
 )
 
 func TestFactoryLayerAddsLayerField(t *testing.T) {

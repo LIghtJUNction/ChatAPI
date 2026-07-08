@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/http/httpx"
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/service/chat/turn"
-	"github.com/zyf/chatapi/internal/service/chat/turnquery"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/http/httpx"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	"go.uber.org/zap"
 )
 

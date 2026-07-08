@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	app "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	model "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
-	"github.com/zyf/chatapi/internal/service/auth/authz/session"
+	app "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	model "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 )
 
 func (s *Service) AllowPrincipalRequest(ctx context.Context, r *http.Request) bool {

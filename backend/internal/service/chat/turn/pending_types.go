@@ -3,9 +3,9 @@ package turn
 import (
 	"time"
 
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/protocol"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 type PendingResult struct {
@@ -29,6 +29,7 @@ type PendingTurn struct {
 	ConversationID    string
 	ResponseID        string
 	OwnerID           string
+	ToolCallIDs       []string
 	Actor             actor.Actor
 	RequestFormat     string
 	Model             string
@@ -38,4 +39,11 @@ type PendingTurn struct {
 	State             string
 	Events            chan PendingEvent
 	Done              chan PendingResult
+}
+
+func (p *PendingTurn) GetConversationID() string {
+	if p == nil {
+		return ""
+	}
+	return p.ConversationID
 }

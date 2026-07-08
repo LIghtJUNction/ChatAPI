@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/zyf/chatapi/internal/service/auth/authz/decision"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/decision"
 )
 
 func WriteDecisionError(w http.ResponseWriter, result decision.Result) {

@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zyf/chatapi/internal/protocol"
-	"github.com/zyf/chatapi/internal/repository/common"
-	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	"go.uber.org/zap"
 )
 
@@ -22,6 +22,8 @@ type PendingTurn = turnsvc.PendingTurn
 type PendingRegistry struct {
 	mu               sync.RWMutex
 	byConversationID map[string]*PendingTurn
+	byOwnerID        map[string]map[string]*PendingTurn
+	byToolCallID     map[string]map[string]*PendingTurn
 	Logger           *zap.Logger
 }
 
@@ -35,6 +37,8 @@ type PendingStats struct {
 func NewPendingRegistry() *PendingRegistry {
 	return &PendingRegistry{
 		byConversationID: make(map[string]*PendingTurn),
+		byOwnerID:        make(map[string]map[string]*PendingTurn),
+		byToolCallID:     make(map[string]map[string]*PendingTurn),
 	}
 }
 
@@ -54,6 +58,21 @@ func (r *PendingRegistry) Add(turn *PendingTurn) {
 		stored.State = "pending"
 	}
 	r.byConversationID[stored.ConversationID] = &stored
+	if stored.OwnerID != "" {
+		if _, ok := r.byOwnerID[stored.OwnerID]; !ok {
+			r.byOwnerID[stored.OwnerID] = map[string]*PendingTurn{}
+		}
+		r.byOwnerID[stored.OwnerID][stored.ConversationID] = &stored
+	}
+	for _, toolCallID := range stored.ToolCallIDs {
+		if toolCallID == "" || stored.OwnerID == "" {
+			continue
+		}
+		if _, ok := r.byToolCallID[stored.OwnerID]; !ok {
+			r.byToolCallID[stored.OwnerID] = map[string]*PendingTurn{}
+		}
+		r.byToolCallID[stored.OwnerID][toolCallID] = &stored
+	}
 	r.loggerForTurn(&stored).Debug("pending turn registered")
 }
 
@@ -62,6 +81,39 @@ func (r *PendingRegistry) GetByConversationID(conversationID string) (*PendingTu
 	defer r.mu.RUnlock()
 	turn, ok := r.byConversationID[conversationID]
 	return turn, ok
+}
+
+func (r *PendingRegistry) ListByOwnerID(ownerID string) []*PendingTurn {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := r.byOwnerID[ownerID]
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]*PendingTurn, 0, len(items))
+	for _, turn := range items {
+		out = append(out, turn)
+	}
+	return out
+}
+
+func (r *PendingRegistry) FindByToolCallID(ownerID string, toolCallID string) (*PendingTurn, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := r.byToolCallID[ownerID]
+	if len(items) == 0 {
+		return nil, false
+	}
+	turn, ok := items[toolCallID]
+	return turn, ok
+}
+
+func (r *PendingRegistry) FindConversationIDByToolCallID(ownerID string, toolCallID string) (string, bool) {
+	turn, ok := r.FindByToolCallID(ownerID, toolCallID)
+	if !ok || turn == nil {
+		return "", false
+	}
+	return turn.ConversationID, true
 }
 
 func (r *PendingRegistry) Stats() PendingStats {
@@ -104,6 +156,7 @@ func (r *PendingRegistry) Resolve(conversationID string, result PendingResult) e
 			turn.State = "completed"
 		}
 		delete(r.byConversationID, conversationID)
+		r.removeIndexes(turn)
 	}
 	r.mu.Unlock()
 	if !ok {
@@ -131,6 +184,7 @@ func (r *PendingRegistry) ExpireOlderThan(cutoff time.Time, body map[string]any)
 		case "pending", "streaming":
 			turn.State = "expired"
 			delete(r.byConversationID, conversationID)
+			r.removeIndexes(turn)
 			expired = append(expired, turn)
 		}
 	}
@@ -268,6 +322,30 @@ func (r *PendingRegistry) loggerForTurn(turn *PendingTurn) *zap.Logger {
 		)
 	}
 	return logger.With(fields...)
+}
+
+func (r *PendingRegistry) removeIndexes(turn *PendingTurn) {
+	if turn == nil {
+		return
+	}
+	if turn.OwnerID != "" {
+		if items := r.byOwnerID[turn.OwnerID]; len(items) > 0 {
+			delete(items, turn.ConversationID)
+			if len(items) == 0 {
+				delete(r.byOwnerID, turn.OwnerID)
+			}
+		}
+		if items := r.byToolCallID[turn.OwnerID]; len(items) > 0 {
+			for toolCallID, stored := range items {
+				if stored != nil && stored.ConversationID == turn.ConversationID {
+					delete(items, toolCallID)
+				}
+			}
+			if len(items) == 0 {
+				delete(r.byToolCallID, turn.OwnerID)
+			}
+		}
+	}
 }
 
 func cloneTurnRequest(input protocol.TurnRequest) protocol.TurnRequest {

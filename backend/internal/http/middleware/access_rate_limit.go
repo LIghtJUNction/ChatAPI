@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
+	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
 )
 
 func RequireAccessRateLimit(access *authaccess.Service) func(http.Handler) http.Handler {

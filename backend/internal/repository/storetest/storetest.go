@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/repository/repositorycontract"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
 )
 
 type NewStoreFunc func(t *testing.T) repositorycontract.Store

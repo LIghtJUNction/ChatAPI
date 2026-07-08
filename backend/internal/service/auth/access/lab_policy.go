@@ -3,7 +3,7 @@ package access
 import (
 	"net/http"
 
-	labauth "github.com/zyf/chatapi/internal/service/auth/authn/lab"
+	labauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/lab"
 )
 
 func (s *Service) Lab() *labauth.Service {

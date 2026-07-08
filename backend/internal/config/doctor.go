@@ -147,10 +147,17 @@ func (r *DiagnosticReport) checkSecrets(cfg Config) {
 		} else if len(cfg.SessionSecret) < 32 {
 			r.add(DiagnosticWarn, "secret.session_secret_short", "CHATAPI_SESSION_SECRET 长度偏短，建议至少 32 个随机字符。")
 		}
-		if cfg.AdminPassword == "" {
-			r.add(DiagnosticWarn, "secret.admin_password_missing", "CHATAPI_ADMIN_PASSWORD 未配置；正式 session/admin 登录接入前需要补齐恢复入口。")
-		} else if cfg.AdminPassword == "change-me" {
-			r.add(DiagnosticError, "secret.admin_password_default", "CHATAPI_ADMIN_PASSWORD 仍为 change-me，生产环境必须修改。")
+		if cfg.AdminUsername == "" && cfg.AdminPassword == "" {
+			r.add(DiagnosticInfo, "secret.super_admin_disabled", "未配置 CHATAPI_ADMIN_USERNAME / CHATAPI_ADMIN_PASSWORD；超级管理员登录已禁用。")
+		} else {
+			if cfg.AdminUsername == "" {
+				r.add(DiagnosticError, "secret.admin_username_missing", "已配置超级管理员密码，但缺少 CHATAPI_ADMIN_USERNAME。")
+			}
+			if cfg.AdminPassword == "" {
+				r.add(DiagnosticError, "secret.admin_password_missing", "已配置超级管理员用户名，但缺少 CHATAPI_ADMIN_PASSWORD。")
+			} else if cfg.AdminPassword == "change-me" {
+				r.add(DiagnosticError, "secret.admin_password_default", "CHATAPI_ADMIN_PASSWORD 仍为 change-me，生产环境必须修改。")
+			}
 		}
 		return
 	}

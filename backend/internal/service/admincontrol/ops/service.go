@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/platform/media/localstore"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 type Store interface {

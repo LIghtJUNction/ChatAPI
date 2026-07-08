@@ -1,4 +1,4 @@
-module github.com/zyf/chatapi
+module github.com/zyf2007/ChatAPI
 
 go 1.26.0
 

@@ -3,7 +3,7 @@ package session
 import (
 	"context"
 
-	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/principal"
 )
 
 type principalContextKey struct{}

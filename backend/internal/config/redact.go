@@ -17,6 +17,7 @@ type RedactedConfig struct {
 	OpenBrowser                           bool     `json:"open_browser"`
 	LabToken                              string   `json:"lab_token"`
 	LabPassword                           string   `json:"lab_password"`
+	AdminUsername                         string   `json:"admin_username"`
 	AdminPassword                         string   `json:"admin_password"`
 	LogLevel                              string   `json:"log_level"`
 	LogFormat                             string   `json:"log_format"`
@@ -83,6 +84,7 @@ func (c Config) Redacted() RedactedConfig {
 		OpenBrowser:                           c.OpenBrowser,
 		LabToken:                              redactSecret(c.LabToken),
 		LabPassword:                           redactSecret(c.LabPassword),
+		AdminUsername:                         c.AdminUsername,
 		AdminPassword:                         redactSecret(c.AdminPassword),
 		LogLevel:                              c.LogLevel,
 		LogFormat:                             c.LogFormat,

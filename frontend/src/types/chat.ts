@@ -13,6 +13,10 @@ export type AuthSession = {
   geetest_captcha_id: string
   current_connection_count: number
   realtime_max_connections_per_user: number
+  oidc_enabled?: boolean
+  oidc_provider_name?: string
+  local_password_login_enabled?: boolean
+  email_verification_enabled?: boolean
 }
 
 export type User = {
@@ -46,8 +50,24 @@ export type AdminUserHistoryResponse = {
 export type ApiKeyInfo = {
   id: string
   name: string
-  api_key: string
+  key_prefix?: string
+  scopes?: string[]
   created_at: string
+  revoked_at?: string | null
+  expires_at?: string | null
+  last_used_at?: string | null
+  api_key?: string
+}
+
+export type ModelKeyInfo = {
+  id: string
+  name: string
+  model?: string
+  key_prefix?: string
+  created_at: string
+  revoked_at?: string | null
+  last_used_at?: string | null
+  api_key?: string
 }
 
 export type ApiKeyListResponse = {

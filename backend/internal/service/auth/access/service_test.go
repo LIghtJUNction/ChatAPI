@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zyf/chatapi/internal/config"
-	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
-	labauth "github.com/zyf/chatapi/internal/service/auth/authn/lab"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
+	labauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/lab"
 )
 
 func TestLabAccessPublicPathsBypassGate(t *testing.T) {
@@ -64,6 +64,25 @@ func TestSessionCSRFSameOriginPolicy(t *testing.T) {
 	}
 	if service.ValidSessionCSRFSameOrigin(req) {
 		t.Fatal("expected cross-origin csrf to fail")
+	}
+}
+
+func TestSessionCSRFAllowsConfiguredFrontendOrigin(t *testing.T) {
+	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
+	cfg.CORSOrigins = []string{
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
+	}
+	service := authaccess.NewService(cfg, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5000/api/user/model-keys", nil)
+	req.Host = "127.0.0.1:5000"
+	req.Header.Set("Origin", "http://localhost:5173")
+	if !service.ShouldCheckSessionCSRF(req, true) {
+		t.Fatal("expected csrf check")
+	}
+	if !service.ValidSessionCSRFSameOrigin(req) {
+		t.Fatal("expected configured frontend origin to pass csrf")
 	}
 }
 

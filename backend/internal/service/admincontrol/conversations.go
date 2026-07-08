@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/repository/common"
-	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
 
 func (s *Service) ListConversations(ctx context.Context) ([]common.Conversation, error) {

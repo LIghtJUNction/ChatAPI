@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
-	sessionsvc "github.com/zyf/chatapi/internal/service/auth/authz/session"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/principal"
+	sessionsvc "github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 )
 
 type Result struct {

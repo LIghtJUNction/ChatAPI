@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/repository/common"
-	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
-	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	"go.uber.org/zap"
 )
 
@@ -30,6 +30,7 @@ type Deps struct {
 	Turn       turnService
 	DeleteOne  func(context.Context, string) (common.DeleteConversationsResult, error)
 	DeleteMany func(context.Context, []string) (common.DeleteConversationsResult, error)
+	OnDelete   func(context.Context, string, string)
 	Logger     *zap.Logger
 }
 
@@ -38,6 +39,7 @@ type Service struct {
 	turn       turnService
 	deleteOne  func(context.Context, string) (common.DeleteConversationsResult, error)
 	deleteMany func(context.Context, []string) (common.DeleteConversationsResult, error)
+	onDelete   func(context.Context, string, string)
 	logger     *zap.Logger
 }
 
@@ -47,6 +49,7 @@ func New(deps Deps) *Service {
 		turn:       deps.Turn,
 		deleteOne:  deps.DeleteOne,
 		deleteMany: deps.DeleteMany,
+		onDelete:   deps.OnDelete,
 		logger:     deps.Logger,
 	}
 }
@@ -105,6 +108,9 @@ func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conver
 	}
 	result, err := s.deleteOne(ctx, strings.TrimSpace(conversationID))
 	if err == nil {
+		if s.onDelete != nil {
+			s.onDelete(ctx, strings.TrimSpace(ownerID), strings.TrimSpace(conversationID))
+		}
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Info("usercontrol conversations deleted conversation")
 	}
 	return result, err
@@ -131,6 +137,11 @@ func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCo
 	result, err := s.deleteMany(ctx, deleteIDs)
 	if err != nil {
 		return common.DeleteConversationsResult{}, 0, err
+	}
+	if s.onDelete != nil {
+		for _, conversationID := range deleteIDs {
+			s.onDelete(ctx, strings.TrimSpace(ownerID), strings.TrimSpace(conversationID))
+		}
 	}
 	logging.BindContext(s.logger, ctx,
 		zap.String("owner.id", strings.TrimSpace(ownerID)),

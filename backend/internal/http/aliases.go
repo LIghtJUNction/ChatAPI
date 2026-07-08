@@ -3,8 +3,8 @@ package httpapi
 import (
 	"net/http"
 
-	httphandler "github.com/zyf/chatapi/internal/http/handler"
-	httprouter "github.com/zyf/chatapi/internal/http/router"
+	httphandler "github.com/zyf2007/ChatAPI/internal/http/handler"
+	httprouter "github.com/zyf2007/ChatAPI/internal/http/router"
 )
 
 type RouterDeps = httprouter.Deps

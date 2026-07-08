@@ -10,23 +10,28 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/http/httpx"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/protocol"
-	"github.com/zyf/chatapi/internal/repository/common"
-	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
-	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
-	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
-	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
+	"github.com/zyf2007/ChatAPI/internal/http/httpx"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
+	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
+	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
+	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
 
 type ChatAPIHandler struct {
-	Turn       *turnsvc.Service
-	Query      *turnquerysvc.Service
-	Preprocess *preprocesssvc.Service
-	Logger     *zap.Logger
+	Turn      *turnsvc.Service
+	Query     *turnquerysvc.Service
+	Ingress   *ingresssvc.Service
+	Streaming *streamingsvc.Service
+	Catalog   *catalogsvc.Service
+	Logger    *zap.Logger
 }
 
 func (h ChatAPIHandler) Responses(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +44,36 @@ func (h ChatAPIHandler) ChatCompletions(w http.ResponseWriter, r *http.Request) 
 
 func (h ChatAPIHandler) AnthropicMessages(w http.ResponseWriter, r *http.Request) {
 	h.handleProtocolRequest(w, r, "anthropic_messages")
+}
+
+func (h ChatAPIHandler) ListModels(w http.ResponseWriter, r *http.Request) {
+	principal, ok := modelkey.PrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.UserID) == "" || h.Catalog == nil {
+		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]any{
+			"error": map[string]any{
+				"message": "unauthorized",
+				"type":    "invalid_request_error",
+			},
+		})
+		return
+	}
+
+	items, err := h.Catalog.ListModelsForPrincipal(r.Context())
+	if err != nil {
+		logging.BindContext(h.Logger, r.Context(), zap.String("owner.id", principal.UserID)).Error("list models failed", zap.Error(err))
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": map[string]any{
+				"message": "internal server error",
+				"type":    "server_error",
+			},
+		})
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"object": "list",
+		"data":   items,
+	})
 }
 
 func (h ChatAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {
@@ -70,40 +105,24 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 		httpx.WriteJSON(w, http.StatusBadRequest, protocol.InvalidJSONError(requestFormat))
 		return
 	}
-	parsed, err := protocol.NormalizeRequest(requestFormat, body)
+	requestMeta := httpx.CaptureRequestMeta(r)
+	parsedReq, err := h.Ingress.Parse(r.Context(), ownerIDForPreprocess(r.Context()), requestFormat, body, requestMeta)
 	if err != nil {
-		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("protocol normalization failed")
+		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("protocol ingress failed", zap.Error(err))
 		httpx.WriteJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
 		return
 	}
-	requestMeta := httpx.CaptureRequestMeta(r)
-	prepared := preprocesssvc.PreparedRequest{Request: parsed}
-	if h.Preprocess != nil {
-		ownerID := ownerIDForPreprocess(r.Context())
-		prepared, err = h.Preprocess.Prepare(r.Context(), ownerID, parsed)
-		if err != nil {
-			logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("protocol preprocess failed", zap.Error(err))
-			httpx.WriteJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
-			return
-		}
-	}
-	parsed = prepared.Request
 	logging.BindContext(h.Logger, r.Context(),
 		zap.String("protocol", requestFormat),
-		zap.String("model", parsed.Model),
-		zap.Bool("stream", parsed.Stream),
+		zap.String("model", parsedReq.Request.Model),
+		zap.Bool("stream", parsedReq.Request.Stream),
 	).Info("accepted protocol request")
-	if parsed.Stream {
-		h.handleStreamRequest(w, r, parsed, prepared.PreparedImages, body, requestMeta)
+	if parsedReq.Request.Stream {
+		h.handleStreamRequest(w, r, parsedReq)
 		return
 	}
 
-	responseBody, err := h.Turn.CreatePendingResponse(r.Context(), turnsvc.SubmitInput{
-		Request:        parsed,
-		PreparedImages: prepared.PreparedImages,
-		RequestMeta:    requestMeta,
-		RawBody:        body,
-	})
+	responseBody, err := h.Ingress.SubmitResponse(r.Context(), parsedReq)
 	if err != nil {
 		requestErr := protocol.InternalError(err.Error())
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Error("create pending response failed", zap.Error(err))
@@ -113,7 +132,7 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	httpx.WriteJSON(w, http.StatusOK, responseBody)
 }
 
-func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, preparedImages []preprocesssvc.PreparedImage, body map[string]any, requestMeta common.Request) {
+func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, parsed ingresssvc.ParsedRequest) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		logging.BindContext(h.Logger, r.Context()).Error("streaming not supported by response writer")
@@ -121,19 +140,14 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	turn, conversation, err := h.Turn.CreatePendingStream(r.Context(), turnsvc.SubmitInput{
-		Request:        request,
-		PreparedImages: preparedImages,
-		RequestMeta:    requestMeta,
-		RawBody:        body,
-	})
+	turn, conversation, err := h.Ingress.SubmitStream(r.Context(), parsed)
 	if err != nil {
 		requestErr := protocol.InternalError(err.Error())
 		logging.BindContext(h.Logger, r.Context(),
-			zap.String("protocol", request.Protocol.String()),
+			zap.String("protocol", parsed.Request.Protocol.String()),
 			zap.Error(err),
 		).Error("create pending stream failed")
-		httpx.WriteJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(request.Protocol.String(), requestErr))
+		httpx.WriteJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(parsed.Request.Protocol.String(), requestErr))
 		return
 	}
 	logging.BindContext(h.Logger, r.Context(),
@@ -147,13 +161,7 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 
 	anthropicBlockStarted := false
-	meta := protocol.ConversationMeta{
-		Protocol:   protocol.ParseProtocol(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses))),
-		Model:      stringValue(conversation.Metadata["model"], "chatapi-lab"),
-		ResponseID: stringValue(conversation.ResponseID, ""),
-	}
-
-	for _, event := range meta.BuildStreamStart() {
+	for _, event := range h.Streaming.BuildStartEvents(conversation) {
 		if err := writeSSEEvent(w, event); err != nil {
 			return
 		}
@@ -168,19 +176,7 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 			if !ok {
 				return
 			}
-			streamEvents, nextAnthropicBlockStarted := meta.BuildPendingStreamEvents(protocol.PendingStreamEvent{
-				Type:      event.Type,
-				DeltaText: event.DeltaText,
-				ErrorBody: event.ErrorBody,
-				Result: protocol.TurnResult{
-					ResponseID: stringValue(conversation.ResponseID, ""),
-					OutputText: event.OutputText,
-					Mode:       event.Mode,
-					ToolName:   event.ToolName,
-					ToolCallID: event.ToolCallID,
-					ToolOutput: event.ToolOutput,
-				},
-			}, anthropicBlockStarted)
+			streamEvents, nextAnthropicBlockStarted := h.Streaming.BuildPendingEvents(conversation, event, anthropicBlockStarted)
 			anthropicBlockStarted = nextAnthropicBlockStarted
 			for _, streamEvent := range streamEvents {
 				if err := writeSSEEvent(w, streamEvent); err != nil {

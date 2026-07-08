@@ -12,23 +12,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/config"
-	httpapi "github.com/zyf/chatapi/internal/http"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/repository/migrations"
-	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
-	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
-	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
-	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
-	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	httpapi "github.com/zyf2007/ChatAPI/internal/http"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
+	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
+	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
+	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
 
 type noopRealtime struct{}
 
 func (noopRealtime) PublishConversationUpsert(common.Conversation, []common.Message) {}
+func (noopRealtime) PublishConversationDelete(string, string)                        {}
 
 func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))

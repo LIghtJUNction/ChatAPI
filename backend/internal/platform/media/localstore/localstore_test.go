@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/platform/media"
+	"github.com/zyf2007/ChatAPI/internal/platform/media"
 )
 
 func TestPersistAVIF(t *testing.T) {

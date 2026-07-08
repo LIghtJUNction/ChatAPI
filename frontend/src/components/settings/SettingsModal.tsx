@@ -4,9 +4,6 @@ import { Modal, Tabs } from 'antd'
 import type { AutomationRule, AuthUser } from '../../types/chat'
 import { ApiKeyManagementPanel } from './ApiKeyManagementPanel'
 import { AutomationRulesPanel } from './AutomationRulesPanel'
-import { ModelManagementPanel } from './ModelManagementPanel'
-import { StatisticsPanel } from './StatisticsPanel'
-import { SystemSettingsPanel } from './SystemSettingsPanel'
 import { UserManagementPanel } from './UserManagementPanel'
 import { UserSettingsPanel } from './UserSettingsPanel'
 
@@ -25,7 +22,7 @@ type SettingsModalProps = {
   onTotpRefresh: () => void
 }
 
-type TabKey = 'statistics' | 'user-settings' | 'api-keys' | 'models' | 'automation' | 'system' | 'users'
+type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'users'
 
 export function SettingsModal({
   automationRuleEditorOpen,
@@ -50,11 +47,6 @@ export function SettingsModal({
 
   const commonTabs = [
     {
-      key: 'statistics',
-      label: '统计面板',
-      children: <StatisticsPanel open={open && activeTab === 'statistics'} />,
-    },
-    {
       key: 'automation',
       label: '自动化规则',
       children: (
@@ -73,11 +65,6 @@ export function SettingsModal({
       label: 'API Keys',
       children: <ApiKeyManagementPanel open={open && activeTab === 'api-keys'} />,
     },
-    {
-      key: 'models',
-      label: '模型管理',
-      children: <ModelManagementPanel open={open && activeTab === 'models'} />,
-    },
   ]
 
   const userSettingsTab = {
@@ -94,16 +81,6 @@ export function SettingsModal({
   }
 
   const adminTabs = [
-    {
-      key: 'system',
-      label: <span style={{ color: '#13c2c2' }}>系统设置</span>,
-      children: (
-        <SystemSettingsPanel
-          open={open && activeTab === 'system'}
-          onClose={onClose}
-        />
-      ),
-    },
     {
       key: 'users',
       label: <span style={{ color: '#13c2c2' }}>用户管理</span>,

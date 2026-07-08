@@ -6,7 +6,7 @@ import (
 	"embed"
 	"fmt"
 
-	"github.com/zyf/chatapi/internal/repository/migrationplan"
+	"github.com/zyf2007/ChatAPI/internal/repository/migrationplan"
 )
 
 const BootstrapVersion = "0001_bootstrap"

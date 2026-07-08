@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/repository/chat"
-	"github.com/zyf/chatapi/internal/repository/common"
-	configrepo "github.com/zyf/chatapi/internal/repository/config"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/repository/chat"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	configrepo "github.com/zyf2007/ChatAPI/internal/repository/config"
 	"go.uber.org/zap"
 )
 

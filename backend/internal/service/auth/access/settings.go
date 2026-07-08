@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 const systemAccessSettingsKey = "system_access_settings"

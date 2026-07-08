@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 func (s *Store) CreateAppAPIKey(ctx context.Context, input common.CreateAppAPIKeyInput) (common.AppAPIKey, error) {

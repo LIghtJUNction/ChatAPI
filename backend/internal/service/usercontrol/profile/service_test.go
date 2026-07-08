@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/repository/common"
-	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
-	userprofile "github.com/zyf/chatapi/internal/service/usercontrol/profile"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
+	userprofile "github.com/zyf2007/ChatAPI/internal/service/usercontrol/profile"
 )
 
 type fakeIdentity struct {

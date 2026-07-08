@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/platform/media/localstore"
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/repository/migrations"
-	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
+	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
+	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
 )
 
 func TestCleanupOrphanImagesDeletesFilesAndRecords(t *testing.T) {

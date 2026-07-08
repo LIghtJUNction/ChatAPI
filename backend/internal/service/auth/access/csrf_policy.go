@@ -3,7 +3,7 @@ package access
 import (
 	"net/http"
 
-	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/config"
 )
 
 func (s *Service) ShouldCheckSessionCSRF(r *http.Request, hasSessionPrincipal bool) bool {
@@ -20,8 +20,6 @@ func (s *Service) ValidSessionCSRFSameOrigin(r *http.Request) bool {
 	if s == nil {
 		return false
 	}
-	baseOrigin := normalizedOrigin(s.cfg.BaseURL)
-	requestOrigin := requestOrigin(r)
 	origin := normalizedOrigin(r.Header.Get("Origin"))
 	if origin == "" {
 		origin = normalizedOrigin(r.Header.Get("Referer"))
@@ -29,5 +27,6 @@ func (s *Service) ValidSessionCSRFSameOrigin(r *http.Request) bool {
 	if origin == "" {
 		return false
 	}
-	return origin == requestOrigin || (baseOrigin != "" && origin == baseOrigin)
+	_, ok := s.trustedOrigins[origin]
+	return ok
 }

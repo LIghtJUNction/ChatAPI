@@ -3,7 +3,7 @@ package localstore
 import (
 	"context"
 	"fmt"
-	"github.com/zyf/chatapi/internal/platform/media"
+	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"os"
 	"path/filepath"
 	"strings"

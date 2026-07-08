@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 func (s *Store) GetSystemConfig(ctx context.Context, key string) (common.SystemConfig, error) {

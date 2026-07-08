@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/repository/migrations"
-	"github.com/zyf/chatapi/internal/repository/repositorycontract"
-	"github.com/zyf/chatapi/internal/repository/storetest"
+	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
+	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
+	"github.com/zyf2007/ChatAPI/internal/repository/storetest"
 )
 
 func TestSQLiteRepositoryContracts(t *testing.T) {

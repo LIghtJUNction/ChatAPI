@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/zyf/chatapi/internal/actor"
-	auditrepo "github.com/zyf/chatapi/internal/repository/audit"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	auditrepo "github.com/zyf2007/ChatAPI/internal/repository/audit"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 type Service struct {

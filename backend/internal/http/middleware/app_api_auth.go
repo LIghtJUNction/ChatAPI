@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
+	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	"go.uber.org/zap"
 )
 

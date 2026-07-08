@@ -1,19 +1,17 @@
 import { Button, Popconfirm, Space } from 'antd'
-import { DeleteOutlined, HistoryOutlined, SafetyOutlined } from '@ant-design/icons'
+import { DeleteOutlined, SafetyOutlined } from '@ant-design/icons'
 
 import type { User } from '../../../types/chat'
 
 type UserColumnsOptions = {
   deletingId: string
   onDelete: (userId: string) => void
-  onOpenHistory: (user: User) => void
   onOpenPassword: (user: User) => void
 }
 
 export function buildUserColumns({
   deletingId,
   onDelete,
-  onOpenHistory,
   onOpenPassword,
 }: UserColumnsOptions) {
   return [
@@ -41,9 +39,6 @@ export function buildUserColumns({
       key: 'action',
       render: (_: unknown, record: User) => (
         <Space size={8} wrap>
-          <Button size="small" icon={<HistoryOutlined />} onClick={() => onOpenHistory(record)}>
-            查看历史消息
-          </Button>
           <Button size="small" icon={<SafetyOutlined />} onClick={() => onOpenPassword(record)}>
             重置密码
           </Button>

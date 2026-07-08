@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/repository/migrations"
-	"github.com/zyf/chatapi/internal/repository/repositorycontract"
-	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
-	"github.com/zyf/chatapi/internal/service/account"
-	appkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	modelkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
-	userkeys "github.com/zyf/chatapi/internal/service/usercontrol/keys"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
+	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
+	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
+	"github.com/zyf2007/ChatAPI/internal/service/account"
+	appkeysvc "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	modelkeysvc "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
+	userkeys "github.com/zyf2007/ChatAPI/internal/service/usercontrol/keys"
 )
 
 func TestKeysServiceCreateListRevoke(t *testing.T) {

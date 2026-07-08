@@ -3,7 +3,6 @@ import { PlusOutlined } from '@ant-design/icons'
 
 import { useUserManagementState } from './userManagement/useUserManagementState'
 import { buildUserColumns } from './userManagement/userColumns'
-import { UserHistoryModal } from './userManagement/UserHistoryModal'
 import { UserPasswordModal } from './userManagement/UserPasswordModal'
 
 type UserManagementPanelProps = {
@@ -14,16 +13,11 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
   const {
     creating,
     deletingId,
-    detailModalOpen,
-    detailUser,
     form,
     handleCreate,
     handleDelete,
     handlePasswordChange,
-    historyLoading,
-    historyMessages,
     loading,
-    openDetailModal,
     openPasswordModal,
     pwForm,
     pwModalOpen,
@@ -31,13 +25,11 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
     pwUsername,
     setPwModalOpen,
     users,
-    closeDetailModal,
   } = useUserManagementState(open)
 
   const columns = buildUserColumns({
     deletingId,
     onDelete: handleDelete,
-    onOpenHistory: openDetailModal,
     onOpenPassword: openPasswordModal,
   })
 
@@ -95,17 +87,6 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
           showTotal: (total) => `共 ${total} 条`,
         }}
         size="small"
-      />
-
-      <UserHistoryModal
-        open={detailModalOpen}
-        user={detailUser}
-        historyMessages={historyMessages}
-        historyLoading={historyLoading}
-        deletingId={deletingId}
-        onClose={closeDetailModal}
-        onDelete={handleDelete}
-        onResetPassword={openPasswordModal}
       />
 
       <UserPasswordModal

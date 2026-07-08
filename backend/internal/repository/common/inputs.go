@@ -129,26 +129,27 @@ type UpsertStorageFileDeletionFailureInput struct {
 }
 
 type CreatePendingInput struct {
-	ConversationID   string
-	RequestID        string
-	ResponseID       string
-	OwnerID          string
-	RequestFormat    string
-	Model            string
-	SystemContent    string
-	DeveloperContent string
-	AssistantContent string
-	UserContent      string
-	InputParts       []RequestInputPart
-	RequestMethod    string
-	RequestPath      string
-	RequestQuery     map[string][]string
-	RequestHeaders   map[string][]string
-	RequestBody      map[string]any
-	ToolSchemas      []any
-	ToolChoice       RequestToolChoice
-	ResponseFormat   RequestResponseFormat
-	PreparedImages   []CreatePendingImageAssetInput
+	ConversationID    string
+	RequestID         string
+	ResponseID        string
+	OwnerID           string
+	ReuseConversation bool
+	RequestFormat     string
+	Model             string
+	SystemContent     string
+	DeveloperContent  string
+	AssistantContent  string
+	UserContent       string
+	InputParts        []RequestInputPart
+	RequestMethod     string
+	RequestPath       string
+	RequestQuery      map[string][]string
+	RequestHeaders    map[string][]string
+	RequestBody       map[string]any
+	ToolSchemas       []any
+	ToolChoice        RequestToolChoice
+	ResponseFormat    RequestResponseFormat
+	PreparedImages    []CreatePendingImageAssetInput
 }
 
 type CreatePendingImageAssetInput struct {

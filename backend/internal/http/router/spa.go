@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/config"
 )
 
 func mountSPA(router chi.Router, cfg config.Config) {

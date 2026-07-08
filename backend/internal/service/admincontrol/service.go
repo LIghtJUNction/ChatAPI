@@ -1,14 +1,14 @@
 package admincontrol
 
 import (
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/chat"
-	"github.com/zyf/chatapi/internal/repository/storage"
-	"github.com/zyf/chatapi/internal/service/account"
-	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
-	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
-	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
-	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/chat"
+	"github.com/zyf2007/ChatAPI/internal/repository/storage"
+	"github.com/zyf2007/ChatAPI/internal/service/account"
+	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
+	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
 
 type Deps struct {

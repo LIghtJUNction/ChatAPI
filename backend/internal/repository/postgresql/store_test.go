@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/repository/repositorycontract"
-	"github.com/zyf/chatapi/internal/repository/storetest"
-	"github.com/zyf/chatapi/internal/testutil/pgtest"
+	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
+	"github.com/zyf2007/ChatAPI/internal/repository/storetest"
+	"github.com/zyf2007/ChatAPI/internal/testutil/pgtest"
 )
 
 func TestPostgreSQLRepositoryContracts(t *testing.T) {

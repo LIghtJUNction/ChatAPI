@@ -3,8 +3,8 @@ package policy
 import (
 	"strings"
 
-	"github.com/zyf/chatapi/internal/repository/common"
-	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/principal"
 )
 
 func (s *Service) IsAuthenticated(pr principal.Principal) bool {

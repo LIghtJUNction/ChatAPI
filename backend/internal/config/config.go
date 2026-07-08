@@ -37,6 +37,7 @@ type Config struct {
 	OpenBrowser                           bool
 	LabToken                              string
 	LabPassword                           string
+	AdminUsername                         string
 	AdminPassword                         string
 	LogLevel                              string
 	LogFormat                             string
@@ -147,6 +148,7 @@ func Default(mode Mode, backendRoot string) Config {
 		OpenBrowser:                           openBrowser,
 		LabToken:                              "",
 		LabPassword:                           "",
+		AdminUsername:                         "",
 		AdminPassword:                         "",
 		LogLevel:                              "info",
 		LogFormat:                             defaultLogFormat(mode),
@@ -243,6 +245,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.LogFormat = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_FORMAT"), cfg.LogFormat))
 	cfg.LabToken = strings.TrimSpace(os.Getenv("CHATAPI_LAB_TOKEN"))
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))
+	cfg.AdminUsername = strings.TrimSpace(os.Getenv("CHATAPI_ADMIN_USERNAME"))
 	cfg.AdminPassword = strings.TrimSpace(os.Getenv("CHATAPI_ADMIN_PASSWORD"))
 	cfg.MetricsEnabled = parseBool(os.Getenv("CHATAPI_METRICS_ENABLED"), cfg.MetricsEnabled)
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_ACCESS_RATE_LIMIT_REQUESTS")); raw != "" {

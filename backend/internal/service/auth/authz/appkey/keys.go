@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	keyutil "github.com/zyf/chatapi/internal/platform/apikey"
-	"github.com/zyf/chatapi/internal/repository/common"
+	keyutil "github.com/zyf2007/ChatAPI/internal/platform/apikey"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 func (s *Service) CreateKey(ctx context.Context, userID string, name string, scopes []string, resourceLimits map[string]any, expiresAt *time.Time) (common.AppAPIKey, string, error) {

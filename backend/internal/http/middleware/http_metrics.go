@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/zyf/chatapi/internal/ops/observability/httpmetrics"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/httpmetrics"
 )
 
 type metricsResponseWriter struct {

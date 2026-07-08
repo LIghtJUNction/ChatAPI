@@ -2,13 +2,14 @@ package turn
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/zyf/chatapi/internal/protocol"
-	"github.com/zyf/chatapi/internal/repository/common"
-	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 )
 
 type Store interface {
@@ -44,27 +45,31 @@ type Submitter struct {
 func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn, common.Conversation, common.Message, error) {
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
-	conversationID := "conv_" + uuid.NewString()
+	conversationID := input.Target.ConversationID
+	if conversationID == "" {
+		conversationID = "conv_" + uuid.NewString()
+	}
 
 	conversation, message, err := s.Store.CreatePendingTurn(ctx, common.CreatePendingInput{
-		ConversationID:   conversationID,
-		RequestID:        requestID,
-		ResponseID:       responseID,
-		OwnerID:          input.OwnerID,
-		RequestFormat:    input.Request.Protocol.String(),
-		Model:            input.Request.Model,
-		SystemContent:    input.Request.SystemContent,
-		DeveloperContent: input.Request.DeveloperContent,
-		AssistantContent: input.Request.AssistantContent,
-		UserContent:      input.Request.UserContent,
-		InputParts:       toStoreInputParts(input.Request.InputParts),
-		RequestMethod:    input.RequestMeta.RequestMethod,
-		RequestPath:      input.RequestMeta.RequestPath,
-		RequestQuery:     input.RequestMeta.RequestQuery,
-		RequestHeaders:   input.RequestMeta.RequestHeaders,
-		RequestBody:      input.RawBody,
-		ToolSchemas:      protocol.RawToolSchemas(input.Request.ToolSchemas),
-		ToolChoice:       common.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
+		ConversationID:    conversationID,
+		RequestID:         requestID,
+		ResponseID:        responseID,
+		OwnerID:           input.OwnerID,
+		ReuseConversation: input.Target.Reuse,
+		RequestFormat:     input.Request.Protocol.String(),
+		Model:             input.Request.Model,
+		SystemContent:     input.Request.SystemContent,
+		DeveloperContent:  input.Request.DeveloperContent,
+		AssistantContent:  input.Request.AssistantContent,
+		UserContent:       input.Request.UserContent,
+		InputParts:        toStoreInputParts(input.Request.InputParts),
+		RequestMethod:     input.RequestMeta.RequestMethod,
+		RequestPath:       input.RequestMeta.RequestPath,
+		RequestQuery:      input.RequestMeta.RequestQuery,
+		RequestHeaders:    input.RequestMeta.RequestHeaders,
+		RequestBody:       input.RawBody,
+		ToolSchemas:       protocol.RawToolSchemas(input.Request.ToolSchemas),
+		ToolChoice:        common.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
 		ResponseFormat: common.RequestResponseFormat{
 			Type:   input.Request.ResponseFormat.Type,
 			Name:   input.Request.ResponseFormat.Name,
@@ -82,6 +87,7 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		ConversationID:    conversationID,
 		ResponseID:        responseID,
 		OwnerID:           input.OwnerID,
+		ToolCallIDs:       extractSubmitToolCallIDs(input.RawBody),
 		Actor:             input.Actor,
 		RequestFormat:     input.Request.Protocol.String(),
 		Model:             input.Request.Model,
@@ -102,6 +108,41 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		}
 	}
 	return turn, conversation, message, nil
+}
+
+func extractSubmitToolCallIDs(body map[string]any) []string {
+	seen := map[string]struct{}{}
+	var ids []string
+	var visit func(any)
+	visit = func(value any) {
+		switch typed := value.(type) {
+		case map[string]any:
+			for _, key := range []string{"tool_call_id", "call_id", "tool_use_id"} {
+				if id := strings.TrimSpace(rawStringValue(typed[key], "")); id != "" {
+					if _, ok := seen[id]; !ok {
+						seen[id] = struct{}{}
+						ids = append(ids, id)
+					}
+				}
+			}
+			for _, item := range typed {
+				visit(item)
+			}
+		case []any:
+			for _, item := range typed {
+				visit(item)
+			}
+		}
+	}
+	visit(body)
+	return ids
+}
+
+func rawStringValue(value any, fallback string) string {
+	if raw, ok := value.(string); ok {
+		return raw
+	}
+	return fallback
 }
 
 func toCreatePendingImageAssets(images []preprocesssvc.PreparedImage) []common.CreatePendingImageAssetInput {

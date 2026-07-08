@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]common.AutomationRule, error) {

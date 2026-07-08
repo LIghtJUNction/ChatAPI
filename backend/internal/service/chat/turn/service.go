@@ -5,11 +5,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/protocol"
-	"github.com/zyf/chatapi/internal/repository/chat"
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/repository/chat"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
 	"go.uber.org/zap"
 )
 
@@ -29,6 +30,7 @@ type Service struct {
 	Submitter                   *Submitter
 	Pending                     pendingRegistryLike
 	Store                       chat.Store
+	Resolver                    *conversationresolve.Service
 	ResolveMutationError        MutationErrorResolver
 	NotifyText                  TextNotifier
 	EnsureMessageAdmission      AdmissionHook
@@ -84,6 +86,11 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 	}
 	input.OwnerID = ownerID
 	input.Actor = s.actor(ctx)
+	if target, err := s.resolveTarget(ctx, input); err != nil {
+		return nil, err
+	} else {
+		input.Target = target
+	}
 	turn, _, _, err := s.Submitter.Submit(ctx, input)
 	if err != nil {
 		logging.BindContext(s.Logger, ctx, zap.String("owner.id", ownerID)).Error("create pending response submit failed", zap.Error(err))
@@ -113,6 +120,11 @@ func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*
 	}
 	input.OwnerID = ownerID
 	input.Actor = s.actor(ctx)
+	if target, err := s.resolveTarget(ctx, input); err != nil {
+		return nil, common.Conversation{}, err
+	} else {
+		input.Target = target
+	}
 	turn, conversation, _, err := s.Submitter.Submit(ctx, input)
 	if err != nil {
 		logging.BindContext(s.Logger, ctx, zap.String("owner.id", ownerID)).Error("create pending stream submit failed", zap.Error(err))
@@ -358,6 +370,25 @@ func stringValue(value any, fallback string) string {
 	return fallback
 }
 
+func (s *Service) resolveTarget(ctx context.Context, input SubmitInput) (SubmitTarget, error) {
+	if s.Resolver == nil {
+		return SubmitTarget{}, nil
+	}
+	target, err := s.Resolver.Resolve(ctx, conversationresolve.ResolveInput{
+		OwnerID: input.OwnerID,
+		Request: input.Request,
+		RawBody: input.RawBody,
+	})
+	if err != nil {
+		return SubmitTarget{}, err
+	}
+	return SubmitTarget{
+		ConversationID: target.ConversationID,
+		Reuse:          target.Reuse,
+		Source:         target.Source,
+	}, nil
+}
+
 type pendingRegistryLike interface {
 	WaitTurn(context.Context, *PendingTurn) (PendingResult, error)
 	StartDelta(string) (string, error)
@@ -370,4 +401,6 @@ type pendingRegistryLike interface {
 	ExpireOlderThan(time.Time, map[string]any) int
 	Add(*PendingTurn)
 	GetByConversationID(string) (*PendingTurn, bool)
+	FindByToolCallID(string, string) (*PendingTurn, bool)
+	FindConversationIDByToolCallID(string, string) (string, bool)
 }

@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/http/httpx"
-	"github.com/zyf/chatapi/internal/repository/common"
-	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	"github.com/zyf/chatapi/internal/service/usercontrol"
-	usercontrolconversations "github.com/zyf/chatapi/internal/service/usercontrol/conversations"
-	usercontrolprofile "github.com/zyf/chatapi/internal/service/usercontrol/profile"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/http/httpx"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
+	usercontrolconversations "github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversations"
+	usercontrolprofile "github.com/zyf2007/ChatAPI/internal/service/usercontrol/profile"
 	"go.uber.org/zap"
 )
 

@@ -1,6 +1,6 @@
 package preprocess
 
-import "github.com/zyf/chatapi/internal/protocol"
+import "github.com/zyf2007/ChatAPI/internal/protocol"
 
 type PreparedImage struct {
 	FileID            string `json:"file_id"`

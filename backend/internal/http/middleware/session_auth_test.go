@@ -5,12 +5,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/actor"
-	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
-	"github.com/zyf/chatapi/internal/repository/common"
-	sessionrestore "github.com/zyf/chatapi/internal/service/auth/authn/sessionrestore"
-	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
-	"github.com/zyf/chatapi/internal/service/auth/authz/session"
+	"github.com/zyf2007/ChatAPI/internal/actor"
+	httpmiddleware "github.com/zyf2007/ChatAPI/internal/http/middleware"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	sessionrestore "github.com/zyf2007/ChatAPI/internal/service/auth/authn/sessionrestore"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	"go.uber.org/zap"
 )
 

@@ -1,47 +1,53 @@
 package router
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
-	"github.com/zyf/chatapi/internal/config"
-	httphandler "github.com/zyf/chatapi/internal/http/handler"
-	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
-	"github.com/zyf/chatapi/internal/ops/observability/httpmetrics"
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/ops/readiness"
-	"github.com/zyf/chatapi/internal/ops/setup"
-	"github.com/zyf/chatapi/internal/platform/media/localstore"
-	"github.com/zyf/chatapi/internal/repository/audit"
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/chat"
-	configrepo "github.com/zyf/chatapi/internal/repository/config"
-	"github.com/zyf/chatapi/internal/repository/platform"
-	"github.com/zyf/chatapi/internal/repository/storage"
-	"github.com/zyf/chatapi/internal/service/account"
-	"github.com/zyf/chatapi/internal/service/admincontrol"
-	auditsvc "github.com/zyf/chatapi/internal/service/audit"
-	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
-	"github.com/zyf/chatapi/internal/service/auth/authn/geetest"
-	"github.com/zyf/chatapi/internal/service/auth/authn/identity"
-	labauth "github.com/zyf/chatapi/internal/service/auth/authn/lab"
-	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
-	oidcsvc "github.com/zyf/chatapi/internal/service/auth/authn/oidc"
-	"github.com/zyf/chatapi/internal/service/auth/authn/ratelimit"
-	sessionrestore "github.com/zyf/chatapi/internal/service/auth/authn/sessionrestore"
-	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
-	totpsvc "github.com/zyf/chatapi/internal/service/auth/authn/totp"
-	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
-	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
-	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
-	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
-	"github.com/zyf/chatapi/internal/service/chat/turn"
-	"github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/service/usercontrol"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	httphandler "github.com/zyf2007/ChatAPI/internal/http/handler"
+	httpmiddleware "github.com/zyf2007/ChatAPI/internal/http/middleware"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/httpmetrics"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/ops/readiness"
+	"github.com/zyf2007/ChatAPI/internal/ops/setup"
+	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
+	"github.com/zyf2007/ChatAPI/internal/repository/audit"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/chat"
+	configrepo "github.com/zyf2007/ChatAPI/internal/repository/config"
+	"github.com/zyf2007/ChatAPI/internal/repository/platform"
+	"github.com/zyf2007/ChatAPI/internal/repository/storage"
+	"github.com/zyf2007/ChatAPI/internal/service/account"
+	"github.com/zyf2007/ChatAPI/internal/service/admincontrol"
+	auditsvc "github.com/zyf2007/ChatAPI/internal/service/audit"
+	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/geetest"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/identity"
+	labauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/lab"
+	localauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/local"
+	oidcsvc "github.com/zyf2007/ChatAPI/internal/service/auth/authn/oidc"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/ratelimit"
+	sessionrestore "github.com/zyf2007/ChatAPI/internal/service/auth/authn/sessionrestore"
+	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
+	totpsvc "github.com/zyf2007/ChatAPI/internal/service/auth/authn/totp"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/verification"
+	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
+	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
+	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
+	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
+	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
+	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
+	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
 )
 
 type Deps struct {
@@ -55,6 +61,9 @@ type Deps struct {
 	Turn           *turn.Service
 	Query          *turnquery.Service
 	ModelAPIKeys   *modelkey.Service
+	Catalog        *catalogsvc.Service
+	Ingress        *ingresssvc.Service
+	Streaming      *streamingsvc.Service
 	AppAPIKeys     *appkey.Service
 	Lab            *labauth.Service
 	LocalAuth      *localauth.Service
@@ -74,6 +83,8 @@ type Deps struct {
 	UserControl    *usercontrol.Service
 	UserSessions   *session.Service
 	LoggerFactory  *logging.Factory
+	Workspace      *workspacesvc.Service
+	WorkspaceHub   *workspacesvc.Hub
 }
 
 func New(deps Deps) http.Handler {
@@ -112,6 +123,12 @@ func New(deps Deps) http.Handler {
 	router.Use(httpmiddleware.RequireSessionCSRF(accessPolicy, deps.Policy, authLogger))
 
 	if deps.UserControl == nil {
+		if deps.Workspace == nil {
+			deps.Workspace = workspacesvc.New(deps.Query)
+		}
+		if deps.WorkspaceHub == nil {
+			deps.WorkspaceHub = workspacesvc.NewHub(deps.Workspace)
+		}
 		deps.UserControl = usercontrol.New(usercontrol.Deps{
 			Identity:     deps.Identity,
 			LocalAuth:    deps.LocalAuth,
@@ -128,6 +145,9 @@ func New(deps Deps) http.Handler {
 			ModelKeys:    deps.ModelAPIKeys,
 			Accounts:     deps.Accounts,
 			Logger:       deps.logger(logging.LayerUserControl),
+			OnDeleteConversation: func(ctx context.Context, ownerID string, conversationID string) {
+				deps.WorkspaceHub.PublishConversationDelete(ownerID, conversationID)
+			},
 		})
 	}
 	if deps.AdminControl == nil {
@@ -142,14 +162,22 @@ func New(deps Deps) http.Handler {
 			AccessSettings: deps.AccessSettings,
 		})
 	}
+	if deps.Turn != nil {
+		if deps.Turn.Resolver == nil {
+			deps.Turn.Resolver = conversationresolve.New(deps.ChatRepo, deps.Turn.Pending)
+		}
+		if deps.Turn.Submitter != nil && deps.Turn.Submitter.Realtime == nil && deps.WorkspaceHub != nil {
+			deps.Turn.Submitter.Realtime = workspacesvc.NewRealtimePublisher(deps.WorkspaceHub)
+		}
+	}
 
 	chatHandler := httphandler.ChatAPIHandler{
-		Turn:  deps.Turn,
-		Query: deps.Query,
-		Preprocess: preprocesssvc.New(deps.Config, localstore.Store{
-			RootDir: deps.Config.MediaDerivedDir,
-		}),
-		Logger: deps.logger(logging.LayerHTTP),
+		Turn:      deps.Turn,
+		Query:     deps.Query,
+		Ingress:   firstIngress(deps.Ingress, preprocesssvc.New(deps.Config, localstore.Store{RootDir: deps.Config.MediaDerivedDir}), deps.Turn),
+		Streaming: firstStreaming(deps.Streaming),
+		Catalog:   firstCatalog(deps.Catalog, deps.ModelAPIKeys),
+		Logger:    deps.logger(logging.LayerHTTP),
 	}
 	appHandler := httphandler.AppAPIHandler{
 		Turn:   deps.Turn,
@@ -186,6 +214,10 @@ func New(deps Deps) http.Handler {
 		Turn:   deps.Turn,
 		Logger: deps.logger(logging.LayerHTTP),
 	}
+	workspaceHandler := httphandler.WorkspaceHandler{
+		Hub:    deps.WorkspaceHub,
+		Logger: deps.logger(logging.LayerHTTP),
+	}
 	healthHandler := httphandler.HealthHandler{Config: deps.Config, Store: deps.PlatformRepo}
 	readinessHandler := httphandler.ReadinessHandler{Service: readiness.NewService(deps.Config, deps.PlatformRepo)}
 	setupHandler := httphandler.SetupHandler{Service: setup.NewService(deps.AuthRepo, deps.Config)}
@@ -210,6 +242,7 @@ func New(deps Deps) http.Handler {
 
 	router.Get("/api/health", healthHandler.ServeHTTP)
 	router.Get("/api/ready", readinessHandler.ServeHTTP)
+	router.Get("/api/ws", workspaceHandler.ServeWS)
 	router.Get("/api/setup/status", setupHandler.Status)
 	router.Get("/setup", setupHandler.HTML)
 	router.Post("/setup", setupHandler.Create)

@@ -2,7 +2,7 @@ package router
 
 import (
 	"github.com/go-chi/chi/v5"
-	httphandler "github.com/zyf/chatapi/internal/http/handler"
+	httphandler "github.com/zyf2007/ChatAPI/internal/http/handler"
 )
 
 func registerLabRoutes(router chi.Router, labHandler httphandler.LabHandler) {

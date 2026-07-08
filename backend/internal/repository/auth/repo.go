@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
 type UserStore interface {

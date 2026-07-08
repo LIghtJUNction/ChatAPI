@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/repository/auth"
-	"github.com/zyf/chatapi/internal/repository/common"
-	appkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	modelkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	appkeysvc "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	modelkeysvc "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"go.uber.org/zap"
 )
 

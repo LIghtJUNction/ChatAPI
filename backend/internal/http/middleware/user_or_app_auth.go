@@ -3,10 +3,10 @@ package middleware
 import (
 	"net/http"
 
-	app "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	"github.com/zyf/chatapi/internal/service/auth/authz/decision"
-	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
-	"github.com/zyf/chatapi/internal/service/auth/authz/session"
+	app "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/decision"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 )
 
 func RequireUserSessionOrAppAPI(policyService *policy.Service, appAuth func(http.Handler) http.Handler, requireSession func(http.Handler) http.Handler) func(http.Handler) http.Handler {

@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/platform/media"
-	"github.com/zyf/chatapi/internal/platform/media/localstore"
-	"github.com/zyf/chatapi/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/platform/media"
+	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
 )
 
 type AssetStore interface {

@@ -3,7 +3,7 @@ package principal
 import (
 	"strings"
 
-	"github.com/zyf/chatapi/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/actor"
 )
 
 type Kind string

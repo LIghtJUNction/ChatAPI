@@ -3,7 +3,7 @@ package policy
 import (
 	"strings"
 
-	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
+	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/principal"
 )
 
 func (s *Service) CanAccessUser(pr principal.Principal, targetUserID string) bool {

@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zyf/chatapi/internal/config"
-	labauth "github.com/zyf/chatapi/internal/service/auth/authn/lab"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	labauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/lab"
 )
 
 type LabDecisionKind string
@@ -26,6 +26,7 @@ type Service struct {
 	cfg              config.Config
 	lab              *labauth.Service
 	settings         *SettingsService
+	trustedOrigins   map[string]struct{}
 	anonymousLimiter *requestLimiter
 	principalLimiter *multiLimiter
 }

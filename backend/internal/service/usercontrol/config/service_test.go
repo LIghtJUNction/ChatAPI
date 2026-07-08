@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zyf/chatapi/internal/repository/migrations"
-	"github.com/zyf/chatapi/internal/repository/repositorycontract"
-	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
-	userconfig "github.com/zyf/chatapi/internal/service/usercontrol/config"
+	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
+	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
+	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
+	userconfig "github.com/zyf2007/ChatAPI/internal/service/usercontrol/config"
 )
 
 func TestConfigServiceGetUpdateAndReplaceRules(t *testing.T) {

@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/http/httpx"
-	"github.com/zyf/chatapi/internal/ops/observability/httpmetrics"
-	"github.com/zyf/chatapi/internal/ops/readiness"
-	"github.com/zyf/chatapi/internal/ops/setup"
-	"github.com/zyf/chatapi/internal/repository/platform"
+	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/http/httpx"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/httpmetrics"
+	"github.com/zyf2007/ChatAPI/internal/ops/readiness"
+	"github.com/zyf2007/ChatAPI/internal/ops/setup"
+	"github.com/zyf2007/ChatAPI/internal/repository/platform"
 )
 
 type HealthHandler struct {
@@ -121,6 +121,7 @@ func decodeSetupInput(r *http.Request) (setup.ApplyInput, error) {
 	contentType := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
 	if strings.HasPrefix(contentType, "application/json") {
 		var body struct {
+			AdminUsername string `json:"admin_username"`
 			AdminPassword string `json:"admin_password"`
 			WriteEnv      *bool  `json:"write_env"`
 			Force         bool   `json:"force"`
@@ -128,6 +129,7 @@ func decodeSetupInput(r *http.Request) (setup.ApplyInput, error) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			return input, err
 		}
+		input.AdminUsername = body.AdminUsername
 		input.AdminPassword = body.AdminPassword
 		input.Force = body.Force
 		input.WriteEnv = body.WriteEnv == nil || *body.WriteEnv
@@ -136,6 +138,7 @@ func decodeSetupInput(r *http.Request) (setup.ApplyInput, error) {
 	if err := r.ParseForm(); err != nil {
 		return input, err
 	}
+	input.AdminUsername = r.FormValue("admin_username")
 	input.AdminPassword = r.FormValue("admin_password")
 	input.Force = parseTruthy(r.FormValue("force"))
 	input.WriteEnv = !parseFalsy(r.FormValue("write_env"))

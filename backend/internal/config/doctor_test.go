@@ -7,6 +7,7 @@ import (
 
 func TestDiagnoseServeRequiresProductionSecrets(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
+	cfg.AdminUsername = "root"
 	cfg.AdminPassword = "change-me"
 
 	report := Diagnose(cfg, cfg.Validate())
@@ -82,6 +83,7 @@ func TestDiagnoseTrustedProxyValidation(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
 	cfg.MasterKey = "01234567890123456789012345678901"
 	cfg.SessionSecret = "01234567890123456789012345678901"
+	cfg.AdminUsername = "root"
 	cfg.AdminPassword = "not-change-me"
 	cfg.TrustedProxies = []string{"not-an-ip"}
 
@@ -98,6 +100,7 @@ func TestDiagnoseWarnsForShortSessionSecret(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
 	cfg.MasterKey = "01234567890123456789012345678901"
 	cfg.SessionSecret = "short"
+	cfg.AdminUsername = "root"
 	cfg.AdminPassword = "not-change-me"
 
 	report := Diagnose(cfg, cfg.Validate())
@@ -110,6 +113,7 @@ func TestDiagnoseOIDCPrivateRPRequirements(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
 	cfg.MasterKey = "01234567890123456789012345678901"
 	cfg.SessionSecret = "01234567890123456789012345678901"
+	cfg.AdminUsername = "root"
 	cfg.AdminPassword = "not-change-me"
 	cfg.OIDCEnabled = true
 	cfg.OIDCClientID = "chatapi"

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
-import { App, Avatar, Button, Empty, Spin } from 'antd'
 import { CopyOutlined, UserOutlined } from '@ant-design/icons'
+import { App, Avatar, Button, Empty, Spin } from 'antd'
 
 import {
   buildCurlCommand,
@@ -9,13 +9,18 @@ import {
   formatTime,
   renderMessageContent,
 } from '../lib/chat-format'
-import type { VisibleMessage } from '../types/chat'
+import type {
+  MessageItem,
+  TimelineItem,
+  VisibleTimelineDraftItem,
+  VisibleTimelineItem,
+} from '../types/chat'
 
 type ChatMessageListProps = {
   messagesLoading: boolean
   sending: boolean
   isWaitingForUser: boolean
-  visibleMessages: VisibleMessage[]
+  visibleMessages: VisibleTimelineItem[]
 }
 
 const DISCLOSURE_ANIMATION_MS = 150
@@ -96,6 +101,23 @@ function AnimatedDisclosure({
   )
 }
 
+function draftMessageFromItem(item: Extract<VisibleTimelineItem, { kind: 'draft' }>): MessageItem {
+  return {
+    id: item.id,
+    role: 'draft',
+    content: item.content,
+    created_at: item.created_at,
+  }
+}
+
+function isDraftItem(item: VisibleTimelineItem): item is VisibleTimelineDraftItem {
+  return item.kind === 'draft'
+}
+
+function isMessageTimelineItem(item: VisibleTimelineItem): item is TimelineItem & { message: MessageItem } {
+  return item.kind === 'message' && !!item.message
+}
+
 export function ChatMessageList({
   isWaitingForUser,
   messagesLoading,
@@ -153,21 +175,44 @@ export function ChatMessageList({
   return (
     <>
       {visibleMessages.map((item) => {
-        const isUser = item.role === 'user'
-        const isToolInput = item.role === 'tool'
-        const isDraft = item.role === 'draft'
-        const isToolCall = item.metadata?.response_mode === 'tool_call'
-        const isToolResult = item.metadata?.response_mode === 'tool_result'
-        const requestDebug = item.metadata?.request_debug
+        if (item.kind === 'system_event' && item.event) {
+          return (
+            <div key={item.id} className="timeline-event-row">
+              <div className={`timeline-event-badge level-${item.event.level || 'info'}`}>
+                <div className="timeline-event-title">{item.event.title}</div>
+                {item.event.detail ? (
+                  <div className="timeline-event-detail">{item.event.detail}</div>
+                ) : null}
+                <div className="timeline-event-time">{formatTime(item.created_at)}</div>
+              </div>
+            </div>
+          )
+        }
+
+        const message = isDraftItem(item)
+          ? draftMessageFromItem(item)
+          : isMessageTimelineItem(item)
+            ? item.message
+            : null
+        if (!message) {
+          return null
+        }
+
+        const isUser = message.role === 'user'
+        const isToolInput = message.role === 'tool'
+        const isDraft = message.role === 'draft'
+        const isToolCall = message.metadata?.response_mode === 'tool_call'
+        const isToolResult = message.metadata?.response_mode === 'tool_result'
+        const requestDebug = message.metadata?.request_debug
         const debugSections = [
           {
             label: '请求格式',
-            value: requestDebug?.request_format || item.metadata?.request_format || '',
+            value: requestDebug?.request_format || message.metadata?.request_format || '',
           },
           { label: 'api-key', value: requestDebug?.api_key_name || '-' },
-          { label: '模型', value: requestDebug?.model || item.metadata?.model || '' },
+          { label: '模型', value: requestDebug?.model || message.metadata?.model || '' },
           { label: '请求 ID', value: requestDebug?.request_id || '' },
-          { label: '响应 ID', value: requestDebug?.response_id || item.response_id || '' },
+          { label: '响应 ID', value: requestDebug?.response_id || message.response_id || '' },
           { label: '请求 Keys', value: requestDebug?.request_keys?.join(', ') || '' },
           { label: 'User-Agent', value: requestDebug?.headers?.user_agent || '' },
           { label: 'Content-Type', value: requestDebug?.headers?.content_type || '' },
@@ -184,7 +229,7 @@ export function ChatMessageList({
 
         return (
           <div
-            key={item.id}
+            key={message.id}
             className={`message-row ${
               isUser
                 ? 'user'
@@ -208,15 +253,15 @@ export function ChatMessageList({
                     ? 'tool-input'
                     : isToolCall
                       ? 'tool-call'
-                    : isToolResult
-                      ? 'tool-result'
-                      : 'assistant'
+                      : isToolResult
+                        ? 'tool-result'
+                        : 'assistant'
               } ${hasDebugCard ? 'has-debug' : ''} ${isDraft ? 'draft' : ''}`}
             >
               {isToolCall && <div className="message-kind-badge">Tool Call</div>}
               {isToolResult && <div className="message-kind-badge tool-result">Tool Result</div>}
               <div className="message-content">
-                {renderMessageContent(item.content, {
+                {renderMessageContent(message.content, {
                   onImageClick: (src, detail, alt) => {
                     setPreviewImage({
                       alt: alt ?? 'message image',
@@ -230,11 +275,11 @@ export function ChatMessageList({
                 <div className="message-tool-meta">
                   <div>
                     <span className="message-debug-label">Tool</span>
-                    <span className="message-debug-value">{item.metadata?.tool_name || '-'}</span>
+                    <span className="message-debug-value">{message.metadata?.tool_name || '-'}</span>
                   </div>
                   <div>
                     <span className="message-debug-label">Call ID</span>
-                    <span className="message-debug-value">{item.metadata?.tool_call_id || '-'}</span>
+                    <span className="message-debug-value">{message.metadata?.tool_call_id || '-'}</span>
                   </div>
                 </div>
               )}
@@ -313,9 +358,9 @@ export function ChatMessageList({
                         ? 'tool_call'
                         : isToolResult
                           ? 'tool_result'
-                          : item.role}
+                          : message.role}
                 </span>
-                <span>{formatTime(item.created_at)}</span>
+                <span>{formatTime(message.created_at)}</span>
               </div>
             </div>
             {!isUser && !isToolInput && (

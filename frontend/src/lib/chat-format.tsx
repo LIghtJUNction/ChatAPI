@@ -390,7 +390,7 @@ export function buildCurlCommand(requestBody: unknown): string {
 
   let endpoint = '/v1/responses'
   if (format === 'chat_completions') endpoint = '/v1/chat/completions'
-  else if (format === 'anthropic') endpoint = '/messages'
+  else if (format === 'anthropic') endpoint = '/v1/messages'
 
   const body = JSON.stringify(requestBody, null, 2)
   return `curl '${origin}${endpoint}' \\\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer YOUR_API_KEY' \\\n  -d '${body}'`

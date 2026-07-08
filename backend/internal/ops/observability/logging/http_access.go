@@ -18,6 +18,7 @@ const (
 	ansiReset     = "\x1b[0m"
 	ansiFgBlack   = "\x1b[30m"
 	ansiFgWhite   = "\x1b[97m"
+	ansiFgBlue    = "\x1b[34m"
 	ansiFgGreen   = "\x1b[32m"
 	ansiFgYellow  = "\x1b[33m"
 	ansiFgRed     = "\x1b[31m"
@@ -31,11 +32,14 @@ const (
 )
 
 type HTTPAccessEntry struct {
-	Method   string
-	Path     string
-	Status   int
-	Duration time.Duration
-	Remote   string
+	Timestamp time.Time
+	RequestID string
+	Kind      string
+	Method    string
+	Path      string
+	Status    int
+	Duration  time.Duration
+	Remote    string
 }
 
 type HTTPAccessFormatter struct {
@@ -62,15 +66,19 @@ func (f HTTPAccessFormatter) WriteSummary(entry HTTPAccessEntry) error {
 }
 
 func (f HTTPAccessFormatter) FormatSummary(entry HTTPAccessEntry) string {
-	levelMark := f.levelMark(entry.Status)
+	timestamp := f.muted(formatAccessTimestamp(entry.Timestamp))
+	requestID := f.requestIDBlock(entry.RequestID)
+	kind := f.kindBlock(entry.Kind)
 	status := f.statusBlock(entry.Status)
-	method := padRight(strings.ToUpper(strings.TrimSpace(entry.Method)), 6)
-	path := padRight(trimOrFallback(entry.Path, "/"), 40)
+	method := f.methodBlock(strings.ToUpper(strings.TrimSpace(entry.Method)))
+	path := f.pathBlock(entry.Path)
 	duration := padLeft(formatDurationMillis(entry.Duration), 8)
 	duration = f.paintDuration(duration, entry.Duration)
 
 	parts := []string{
-		levelMark,
+		timestamp,
+		requestID,
+		kind,
 		status,
 		method,
 		path,
@@ -83,19 +91,34 @@ func (f HTTPAccessFormatter) FormatSummary(entry HTTPAccessEntry) string {
 	return strings.Join(parts, " ")
 }
 
-func (f HTTPAccessFormatter) levelMark(status int) string {
-	switch {
-	case status >= 500:
-		return f.colorize("◆", ansiFgRed)
-	case status >= 400:
-		return f.colorize("●", ansiFgYellow)
+func (f HTTPAccessFormatter) requestIDBlock(requestID string) string {
+	value := accessRequestID(requestID)
+	if value == "-" {
+		return f.colorize("["+value+"]", ansiFgRed)
+	}
+	return f.muted("[" + value + "]")
+}
+
+func (f HTTPAccessFormatter) kindBlock(kind string) string {
+	kind = strings.ToUpper(strings.TrimSpace(kind))
+	if kind == "" {
+		kind = "HTTP"
+	}
+	kind = padRight(kind, 4)
+	switch strings.TrimSpace(kind) {
+	case "WS":
+		return f.colorize(kind, ansiFgMagenta)
+	case "SSE":
+		return f.colorize(kind, ansiFgCyan)
+	case "POLL":
+		return f.colorize(kind, ansiFgYellow)
 	default:
-		return f.colorize("●", ansiFgGreen)
+		return f.muted(kind)
 	}
 }
 
 func (f HTTPAccessFormatter) statusBlock(status int) string {
-	text := " " + strconv.Itoa(status) + " "
+	text := " " + padLeft(strconv.Itoa(status), 3) + " "
 	switch {
 	case status >= 500:
 		return f.colorize(text, ansiBgRed, ansiFgWhite)
@@ -106,6 +129,26 @@ func (f HTTPAccessFormatter) statusBlock(status int) string {
 	default:
 		return f.colorize(text, ansiBgGreen, ansiFgBlack)
 	}
+}
+
+func (f HTTPAccessFormatter) methodBlock(method string) string {
+	method = padRight(strings.TrimSpace(method), 7)
+	switch strings.TrimSpace(method) {
+	case http.MethodGet:
+		return f.colorize(method, ansiFgBlue)
+	case http.MethodPost:
+		return f.colorize(method, ansiFgCyan)
+	case http.MethodPut, http.MethodPatch:
+		return f.colorize(method, ansiFgYellow)
+	case http.MethodDelete:
+		return f.colorize(method, ansiFgRed)
+	default:
+		return f.colorize(method, ansiFgMagenta)
+	}
+}
+
+func (f HTTPAccessFormatter) pathBlock(path string) string {
+	return padRight(ellipsize(trimOrFallback(path, "/"), 52), 52)
 }
 
 func (f HTTPAccessFormatter) paintDuration(value string, d time.Duration) string {
@@ -142,6 +185,32 @@ func formatDurationMillis(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%.2fms", ms)
 	}
+}
+
+func formatAccessTimestamp(ts time.Time) string {
+	if ts.IsZero() {
+		ts = time.Now()
+	}
+	return ts.Format("2006-01-02T15:04:05.000Z07:00")
+}
+
+func accessRequestID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func ellipsize(value string, width int) string {
+	runes := []rune(value)
+	if len(runes) <= width {
+		return value
+	}
+	if width <= 1 {
+		return string(runes[:width])
+	}
+	return string(runes[:width-1]) + "…"
 }
 
 func padRight(value string, width int) string {

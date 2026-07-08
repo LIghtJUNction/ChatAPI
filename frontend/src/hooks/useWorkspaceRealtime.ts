@@ -3,19 +3,19 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import { resolveWebSocketUrl } from '../lib/api'
 import type {
   Conversation,
-  MessageItem,
+  TimelineItem,
   WorkspaceConnectionCountEvent,
   WorkspaceConversationDeleteEvent,
   WorkspaceConversationUpsertEvent,
   WorkspaceSnapshotEvent,
+  WorkspaceTimelineItemAppendEvent,
+  WorkspaceTimelineResetEvent,
 } from '../types/chat'
 
 const STORAGE_KEY = 'chatapi.conversationId'
 
 function sortConversations(items: Conversation[]) {
-  return [...items].sort((left, right) => {
-    return Date.parse(right.updated_at) - Date.parse(left.updated_at)
-  })
+  return [...items].sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))
 }
 
 type UseWorkspaceRealtimeParams = {
@@ -25,8 +25,7 @@ type UseWorkspaceRealtimeParams = {
   selectedConversationId: string
   setConversations: Dispatch<SetStateAction<Conversation[]>>
   setDraftBuffers: Dispatch<SetStateAction<Record<string, string>>>
-  setMessagesByConversation: Dispatch<SetStateAction<Record<string, MessageItem[]>>>
-  setLoadedConversationIds: Dispatch<SetStateAction<Set<string>>>
+  setTimelineByConversation: Dispatch<SetStateAction<Record<string, TimelineItem[]>>>
   setMessagesLoading: Dispatch<SetStateAction<boolean>>
   setSelectedConversationId: Dispatch<SetStateAction<string>>
 }
@@ -38,34 +37,52 @@ export function useWorkspaceRealtime({
   selectedConversationId,
   setConversations,
   setDraftBuffers,
-  setMessagesByConversation,
-  setLoadedConversationIds,
+  setTimelineByConversation,
   setMessagesLoading,
   setSelectedConversationId,
 }: UseWorkspaceRealtimeParams) {
   const conversationsRef = useRef<Conversation[]>([])
   const selectedConversationIdRef = useRef('')
   const socketRef = useRef<WebSocket | null>(null)
+  const subscribedConversationIdRef = useRef('')
 
   function resolvePreferredConversationId(items: Conversation[]) {
-    const requested =
-      selectedConversationIdRef.current || localStorage.getItem(STORAGE_KEY) || ''
+    const requested = selectedConversationIdRef.current || localStorage.getItem(STORAGE_KEY) || ''
     if (requested && items.some((item) => item.id === requested)) {
       return requested
     }
     return items[0]?.id ?? ''
   }
 
+  function sendJSON(payload: unknown) {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return
+    socketRef.current.send(JSON.stringify(payload))
+  }
+
+  function subscribeConversation(conversationId: string) {
+    const nextID = conversationId.trim()
+    const previousID = subscribedConversationIdRef.current
+    if (previousID && previousID !== nextID) {
+      sendJSON({ type: 'timeline.unsubscribe', conversation_id: previousID })
+    }
+    subscribedConversationIdRef.current = nextID
+    if (nextID) {
+      setMessagesLoading(true)
+      sendJSON({ type: 'timeline.subscribe', conversation_id: nextID })
+      return
+    }
+    setMessagesLoading(false)
+  }
+
   function applySelectedConversation(nextConversationId: string) {
     selectedConversationIdRef.current = nextConversationId
-    setSelectedConversationId((current) =>
-      current === nextConversationId ? current : nextConversationId,
-    )
+    setSelectedConversationId((current) => (current === nextConversationId ? current : nextConversationId))
     if (nextConversationId) {
       localStorage.setItem(STORAGE_KEY, nextConversationId)
     } else {
       localStorage.removeItem(STORAGE_KEY)
     }
+    subscribeConversation(nextConversationId)
   }
 
   useEffect(() => {
@@ -105,7 +122,12 @@ export function useWorkspaceRealtime({
     function connect() {
       const socket = new WebSocket(resolveWebSocketUrl('/api/ws'))
       socketRef.current = socket
+      subscribedConversationIdRef.current = ''
       setMessagesLoading(true)
+
+      socket.addEventListener('open', () => {
+        sendJSON({ type: 'workspace.ping' })
+      })
 
       socket.addEventListener('message', (event) => {
         if (!active) return
@@ -114,78 +136,87 @@ export function useWorkspaceRealtime({
           | WorkspaceConnectionCountEvent
           | WorkspaceConversationUpsertEvent
           | WorkspaceConversationDeleteEvent
+          | WorkspaceTimelineResetEvent
+          | WorkspaceTimelineItemAppendEvent
           | { type: 'disconnect'; reason?: string }
-          | { type: 'ping' }
+          | { type: 'workspace.ping' }
         try {
           payload = JSON.parse(event.data) as
             | WorkspaceSnapshotEvent
             | WorkspaceConnectionCountEvent
             | WorkspaceConversationUpsertEvent
             | WorkspaceConversationDeleteEvent
+            | WorkspaceTimelineResetEvent
+            | WorkspaceTimelineItemAppendEvent
             | { type: 'disconnect'; reason?: string }
-            | { type: 'ping' }
+            | { type: 'workspace.ping' }
         } catch {
           return
         }
-        if (payload.type === 'ping') {
-          return
-        }
+
+        if (payload.type === 'workspace.ping') return
         if (payload.type === 'disconnect') {
           socket.close()
           return
         }
 
-        if (payload.type === 'snapshot') {
+        if (payload.type === 'workspace.snapshot') {
           const nextConversations = sortConversations(payload.conversations)
+          conversationsRef.current = nextConversations
           setConversations(nextConversations)
           applySelectedConversation(resolvePreferredConversationId(nextConversations))
           return
         }
 
-        if (payload.type === 'connection_count') {
+        if (payload.type === 'workspace.connections') {
           onConnectionCountChange(payload.current_connection_count)
           return
         }
 
-        if (payload.type === 'conversation_upsert') {
-          const remaining = conversationsRef.current.filter(
-            (item) => item.id !== payload.conversation.id,
-          )
-          const nextConversations = sortConversations([
-            payload.conversation,
-            ...remaining,
-          ])
+        if (payload.type === 'conversation.upsert') {
+          const remaining = conversationsRef.current.filter((item) => item.id !== payload.conversation.id)
+          const nextConversations = sortConversations([payload.conversation, ...remaining])
           conversationsRef.current = nextConversations
           setConversations(nextConversations)
-          applySelectedConversation(resolvePreferredConversationId(nextConversations))
-          if (payload.messages) {
-            setMessagesByConversation((current) => ({
-              ...current,
-              [payload.conversation.id]: payload.messages ?? [],
-            }))
-            setLoadedConversationIds((current) => {
-              const next = new Set(current)
-              next.add(payload.conversation.id)
-              return next
-            })
-          } else {
-            setLoadedConversationIds((current) => {
-              if (!current.has(payload.conversation.id)) return current
-              const next = new Set(current)
-              next.delete(payload.conversation.id)
-              return next
-            })
+          if (!selectedConversationIdRef.current) {
+            applySelectedConversation(resolvePreferredConversationId(nextConversations))
           }
           return
         }
 
-        const nextConversations = conversationsRef.current.filter(
-          (item) => item.id !== payload.conversation_id,
-        )
+        if (payload.type === 'timeline.reset') {
+          setTimelineByConversation((current) => ({
+            ...current,
+            [payload.conversation_id]: payload.items,
+          }))
+          setMessagesLoading(false)
+          return
+        }
+
+        if (payload.type === 'timeline.append') {
+          setConversations((current) => {
+            const remaining = current.filter((item) => item.id !== payload.conversation.id)
+            const next = sortConversations([payload.conversation, ...remaining])
+            conversationsRef.current = next
+            return next
+          })
+          setTimelineByConversation((current) => {
+            const existing = current[payload.conversation_id] ?? []
+            if (existing.some((item) => item.id === payload.item.id)) {
+              return current
+            }
+            return {
+              ...current,
+              [payload.conversation_id]: [...existing, payload.item],
+            }
+          })
+          return
+        }
+
+        const nextConversations = conversationsRef.current.filter((item) => item.id !== payload.conversation_id)
         conversationsRef.current = nextConversations
         setConversations(nextConversations)
-        applySelectedConversation(resolvePreferredConversationId(nextConversations))
-        setMessagesByConversation((current) => {
+        setTimelineByConversation((current) => {
           if (!Object.prototype.hasOwnProperty.call(current, payload.conversation_id)) {
             return current
           }
@@ -193,6 +224,9 @@ export function useWorkspaceRealtime({
           delete next[payload.conversation_id]
           return next
         })
+        if (selectedConversationIdRef.current === payload.conversation_id) {
+          applySelectedConversation(resolvePreferredConversationId(nextConversations))
+        }
       })
 
       socket.addEventListener('close', () => {
@@ -200,6 +234,7 @@ export function useWorkspaceRealtime({
         if (socketRef.current === socket) {
           socketRef.current = null
         }
+        subscribedConversationIdRef.current = ''
         setMessagesLoading(true)
         reconnectTimer = window.setTimeout(() => {
           connect()
@@ -218,13 +253,15 @@ export function useWorkspaceRealtime({
       window.clearTimeout(reconnectTimer)
       socketRef.current?.close()
       socketRef.current = null
+      subscribedConversationIdRef.current = ''
     }
   }, [
     authenticated,
     onConnectionCountChange,
     setConversations,
-    setMessagesByConversation,
     setMessagesLoading,
+    setSelectedConversationId,
+    setTimelineByConversation,
   ])
 
   return {

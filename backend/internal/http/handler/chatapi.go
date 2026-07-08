@@ -12,12 +12,12 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/http/httpx"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
-	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
+	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
@@ -33,6 +33,7 @@ type ChatAPIHandler struct {
 	Ingress   *ingresssvc.Service
 	Streaming *streamingsvc.Service
 	Catalog   *catalogsvc.Service
+	Egress    *egresssvc.Service
 	Logger    *zap.Logger
 }
 
@@ -104,14 +105,14 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("invalid protocol request json")
-		httpx.WriteJSON(w, http.StatusBadRequest, protocol.InvalidJSONError(requestFormat))
+		httpx.WriteJSON(w, http.StatusBadRequest, h.egress().InvalidJSONBody(requestFormat))
 		return
 	}
 	requestMeta := httpx.CaptureRequestMeta(r)
 	parsedReq, err := h.Ingress.Parse(r.Context(), ownerIDForPreprocess(r.Context()), requestFormat, body, requestMeta)
 	if err != nil {
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("protocol ingress failed", zap.Error(err))
-		httpx.WriteJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
+		httpx.WriteJSON(w, h.egress().ErrorStatus(err), h.egress().ErrorBody(requestFormat, err))
 		return
 	}
 	logging.BindContext(h.Logger, r.Context(),
@@ -126,33 +127,32 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 
 	responseBody, err := h.Ingress.SubmitResponse(r.Context(), parsedReq)
 	if err != nil {
-		requestErr := protocol.InternalError(err.Error())
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Error("create pending response failed", zap.Error(err))
-		httpx.WriteJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(requestFormat, requestErr))
+		httpx.WriteJSON(w, http.StatusInternalServerError, h.egress().InternalErrorBody(requestFormat, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, responseBody)
 }
 
 func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, parsed ingresssvc.ParsedRequest) {
+	ctx := logging.WithConnectionID(r.Context(), logging.NewConnectionID("sse"))
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		logging.BindContext(h.Logger, r.Context()).Error("streaming not supported by response writer")
+		logging.BindContext(h.Logger, ctx).Error("streaming not supported by response writer")
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
-	turn, conversation, err := h.Ingress.SubmitStream(r.Context(), parsed)
+	turn, conversation, err := h.Ingress.SubmitStream(ctx, parsed)
 	if err != nil {
-		requestErr := protocol.InternalError(err.Error())
-		logging.BindContext(h.Logger, r.Context(),
+		logging.BindContext(h.Logger, ctx,
 			zap.String("protocol", parsed.Request.Protocol.String()),
 			zap.Error(err),
 		).Error("create pending stream failed")
-		httpx.WriteJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(parsed.Request.Protocol.String(), requestErr))
+		httpx.WriteJSON(w, http.StatusInternalServerError, h.egress().InternalErrorBody(parsed.Request.Protocol.String(), err))
 		return
 	}
-	logging.BindContext(h.Logger, r.Context(),
+	logging.BindContext(h.Logger, ctx,
 		zap.String("conversation.id", turn.ConversationID),
 		zap.String("request.id", turn.RequestID),
 	).Info("stream pending turn created")
@@ -161,33 +161,15 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+	_ = h.Streaming.StreamPendingTurn(ctx, w, conversation, turn.Events)
+}
 
-	anthropicBlockStarted := false
-	for _, event := range h.Streaming.BuildStartEvents(conversation) {
-		if err := writeSSEEvent(w, event); err != nil {
-			return
-		}
-		flusher.Flush()
+func (h ChatAPIHandler) egress() *egresssvc.Service {
+	if h.Egress != nil {
+		return h.Egress
 	}
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case event, ok := <-turn.Events:
-			if !ok {
-				return
-			}
-			streamEvents, nextAnthropicBlockStarted := h.Streaming.BuildPendingEvents(conversation, event, anthropicBlockStarted)
-			anthropicBlockStarted = nextAnthropicBlockStarted
-			for _, streamEvent := range streamEvents {
-				if err := writeSSEEvent(w, streamEvent); err != nil {
-					return
-				}
-				flusher.Flush()
-			}
-		}
-	}
+	return egresssvc.New()
 }
 
 func (h ChatAPIHandler) executeTurnControl(w http.ResponseWriter, r *http.Request, kind turnsvc.TurnControlKind) {
@@ -291,26 +273,6 @@ func ownerIDForPreprocess(ctx context.Context) string {
 		return strings.TrimSpace(principal.UserID)
 	}
 	return ""
-}
-
-func writeSSEEvent(w http.ResponseWriter, event protocol.StreamEvent) error {
-	if event.Event != "" {
-		if _, err := w.Write([]byte("event: " + event.Event + "\n")); err != nil {
-			return err
-		}
-	}
-	switch data := event.Data.(type) {
-	case string:
-		_, err := w.Write([]byte("data: " + data + "\n\n"))
-		return err
-	default:
-		raw, err := json.Marshal(data)
-		if err != nil {
-			return err
-		}
-		_, err = w.Write([]byte("data: " + string(raw) + "\n\n"))
-		return err
-	}
 }
 
 func mustConversationID(input map[string]any) (string, error) {

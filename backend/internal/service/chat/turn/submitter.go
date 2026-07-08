@@ -101,6 +101,12 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	}
 	s.Pending.Add(turn)
 	s.Realtime.PublishConversationUpsert(conversation, []common.Message{message})
+	s.Realtime.PublishTimelineItemAppend(input.OwnerID, conversation, timelinesvc.Item{
+		ID:        "msg:" + message.ID,
+		Kind:      "message",
+		CreatedAt: message.CreatedAt,
+		Message:   &message,
+	})
 	if s.Hooks.AfterCreate != nil {
 		s.Hooks.AfterCreate(ctx, input.Request, conversationID, responseID)
 	}

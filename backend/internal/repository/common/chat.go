@@ -38,6 +38,17 @@ type ConversationEvent struct {
 	CreatedAt      time.Time      `json:"created_at"`
 }
 
+type TurnIdentity struct {
+	OwnerID   string `json:"owner_id,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+}
+
+type PendingTurnMutationResult struct {
+	Conversation Conversation      `json:"conversation"`
+	Message      Message           `json:"message"`
+	Event        ConversationEvent `json:"event"`
+}
+
 type Request struct {
 	RequestID      string                `json:"request_id"`
 	OwnerID        string                `json:"owner_id,omitempty"`

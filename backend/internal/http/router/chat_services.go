@@ -3,6 +3,7 @@ package router
 import (
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
+	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
 	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
@@ -30,6 +31,13 @@ func firstStreaming(current *streamingsvc.Service) *streamingsvc.Service {
 		return current
 	}
 	return streamingsvc.New()
+}
+
+func firstEgress(current *egresssvc.Service) *egresssvc.Service {
+	if current != nil {
+		return current
+	}
+	return egresssvc.New()
 }
 
 func firstTimeline(current *timelinesvc.Service, store chat.Store) *timelinesvc.Service {

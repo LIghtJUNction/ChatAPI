@@ -185,13 +185,24 @@ type UpdateDraftInput struct {
 type AbortPendingInput struct {
 	ConversationID string
 	Reason         string
-	Event          *AppendConversationEventInput
 }
 
 type DisconnectPendingInput struct {
 	ConversationID string
 	Reason         string
-	Event          *AppendConversationEventInput
+}
+
+type PendingTurnLifecycleMutationInput struct {
+	ConversationID string
+	Reason         string
+	Identity       TurnIdentity
+	EventID        string
+	EventType      string
+	EventLevel     string
+	EventTitle     string
+	EventDetail    string
+	EventMetadata  map[string]any
+	EventCreatedAt time.Time
 }
 
 type AppendConversationEventInput struct {

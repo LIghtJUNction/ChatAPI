@@ -10,10 +10,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
-func insertConversationEventPostgreSQL(ctx context.Context, tx pgx.Tx, conversation common.Conversation, input *common.AppendConversationEventInput, fallbackTime time.Time) error {
-	if tx == nil || input == nil {
-		return nil
-	}
+func buildConversationEventFromInput(conversation common.Conversation, input common.AppendConversationEventInput, fallbackTime time.Time) common.ConversationEvent {
 	createdAt := input.CreatedAt
 	if createdAt.IsZero() {
 		if fallbackTime.IsZero() {
@@ -22,7 +19,7 @@ func insertConversationEventPostgreSQL(ctx context.Context, tx pgx.Tx, conversat
 			createdAt = fallbackTime.UTC()
 		}
 	}
-	item := common.ConversationEvent{
+	return common.ConversationEvent{
 		ID:             firstString(input.ID, "evt_"+uuid.NewString()),
 		ConversationID: firstString(input.ConversationID, conversation.ID),
 		OwnerID:        firstString(input.OwnerID, metadataString(conversation.Metadata, "owner_id", "")),
@@ -33,6 +30,12 @@ func insertConversationEventPostgreSQL(ctx context.Context, tx pgx.Tx, conversat
 		RequestID:      input.RequestID,
 		Metadata:       ensureMap(input.Metadata),
 		CreatedAt:      createdAt,
+	}
+}
+
+func insertConversationEventPostgreSQL(ctx context.Context, tx pgx.Tx, item common.ConversationEvent) error {
+	if tx == nil {
+		return nil
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO conversation_events(

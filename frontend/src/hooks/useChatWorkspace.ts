@@ -6,10 +6,9 @@ import {
   buildInitialToolFormValues,
   getLastToolSchemas,
 } from '../lib/chat-format'
-import { buildVisibleMessages } from '../lib/visibleMessages'
+import { buildVisibleTimeline } from '../lib/visibleTimeline'
 import { buildToolCallPayload } from './chatWorkspace/buildToolCallPayload'
 import { DEFAULT_AUTH_SESSION } from './chatWorkspace/defaultAuthSession'
-import { useConversationMessages } from './chatWorkspace/useConversationMessages'
 import { useAutomationRules } from './useAutomationRules'
 import { useKeyboardOffset } from './useKeyboardOffset'
 import { useWorkspaceRealtime } from './useWorkspaceRealtime'
@@ -18,6 +17,7 @@ import type {
   AuthUser,
   ComposerMode,
   Conversation,
+  TimelineItem,
   ReasoningStreamMode,
   ResponsesPayload,
   ToolFieldValue,
@@ -30,8 +30,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const [loginLoading, setLoginLoading] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversationId, setSelectedConversationId] = useState('')
-  const [messagesByConversation, setMessagesByConversation] = useState<Record<string, MessageItem[]>>({})
-  const [loadedConversationIds, setLoadedConversationIds] = useState<Set<string>>(() => new Set())
+  const [timelineByConversation, setTimelineByConversation] = useState<Record<string, TimelineItem[]>>({})
   const [messagesLoading, setMessagesLoading] = useState(true)
   const [composer, setComposer] = useState('')
   const [thinkingText, setThinkingText] = useState('')
@@ -78,8 +77,7 @@ export function useChatWorkspace(isMobile: boolean) {
     selectedConversationId,
     setConversations,
     setDraftBuffers,
-    setLoadedConversationIds,
-    setMessagesByConversation,
+    setTimelineByConversation,
     setMessagesLoading,
     setSelectedConversationId,
   })
@@ -87,7 +85,10 @@ export function useChatWorkspace(isMobile: boolean) {
   const selectedConversation = conversations.find(
     (item) => item.id === selectedConversationId,
   )
-  const messages = messagesByConversation[selectedConversationId] ?? []
+  const timeline = timelineByConversation[selectedConversationId] ?? []
+  const messages = timeline
+    .filter((item): item is TimelineItem & { message: MessageItem } => item.kind === 'message' && !!item.message)
+    .map((item) => item.message)
   const hasLocalDraftBuffer =
     !!selectedConversationId &&
     Object.prototype.hasOwnProperty.call(draftBuffers, selectedConversationId)
@@ -100,7 +101,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const availableToolSchemas = getLastToolSchemas(messages)
   const selectedToolSchema =
     availableToolSchemas.find((item) => item.name === toolName) ?? null
-  const visibleMessages = buildVisibleMessages(messages, draftBuffer)
+  const visibleMessages = buildVisibleTimeline(timeline, draftBuffer)
 
   useEffect(() => {
     const currentStatus = String(selectedConversation?.metadata?.realtime_status || '')
@@ -172,15 +173,6 @@ export function useChatWorkspace(isMobile: boolean) {
     }
   }, [])
 
-  useConversationMessages({
-    authenticated: auth.authenticated,
-    loadedConversationIds,
-    selectedConversationId,
-    setLoadedConversationIds,
-    setMessagesByConversation,
-    setMessagesLoading,
-  })
-
   useEffect(() => {
     if (composerMode !== 'tool_call') return
     if (toolName && selectedToolSchema) return
@@ -219,8 +211,7 @@ export function useChatWorkspace(isMobile: boolean) {
       setTotpEnabled(false)
       setConversations([])
       setSelectedConversationId('')
-      setMessagesByConversation({})
-      setLoadedConversationIds(new Set())
+      setTimelineByConversation({})
       setMessagesLoading(false)
       setComposer('')
       clearThinkingInput()

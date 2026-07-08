@@ -13,6 +13,7 @@ type Reader interface {
 	FindConversationByToolCallID(context.Context, string, string) (common.Conversation, error)
 	ListRequests(context.Context) ([]common.Request, error)
 	GetRequest(context.Context, string) (common.Request, error)
+	GetLatestRequestForConversation(context.Context, string) (common.Request, error)
 	ListMessages(context.Context, string) ([]common.Message, error)
 	ListConversationEvents(context.Context, string) ([]common.ConversationEvent, error)
 	ListMediaAssets(context.Context) ([]common.MediaAsset, error)
@@ -28,6 +29,8 @@ type Writer interface {
 	CompletePendingTurn(context.Context, common.CompletePendingInput) (common.Conversation, common.Message, error)
 	AbortPendingTurn(context.Context, common.AbortPendingInput) (common.Conversation, common.Message, error)
 	DisconnectPendingTurn(context.Context, common.DisconnectPendingInput) (common.Conversation, common.Message, error)
+	AbortPendingTurnWithEvent(context.Context, common.PendingTurnLifecycleMutationInput) (common.PendingTurnMutationResult, error)
+	DisconnectPendingTurnWithEvent(context.Context, common.PendingTurnLifecycleMutationInput) (common.PendingTurnMutationResult, error)
 	DisconnectAllPendingTurns(context.Context, string) (common.ExpirePendingTurnsResult, error)
 	AppendConversationEvent(context.Context, common.AppendConversationEventInput) (common.ConversationEvent, error)
 }

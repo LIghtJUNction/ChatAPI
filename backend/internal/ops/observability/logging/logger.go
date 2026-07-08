@@ -108,6 +108,7 @@ func (f *Factory) LogHTTPAccess(entry HTTPAccessEntry) {
 		logger = f.Layer(LayerHTTP)
 	}
 	logger.Info(HTTPAccessMessage(),
+		zap.String("request_id", strings.TrimSpace(entry.RequestID)),
 		zap.String("http.method", strings.TrimSpace(entry.Method)),
 		zap.String("http.path", trimOrFallback(entry.Path, "/")),
 		zap.String("http.remote_addr", strings.TrimSpace(entry.Remote)),
@@ -123,6 +124,12 @@ func (f *Factory) ForContext(ctx context.Context, layer string, fields ...zap.Fi
 	}
 	if contextual, ok := FromContext(ctx); ok {
 		logger = contextual.With(fields...)
+	}
+	if requestID, ok := RequestIDFromContext(ctx); ok {
+		logger = logger.With(zap.String("request_id", requestID))
+	}
+	if connectionID, ok := ConnectionIDFromContext(ctx); ok {
+		logger = logger.With(zap.String("connection_id", connectionID))
 	}
 	if requestActor, ok := actor.FromContext(ctx); ok {
 		logger = logger.With(ActorFields(requestActor)...)
@@ -150,6 +157,12 @@ func BindContext(base *zap.Logger, ctx context.Context, fields ...zap.Field) *za
 	if ctx != nil {
 		if contextual, ok := FromContext(ctx); ok {
 			logger = contextual
+		}
+		if requestID, ok := RequestIDFromContext(ctx); ok {
+			logger = logger.With(zap.String("request_id", requestID))
+		}
+		if connectionID, ok := ConnectionIDFromContext(ctx); ok {
+			logger = logger.With(zap.String("connection_id", connectionID))
 		}
 		if requestActor, ok := actor.FromContext(ctx); ok {
 			logger = logger.With(ActorFields(requestActor)...)

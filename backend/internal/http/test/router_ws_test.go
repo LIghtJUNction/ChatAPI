@@ -27,6 +27,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
@@ -84,7 +85,8 @@ func TestRouterWorkspaceWebSocketUpgradeWithSession(t *testing.T) {
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
 	identityService := identity.NewService(accountService)
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
-	workspaceService := workspacesvc.New(queryService)
+	timelineService := timelinesvc.New(st, logFactory.Layer(logging.LayerTurnQuery))
+	workspaceService := workspacesvc.New(queryService, timelineService)
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
@@ -135,7 +137,7 @@ func TestRouterWorkspaceWebSocketUpgradeWithSession(t *testing.T) {
 	if err := conn.ReadJSON(&snapshot); err != nil {
 		t.Fatalf("read snapshot: %v", err)
 	}
-	if snapshot["type"] != "snapshot" {
+	if snapshot["type"] != "workspace.snapshot" {
 		t.Fatalf("unexpected first websocket event: %#v", snapshot)
 	}
 }
@@ -192,7 +194,8 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
 	identityService := identity.NewService(accountService)
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
-	workspaceService := workspacesvc.New(queryService)
+	timelineService := timelinesvc.New(st, logFactory.Layer(logging.LayerTurnQuery))
+	workspaceService := workspacesvc.New(queryService, timelineService)
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)
@@ -275,6 +278,21 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 	}()
 
 	request := waitForRequestForOwner(t, queryService, "user_a")
+	if err := conn.WriteJSON(map[string]any{
+		"type":            "timeline.subscribe",
+		"conversation_id": request.ConversationID,
+	}); err != nil {
+		t.Fatalf("subscribe timeline: %v", err)
+	}
+	for {
+		var payload map[string]any
+		if err := conn.ReadJSON(&payload); err != nil {
+			t.Fatalf("read subscription payload: %v", err)
+		}
+		if payload["type"] == "timeline.reset" {
+			break
+		}
+	}
 	postJSONWithCookie(t, server.URL+"/api/conversations/"+request.ConversationID+"/abort", map[string]any{
 		"error": "manual stop",
 	}, cookie, http.StatusOK)
@@ -291,7 +309,7 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 		if err := json.Unmarshal(data, &payload); err != nil {
 			t.Fatalf("decode ws event: %v", err)
 		}
-		if payload["type"] != "timeline_item_append" {
+		if payload["type"] != "timeline.append" {
 			continue
 		}
 		item, _ := payload["item"].(map[string]any)
@@ -304,7 +322,7 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("expected timeline_item_append event")
+	t.Fatal("expected timeline.append event")
 }
 
 func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
@@ -359,7 +377,8 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
 	identityService := identity.NewService(accountService)
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
-	workspaceService := workspacesvc.New(queryService)
+	timelineService := timelinesvc.New(st, logFactory.Layer(logging.LayerTurnQuery))
+	workspaceService := workspacesvc.New(queryService, timelineService)
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)
@@ -499,7 +518,8 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
 	identityService := identity.NewService(accountService)
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
-	workspaceService := workspacesvc.New(queryService)
+	timelineService := timelinesvc.New(st, logFactory.Layer(logging.LayerTurnQuery))
+	workspaceService := workspacesvc.New(queryService, timelineService)
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)

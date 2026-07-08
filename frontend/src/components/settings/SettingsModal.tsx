@@ -39,7 +39,7 @@ export function SettingsModal({
   onTotpRefresh,
 }: SettingsModalProps) {
   const isAdmin = user?.role === 'admin'
-  const [activeTab, setActiveTab] = useState<TabKey>('statistics')
+  const [activeTab, setActiveTab] = useState<TabKey>('user-settings')
 
   const handleTabChange = (key: string) => {
     setActiveTab(key as TabKey)

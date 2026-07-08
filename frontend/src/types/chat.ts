@@ -144,6 +144,27 @@ export type MessageItem = {
   }
 }
 
+export type ConversationEventItem = {
+  id: string
+  conversation_id: string
+  owner_id: string
+  type: string
+  level: string
+  title: string
+  detail?: string
+  request_id?: string
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export type TimelineItem = {
+  id: string
+  kind: 'message' | 'system_event' | string
+  created_at: string
+  message?: MessageItem
+  event?: ConversationEventItem
+}
+
 export type ResponsesPayload = {
   conversation: Conversation
   output_text?: string
@@ -173,6 +194,14 @@ export type ToolFieldValue = string | number | boolean
 export type ComposerMode = 'assistant_message' | 'thinking' | 'tool_call'
 export type ReasoningStreamMode = 'summery' | 'reasoning'
 export type VisibleMessage = MessageItem & { draft?: boolean }
+export type VisibleTimelineDraftItem = {
+  id: string
+  kind: 'draft'
+  created_at: string
+  draft: true
+  content: string
+}
+export type VisibleTimelineItem = TimelineItem | VisibleTimelineDraftItem
 export type GeetestValidationResult = {
   lot_number: string
   captcha_output: string
@@ -273,22 +302,34 @@ export type PasswordResetConfig = {
 }
 
 export type WorkspaceSnapshotEvent = {
-  type: 'snapshot'
+  type: 'workspace.snapshot'
   conversations: Conversation[]
 }
 
 export type WorkspaceConversationUpsertEvent = {
-  type: 'conversation_upsert'
+  type: 'conversation.upsert'
   conversation: Conversation
-  messages?: MessageItem[]
 }
 
 export type WorkspaceConversationDeleteEvent = {
-  type: 'conversation_delete'
+  type: 'conversation.remove'
   conversation_id: string
 }
 
+export type WorkspaceTimelineResetEvent = {
+  type: 'timeline.reset'
+  conversation_id: string
+  items: TimelineItem[]
+}
+
+export type WorkspaceTimelineItemAppendEvent = {
+  type: 'timeline.append'
+  conversation_id: string
+  conversation: Conversation
+  item: TimelineItem
+}
+
 export type WorkspaceConnectionCountEvent = {
-  type: 'connection_count'
+  type: 'workspace.connections'
   current_connection_count: number
 }

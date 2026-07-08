@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Form, Input, Popconfirm, Space, Table, Tabs, Typography } from 'antd'
+import { Button, Form, Input, Popconfirm, Table, Tabs, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 
 import { appMessage } from '../../lib/antdApp'

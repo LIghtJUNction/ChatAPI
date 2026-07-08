@@ -3,10 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/zyf2007/ChatAPI/internal/actor"
+	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 	"go.uber.org/zap"
 )
@@ -22,54 +24,125 @@ var workspaceUpgrader = websocket.Upgrader{
 
 func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	if h.Hub == nil {
+		logging.BindContext(h.Logger, r.Context()).Warn("workspace websocket rejected", zap.String("reason", "hub_unavailable"))
 		http.Error(w, "workspace hub unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	ownerID := actor.OwnerIDFromContext(r.Context())
 	if ownerID == "" {
+		logging.BindContext(h.Logger, r.Context()).Warn("workspace websocket rejected", zap.String("reason", "unauthorized"))
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	ctx := logging.WithConnectionID(r.Context(), logging.NewConnectionID("ws"))
+	logger := logging.BindContext(h.Logger, ctx,
+		zap.String("owner.id", ownerID),
+		zap.String("transport", "ws"),
+		zap.String("http.path", r.URL.Path),
+		zap.String("http.remote_addr", r.RemoteAddr),
+	)
+	logger.Debug("workspace websocket upgrade starting")
 	conn, err := workspaceUpgrader.Upgrade(w, r, nil)
 	if err != nil {
+		logger.Warn("workspace websocket upgrade failed", zap.Error(err))
 		return
 	}
+	logger.Info("workspace websocket connected")
 	defer conn.Close()
 
-	sendMu := make(chan struct{}, 1)
-	sendMu <- struct{}{}
 	wsConn := workspacesvc.NewConnection(func(payload any) {
-		select {
-		case <-sendMu:
-			defer func() { sendMu <- struct{}{} }()
-			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			_ = conn.WriteJSON(payload)
-		default:
+		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.WriteJSON(payload); err != nil {
+			logger.Debug("workspace websocket outbound send failed",
+				zap.String("message.type", workspacePayloadType(payload)),
+				zap.Error(err),
+			)
+			return
 		}
+		logger.Debug("workspace websocket outbound sent",
+			zap.String("message.type", workspacePayloadType(payload)),
+		)
 	})
 
-	h.Hub.Register(ownerID, wsConn)
+	connectionCount := h.Hub.Register(ownerID, wsConn)
+	logger.Debug("workspace websocket registered", zap.Int("workspace.connection_count", connectionCount))
 	defer func() {
-		h.Hub.Unregister(ownerID, wsConn)
+		connectionCount := h.Hub.Unregister(ownerID, wsConn)
+		logger.Info("workspace websocket disconnected", zap.Int("workspace.connection_count", connectionCount))
 		h.Hub.PublishConnectionCount(ownerID)
 	}()
 
 	snapshot, err := h.Hub.Snapshot(r.Context(), ownerID)
-	if err == nil {
-		_ = conn.WriteJSON(snapshot)
+	if err != nil {
+		logger.Debug("workspace websocket snapshot skipped", zap.Error(err))
+	} else {
+		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.WriteJSON(snapshot); err != nil {
+			logger.Warn("workspace websocket snapshot send failed", zap.Error(err))
+			return
+		}
+		logger.Debug("workspace websocket snapshot sent", zap.Int("conversations.count", len(snapshot.Conversations)))
 	}
 	h.Hub.PublishConnectionCount(ownerID)
+	logger.Debug("workspace websocket connection count published")
 
 	for {
-		if _, data, err := conn.ReadMessage(); err != nil {
+		messageType, data, err := conn.ReadMessage()
+		if err != nil {
+			logger.Debug("workspace websocket read stopped", zap.Error(err))
 			return
-		} else if len(data) > 0 {
-			var payload map[string]any
-			if json.Unmarshal(data, &payload) == nil {
-				if stringValue(payload["type"], "") == "ping" {
-					_ = conn.WriteJSON(map[string]any{"type": "ping"})
-				}
-			}
 		}
+		if len(data) == 0 {
+			logger.Debug("workspace websocket inbound ignored", zap.Int("ws.message_type", messageType), zap.String("reason", "empty_payload"))
+			continue
+		}
+
+		logger.Debug("workspace websocket inbound received",
+			zap.Int("ws.message_type", messageType),
+			zap.Int("ws.payload_bytes", len(data)),
+		)
+
+		var payload map[string]any
+		if err := json.Unmarshal(data, &payload); err != nil {
+			logger.Debug("workspace websocket inbound invalid json",
+				zap.Int("ws.payload_bytes", len(data)),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		msg, parseErr := workspacesvc.ParseClientMessage(payload)
+		if parseErr != nil {
+			logger.Debug("workspace websocket inbound unsupported message",
+				zap.String("message.type", strings.TrimSpace(stringValue(payload["type"], ""))),
+				zap.Error(parseErr),
+			)
+			continue
+		}
+
+		logger.Debug("workspace websocket inbound parsed",
+			zap.String("message.type", msg.Type),
+			zap.String("conversation.id", strings.TrimSpace(msg.ConversationID)),
+		)
+		if err := h.Hub.HandleClientMessage(ctx, ownerID, wsConn, msg); err != nil {
+			logger.Debug("workspace websocket inbound handle failed",
+				zap.String("message.type", msg.Type),
+				zap.String("conversation.id", strings.TrimSpace(msg.ConversationID)),
+				zap.Error(err),
+			)
+			continue
+		}
+		logger.Debug("workspace websocket inbound handled",
+			zap.String("message.type", msg.Type),
+			zap.String("conversation.id", strings.TrimSpace(msg.ConversationID)),
+		)
 	}
+}
+
+func workspacePayloadType(payload any) string {
+	item, ok := payload.(map[string]any)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(stringValue(item["type"], ""))
 }

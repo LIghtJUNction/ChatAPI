@@ -41,6 +41,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
 	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
+	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
 	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
@@ -65,6 +66,7 @@ type Deps struct {
 	Catalog        *catalogsvc.Service
 	Ingress        *ingresssvc.Service
 	Streaming      *streamingsvc.Service
+	Egress         *egresssvc.Service
 	Timeline       *timelinesvc.Service
 	AppAPIKeys     *appkey.Service
 	Lab            *labauth.Service
@@ -126,7 +128,7 @@ func New(deps Deps) http.Handler {
 
 	if deps.UserControl == nil {
 		if deps.Workspace == nil {
-			deps.Workspace = workspacesvc.New(deps.Query)
+			deps.Workspace = workspacesvc.New(deps.Query, firstTimeline(deps.Timeline, deps.ChatRepo))
 		}
 		if deps.WorkspaceHub == nil {
 			deps.WorkspaceHub = workspacesvc.NewHub(deps.Workspace)
@@ -168,6 +170,9 @@ func New(deps Deps) http.Handler {
 		if deps.Turn.Resolver == nil {
 			deps.Turn.Resolver = conversationresolve.New(deps.ChatRepo, deps.Turn.Pending)
 		}
+		if deps.Turn.Egress == nil {
+			deps.Turn.Egress = firstEgress(deps.Egress)
+		}
 		if deps.Turn.Submitter != nil && deps.Turn.Submitter.Realtime == nil && deps.WorkspaceHub != nil {
 			deps.Turn.Submitter.Realtime = workspacesvc.NewRealtimePublisher(deps.WorkspaceHub)
 		}
@@ -180,12 +185,14 @@ func New(deps Deps) http.Handler {
 		Ingress:   firstIngress(deps.Ingress, preprocesssvc.New(deps.Config, localstore.Store{RootDir: deps.Config.MediaDerivedDir}), deps.Turn),
 		Streaming: firstStreaming(deps.Streaming),
 		Catalog:   firstCatalog(deps.Catalog, deps.ModelAPIKeys),
+		Egress:    firstEgress(deps.Egress),
 		Logger:    deps.logger(logging.LayerHTTP),
 	}
 	appHandler := httphandler.AppAPIHandler{
-		Turn:   deps.Turn,
-		Query:  deps.Query,
-		Logger: deps.logger(logging.LayerTurnQuery),
+		Turn:     deps.Turn,
+		Query:    deps.Query,
+		Timeline: firstTimeline(deps.Timeline, deps.ChatRepo),
+		Logger:   deps.logger(logging.LayerTurnQuery),
 	}
 	authHandler := httphandler.AuthHandler{
 		Config:       deps.Config,

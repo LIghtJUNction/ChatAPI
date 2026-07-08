@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
@@ -62,20 +63,30 @@ func requestLoggingMiddleware(factory *logging.Factory, base *zap.Logger) func(h
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+			requestID := strings.TrimSpace(r.Header.Get(logging.RequestIDHeader))
+			if requestID == "" {
+				requestID = logging.NewRequestID()
+			}
+			w.Header().Set(logging.RequestIDHeader, requestID)
 			logger := base.With(
+				zap.String("request_id", requestID),
 				zap.String("http.method", r.Method),
 				zap.String("http.path", r.URL.Path),
 				zap.String("http.remote_addr", r.RemoteAddr),
 			)
-			ctx := logging.WithLogger(r.Context(), logger)
+			ctx := logging.WithRequestID(r.Context(), requestID)
+			ctx = logging.WithLogger(ctx, logger)
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r.WithContext(ctx))
 			entry := logging.HTTPAccessEntry{
-				Method:   r.Method,
-				Path:     r.URL.Path,
-				Status:   logging.HTTPStatusFromRecorder(rec.status),
-				Duration: time.Since(start),
-				Remote:   r.RemoteAddr,
+				Timestamp: start,
+				RequestID: requestID,
+				Kind:      httpAccessKind(r),
+				Method:    r.Method,
+				Path:      r.URL.Path,
+				Status:    logging.HTTPStatusFromRecorder(rec.status),
+				Duration:  time.Since(start),
+				Remote:    r.RemoteAddr,
 			}
 			if factory != nil {
 				factory.LogHTTPAccess(entry)
@@ -88,4 +99,21 @@ func requestLoggingMiddleware(factory *logging.Factory, base *zap.Logger) func(h
 			logger.Info(logging.HTTPAccessMessage())
 		})
 	}
+}
+
+func httpAccessKind(r *http.Request) string {
+	if r == nil {
+		return "HTTP"
+	}
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
+		return "WS"
+	}
+	if strings.Contains(strings.ToLower(strings.TrimSpace(r.Header.Get("Accept"))), "text/event-stream") {
+		return "SSE"
+	}
+	path := strings.ToLower(strings.TrimSpace(r.URL.Path))
+	if strings.Contains(path, "/events") || strings.Contains(path, "/poll") {
+		return "POLL"
+	}
+	return "HTTP"
 }

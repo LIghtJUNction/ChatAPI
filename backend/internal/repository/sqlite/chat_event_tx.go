@@ -10,10 +10,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 )
 
-func insertConversationEventSQLite(ctx context.Context, tx *sql.Tx, conversation common.Conversation, input *common.AppendConversationEventInput, fallbackTime time.Time) error {
-	if tx == nil || input == nil {
-		return nil
-	}
+func buildConversationEventFromInput(conversation common.Conversation, input common.AppendConversationEventInput, fallbackTime time.Time) common.ConversationEvent {
 	createdAt := input.CreatedAt
 	if createdAt.IsZero() {
 		if fallbackTime.IsZero() {
@@ -22,7 +19,7 @@ func insertConversationEventSQLite(ctx context.Context, tx *sql.Tx, conversation
 			createdAt = fallbackTime.UTC()
 		}
 	}
-	item := common.ConversationEvent{
+	return common.ConversationEvent{
 		ID:             stringValue(input.ID, "evt_"+uuid.NewString()),
 		ConversationID: stringValue(input.ConversationID, conversation.ID),
 		OwnerID:        stringValue(input.OwnerID, metadataString(conversation.Metadata, "owner_id", "")),
@@ -33,6 +30,12 @@ func insertConversationEventSQLite(ctx context.Context, tx *sql.Tx, conversation
 		RequestID:      input.RequestID,
 		Metadata:       ensureMap(input.Metadata),
 		CreatedAt:      createdAt,
+	}
+}
+
+func insertConversationEventSQLite(ctx context.Context, tx *sql.Tx, item common.ConversationEvent) error {
+	if tx == nil {
+		return nil
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO conversation_events(

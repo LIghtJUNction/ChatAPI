@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -12,15 +13,10 @@ import (
 
 type ConversationQuery interface {
 	ListConversationsForOwner(context.Context, string) ([]common.Conversation, error)
-	ListMessagesForOwner(context.Context, string, string) ([]common.Message, error)
 }
 
-type PendingQuery interface {
-	ListByOwnerID(string) []*PendingTurnView
-}
-
-type PendingTurnView struct {
-	ConversationID string
+type TimelineQuery interface {
+	ListTimelineForOwner(context.Context, string, string) ([]timelinesvc.Item, error)
 }
 
 type Snapshot struct {
@@ -31,7 +27,6 @@ type Snapshot struct {
 type ConversationUpsert struct {
 	Type         string              `json:"type"`
 	Conversation common.Conversation `json:"conversation"`
-	Messages     []common.Message    `json:"messages,omitempty"`
 }
 
 type ConversationDelete struct {
@@ -39,16 +34,79 @@ type ConversationDelete struct {
 	ConversationID string `json:"conversation_id"`
 }
 
+type TimelineReset struct {
+	Type           string             `json:"type"`
+	ConversationID string             `json:"conversation_id"`
+	Items          []timelinesvc.Item `json:"items"`
+}
+
 type TimelineItemAppend struct {
-	Type           string           `json:"type"`
-	ConversationID string           `json:"conversation_id"`
-	Item           timelinesvc.Item `json:"item"`
+	Type           string              `json:"type"`
+	ConversationID string              `json:"conversation_id"`
+	Item           timelinesvc.Item    `json:"item"`
 	Conversation   common.Conversation `json:"conversation"`
 }
 
 type ConnectionCount struct {
 	Type                   string `json:"type"`
 	CurrentConnectionCount int    `json:"current_connection_count"`
+}
+
+type ClientMessage struct {
+	Type           string `json:"type"`
+	ConversationID string `json:"conversation_id,omitempty"`
+}
+
+var ErrInvalidClientMessage = errors.New("invalid workspace client message")
+
+type Service struct {
+	conversations ConversationQuery
+	timeline      TimelineQuery
+}
+
+func New(conversations ConversationQuery, timeline TimelineQuery) *Service {
+	return &Service{conversations: conversations, timeline: timeline}
+}
+
+func (s *Service) Snapshot(ctx context.Context, ownerID string) (Snapshot, error) {
+	items, err := s.conversations.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
+	if err != nil {
+		return Snapshot{}, err
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+	return Snapshot{Type: "workspace.snapshot", Conversations: items}, nil
+}
+
+func (s *Service) TimelineReset(ctx context.Context, ownerID string, conversationID string) (TimelineReset, error) {
+	items, err := s.timeline.ListTimelineForOwner(ctx, strings.TrimSpace(conversationID), strings.TrimSpace(ownerID))
+	if err != nil {
+		return TimelineReset{}, err
+	}
+	return TimelineReset{
+		Type:           "timeline.reset",
+		ConversationID: strings.TrimSpace(conversationID),
+		Items:          items,
+	}, nil
+}
+
+func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
+	msg := ClientMessage{
+		Type:           stringValue(payload["type"], ""),
+		ConversationID: strings.TrimSpace(stringValue(payload["conversation_id"], "")),
+	}
+	switch msg.Type {
+	case "workspace.ping":
+		return msg, nil
+	case "timeline.subscribe", "timeline.unsubscribe":
+		if msg.ConversationID == "" {
+			return ClientMessage{}, ErrInvalidClientMessage
+		}
+		return msg, nil
+	default:
+		return ClientMessage{}, ErrInvalidClientMessage
+	}
 }
 
 type RealtimePublisher struct {
@@ -67,7 +125,7 @@ func (p *RealtimePublisher) PublishConversationUpsert(conversation common.Conver
 	if ownerID == "" {
 		return
 	}
-	p.hub.PublishConversationUpsert(ownerID, conversation, messages)
+	p.hub.PublishConversationUpsert(ownerID, conversation)
 }
 
 func (p *RealtimePublisher) PublishConversationDelete(ownerID string, conversationID string) {
@@ -82,25 +140,6 @@ func (p *RealtimePublisher) PublishTimelineItemAppend(ownerID string, conversati
 		return
 	}
 	p.hub.PublishTimelineItemAppend(strings.TrimSpace(ownerID), conversation, item)
-}
-
-type Service struct {
-	query ConversationQuery
-}
-
-func New(query ConversationQuery) *Service {
-	return &Service{query: query}
-}
-
-func (s *Service) Snapshot(ctx context.Context, ownerID string) (Snapshot, error) {
-	items, err := s.query.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
-	if err != nil {
-		return Snapshot{}, err
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].UpdatedAt.After(items[j].UpdatedAt)
-	})
-	return Snapshot{Type: "snapshot", Conversations: items}, nil
 }
 
 type Hub struct {
@@ -145,44 +184,69 @@ func (h *Hub) Snapshot(ctx context.Context, ownerID string) (Snapshot, error) {
 	return h.workspace.Snapshot(ctx, ownerID)
 }
 
+func (h *Hub) HandleClientMessage(ctx context.Context, ownerID string, conn *Connection, msg ClientMessage) error {
+	switch msg.Type {
+	case "workspace.ping":
+		conn.Send(map[string]any{"type": "workspace.ping"})
+		return nil
+	case "timeline.subscribe":
+		conn.Lock()
+		defer conn.Unlock()
+		conn.Subscribe(msg.ConversationID)
+		reset, err := h.workspace.TimelineReset(ctx, ownerID, msg.ConversationID)
+		if err != nil {
+			conn.Unsubscribe(msg.ConversationID)
+			return err
+		}
+		conn.SendLocked(reset)
+		return nil
+	case "timeline.unsubscribe":
+		conn.Unsubscribe(msg.ConversationID)
+		return nil
+	default:
+		return ErrInvalidClientMessage
+	}
+}
+
 func (h *Hub) ConnectionCount(ownerID string) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.connections[ownerID])
 }
 
-func (h *Hub) PublishConversationUpsert(ownerID string, conversation common.Conversation, messages []common.Message) {
+func (h *Hub) PublishConversationUpsert(ownerID string, conversation common.Conversation) {
 	h.broadcast(ownerID, ConversationUpsert{
-		Type:         "conversation_upsert",
+		Type:         "conversation.upsert",
 		Conversation: conversation,
-		Messages:     messages,
-	})
+	}, nil)
 }
 
 func (h *Hub) PublishConversationDelete(ownerID string, conversationID string) {
 	h.broadcast(ownerID, ConversationDelete{
-		Type:           "conversation_delete",
+		Type:           "conversation.remove",
 		ConversationID: conversationID,
-	})
+	}, nil)
 }
 
 func (h *Hub) PublishTimelineItemAppend(ownerID string, conversation common.Conversation, item timelinesvc.Item) {
 	h.broadcast(ownerID, TimelineItemAppend{
-		Type:           "timeline_item_append",
+		Type:           "timeline.append",
 		ConversationID: conversation.ID,
 		Item:           item,
 		Conversation:   conversation,
+	}, func(conn *Connection) bool {
+		return conn.IsSubscribed(conversation.ID)
 	})
 }
 
 func (h *Hub) PublishConnectionCount(ownerID string) {
 	h.broadcast(ownerID, ConnectionCount{
-		Type:                   "connection_count",
+		Type:                   "workspace.connections",
 		CurrentConnectionCount: h.ConnectionCount(ownerID),
-	})
+	}, nil)
 }
 
-func (h *Hub) broadcast(ownerID string, payload any) {
+func (h *Hub) broadcast(ownerID string, payload any, allow func(*Connection) bool) {
 	h.mu.RLock()
 	connections := h.connections[ownerID]
 	if len(connections) == 0 {
@@ -195,23 +259,76 @@ func (h *Hub) broadcast(ownerID string, payload any) {
 	}
 	h.mu.RUnlock()
 	for _, conn := range items {
+		if allow != nil && !allow(conn) {
+			continue
+		}
 		conn.Send(payload)
 	}
 }
 
 type Connection struct {
-	send func(any)
+	mu            sync.Mutex
+	send          func(any)
+	subscriptions map[string]struct{}
 }
 
 func NewConnection(send func(any)) *Connection {
-	return &Connection{send: send}
+	return &Connection{
+		send:          send,
+		subscriptions: map[string]struct{}{},
+	}
+}
+
+func (c *Connection) Lock() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+}
+
+func (c *Connection) Unlock() {
+	if c == nil {
+		return
+	}
+	c.mu.Unlock()
 }
 
 func (c *Connection) Send(payload any) {
 	if c == nil || c.send == nil {
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.send(payload)
+}
+
+func (c *Connection) SendLocked(payload any) {
+	if c == nil || c.send == nil {
+		return
+	}
+	c.send(payload)
+}
+
+func (c *Connection) Subscribe(conversationID string) {
+	if c == nil {
+		return
+	}
+	c.subscriptions[strings.TrimSpace(conversationID)] = struct{}{}
+}
+
+func (c *Connection) Unsubscribe(conversationID string) {
+	if c == nil {
+		return
+	}
+	delete(c.subscriptions, strings.TrimSpace(conversationID))
+}
+
+func (c *Connection) IsSubscribed(conversationID string) bool {
+	if c == nil {
+		return false
+	}
+	_, ok := c.subscriptions[strings.TrimSpace(conversationID)]
+	return ok
 }
 
 func ownerIDOfConversation(conversation common.Conversation) string {

@@ -3,7 +3,7 @@ import { Form } from 'antd'
 
 import { appMessage } from '../../../lib/antdApp'
 import { requestJson } from '../../../lib/api'
-import type { User } from '../../../types/chat'
+import type { AdminUserHistoryMessage, User } from '../../../types/chat'
 
 type CreateUserValues = {
   username: string

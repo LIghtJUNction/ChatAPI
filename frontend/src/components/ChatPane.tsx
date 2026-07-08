@@ -30,7 +30,7 @@ import type {
   ReasoningStreamMode,
   ToolFieldValue,
   ToolSchemaOption,
-  VisibleMessage,
+  VisibleTimelineItem,
 } from '../types/chat'
 
 const { TextArea } = Input
@@ -66,7 +66,7 @@ type ChatPaneProps = {
   toolCallId: string
   toolFormValues: Record<string, ToolFieldValue>
   toolName: string
-  visibleMessages: VisibleMessage[]
+  visibleMessages: VisibleTimelineItem[]
 }
 
 export function ChatPane(props: ChatPaneProps) {

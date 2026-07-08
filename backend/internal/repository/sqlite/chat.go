@@ -193,6 +193,33 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (common.Reques
 	return item, nil
 }
 
+func (s *Store) GetLatestRequestForConversation(ctx context.Context, conversationID string) (common.Request, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT
+			m.conversation_id,
+			m.created_at,
+			m.metadata_json,
+			c.updated_at,
+			c.metadata_json
+		FROM messages m
+		JOIN conversations c ON c.id = m.conversation_id
+		WHERE m.role = 'user'
+			AND m.conversation_id = ?
+			AND json_extract(m.metadata_json, '$.request_debug.request_id') IS NOT NULL
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT 1
+	`, conversationID)
+
+	item, err := scanRequestRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return common.Request{}, errNotFound
+		}
+		return common.Request{}, err
+	}
+	return item, nil
+}
+
 func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]common.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json
@@ -723,13 +750,21 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 }
 
 func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingInput) (common.Conversation, common.Message, error) {
+	result, err := s.AbortPendingTurnWithEvent(ctx, common.PendingTurnLifecycleMutationInput{
+		ConversationID: input.ConversationID,
+		Reason:         input.Reason,
+	})
+	return result.Conversation, result.Message, err
+}
+
+func (s *Store) AbortPendingTurnWithEvent(ctx context.Context, input common.PendingTurnLifecycleMutationInput) (common.PendingTurnMutationResult, error) {
 	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
-		return common.Conversation{}, common.Message{}, err
+		return common.PendingTurnMutationResult{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
 	if !isTurnCompletable(metadata) {
-		return common.Conversation{}, common.Message{}, errConflict
+		return common.PendingTurnMutationResult{}, errConflict
 	}
 	metadata["realtime_status"] = "aborted"
 	metadata["realtime_draft_text"] = ""
@@ -740,7 +775,7 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingI
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		s.logger(ctx).Warn("sqlite abort pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return common.Conversation{}, common.Message{}, err
+		return common.PendingTurnMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -749,30 +784,54 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingI
 		SET updated_at = ?, metadata_json = ?
 		WHERE id = ?
 	`, formatTime(now), mustJSON(metadata), conversation.ID); err != nil {
-		return common.Conversation{}, common.Message{}, err
+		return common.PendingTurnMutationResult{}, err
 	}
-	if err := insertConversationEventSQLite(ctx, tx, conversation, input.Event, now); err != nil {
-		return common.Conversation{}, common.Message{}, err
+	event := buildConversationEventFromInput(conversation, common.AppendConversationEventInput{
+		ID:             input.EventID,
+		ConversationID: conversation.ID,
+		OwnerID:        input.Identity.OwnerID,
+		Type:           stringValue(input.EventType, "request_aborted"),
+		Level:          stringValue(input.EventLevel, "warn"),
+		Title:          stringValue(input.EventTitle, "Request Aborted"),
+		Detail:         stringValue(input.EventDetail, input.Reason),
+		RequestID:      input.Identity.RequestID,
+		Metadata:       ensureMap(input.EventMetadata),
+		CreatedAt:      input.EventCreatedAt,
+	}, now)
+	if err := insertConversationEventSQLite(ctx, tx, event); err != nil {
+		return common.PendingTurnMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		s.logger(ctx).Warn("sqlite abort pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return common.Conversation{}, common.Message{}, err
+		return common.PendingTurnMutationResult{}, err
 	}
 	s.logger(ctx).Debug("sqlite pending turn aborted", zap.String("conversation.id", input.ConversationID))
-	return conversation, common.Message{}, nil
+	return common.PendingTurnMutationResult{
+		Conversation: conversation,
+		Message:      common.Message{},
+		Event:        event,
+	}, nil
 }
 
 func (s *Store) DisconnectPendingTurn(ctx context.Context, input common.DisconnectPendingInput) (common.Conversation, common.Message, error) {
+	result, err := s.DisconnectPendingTurnWithEvent(ctx, common.PendingTurnLifecycleMutationInput{
+		ConversationID: input.ConversationID,
+		Reason:         input.Reason,
+	})
+	return result.Conversation, result.Message, err
+}
+
+func (s *Store) DisconnectPendingTurnWithEvent(ctx context.Context, input common.PendingTurnLifecycleMutationInput) (common.PendingTurnMutationResult, error) {
 	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
-		return common.Conversation{}, common.Message{}, err
+		return common.PendingTurnMutationResult{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
 	if isPendingRequestDisconnected(metadata) {
-		return conversation, common.Message{}, common.ErrPendingDisconnected
+		return common.PendingTurnMutationResult{Conversation: conversation}, common.ErrPendingDisconnected
 	}
 	if !isTurnCompletable(metadata) {
-		return common.Conversation{}, common.Message{}, errConflict
+		return common.PendingTurnMutationResult{}, errConflict
 	}
 	metadata["realtime_status"] = "disconnected"
 	metadata["realtime_draft_text"] = ""
@@ -782,7 +841,7 @@ func (s *Store) DisconnectPendingTurn(ctx context.Context, input common.Disconne
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return common.Conversation{}, common.Message{}, err
+		return common.PendingTurnMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -791,15 +850,31 @@ func (s *Store) DisconnectPendingTurn(ctx context.Context, input common.Disconne
 		SET updated_at = ?, metadata_json = ?
 		WHERE id = ?
 	`, formatTime(now), mustJSON(metadata), conversation.ID); err != nil {
-		return common.Conversation{}, common.Message{}, err
+		return common.PendingTurnMutationResult{}, err
 	}
-	if err := insertConversationEventSQLite(ctx, tx, conversation, input.Event, now); err != nil {
-		return common.Conversation{}, common.Message{}, err
+	event := buildConversationEventFromInput(conversation, common.AppendConversationEventInput{
+		ID:             input.EventID,
+		ConversationID: conversation.ID,
+		OwnerID:        input.Identity.OwnerID,
+		Type:           stringValue(input.EventType, "request_disconnected"),
+		Level:          stringValue(input.EventLevel, "warn"),
+		Title:          stringValue(input.EventTitle, "Request Disconnected"),
+		Detail:         stringValue(input.EventDetail, input.Reason),
+		RequestID:      input.Identity.RequestID,
+		Metadata:       ensureMap(input.EventMetadata),
+		CreatedAt:      input.EventCreatedAt,
+	}, now)
+	if err := insertConversationEventSQLite(ctx, tx, event); err != nil {
+		return common.PendingTurnMutationResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return common.Conversation{}, common.Message{}, err
+		return common.PendingTurnMutationResult{}, err
 	}
-	return conversation, common.Message{}, nil
+	return common.PendingTurnMutationResult{
+		Conversation: conversation,
+		Message:      common.Message{},
+		Event:        event,
+	}, nil
 }
 
 func (s *Store) DisconnectAllPendingTurns(ctx context.Context, reason string) (common.ExpirePendingTurnsResult, error) {

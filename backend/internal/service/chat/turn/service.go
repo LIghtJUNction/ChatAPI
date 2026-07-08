@@ -8,10 +8,10 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
-	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
+	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	"go.uber.org/zap"
 )
@@ -28,6 +28,11 @@ type ExpireResult struct {
 	ExpiredActiveTurns   int `json:"expired_active_turns"`
 }
 
+type TurnIdentity struct {
+	OwnerID   string
+	RequestID string
+}
+
 type Service struct {
 	Submitter                   *Submitter
 	Pending                     pendingRegistryLike
@@ -39,6 +44,7 @@ type Service struct {
 	EnsureConversationAdmission AdmissionHook
 	OwnerIDFromContext          func(context.Context) string
 	ActorFromContext            func(context.Context) (actor.Actor, bool)
+	Egress                      *egresssvc.Service
 	Logger                      *zap.Logger
 }
 
@@ -107,7 +113,7 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 	result, err := s.Pending.WaitTurn(ctx, turn)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			_ = s.disconnectPendingRequest(context.Background(), turn.ConversationID, turn.RequestID, "request disconnected", "request_disconnected", "Request Disconnected")
+			_ = s.disconnectPendingRequest(context.Background(), turn.ConversationID, TurnIdentity{RequestID: turn.RequestID, OwnerID: turn.OwnerID}, "request disconnected", "request_disconnected", "Request Disconnected")
 		}
 		logging.BindContext(s.Logger, ctx,
 			zap.String("owner.id", ownerID),
@@ -156,8 +162,11 @@ func (s *Service) DisconnectRecoveredPending(ctx context.Context, reason string)
 		if status != "waiting" && status != "streaming" {
 			continue
 		}
-		requestID := s.latestConversationRequestID(ctx, item.ID)
-		if err := s.disconnectPendingRequest(ctx, item.ID, requestID, reason, "recovered_pending_disconnected", "Recovered Pending Disconnected"); err == nil || errors.Is(err, common.ErrPendingDisconnected) {
+		identity, resolveErr := s.resolveStoredTurnIdentity(ctx, item.ID)
+		if resolveErr != nil && !errors.Is(resolveErr, common.ErrNotFound) {
+			return ExpireResult{}, resolveErr
+		}
+		if err := s.disconnectPendingRequest(ctx, item.ID, identity, reason, "recovered_pending_disconnected", "Recovered Pending Disconnected"); err == nil || errors.Is(err, common.ErrPendingDisconnected) {
 			result.ExpiredConversations++
 		} else {
 			return ExpireResult{}, err
@@ -209,18 +218,7 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	} else {
 		s.Submitter.Realtime.PublishConversationUpsert(conversation, []common.Message{message})
 	}
-	responseBody := protocol.BuildResponseForMeta(protocol.ConversationMeta{
-		Protocol:   protocol.ParseProtocol(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses))),
-		Model:      stringValue(conversation.Metadata["model"], "chatapi-lab"),
-		ResponseID: stringValue(conversation.ResponseID, input.ResponseID),
-	}, protocol.TurnResult{
-		ResponseID: stringValue(conversation.ResponseID, input.ResponseID),
-		OutputText: message.Content,
-		Mode:       input.Mode,
-		ToolName:   input.ToolName,
-		ToolCallID: input.ToolCallID,
-		ToolOutput: stringValue(input.ToolOutput, message.Content),
-	})
+	responseBody := s.egress().CompleteBody(conversation, input, message)
 	_ = s.Pending.Publish(input.ConversationID, PendingEvent{
 		Type:         "complete",
 		OutputText:   message.Content,
@@ -233,6 +231,7 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	if err := s.Pending.Resolve(input.ConversationID, PendingResult{ResponseBody: responseBody}); err != nil {
 		return nil, err
 	}
+	s.publishMessageTimelineItem(conversation, message)
 	s.notifyText(ctx, s.ownerID(ctx), conversation.Title, message.Content)
 	return map[string]any{"conversation": conversation, "output_text": message.Content}, nil
 }
@@ -246,19 +245,20 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 		).Warn("turn abort start rejected", zap.Error(err))
 		return s.resolveMutationError(ctx, conversationID, err)
 	}
-	requestID := s.pendingRequestID(conversationID)
-	conversation, _, err := s.Store.AbortPendingTurn(ctx, common.AbortPendingInput{
+	identity, err := s.resolveActiveTurnIdentity(ctx, conversationID)
+	if err != nil {
+		s.Pending.RevertFinalize(conversationID, previousState)
+		return err
+	}
+	result, err := s.Store.AbortPendingTurnWithEvent(ctx, common.PendingTurnLifecycleMutationInput{
 		ConversationID: conversationID,
 		Reason:         reason,
-		Event: &common.AppendConversationEventInput{
-			OwnerID:   s.ownerID(ctx),
-			Type:      "request_aborted",
-			Level:     "warn",
-			Title:     "Request Aborted",
-			Detail:    reason,
-			RequestID: requestID,
-			Metadata:  map[string]any{"reason": reason},
-		},
+		Identity:       common.TurnIdentity{OwnerID: identity.OwnerID, RequestID: identity.RequestID},
+		EventType:      "request_aborted",
+		EventLevel:     "warn",
+		EventTitle:     "Request Aborted",
+		EventDetail:    reason,
+		EventMetadata:  map[string]any{"reason": reason},
 	})
 	if err != nil {
 		s.Pending.RevertFinalize(conversationID, previousState)
@@ -268,15 +268,16 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 		).Error("turn abort persistence failed", zap.Error(err))
 		return err
 	}
+	conversation := result.Conversation
 	s.publishConversationState(ctx, conversationID)
-	s.publishLatestTimelineEvent(ctx, conversationID, conversation)
-	body := protocol.AbortError(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses)), reason)
+	s.publishTimelineEvent(conversation, result.Event)
+	body := s.egress().AbortBody(conversation, reason)
 	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "abort", ErrorBody: body})
-	s.notifyText(ctx, s.ownerID(ctx), conversation.Title, reason)
+	s.notifyText(ctx, identity.OwnerID, conversation.Title, reason)
 	logging.BindContext(s.Logger, ctx,
-		zap.String("owner.id", s.ownerID(ctx)),
+		zap.String("owner.id", identity.OwnerID),
 		zap.String("conversation.id", conversationID),
-		zap.String("request.format", stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses))),
+		zap.String("request.format", stringValue(conversation.Metadata["request_format"], "responses")),
 		zap.String("turn.action", "abort"),
 	).Info("turn aborted conversation")
 	return s.Pending.Abort(conversationID, body)
@@ -390,6 +391,13 @@ func (s *Service) resolveMutationError(ctx context.Context, conversationID strin
 	return s.ResolveMutationError(ctx, conversationID, err)
 }
 
+func (s *Service) egress() *egresssvc.Service {
+	if s != nil && s.Egress != nil {
+		return s.Egress
+	}
+	return egresssvc.New()
+}
+
 func pendingExpiredBody(ttl time.Duration) map[string]any {
 	return map[string]any{
 		"error": map[string]any{
@@ -456,22 +464,23 @@ func (s *Service) disconnectOnRequestDone(ctx context.Context, conversationID st
 	if _, pending := s.Pending.GetByConversationID(conversationID); !pending {
 		return
 	}
-	_ = s.disconnectPendingRequest(context.Background(), conversationID, requestID, reason, "request_disconnected", "Request Disconnected")
+	_ = s.disconnectPendingRequest(context.Background(), conversationID, TurnIdentity{RequestID: requestID}, reason, "request_disconnected", "Request Disconnected")
 }
 
-func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID string, requestID string, reason string, eventType string, title string) error {
-	conversation, _, err := s.Store.DisconnectPendingTurn(ctx, common.DisconnectPendingInput{
+func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID string, identity TurnIdentity, reason string, eventType string, title string) error {
+	resolved, err := s.resolveIdentityForMutation(ctx, conversationID, identity)
+	if err != nil {
+		return err
+	}
+	result, err := s.Store.DisconnectPendingTurnWithEvent(ctx, common.PendingTurnLifecycleMutationInput{
 		ConversationID: conversationID,
 		Reason:         reason,
-		Event: &common.AppendConversationEventInput{
-			OwnerID:   s.eventOwnerID(ctx, conversationID),
-			Type:      eventType,
-			Level:     "warn",
-			Title:     title,
-			Detail:    reason,
-			RequestID: requestID,
-			Metadata:  map[string]any{"reason": reason},
-		},
+		Identity:       common.TurnIdentity{OwnerID: resolved.OwnerID, RequestID: resolved.RequestID},
+		EventType:      eventType,
+		EventLevel:     "warn",
+		EventTitle:     title,
+		EventDetail:    reason,
+		EventMetadata:  map[string]any{"reason": reason},
 	})
 	if err != nil {
 		if errors.Is(err, common.ErrPendingDisconnected) {
@@ -479,8 +488,9 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 		}
 		return err
 	}
+	conversation := result.Conversation
 	s.publishConversationState(ctx, conversationID)
-	s.publishLatestTimelineEvent(ctx, conversationID, conversation)
+	s.publishTimelineEvent(conversation, result.Event)
 	_ = s.Pending.Abort(conversationID, map[string]any{
 		"error": map[string]any{
 			"message": reason,
@@ -490,7 +500,7 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 	})
 	logging.BindContext(s.Logger, context.Background(),
 		zap.String("conversation.id", conversationID),
-		zap.String("request.id", requestID),
+		zap.String("request.id", resolved.RequestID),
 	).Info("pending request disconnected")
 	return nil
 }
@@ -527,55 +537,72 @@ func (s *Service) publishTimelineEvent(conversation common.Conversation, event c
 	})
 }
 
-func (s *Service) publishLatestTimelineEvent(ctx context.Context, conversationID string, conversation common.Conversation) {
-	if s == nil || s.Store == nil {
+func (s *Service) publishMessageTimelineItem(conversation common.Conversation, message common.Message) {
+	if s == nil || s.Submitter == nil || s.Submitter.Realtime == nil {
 		return
 	}
-	items, err := s.Store.ListConversationEvents(ctx, conversationID)
-	if err != nil || len(items) == 0 {
+	ownerID := strings.TrimSpace(stringValue(conversation.Metadata["owner_id"], ""))
+	if ownerID == "" {
 		return
 	}
-	s.publishTimelineEvent(conversation, items[len(items)-1])
+	s.Submitter.Realtime.PublishTimelineItemAppend(ownerID, conversation, timelinesvc.Item{
+		ID:        "msg:" + message.ID,
+		Kind:      "message",
+		CreatedAt: message.CreatedAt,
+		Message:   &message,
+	})
 }
 
-func (s *Service) pendingRequestID(conversationID string) string {
-	if s == nil || s.Pending == nil || strings.TrimSpace(conversationID) == "" {
-		return ""
+func (s *Service) resolveActiveTurnIdentity(ctx context.Context, conversationID string) (TurnIdentity, error) {
+	if s == nil {
+		return TurnIdentity{}, nil
 	}
-	turn, ok := s.Pending.GetByConversationID(conversationID)
-	if !ok || turn == nil {
-		return ""
+	if turn, ok := s.Pending.GetByConversationID(conversationID); ok && turn != nil {
+		return TurnIdentity{
+			OwnerID:   strings.TrimSpace(turn.OwnerID),
+			RequestID: strings.TrimSpace(turn.RequestID),
+		}, nil
 	}
-	return strings.TrimSpace(turn.RequestID)
+	return s.resolveStoredTurnIdentity(ctx, conversationID)
 }
 
-func (s *Service) latestConversationRequestID(ctx context.Context, conversationID string) string {
+func (s *Service) resolveStoredTurnIdentity(ctx context.Context, conversationID string) (TurnIdentity, error) {
 	if s == nil || s.Store == nil || strings.TrimSpace(conversationID) == "" {
-		return ""
+		return TurnIdentity{}, common.ErrNotFound
 	}
-	items, err := s.Store.ListMessages(ctx, conversationID)
+	req, err := s.Store.GetLatestRequestForConversation(ctx, conversationID)
 	if err != nil {
-		return ""
+		return TurnIdentity{}, err
 	}
-	for i := len(items) - 1; i >= 0; i-- {
-		requestDebug, _ := items[i].Metadata["request_debug"].(map[string]any)
-		if requestID := strings.TrimSpace(stringValue(requestDebug["request_id"], "")); requestID != "" {
-			return requestID
-		}
-	}
-	return ""
+	return TurnIdentity{
+		OwnerID:   strings.TrimSpace(req.OwnerID),
+		RequestID: strings.TrimSpace(req.RequestID),
+	}, nil
 }
 
-func (s *Service) eventOwnerID(ctx context.Context, conversationID string) string {
-	if ownerID := strings.TrimSpace(s.ownerID(ctx)); ownerID != "" {
-		return ownerID
+func (s *Service) resolveIdentityForMutation(ctx context.Context, conversationID string, base TurnIdentity) (TurnIdentity, error) {
+	identity := TurnIdentity{
+		OwnerID:   strings.TrimSpace(base.OwnerID),
+		RequestID: strings.TrimSpace(base.RequestID),
 	}
-	if s == nil || s.Pending == nil || strings.TrimSpace(conversationID) == "" {
-		return ""
+	if identity.OwnerID != "" && identity.RequestID != "" {
+		return identity, nil
 	}
-	turn, ok := s.Pending.GetByConversationID(conversationID)
-	if !ok || turn == nil {
-		return ""
+	resolved, err := s.resolveActiveTurnIdentity(ctx, conversationID)
+	if err != nil {
+		if identity.OwnerID != "" || identity.RequestID != "" {
+			return identity, nil
+		}
+		return TurnIdentity{}, err
 	}
-	return strings.TrimSpace(turn.OwnerID)
+	if identity.OwnerID == "" {
+		identity.OwnerID = resolved.OwnerID
+	}
+	if identity.RequestID == "" {
+		identity.RequestID = resolved.RequestID
+	}
+	if identity.OwnerID == "" {
+		identity.OwnerID = strings.TrimSpace(s.ownerID(ctx))
+	}
+	return identity, nil
 }

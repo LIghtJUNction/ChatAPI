@@ -16,15 +16,16 @@ import (
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
+	"github.com/zyf/chatapi/internal/service/account"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
-	appkey "github.com/zyf/chatapi/internal/service/auth/appkey"
-	"github.com/zyf/chatapi/internal/service/auth/identity"
-	localauth "github.com/zyf/chatapi/internal/service/auth/local"
-	modelkey "github.com/zyf/chatapi/internal/service/auth/modelkey"
-	"github.com/zyf/chatapi/internal/service/auth/policy"
-	"github.com/zyf/chatapi/internal/service/auth/session"
-	"github.com/zyf/chatapi/internal/service/auth/verification"
+	"github.com/zyf/chatapi/internal/service/auth/authn/identity"
+	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
+	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
+	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
+	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
+	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
+	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
@@ -94,13 +95,14 @@ func TestRouterUserFlow(t *testing.T) {
 		t.Fatalf("new session service: %v", err)
 	}
 	verificationService := verification.NewService(st, &memorySender{})
-	localService := localauth.NewService(st, policies, sessionService, verificationService)
+	accountService := account.NewService(st)
+	localService := localauth.NewService(accountService, st, policies, sessionService, verificationService)
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
-	identityService := identity.NewService(st)
+	identityService := identity.NewService(accountService)
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
-	userService := usersvc.NewService(st, appKeyService, modelKeyService)
+	userService := usersvc.NewService(accountService, st, appKeyService, modelKeyService)
 
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)
@@ -129,7 +131,7 @@ func TestRouterUserFlow(t *testing.T) {
 		LocalAuth:     localService,
 		Verification:  verificationService,
 		Policy:        policies,
-		AdminUsers:    authadmin.NewService(st, policies),
+		AdminUsers:    authadmin.NewService(accountService, st, policies),
 		AdminChat:     chatadmin.NewService(queryService, turnService, st),
 		Audit:         auditsvc.NewService(st),
 		Identity:      identityService,

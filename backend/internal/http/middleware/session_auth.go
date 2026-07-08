@@ -7,8 +7,8 @@ import (
 
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/service/auth/principal"
-	"github.com/zyf/chatapi/internal/service/auth/session"
+	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
+	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	"go.uber.org/zap"
 )
 

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/service/account"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -32,9 +32,9 @@ type Claims struct {
 }
 
 type Service struct {
-	store store.Store
-	cfg   config.Config
-	now   func() time.Time
+	accounts *account.Service
+	cfg      config.Config
+	now      func() time.Time
 }
 
 type AuthResult struct {
@@ -44,16 +44,16 @@ type AuthResult struct {
 	RoleChanged  bool
 }
 
-func NewService(dataStore store.Store, cfg config.Config) *Service {
+func NewService(accounts *account.Service, cfg config.Config) *Service {
 	return &Service{
-		store: dataStore,
-		cfg:   cfg,
-		now:   func() time.Time { return time.Now().UTC() },
+		accounts: accounts,
+		cfg:      cfg,
+		now:      func() time.Time { return time.Now().UTC() },
 	}
 }
 
 func (s *Service) AuthenticateResult(ctx context.Context, claims Claims) (AuthResult, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.accounts == nil {
 		return AuthResult{}, ErrUserNotFound
 	}
 	subject := strings.TrimSpace(claims.Subject)
@@ -64,9 +64,9 @@ func (s *Service) AuthenticateResult(ctx context.Context, claims Claims) (AuthRe
 	if !s.isAllowedEmail(email, claims.EmailVerified) {
 		return AuthResult{}, ErrAccessDenied
 	}
-	identity, err := s.store.GetUserIdentity(ctx, "oidc", subject)
+	identity, err := s.accounts.GetUserIdentity(ctx, "oidc", subject)
 	if err == nil {
-		user, err := s.store.GetUser(ctx, identity.UserID)
+		user, err := s.accounts.GetUser(ctx, identity.UserID)
 		if err != nil {
 			return AuthResult{}, err
 		}
@@ -83,7 +83,7 @@ func (s *Service) AuthenticateResult(ctx context.Context, claims Claims) (AuthRe
 }
 
 func (s *Service) BindIdentity(ctx context.Context, userID string, claims Claims) (AuthResult, error) {
-	if s == nil || s.store == nil {
+	if s == nil || s.accounts == nil {
 		return AuthResult{}, ErrUserNotFound
 	}
 	userID = strings.TrimSpace(userID)
@@ -98,14 +98,14 @@ func (s *Service) BindIdentity(ctx context.Context, userID string, claims Claims
 	if !s.isAllowedEmail(email, claims.EmailVerified) {
 		return AuthResult{}, ErrAccessDenied
 	}
-	user, err := s.store.GetUser(ctx, userID)
+	user, err := s.accounts.GetUser(ctx, userID)
 	if err != nil {
 		return AuthResult{}, err
 	}
 	if !user.IsActive {
 		return AuthResult{}, ErrAccessDenied
 	}
-	identity, err := s.store.GetUserIdentity(ctx, "oidc", subject)
+	identity, err := s.accounts.GetUserIdentity(ctx, "oidc", subject)
 	if err == nil && identity.UserID != user.ID {
 		return AuthResult{}, ErrIdentityConflict
 	}
@@ -126,7 +126,7 @@ func (s *Service) updateUserAndIdentity(ctx context.Context, user store.User, ex
 	email := normalizeEmail(claims.Email)
 	previousRole := userRole(user)
 	lastLoginAt := s.now()
-	updated, err := s.store.UpdateUser(ctx, store.UpdateUserInput{
+	updated, err := s.accounts.UpdateUser(ctx, account.UpdateUserInput{
 		ID:           user.ID,
 		Username:     firstNonEmptyString(user.Username, usernameFromClaims(claims)),
 		Email:        firstNonEmptyString(user.Email, email),
@@ -139,7 +139,7 @@ func (s *Service) updateUserAndIdentity(ctx context.Context, user store.User, ex
 	if err != nil {
 		return AuthResult{}, err
 	}
-	identity, err := s.store.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
+	identity, err := s.accounts.UpsertIdentity(ctx, store.UpsertUserIdentityInput{
 		ID:            identityID(existingIdentity),
 		UserID:        updated.ID,
 		Provider:      "oidc",
@@ -166,7 +166,7 @@ func (s *Service) lookupOrCreateUser(ctx context.Context, claims Claims) (store.
 		if !claims.EmailVerified {
 			return store.User{}, ErrEmailUnverified
 		}
-		user, err := s.store.GetUserByEmail(ctx, email)
+		user, err := s.accounts.GetUserByEmail(ctx, email)
 		if err == nil {
 			return user, nil
 		}
@@ -177,14 +177,12 @@ func (s *Service) lookupOrCreateUser(ctx context.Context, claims Claims) (store.
 	if !s.cfg.OIDCAutoCreateUser {
 		return store.User{}, ErrUserNotFound
 	}
-	return s.store.CreateUser(ctx, store.CreateUserInput{
-		ID:           "user_" + uuid.NewString(),
-		Username:     usernameFromClaims(claims),
-		Email:        email,
-		PasswordHash: "",
-		Role:         s.roleForEmail(email, claims.EmailVerified),
-		IsActive:     true,
-		LocalAdmin:   false,
+	return s.accounts.CreateUser(ctx, account.CreateUserInput{
+		Username:   usernameFromClaims(claims),
+		Email:      email,
+		Role:       s.roleForEmail(email, claims.EmailVerified),
+		IsActive:   true,
+		LocalAdmin: false,
 	})
 }
 

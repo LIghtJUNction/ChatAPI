@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zyf/chatapi/internal/service/auth/principal"
-	"github.com/zyf/chatapi/internal/service/auth/session"
+	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
+	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 )
 
 func TestIssueAndParseRoundTrip(t *testing.T) {

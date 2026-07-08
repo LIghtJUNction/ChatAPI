@@ -1,6 +1,6 @@
 package policy
 
-import "github.com/zyf/chatapi/internal/service/auth/principal"
+import "github.com/zyf/chatapi/internal/service/auth/authz/principal"
 
 func (s *Service) CanAccessWeb(pr principal.Principal) bool {
 	return s.IsHumanSession(pr)

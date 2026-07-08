@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/service/auth/policy"
+	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"go.uber.org/zap"
 )
 

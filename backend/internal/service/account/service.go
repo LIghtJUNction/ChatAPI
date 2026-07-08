@@ -1,0 +1,227 @@
+package account
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/zyf/chatapi/internal/platform/password"
+	"github.com/zyf/chatapi/internal/store"
+)
+
+var (
+	ErrUserExists    = errors.New("user already exists")
+	ErrEmailRequired = errors.New("email is required")
+)
+
+type Service struct {
+	store store.Store
+	now   func() time.Time
+}
+
+type CreateUserInput struct {
+	ID           string
+	Username     string
+	Email        string
+	Password     string
+	PasswordHash string
+	Role         string
+	IsActive     bool
+	LocalAdmin   bool
+	LastLoginAt  *time.Time
+}
+
+type UpdateUserInput struct {
+	ID           string
+	Username     string
+	Email        string
+	Password     string
+	PasswordHash string
+	Role         string
+	IsActive     bool
+	LocalAdmin   bool
+	LastLoginAt  *time.Time
+}
+
+func NewService(dataStore store.Store) *Service {
+	return &Service{
+		store: dataStore,
+		now:   func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func (s *Service) GetUser(ctx context.Context, userID string) (store.User, error) {
+	return s.store.GetUser(ctx, strings.TrimSpace(userID))
+}
+
+func (s *Service) GetUserByEmail(ctx context.Context, email string) (store.User, error) {
+	return s.store.GetUserByEmail(ctx, normalizeEmail(email))
+}
+
+func (s *Service) GetUserByUsername(ctx context.Context, username string) (store.User, error) {
+	return s.store.GetUserByUsername(ctx, strings.TrimSpace(username))
+}
+
+func (s *Service) LookupUserByIdentifier(ctx context.Context, identifier string) (store.User, error) {
+	identifier = strings.TrimSpace(identifier)
+	if strings.Contains(identifier, "@") {
+		return s.GetUserByEmail(ctx, identifier)
+	}
+	return s.GetUserByUsername(ctx, identifier)
+}
+
+func (s *Service) ListUsers(ctx context.Context) ([]store.User, error) {
+	return s.store.ListUsers(ctx)
+}
+
+func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (store.User, error) {
+	email := normalizeEmail(input.Email)
+	username := strings.TrimSpace(input.Username)
+	if email != "" {
+		if _, err := s.store.GetUserByEmail(ctx, email); err == nil {
+			return store.User{}, ErrUserExists
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return store.User{}, err
+		}
+	}
+	if username != "" {
+		if _, err := s.store.GetUserByUsername(ctx, username); err == nil {
+			return store.User{}, ErrUserExists
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return store.User{}, err
+		}
+	}
+	passwordHash, err := resolvePasswordHash(strings.TrimSpace(input.Password), strings.TrimSpace(input.PasswordHash))
+	if err != nil {
+		return store.User{}, err
+	}
+	id := strings.TrimSpace(input.ID)
+	if id == "" {
+		id = "user_" + uuid.NewString()
+	}
+	role := strings.TrimSpace(input.Role)
+	if role == "" {
+		role = "user"
+	}
+	return s.store.CreateUser(ctx, store.CreateUserInput{
+		ID:           id,
+		Username:     username,
+		Email:        email,
+		PasswordHash: passwordHash,
+		Role:         role,
+		IsActive:     input.IsActive,
+		LocalAdmin:   input.LocalAdmin,
+	})
+}
+
+func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (store.User, error) {
+	passwordHash, err := resolvePasswordHash(strings.TrimSpace(input.Password), strings.TrimSpace(input.PasswordHash))
+	if err != nil {
+		return store.User{}, err
+	}
+	return s.store.UpdateUser(ctx, store.UpdateUserInput{
+		ID:           strings.TrimSpace(input.ID),
+		Username:     strings.TrimSpace(input.Username),
+		Email:        normalizeEmail(input.Email),
+		PasswordHash: passwordHash,
+		Role:         strings.TrimSpace(input.Role),
+		IsActive:     input.IsActive,
+		LocalAdmin:   input.LocalAdmin,
+		LastLoginAt:  input.LastLoginAt,
+	})
+}
+
+func (s *Service) SetUserState(ctx context.Context, userID string, isActive bool) (store.User, error) {
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return store.User{}, err
+	}
+	return s.UpdateUser(ctx, UpdateUserInput{
+		ID:           user.ID,
+		Username:     user.Username,
+		Email:        user.Email,
+		PasswordHash: user.PasswordHash,
+		Role:         user.Role,
+		IsActive:     isActive,
+		LocalAdmin:   user.LocalAdmin,
+		LastLoginAt:  user.LastLoginAt,
+	})
+}
+
+func (s *Service) SetPassword(ctx context.Context, userID string, newPassword string) (store.User, error) {
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return store.User{}, err
+	}
+	return s.UpdateUser(ctx, UpdateUserInput{
+		ID:          user.ID,
+		Username:    user.Username,
+		Email:       user.Email,
+		Password:    strings.TrimSpace(newPassword),
+		Role:        user.Role,
+		IsActive:    user.IsActive,
+		LocalAdmin:  user.LocalAdmin,
+		LastLoginAt: user.LastLoginAt,
+	})
+}
+
+func (s *Service) PreviewDeletion(ctx context.Context, userID string) (store.UserDeletionPreview, error) {
+	return s.store.PreviewUserDeletion(ctx, strings.TrimSpace(userID))
+}
+
+func (s *Service) DeleteUser(ctx context.Context, userID string) error {
+	return s.store.DeleteUserAccount(ctx, strings.TrimSpace(userID))
+}
+
+func (s *Service) TransferOwnership(ctx context.Context, sourceUserID string, targetUserID string) (store.UserOwnershipTransferResult, error) {
+	return s.store.TransferUserOwnership(ctx, strings.TrimSpace(sourceUserID), strings.TrimSpace(targetUserID))
+}
+
+func (s *Service) TransferOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (store.UserOwnershipTransferResult, error) {
+	return s.store.TransferUserOwnershipSelection(ctx, strings.TrimSpace(sourceUserID), strings.TrimSpace(targetUserID), conversationIDs, filenames)
+}
+
+func (s *Service) GetUserIdentity(ctx context.Context, provider string, subject string) (store.UserIdentity, error) {
+	return s.store.GetUserIdentity(ctx, strings.TrimSpace(provider), strings.TrimSpace(subject))
+}
+
+func (s *Service) ResolveIdentity(ctx context.Context, provider string, subject string) (store.User, store.UserIdentity, error) {
+	identity, err := s.GetUserIdentity(ctx, provider, subject)
+	if err != nil {
+		return store.User{}, store.UserIdentity{}, err
+	}
+	user, err := s.GetUser(ctx, identity.UserID)
+	if err != nil {
+		return store.User{}, store.UserIdentity{}, err
+	}
+	return user, identity, nil
+}
+
+func (s *Service) ListUserIdentities(ctx context.Context, userID string) ([]store.UserIdentity, error) {
+	return s.store.ListUserIdentities(ctx, strings.TrimSpace(userID))
+}
+
+func (s *Service) UpsertIdentity(ctx context.Context, input store.UpsertUserIdentityInput) (store.UserIdentity, error) {
+	input.Provider = strings.TrimSpace(input.Provider)
+	input.Subject = strings.TrimSpace(input.Subject)
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.Email = normalizeEmail(input.Email)
+	return s.store.UpsertUserIdentity(ctx, input)
+}
+
+func (s *Service) DeleteUserIdentity(ctx context.Context, identityID string, userID string) error {
+	return s.store.DeleteUserIdentity(ctx, strings.TrimSpace(identityID), strings.TrimSpace(userID))
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func resolvePasswordHash(passwordText string, existingHash string) (string, error) {
+	if passwordText == "" {
+		return existingHash, nil
+	}
+	return password.Hash(passwordText)
+}

@@ -6,27 +6,29 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	appkeysvc "github.com/zyf/chatapi/internal/service/auth/appkey"
-	modelkeysvc "github.com/zyf/chatapi/internal/service/auth/modelkey"
+	"github.com/zyf/chatapi/internal/service/account"
+	appkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
+	modelkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
 	"github.com/zyf/chatapi/internal/store"
 )
 
 type Service struct {
+	accounts  *account.Service
 	store     store.Store
 	appKeys   *appkeysvc.Service
 	modelKeys *modelkeysvc.Service
 }
 
-func NewService(dataStore store.Store, appKeys *appkeysvc.Service, modelKeys *modelkeysvc.Service) *Service {
-	return &Service{store: dataStore, appKeys: appKeys, modelKeys: modelKeys}
+func NewService(accounts *account.Service, dataStore store.Store, appKeys *appkeysvc.Service, modelKeys *modelkeysvc.Service) *Service {
+	return &Service{accounts: accounts, store: dataStore, appKeys: appKeys, modelKeys: modelKeys}
 }
 
 func (s *Service) GetUser(ctx context.Context, userID string) (store.User, error) {
-	return s.store.GetUser(ctx, strings.TrimSpace(userID))
+	return s.accounts.GetUser(ctx, strings.TrimSpace(userID))
 }
 
 func (s *Service) ListUserIdentities(ctx context.Context, userID string) ([]store.UserIdentity, error) {
-	return s.store.ListUserIdentities(ctx, strings.TrimSpace(userID))
+	return s.accounts.ListUserIdentities(ctx, strings.TrimSpace(userID))
 }
 
 func (s *Service) ListAppKeys(ctx context.Context, userID string) ([]store.AppAPIKey, error) {

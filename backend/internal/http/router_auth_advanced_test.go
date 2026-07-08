@@ -26,20 +26,21 @@ import (
 	"github.com/zyf/chatapi/internal/platform/email"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
+	"github.com/zyf/chatapi/internal/service/account"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
-	appkey "github.com/zyf/chatapi/internal/service/auth/appkey"
-	"github.com/zyf/chatapi/internal/service/auth/geetest"
-	"github.com/zyf/chatapi/internal/service/auth/identity"
-	localauth "github.com/zyf/chatapi/internal/service/auth/local"
-	modelkey "github.com/zyf/chatapi/internal/service/auth/modelkey"
-	oidcsvc "github.com/zyf/chatapi/internal/service/auth/oidc"
-	"github.com/zyf/chatapi/internal/service/auth/policy"
-	"github.com/zyf/chatapi/internal/service/auth/ratelimit"
-	"github.com/zyf/chatapi/internal/service/auth/session"
-	authsettings "github.com/zyf/chatapi/internal/service/auth/settings"
-	totpsvc "github.com/zyf/chatapi/internal/service/auth/totp"
-	"github.com/zyf/chatapi/internal/service/auth/verification"
+	"github.com/zyf/chatapi/internal/service/auth/authn/geetest"
+	"github.com/zyf/chatapi/internal/service/auth/authn/identity"
+	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
+	oidcsvc "github.com/zyf/chatapi/internal/service/auth/authn/oidc"
+	"github.com/zyf/chatapi/internal/service/auth/authn/ratelimit"
+	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
+	totpsvc "github.com/zyf/chatapi/internal/service/auth/authn/totp"
+	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
+	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
+	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
+	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
+	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
@@ -105,13 +106,13 @@ func TestAuthSettingsGeeTestAndTOTPFlow(t *testing.T) {
 
 	adminCookie := loginAndGetCookie(t, server.URL, "admin@example.com", "admin-pass")
 	postJSONWithCookie(t, server.URL+"/api/admin/auth/settings", map[string]any{
-		"external_registration_enabled":       true,
-		"email_verification_enabled":          true,
-		"password_reset_enabled":              true,
-		"local_password_login_enabled":        false,
-		"geetest_login_enabled":               true,
-		"geetest_register_enabled":            true,
-		"geetest_password_reset_enabled":      true,
+		"external_registration_enabled":                 true,
+		"email_verification_enabled":                    true,
+		"password_reset_enabled":                        true,
+		"local_password_login_enabled":                  false,
+		"geetest_login_enabled":                         true,
+		"geetest_register_enabled":                      true,
+		"geetest_password_reset_enabled":                true,
 		"registration_email_domain_restriction_enabled": false,
 	}, adminCookie, http.StatusOK)
 
@@ -124,13 +125,13 @@ func TestAuthSettingsGeeTestAndTOTPFlow(t *testing.T) {
 	}
 
 	postJSONWithCookie(t, server.URL+"/api/admin/auth/settings", map[string]any{
-		"external_registration_enabled":       true,
-		"email_verification_enabled":          true,
-		"password_reset_enabled":              true,
-		"local_password_login_enabled":        true,
-		"geetest_login_enabled":               true,
-		"geetest_register_enabled":            true,
-		"geetest_password_reset_enabled":      true,
+		"external_registration_enabled":                 true,
+		"email_verification_enabled":                    true,
+		"password_reset_enabled":                        true,
+		"local_password_login_enabled":                  true,
+		"geetest_login_enabled":                         true,
+		"geetest_register_enabled":                      true,
+		"geetest_password_reset_enabled":                true,
 		"registration_email_domain_restriction_enabled": false,
 	}, adminCookie, http.StatusOK)
 
@@ -349,17 +350,18 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 	}
 	verificationService := verification.NewService(st, sender)
 	verificationService.Logger = logFactory.Layer(logging.LayerAuth)
-	localService := localauth.NewService(st, policies, sessionService, verificationService)
+	accountService := account.NewService(st)
+	localService := localauth.NewService(accountService, st, policies, sessionService, verificationService)
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
-	identityService := identity.NewService(st)
+	identityService := identity.NewService(accountService)
 	modelKeyService := modelkey.NewService(st, cfg.MasterKey)
 	appKeyService := appkey.NewService(st)
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
-	userService := usersvc.NewService(st, appKeyService, modelKeyService)
+	userService := usersvc.NewService(accountService, st, appKeyService, modelKeyService)
 	authSettings := authsettings.NewService(st, cfg)
 	geetestService := geetest.NewService(cfg, nil)
 	totpService := totpsvc.NewService(st, cfg.MasterKey, "ChatAPI")
-	oidcService := oidcsvc.NewService(st, cfg)
+	oidcService := oidcsvc.NewService(accountService, cfg)
 	loginLimiter := ratelimit.NewService(5, time.Minute)
 	auditService := auditsvc.NewService(st)
 
@@ -393,7 +395,7 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 		TOTP:          totpService,
 		OIDC:          oidcService,
 		LoginLimiter:  loginLimiter,
-		AdminUsers:    authadmin.NewService(st, policies),
+		AdminUsers:    authadmin.NewService(accountService, st, policies),
 		AdminChat:     chatadmin.NewService(queryService, turnService, st),
 		Audit:         auditService,
 		Identity:      identityService,
@@ -412,13 +414,13 @@ type testOIDCProviderConfig struct {
 }
 
 type testOIDCProvider struct {
-	server      *httptest.Server
-	issuer      string
-	privateKey  *rsa.PrivateKey
-	keyID       string
-	clientID    string
-	claims      testOIDCProviderConfig
-	codeNonce   map[string]string
+	server     *httptest.Server
+	issuer     string
+	privateKey *rsa.PrivateKey
+	keyID      string
+	clientID   string
+	claims     testOIDCProviderConfig
+	codeNonce  map[string]string
 }
 
 func newTestOIDCProvider(t *testing.T, cfg testOIDCProviderConfig) *testOIDCProvider {
@@ -445,17 +447,17 @@ func newTestOIDCProvider(t *testing.T, cfg testOIDCProviderConfig) *testOIDCProv
 	return p
 }
 
-func (p *testOIDCProvider) Close() { p.server.Close() }
+func (p *testOIDCProvider) Close()         { p.server.Close() }
 func (p *testOIDCProvider) Issuer() string { return p.issuer }
 
 func (p *testOIDCProvider) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"issuer":                 p.issuer,
-		"authorization_endpoint": p.issuer + "/authorize",
-		"token_endpoint":         p.issuer + "/token",
-		"userinfo_endpoint":      p.issuer + "/userinfo",
-		"jwks_uri":               p.issuer + "/jwks",
+		"issuer":                                p.issuer,
+		"authorization_endpoint":                p.issuer + "/authorize",
+		"token_endpoint":                        p.issuer + "/token",
+		"userinfo_endpoint":                     p.issuer + "/userinfo",
+		"jwks_uri":                              p.issuer + "/jwks",
 		"id_token_signing_alg_values_supported": []string{"RS256"},
 	})
 }

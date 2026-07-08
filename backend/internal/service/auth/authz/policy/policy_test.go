@@ -3,8 +3,8 @@ package policy_test
 import (
 	"testing"
 
-	"github.com/zyf/chatapi/internal/service/auth/policy"
-	"github.com/zyf/chatapi/internal/service/auth/principal"
+	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
+	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
 	"github.com/zyf/chatapi/internal/store"
 )
 

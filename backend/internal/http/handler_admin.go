@@ -12,7 +12,7 @@ import (
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
-	authsettings "github.com/zyf/chatapi/internal/service/auth/settings"
+	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
 	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"

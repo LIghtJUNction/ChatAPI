@@ -9,10 +9,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/platform/password"
-	"github.com/zyf/chatapi/internal/service/auth/policy"
-	"github.com/zyf/chatapi/internal/service/auth/principal"
-	"github.com/zyf/chatapi/internal/service/auth/session"
-	"github.com/zyf/chatapi/internal/service/auth/verification"
+	"github.com/zyf/chatapi/internal/service/account"
+	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
+	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
+	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
+	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
@@ -29,6 +30,7 @@ var (
 )
 
 type Service struct {
+	accounts     *account.Service
 	store        store.Store
 	policies     *policy.Service
 	sessions     *session.Service
@@ -61,8 +63,9 @@ type AuthResult struct {
 	Claims    session.Claims      `json:"claims"`
 }
 
-func NewService(dataStore store.Store, policies *policy.Service, sessions *session.Service, verificationService *verification.Service) *Service {
+func NewService(accounts *account.Service, dataStore store.Store, policies *policy.Service, sessions *session.Service, verificationService *verification.Service) *Service {
 	return &Service{
+		accounts:     accounts,
 		store:        dataStore,
 		policies:     policies,
 		sessions:     sessions,
@@ -90,30 +93,28 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (store.User
 		}
 	}
 
-	if _, err := s.store.GetUserByEmail(ctx, emailAddress); err == nil {
+	if _, err := s.accounts.GetUserByEmail(ctx, emailAddress); err == nil {
 		return store.User{}, ErrUserExists
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return store.User{}, err
 	}
-	if _, err := s.store.GetUserByUsername(ctx, username); err == nil {
+	if _, err := s.accounts.GetUserByUsername(ctx, username); err == nil {
 		return store.User{}, ErrUserExists
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return store.User{}, err
 	}
-
-	hashed, err := password.Hash(passwordText)
-	if err != nil {
-		return store.User{}, err
-	}
-	user, err := s.store.CreateUser(ctx, store.CreateUserInput{
-		ID:           "user_" + uuid.NewString(),
-		Username:     username,
-		Email:        emailAddress,
-		PasswordHash: hashed,
-		Role:         "user",
-		IsActive:     true,
+	user, err := s.accounts.CreateUser(ctx, account.CreateUserInput{
+		ID:       "user_" + uuid.NewString(),
+		Username: username,
+		Email:    emailAddress,
+		Password: passwordText,
+		Role:     "user",
+		IsActive: true,
 	})
 	if err != nil {
+		if errors.Is(err, account.ErrUserExists) {
+			return store.User{}, ErrUserExists
+		}
 		return store.User{}, err
 	}
 	_, _ = s.store.CreateAuditLog(ctx, store.CreateAuditLogInput{
@@ -143,7 +144,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (AuthResult, erro
 	if identifier == "" || passwordText == "" {
 		return AuthResult{}, ErrInvalidCredentials
 	}
-	user, err := s.lookupUser(ctx, identifier)
+	user, err := s.accounts.LookupUserByIdentifier(ctx, identifier)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return AuthResult{}, ErrInvalidCredentials
@@ -175,7 +176,16 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (AuthResult, erro
 		}
 		update.PasswordHash = hashed
 	}
-	user, err = s.store.UpdateUser(ctx, update)
+	user, err = s.accounts.UpdateUser(ctx, account.UpdateUserInput{
+		ID:           update.ID,
+		Username:     update.Username,
+		Email:        update.Email,
+		PasswordHash: update.PasswordHash,
+		Role:         update.Role,
+		IsActive:     update.IsActive,
+		LocalAdmin:   update.LocalAdmin,
+		LastLoginAt:  update.LastLoginAt,
+	})
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -218,7 +228,7 @@ func (s *Service) SendPasswordReset(ctx context.Context, emailAddress string) (v
 	if emailAddress == "" {
 		return verification.SendResult{}, ErrEmailRequired
 	}
-	if _, err := s.store.GetUserByEmail(ctx, emailAddress); err != nil {
+	if _, err := s.accounts.GetUserByEmail(ctx, emailAddress); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return verification.SendResult{}, ErrInvalidCredentials
 		}
@@ -244,24 +254,11 @@ func (s *Service) ResetPassword(ctx context.Context, input ResetPasswordInput) e
 	if err := s.verification.VerifyCode(ctx, emailAddress, verification.PurposePasswordReset, input.VerificationCode); err != nil {
 		return err
 	}
-	user, err := s.store.GetUserByEmail(ctx, emailAddress)
+	user, err := s.accounts.GetUserByEmail(ctx, emailAddress)
 	if err != nil {
 		return err
 	}
-	hashed, err := password.Hash(strings.TrimSpace(input.NewPassword))
-	if err != nil {
-		return err
-	}
-	_, err = s.store.UpdateUser(ctx, store.UpdateUserInput{
-		ID:           user.ID,
-		Username:     user.Username,
-		Email:        user.Email,
-		PasswordHash: hashed,
-		Role:         user.Role,
-		IsActive:     user.IsActive,
-		LocalAdmin:   user.LocalAdmin,
-		LastLoginAt:  user.LastLoginAt,
-	})
+	_, err = s.accounts.SetPassword(ctx, user.ID, input.NewPassword)
 	if err != nil {
 		return err
 	}
@@ -288,24 +285,11 @@ func (s *Service) UpdatePasswordForUser(ctx context.Context, userID string, newP
 	if newPassword == "" {
 		return ErrNewPasswordRequired
 	}
-	user, err := s.store.GetUser(ctx, userID)
+	user, err := s.accounts.GetUser(ctx, userID)
 	if err != nil {
 		return err
 	}
-	hashed, err := password.Hash(newPassword)
-	if err != nil {
-		return err
-	}
-	_, err = s.store.UpdateUser(ctx, store.UpdateUserInput{
-		ID:           user.ID,
-		Username:     user.Username,
-		Email:        user.Email,
-		PasswordHash: hashed,
-		Role:         user.Role,
-		IsActive:     user.IsActive,
-		LocalAdmin:   user.LocalAdmin,
-		LastLoginAt:  user.LastLoginAt,
-	})
+	_, err = s.accounts.SetPassword(ctx, user.ID, newPassword)
 	if err != nil {
 		return err
 	}
@@ -321,11 +305,4 @@ func (s *Service) UpdatePasswordForUser(ctx context.Context, userID string, newP
 		Outcome:      "success",
 	})
 	return nil
-}
-
-func (s *Service) lookupUser(ctx context.Context, identifier string) (store.User, error) {
-	if strings.Contains(identifier, "@") {
-		return s.store.GetUserByEmail(ctx, strings.ToLower(identifier))
-	}
-	return s.store.GetUserByUsername(ctx, identifier)
 }

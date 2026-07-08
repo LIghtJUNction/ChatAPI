@@ -17,13 +17,14 @@ import (
 	"github.com/zyf/chatapi/internal/platform/email"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
-	appkey "github.com/zyf/chatapi/internal/service/auth/appkey"
-	"github.com/zyf/chatapi/internal/service/auth/identity"
-	localauth "github.com/zyf/chatapi/internal/service/auth/local"
-	modelkey "github.com/zyf/chatapi/internal/service/auth/modelkey"
-	"github.com/zyf/chatapi/internal/service/auth/policy"
-	"github.com/zyf/chatapi/internal/service/auth/session"
-	"github.com/zyf/chatapi/internal/service/auth/verification"
+	"github.com/zyf/chatapi/internal/service/account"
+	"github.com/zyf/chatapi/internal/service/auth/authn/identity"
+	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
+	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
+	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
+	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
+	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
+	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	usersvc "github.com/zyf/chatapi/internal/service/user"
 )
 
@@ -75,10 +76,11 @@ func TestRouterLocalAuthFlow(t *testing.T) {
 	verificationService := verification.NewService(st, sender)
 	verificationService.Logger = logFactory.Layer(logging.LayerAuth)
 	policies := policy.NewService()
-	identityService := identity.NewService(st)
-	localService := localauth.NewService(st, policies, sessionService, verificationService)
+	accountService := account.NewService(st)
+	identityService := identity.NewService(accountService)
+	localService := localauth.NewService(accountService, st, policies, sessionService, verificationService)
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
-	userService := usersvc.NewService(st, appkey.NewService(st), modelkey.NewService(st, "test-master-key"))
+	userService := usersvc.NewService(accountService, st, appkey.NewService(st), modelkey.NewService(st, "test-master-key"))
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	cfg.SMTPEnabled = true

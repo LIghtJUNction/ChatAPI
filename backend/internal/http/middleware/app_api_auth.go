@@ -10,7 +10,7 @@ import (
 
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	appkey "github.com/zyf/chatapi/internal/service/auth/appkey"
+	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	"go.uber.org/zap"
 )
 

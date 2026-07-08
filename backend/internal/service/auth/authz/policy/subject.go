@@ -3,7 +3,7 @@ package policy
 import (
 	"strings"
 
-	"github.com/zyf/chatapi/internal/service/auth/principal"
+	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
 	"github.com/zyf/chatapi/internal/store"
 )
 

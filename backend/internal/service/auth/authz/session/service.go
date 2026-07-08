@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/service/auth/principal"
+	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
 )
 
 var (

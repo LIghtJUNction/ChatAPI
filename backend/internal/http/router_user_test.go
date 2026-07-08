@@ -30,7 +30,6 @@ import (
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	usersvc "github.com/zyf/chatapi/internal/service/user"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -102,8 +101,6 @@ func TestRouterUserFlow(t *testing.T) {
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
-	userService := usersvc.NewService(accountService, st, appKeyService, modelKeyService)
-
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)
 	turnService := &turnsvc.Service{
@@ -124,6 +121,7 @@ func TestRouterUserFlow(t *testing.T) {
 	cfg.GeetestCaptchaID = "captcha-id"
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
+		Store:         st,
 		Turn:          turnService,
 		Query:         queryService,
 		ModelAPIKeys:  modelKeyService,
@@ -131,11 +129,11 @@ func TestRouterUserFlow(t *testing.T) {
 		LocalAuth:     localService,
 		Verification:  verificationService,
 		Policy:        policies,
+		Accounts:      accountService,
 		AdminUsers:    authadmin.NewService(accountService, st, policies),
 		AdminChat:     chatadmin.NewService(queryService, turnService, st),
 		Audit:         auditsvc.NewService(st),
 		Identity:      identityService,
-		Users:         userService,
 		UserSessions:  sessionService,
 		LoggerFactory: logFactory,
 	}))
@@ -323,6 +321,7 @@ func deleteTextWithCookie(t *testing.T, url string, cookie *http.Cookie) (int, s
 		t.Fatalf("new request: %v", err)
 	}
 	req.AddCookie(cookie)
+	setSameOriginHeader(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("delete %s: %v", url, err)

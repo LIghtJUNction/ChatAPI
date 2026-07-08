@@ -31,6 +31,7 @@ env/
 
 # Backend local data
 backend/data/
+backend.bak/
 data/
 
 # Frontend

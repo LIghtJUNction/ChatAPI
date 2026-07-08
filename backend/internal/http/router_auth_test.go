@@ -21,11 +21,8 @@ import (
 	"github.com/zyf/chatapi/internal/service/auth/authn/identity"
 	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
 	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
-	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
-	modelkey "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	usersvc "github.com/zyf/chatapi/internal/service/user"
 )
 
 type memorySender struct {
@@ -80,17 +77,16 @@ func TestRouterLocalAuthFlow(t *testing.T) {
 	identityService := identity.NewService(accountService)
 	localService := localauth.NewService(accountService, st, policies, sessionService, verificationService)
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
-	userService := usersvc.NewService(accountService, st, appkey.NewService(st), modelkey.NewService(st, "test-master-key"))
-
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	cfg.SMTPEnabled = true
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
+		Store:         st,
 		LocalAuth:     localService,
 		Verification:  verificationService,
 		Policy:        policies,
+		Accounts:      accountService,
 		Identity:      identityService,
-		Users:         userService,
 		UserSessions:  sessionService,
 		LoggerFactory: logFactory,
 	}))

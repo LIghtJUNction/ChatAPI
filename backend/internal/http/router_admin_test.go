@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,7 +32,6 @@ import (
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	usersvc "github.com/zyf/chatapi/internal/service/user"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -96,8 +96,6 @@ func TestRouterAdminFlow(t *testing.T) {
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
-	userService := usersvc.NewService(accountService, st, appKeyService, modelKeyService)
-
 	pending := pendingsvc.NewPendingRegistry()
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
@@ -130,6 +128,7 @@ func TestRouterAdminFlow(t *testing.T) {
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
+		Store:         st,
 		Turn:          turnService,
 		Query:         queryService,
 		ModelAPIKeys:  modelKeyService,
@@ -137,11 +136,11 @@ func TestRouterAdminFlow(t *testing.T) {
 		LocalAuth:     localService,
 		Verification:  verificationService,
 		Policy:        policies,
+		Accounts:      accountService,
 		AdminUsers:    adminUserService,
 		AdminChat:     adminChatService,
 		Audit:         auditService,
 		Identity:      identityService,
-		Users:         userService,
 		UserSessions:  sessionService,
 		LoggerFactory: logFactory,
 	}))
@@ -214,6 +213,36 @@ func TestRouterAdminFlow(t *testing.T) {
 	getJSONWithCookie(t, server.URL+"/api/admin/requests/"+request.RequestID, adminCookie, http.StatusOK)
 	getJSONWithCookie(t, server.URL+"/api/admin/conversations", adminCookie, http.StatusOK)
 	getJSONWithCookie(t, server.URL+"/api/admin/conversations/"+request.ConversationID+"/messages", adminCookie, http.StatusOK)
+	accessSettingsResp := getJSONWithCookie(t, server.URL+"/api/admin/access/settings", adminCookie, http.StatusOK)
+	if accessSettingsResp["ok"] != true {
+		t.Fatalf("unexpected access settings response: %#v", accessSettingsResp)
+	}
+	if accessSettingsResp["key"] != "system_access_settings" {
+		t.Fatalf("unexpected access settings key: %#v", accessSettingsResp)
+	}
+	if _, ok := accessSettingsResp["schema"].(map[string]any); !ok {
+		t.Fatalf("expected schema document in access settings response: %#v", accessSettingsResp)
+	}
+	current, ok := accessSettingsResp["current"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected current document in access settings response: %#v", accessSettingsResp)
+	}
+	if _, ok := current["global_rate_limit_requests"]; !ok {
+		t.Fatalf("expected current global_rate_limit_requests: %#v", accessSettingsResp)
+	}
+	accessSettingsResp = postJSONWithCookie(t, server.URL+"/api/admin/access/settings", map[string]any{
+		"user_rate_limit_requests":    10,
+		"user_rate_limit_window":      "1m",
+		"app_key_rate_limit_requests": 20,
+		"app_key_rate_limit_window":   "2m",
+	}, adminCookie, http.StatusOK)
+	current, ok = accessSettingsResp["current"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected current document after update: %#v", accessSettingsResp)
+	}
+	if int(current["user_rate_limit_requests"].(float64)) != 10 {
+		t.Fatalf("unexpected saved access settings response: %#v", accessSettingsResp)
+	}
 
 	postJSONWithCookie(t, server.URL+"/api/admin/conversations/"+request.ConversationID+"/complete", map[string]any{
 		"text": "admin completed",
@@ -248,6 +277,7 @@ func loginAndGetCookie(t *testing.T, baseURL string, identifier string, password
 		t.Fatalf("new login request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setSameOriginHeader(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("login request: %v", err)
@@ -275,6 +305,7 @@ func getJSONWithCookie(t *testing.T, url string, cookie *http.Cookie, wantStatus
 		t.Fatalf("new request: %v", err)
 	}
 	req.AddCookie(cookie)
+	setSameOriginHeader(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("get %s: %v", url, err)
@@ -290,6 +321,7 @@ func getTextWithCookie(t *testing.T, url string, cookie *http.Cookie) (int, stri
 		t.Fatalf("new request: %v", err)
 	}
 	req.AddCookie(cookie)
+	setSameOriginHeader(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("get %s: %v", url, err)
@@ -311,6 +343,7 @@ func postJSONWithCookie(t *testing.T, url string, body map[string]any, cookie *h
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
+	setSameOriginHeader(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("post %s: %v", url, err)
@@ -326,6 +359,7 @@ func deleteJSONWithCookie(t *testing.T, url string, cookie *http.Cookie, wantSta
 		t.Fatalf("new request: %v", err)
 	}
 	req.AddCookie(cookie)
+	setSameOriginHeader(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("delete %s: %v", url, err)
@@ -346,10 +380,18 @@ func putJSONWithCookie(t *testing.T, url string, body map[string]any, cookie *ht
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
+	setSameOriginHeader(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("put %s: %v", url, err)
 	}
 	defer resp.Body.Close()
 	return decodeJSONBody(t, resp.Body, resp.StatusCode, wantStatus)
+}
+
+func setSameOriginHeader(req *http.Request) {
+	if req == nil || req.URL == nil {
+		return
+	}
+	req.Header.Set("Origin", (&url.URL{Scheme: req.URL.Scheme, Host: req.URL.Host}).String())
 }

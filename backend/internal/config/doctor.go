@@ -68,6 +68,7 @@ func Diagnose(cfg Config, validationErr error) DiagnosticReport {
 	report.checkPaths(cfg)
 	report.checkCORS(cfg)
 	report.checkTrustedProxies(cfg)
+	report.checkAccess(cfg)
 	report.checkStorage(cfg)
 	report.checkPending(cfg)
 	report.checkRuntime(cfg)
@@ -210,6 +211,17 @@ func (r *DiagnosticReport) checkTrustedProxies(cfg Config) {
 		}
 	}
 	r.add(DiagnosticInfo, "trusted_proxy.enabled", "已启用可信代理；只有来自这些代理的请求才会读取 X-Forwarded-For / X-Real-IP。")
+}
+
+func (r *DiagnosticReport) checkAccess(cfg Config) {
+	if cfg.AccessRateLimitRequests <= 0 {
+		return
+	}
+	if cfg.AccessRateLimitRequests < 30 {
+		r.add(DiagnosticWarn, "access.rate_limit_low", "全局入口限流阈值偏低，可能影响浏览器和 API 并发调试。")
+		return
+	}
+	r.add(DiagnosticInfo, "access.rate_limit_enabled", "已启用全局入口限流；超出阈值的请求会在 access policy 层被拒绝。")
 }
 
 func (r *DiagnosticReport) checkOIDC(cfg Config) {

@@ -23,6 +23,8 @@ type RedactedConfig struct {
 	CORSOrigins                           []string `json:"cors_origins"`
 	TrustedProxies                        []string `json:"trusted_proxies,omitempty"`
 	MetricsEnabled                        bool     `json:"metrics_enabled"`
+	AccessRateLimitRequests               int      `json:"access_rate_limit_requests"`
+	AccessRateLimitWindow                 string   `json:"access_rate_limit_window"`
 	UploadMaxBytes                        int64    `json:"upload_max_bytes"`
 	StorageDefaultQuotaBytes              int64    `json:"storage_default_quota_bytes"`
 	StorageBlockNewConversations          bool     `json:"storage_block_new_conversations"`
@@ -87,6 +89,8 @@ func (c Config) Redacted() RedactedConfig {
 		CORSOrigins:                           append([]string(nil), c.CORSOrigins...),
 		TrustedProxies:                        append([]string(nil), c.TrustedProxies...),
 		MetricsEnabled:                        c.MetricsEnabled,
+		AccessRateLimitRequests:               c.AccessRateLimitRequests,
+		AccessRateLimitWindow:                 c.AccessRateLimitWindow.String(),
 		UploadMaxBytes:                        c.UploadMaxBytes,
 		StorageDefaultQuotaBytes:              c.StorageDefaultQuotaBytes,
 		StorageBlockNewConversations:          c.StorageBlockNewConversations,

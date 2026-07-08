@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	"github.com/zyf/chatapi/internal/service/auth/authn/geetest"
@@ -275,7 +274,7 @@ func (h AuthHandler) OIDCLink(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "oidc is not enabled", http.StatusNotFound)
 		return
 	}
-	principal, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context())
+	principal, ok := session.PrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {
 		http.Error(w, "session required", http.StatusUnauthorized)
 		return
@@ -367,7 +366,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	claims := claimsFromMap(rawClaims)
 	if intent == oidcIntentLink {
-		principal, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context())
+		principal, ok := session.PrincipalFromContext(r.Context())
 		if !ok || strings.TrimSpace(principal.UserID) == "" {
 			http.Error(w, "session required", http.StatusUnauthorized)
 			return
@@ -560,7 +559,7 @@ func (h AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AuthHandler) TOTPSetup(w http.ResponseWriter, r *http.Request) {
-	principal, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context())
+	principal, ok := session.PrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {
 		http.Error(w, "session required", http.StatusUnauthorized)
 		return
@@ -579,7 +578,7 @@ func (h AuthHandler) TOTPSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AuthHandler) TOTPConfirm(w http.ResponseWriter, r *http.Request) {
-	principal, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context())
+	principal, ok := session.PrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {
 		http.Error(w, "session required", http.StatusUnauthorized)
 		return
@@ -600,7 +599,7 @@ func (h AuthHandler) TOTPConfirm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AuthHandler) TOTPReset(w http.ResponseWriter, r *http.Request) {
-	principal, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context())
+	principal, ok := session.PrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {
 		http.Error(w, "session required", http.StatusUnauthorized)
 		return

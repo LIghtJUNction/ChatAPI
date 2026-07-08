@@ -12,16 +12,17 @@ import (
 )
 
 const (
-	LayerApp        = "app"
-	LayerHTTP       = "http"
-	LayerAuth       = "auth"
-	LayerTurn       = "turn"
-	LayerTurnQuery  = "turnquery"
-	LayerPending    = "pending"
-	LayerRepository = "repository"
-	LayerMigrate    = "migrate"
-	LayerPlatform   = "platform"
-	LayerAudit      = "audit"
+	LayerApp         = "app"
+	LayerHTTP        = "http"
+	LayerAuth        = "auth"
+	LayerTurn        = "turn"
+	LayerTurnQuery   = "turnquery"
+	LayerPending     = "pending"
+	LayerUserControl = "usercontrol"
+	LayerRepository  = "repository"
+	LayerMigrate     = "migrate"
+	LayerPlatform    = "platform"
+	LayerAudit       = "audit"
 )
 
 type Config struct {

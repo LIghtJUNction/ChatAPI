@@ -7,6 +7,7 @@ import (
 
 	"github.com/zyf/chatapi/internal/actor"
 	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
+	sessionrestore "github.com/zyf/chatapi/internal/service/auth/authn/sessionrestore"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	"github.com/zyf/chatapi/internal/store"
@@ -41,8 +42,8 @@ func TestLoadUserSessionRestoresPrincipalAndActor(t *testing.T) {
 
 	var gotActor actor.Actor
 	var gotUserID string
-	handler := httpmiddleware.LoadUserSession(sessionService, zap.NewNop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sessionPrincipal, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context())
+	handler := httpmiddleware.LoadUserSession(sessionrestore.NewService(sessionService), zap.NewNop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessionPrincipal, ok := session.PrincipalFromContext(r.Context())
 		if !ok {
 			t.Fatal("expected session principal in context")
 		}
@@ -72,7 +73,7 @@ func TestLoadUserSessionRestoresPrincipalAndActor(t *testing.T) {
 }
 
 func TestRequireUserSessionRejectsMissingSession(t *testing.T) {
-	handler := httpmiddleware.RequireUserSession(zap.NewNop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := httpmiddleware.RequireUserSession(policy.NewService(), zap.NewNop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 

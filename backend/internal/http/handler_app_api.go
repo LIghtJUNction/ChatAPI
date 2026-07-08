@@ -8,8 +8,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
-	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
 )
@@ -21,7 +21,7 @@ type AppAPIHandler struct {
 }
 
 func (h AppAPIHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
-	principal, ok := httpmiddleware.AppAPIPrincipalFromContext(r.Context())
+	principal, ok := appkey.PrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {
 		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
 		return
@@ -36,7 +36,7 @@ func (h AppAPIHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
-	principal, ok := httpmiddleware.AppAPIPrincipalFromContext(r.Context())
+	principal, ok := appkey.PrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {
 		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
 		return
@@ -60,7 +60,7 @@ func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
-	principal, ok := httpmiddleware.AppAPIPrincipalFromContext(r.Context())
+	principal, ok := appkey.PrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {
 		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
 		return
@@ -75,7 +75,7 @@ func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request)
 }
 
 func (h AppAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {
-	principal, ok := httpmiddleware.AppAPIPrincipalFromContext(r.Context())
+	principal, ok := appkey.PrincipalFromContext(r.Context())
 	if !ok || strings.TrimSpace(principal.UserID) == "" {
 		http.Error(w, "app api key unauthorized", http.StatusUnauthorized)
 		return

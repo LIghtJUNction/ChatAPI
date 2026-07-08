@@ -9,9 +9,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
-	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/protocol"
+	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
+	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
@@ -187,7 +188,7 @@ func (h ChatAPIHandler) executeTurnControl(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if principal, ok := httpmiddleware.AppAPIPrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
+	if principal, ok := appkey.PrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
 		if _, err := h.Query.ListMessagesForOwner(r.Context(), command.ConversationID, principal.UserID); err != nil {
 			status := http.StatusNotFound
 			if errors.Is(err, turnquerysvc.ErrForbidden) {
@@ -202,7 +203,7 @@ func (h ChatAPIHandler) executeTurnControl(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	if principal, ok := httpmiddleware.UserSessionPrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
+	if principal, ok := session.PrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
 		if _, err := h.Query.ListMessagesForOwner(r.Context(), command.ConversationID, principal.UserID); err != nil {
 			status := http.StatusNotFound
 			if errors.Is(err, turnquerysvc.ErrForbidden) {

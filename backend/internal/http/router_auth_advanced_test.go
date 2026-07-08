@@ -45,7 +45,6 @@ import (
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	usersvc "github.com/zyf/chatapi/internal/service/user"
 	"github.com/zyf/chatapi/internal/store"
 )
 
@@ -357,7 +356,6 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 	modelKeyService := modelkey.NewService(st, cfg.MasterKey)
 	appKeyService := appkey.NewService(st)
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
-	userService := usersvc.NewService(accountService, st, appKeyService, modelKeyService)
 	authSettings := authsettings.NewService(st, cfg)
 	geetestService := geetest.NewService(cfg, nil)
 	totpService := totpsvc.NewService(st, cfg.MasterKey, "ChatAPI")
@@ -383,6 +381,7 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 
 	return httpapi.RouterDeps{
 		Config:        cfg,
+		Store:         st,
 		Turn:          turnService,
 		Query:         queryService,
 		ModelAPIKeys:  modelKeyService,
@@ -395,11 +394,11 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 		TOTP:          totpService,
 		OIDC:          oidcService,
 		LoginLimiter:  loginLimiter,
+		Accounts:      accountService,
 		AdminUsers:    authadmin.NewService(accountService, st, policies),
 		AdminChat:     chatadmin.NewService(queryService, turnService, st),
 		Audit:         auditService,
 		Identity:      identityService,
-		Users:         userService,
 		UserSessions:  sessionService,
 		LoggerFactory: logFactory,
 	}

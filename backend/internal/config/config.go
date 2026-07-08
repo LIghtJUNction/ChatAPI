@@ -43,6 +43,8 @@ type Config struct {
 	CORSOrigins                           []string
 	TrustedProxies                        []string
 	MetricsEnabled                        bool
+	AccessRateLimitRequests               int
+	AccessRateLimitWindow                 time.Duration
 	UploadMaxBytes                        int64
 	StorageDefaultQuotaBytes              int64
 	StorageBlockNewConversations          bool
@@ -142,6 +144,8 @@ func Default(mode Mode, backendRoot string) Config {
 		CORSOrigins:                           []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		TrustedProxies:                        nil,
 		MetricsEnabled:                        false,
+		AccessRateLimitRequests:               0,
+		AccessRateLimitWindow:                 time.Minute,
 		UploadMaxBytes:                        10 << 20,
 		StorageDefaultQuotaBytes:              0,
 		StorageBlockNewConversations:          false,
@@ -223,6 +227,20 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))
 	cfg.AdminPassword = strings.TrimSpace(os.Getenv("CHATAPI_ADMIN_PASSWORD"))
 	cfg.MetricsEnabled = parseBool(os.Getenv("CHATAPI_METRICS_ENABLED"), cfg.MetricsEnabled)
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_ACCESS_RATE_LIMIT_REQUESTS")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_ACCESS_RATE_LIMIT_REQUESTS: %w", err)
+		}
+		cfg.AccessRateLimitRequests = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("CHATAPI_ACCESS_RATE_LIMIT_WINDOW")); raw != "" {
+		value, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid CHATAPI_ACCESS_RATE_LIMIT_WINDOW: %w", err)
+		}
+		cfg.AccessRateLimitWindow = value
+	}
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_UPLOAD_MAX_BYTES")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
@@ -412,6 +430,12 @@ func (c Config) Validate() error {
 	}
 	if c.UploadMaxBytes <= 0 {
 		return errors.New("upload max bytes must be positive")
+	}
+	if c.AccessRateLimitRequests < 0 {
+		return errors.New("access rate limit requests must be non-negative")
+	}
+	if c.AccessRateLimitRequests > 0 && c.AccessRateLimitWindow <= 0 {
+		return errors.New("access rate limit window must be positive when access rate limiting is enabled")
 	}
 	if c.StorageDefaultQuotaBytes < 0 {
 		return errors.New("storage default quota bytes must be non-negative")

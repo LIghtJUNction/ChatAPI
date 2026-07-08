@@ -11,6 +11,7 @@ import (
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
+	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
 	authadmin "github.com/zyf/chatapi/internal/service/auth/admin"
 	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
 	chatadmin "github.com/zyf/chatapi/internal/service/chat/admin"
@@ -19,11 +20,12 @@ import (
 )
 
 type AdminHandler struct {
-	Users        *authadmin.Service
-	Chat         *chatadmin.Service
-	Audit        *auditsvc.Service
-	AuthSettings *authsettings.Service
-	Logger       *zap.Logger
+	Users          *authadmin.Service
+	Chat           *chatadmin.Service
+	Audit          *auditsvc.Service
+	AuthSettings   *authsettings.Service
+	AccessSettings *authaccess.SettingsService
+	Logger         *zap.Logger
 }
 
 func (h AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -388,6 +390,44 @@ func (h AdminHandler) SetAuthSettings(w http.ResponseWriter, r *http.Request) {
 	h.record(r, "admin.auth", "auth_settings", "system_settings", "update", "success", nil)
 	item["ok"] = true
 	writeJSON(w, http.StatusOK, item)
+}
+
+func (h AdminHandler) GetAccessSettings(w http.ResponseWriter, r *http.Request) {
+	if h.AccessSettings == nil {
+		http.Error(w, "access settings service not configured", http.StatusInternalServerError)
+		return
+	}
+	item, err := h.AccessSettings.GetDocument(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (h AdminHandler) SetAccessSettings(w http.ResponseWriter, r *http.Request) {
+	if h.AccessSettings == nil {
+		http.Error(w, "access settings service not configured", http.StatusInternalServerError)
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	item, err := h.AccessSettings.Set(r.Context(), body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h.record(r, "admin.access", "access_settings", "system_access_settings", "update", "success", nil)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":               true,
+		"key":              "system_access_settings",
+		"current":          item,
+		"schema":           h.AccessSettings.Schema(),
+		"response_version": 1,
+	})
 }
 
 func (h AdminHandler) record(r *http.Request, eventType string, resourceType string, resourceID string, action string, outcome string, metadata map[string]any) {

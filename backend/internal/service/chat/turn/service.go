@@ -199,11 +199,19 @@ func (s *Service) CompleteConversation(ctx context.Context, input store.Complete
 func (s *Service) AbortConversation(ctx context.Context, conversationID string, reason string) error {
 	previousState, err := s.Pending.StartAbort(conversationID)
 	if err != nil {
+		logging.BindContext(s.Logger, ctx,
+			zap.String("conversation.id", conversationID),
+			zap.String("turn.action", "abort"),
+		).Warn("turn abort start rejected", zap.Error(err))
 		return s.resolveMutationError(ctx, conversationID, err)
 	}
 	conversation, message, err := s.Store.AbortPendingTurn(ctx, store.AbortPendingInput{ConversationID: conversationID, Reason: reason})
 	if err != nil {
 		s.Pending.RevertFinalize(conversationID, previousState)
+		logging.BindContext(s.Logger, ctx,
+			zap.String("conversation.id", conversationID),
+			zap.String("turn.action", "abort"),
+		).Error("turn abort persistence failed", zap.Error(err))
 		return err
 	}
 	messages, listErr := s.Store.ListMessages(ctx, conversationID)
@@ -215,6 +223,12 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 	body := protocol.AbortError(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses)), reason)
 	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "abort", ErrorBody: body})
 	s.notifyText(ctx, s.ownerID(ctx), conversation.Title, reason)
+	logging.BindContext(s.Logger, ctx,
+		zap.String("owner.id", s.ownerID(ctx)),
+		zap.String("conversation.id", conversationID),
+		zap.String("request.format", stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses))),
+		zap.String("turn.action", "abort"),
+	).Info("turn aborted conversation")
 	return s.Pending.Abort(conversationID, body)
 }
 
@@ -237,8 +251,17 @@ func (s *Service) ExpirePendingTurns(ctx context.Context, ttl time.Duration, now
 
 func (s *Service) ExecuteTurnControl(ctx context.Context, command TurnControlCommand) (map[string]any, error) {
 	if err := command.Validate(); err != nil {
+		logging.BindContext(s.Logger, ctx,
+			zap.String("conversation.id", command.ConversationID),
+			zap.String("turn.control.kind", string(command.Kind)),
+		).Warn("turn control validation failed", zap.Error(err))
 		return nil, err
 	}
+	logging.BindContext(s.Logger, ctx,
+		zap.String("conversation.id", command.ConversationID),
+		zap.String("turn.control.kind", string(command.Kind)),
+		zap.String("response.id", command.ResponseID),
+	).Debug("turn control dispatch")
 	switch command.Kind {
 	case TurnControlRespond, TurnControlStreamComplete:
 		return s.CompleteConversation(ctx, store.CompletePendingInput{

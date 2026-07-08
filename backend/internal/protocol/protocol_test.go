@@ -91,6 +91,32 @@ func TestParseRequestSupportsResponsesDirectInputParts(t *testing.T) {
 	}
 }
 
+func TestParseRequestSupportsResponsesMessageContentWithoutRole(t *testing.T) {
+	request := ParseRequest("responses", map[string]any{
+		"model": "gpt-test",
+		"input": []any{
+			map[string]any{
+				"content": []any{
+					map[string]any{"type": "input_text", "text": "hello"},
+					map[string]any{"type": "input_image", "image_url": "data:image/png;base64,ZmFrZQ==", "media_type": "image/png"},
+				},
+			},
+		},
+	})
+	if request.UserContent != "hello" {
+		t.Fatalf("unexpected user content: %#v", request.UserContent)
+	}
+	if len(request.InputParts) != 2 {
+		t.Fatalf("unexpected responses message content parts: %#v", request.InputParts)
+	}
+	if request.InputParts[0].Type != "text" || request.InputParts[1].Type != "image" {
+		t.Fatalf("unexpected responses parsed parts: %#v", request.InputParts)
+	}
+	if request.InputParts[1].URL != "data:image/png;base64,ZmFrZQ==" {
+		t.Fatalf("unexpected responses image url: %#v", request.InputParts[1])
+	}
+}
+
 func TestParseRequestSupportsAnthropicImageSourceBlocks(t *testing.T) {
 	request := ParseRequest("anthropic_messages", map[string]any{
 		"model": "claude-test",

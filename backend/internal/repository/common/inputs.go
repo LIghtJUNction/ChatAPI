@@ -187,6 +187,11 @@ type AbortPendingInput struct {
 	Reason         string
 }
 
+type DisconnectPendingInput struct {
+	ConversationID string
+	Reason         string
+}
+
 type DeleteConversationsResult struct {
 	DeletedConversations int `json:"deleted_conversations"`
 	DeletedMessages      int `json:"deleted_messages"`

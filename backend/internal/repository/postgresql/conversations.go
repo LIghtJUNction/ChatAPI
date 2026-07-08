@@ -605,6 +605,100 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingI
 	return conversation, message, nil
 }
 
+func (s *Store) DisconnectPendingTurn(ctx context.Context, input common.DisconnectPendingInput) (common.Conversation, common.Message, error) {
+	conversation, err := s.GetConversation(ctx, input.ConversationID)
+	if err != nil {
+		return common.Conversation{}, common.Message{}, err
+	}
+	metadata := ensureMap(conversation.Metadata)
+	if isPendingRequestDisconnected(metadata) {
+		return conversation, common.Message{}, common.ErrPendingDisconnected
+	}
+	if !isTurnCompletable(metadata) {
+		return common.Conversation{}, common.Message{}, common.ErrTurnConflict
+	}
+	metadata["realtime_status"] = "disconnected"
+	metadata["realtime_draft_text"] = ""
+	now := time.Now().UTC()
+
+	message := common.Message{
+		ID:        "msg_" + uuid.NewString(),
+		Role:      "assistant",
+		Content:   stringValue(input.Reason, "request disconnected"),
+		CreatedAt: now,
+		Status:    "disconnected",
+		Metadata: map[string]any{
+			"response_mode": "assistant_message",
+			"disconnect":    true,
+		},
+	}
+	conversation.Metadata = metadata
+	conversation.UpdatedAt = now
+	conversation.LastMessageAt = now
+	conversation.MessageCount += 1
+	conversation.LastMessagePreview = message.Content
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return common.Conversation{}, common.Message{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO messages(
+			id, conversation_id, role, content, created_at, status, response_id, metadata_json
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+	`, message.ID, conversation.ID, message.Role, message.Content, now, message.Status, nil, mustJSON(message.Metadata)); err != nil {
+		return common.Conversation{}, common.Message{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE conversations
+		SET updated_at = $1, last_message_at = $2, message_count = $3, last_message_preview = $4, metadata_json = $5::jsonb
+		WHERE id = $6
+	`, now, now, conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
+		return common.Conversation{}, common.Message{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return common.Conversation{}, common.Message{}, err
+	}
+	return conversation, message, nil
+}
+
+func (s *Store) DisconnectAllPendingTurns(ctx context.Context, reason string) (common.ExpirePendingTurnsResult, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id
+		FROM conversations
+		WHERE COALESCE(metadata_json->>'realtime_status', '') IN ('waiting', 'streaming')
+	`)
+	if err != nil {
+		return common.ExpirePendingTurnsResult{}, err
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return common.ExpirePendingTurnsResult{}, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return common.ExpirePendingTurnsResult{}, err
+	}
+
+	result := common.ExpirePendingTurnsResult{}
+	for _, id := range ids {
+		if _, _, err := s.DisconnectPendingTurn(ctx, common.DisconnectPendingInput{
+			ConversationID: id,
+			Reason:         reason,
+		}); err == nil {
+			result.ExpiredConversations++
+		}
+	}
+	return result, nil
+}
+
 func scanConversation(row rowScanner) (common.Conversation, error) {
 	var item common.Conversation
 	var metadataJSON []byte
@@ -797,6 +891,11 @@ func isDraftWritable(metadata map[string]any) bool {
 func isTurnCompletable(metadata map[string]any) bool {
 	status := metadataString(metadata, "realtime_status", "waiting")
 	return status == "waiting" || status == "streaming"
+}
+
+func isPendingRequestDisconnected(metadata map[string]any) bool {
+	status := metadataString(metadata, "realtime_status", "waiting")
+	return status == "disconnected"
 }
 
 func metadataString(metadata map[string]any, key string, fallback string) string {

@@ -519,6 +519,11 @@ func isTurnCompletable(metadata map[string]any) bool {
 	return status == "waiting" || status == "streaming"
 }
 
+func isPendingRequestDisconnected(metadata map[string]any) bool {
+	status := metadataString(metadata, "realtime_status", "waiting")
+	return status == "disconnected"
+}
+
 func metadataString(metadata map[string]any, key string, fallback string) string {
 	value, _ := metadata[key].(string)
 	if strings.TrimSpace(value) == "" {

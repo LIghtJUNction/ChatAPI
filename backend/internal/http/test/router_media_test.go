@@ -156,6 +156,109 @@ func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
 	}
 }
 
+func TestResponsesMessageContentDataURLTranscodesToAVIF(t *testing.T) {
+	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer st.Close()
+	if err := migrations.Bootstrap(context.Background(), st.DB()); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	logFactory, err := logging.NewFactory(logging.Config{Level: "debug", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	st.Logger = logFactory.Layer(logging.LayerRepository)
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
+		ID:       "user_media_resp",
+		Username: "mediaresp",
+		Email:    "mediaresp@example.com",
+		Role:     "user",
+		IsActive: true,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	cfg := config.Default(config.ModeServe, filepath.Join(t.TempDir(), "backend"))
+	cfg.MediaDerivedDir = filepath.Join(t.TempDir(), "derived")
+
+	pendingRegistry := pending.NewPendingRegistry()
+	turnService := &turnsvc.Service{
+		Submitter: &turnsvc.Submitter{
+			Store:              st,
+			Pending:            pendingRegistry,
+			Realtime:           noopRealtime{},
+			PreparedImageClean: localstore.Store{RootDir: cfg.MediaDerivedDir},
+		},
+		Pending:            pendingRegistry,
+		Store:              st,
+		OwnerIDFromContext: actor.OwnerIDFromContext,
+		ActorFromContext:   actor.FromContext,
+		Logger:             logFactory.Layer(logging.LayerTurn),
+	}
+	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
+	modelKeyService := modelkey.NewService(st, "test-master-key")
+	_, modelKey, err := modelKeyService.CreateKey(context.Background(), "user_media_resp", "media-model", "demo-media")
+	if err != nil {
+		t.Fatalf("create model key: %v", err)
+	}
+
+	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
+		Config:        cfg,
+		ChatRepo:      st,
+		AuthRepo:      st,
+		ConfigRepo:    st,
+		StorageRepo:   st,
+		AuditRepo:     st,
+		PlatformRepo:  st,
+		Turn:          turnService,
+		Query:         queryService,
+		ModelAPIKeys:  modelKeyService,
+		LoggerFactory: logFactory,
+	}))
+	defer server.Close()
+
+	resultCh := make(chan map[string]any, 1)
+	go func() {
+		resultCh <- postJSONWithHeaders(t, server.URL+"/v1/responses", map[string]any{
+			"model": "demo-media",
+			"input": []any{
+				map[string]any{
+					"content": []any{
+						map[string]any{"type": "input_text", "text": "see image"},
+						map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(tinyPNGBytes(t))},
+					},
+				},
+			},
+		}, map[string]string{
+			"Authorization": "Bearer " + modelKey,
+		}, http.StatusOK)
+	}()
+
+	req := waitForRequestForOwner(t, queryService, "user_media_resp")
+	assets, err := st.ListMediaAssets(context.Background())
+	if err != nil {
+		t.Fatalf("list media assets: %v", err)
+	}
+	if len(assets) != 1 {
+		t.Fatalf("expected 1 media asset, got %#v", assets)
+	}
+	if filepath.Ext(assets[0].Path) != ".avif" {
+		t.Fatalf("expected avif asset path, got %#v", assets[0])
+	}
+
+	if _, err := turnService.CompleteConversation(context.Background(), common.CompletePendingInput{
+		ConversationID: req.ConversationID,
+		ResponseID:     "resp_done",
+		OutputText:     "done",
+		Mode:           "assistant_message",
+	}); err != nil {
+		t.Fatalf("complete conversation: %v", err)
+	}
+	<-resultCh
+}
+
 func tinyPNGBytes(t *testing.T) []byte {
 	t.Helper()
 	img := image.NewNRGBA(image.Rect(0, 0, 2, 1))

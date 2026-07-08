@@ -101,8 +101,15 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 		zap.String("conversation.id", turn.ConversationID),
 		zap.String("request.id", turn.RequestID),
 	).Info("pending response created")
+	go s.disconnectOnRequestDone(turn.ConversationID, ctx.Err, turn.RequestID)
 	result, err := s.Pending.WaitTurn(ctx, turn)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			_, _, _ = s.Store.DisconnectPendingTurn(context.Background(), common.DisconnectPendingInput{
+				ConversationID: turn.ConversationID,
+				Reason:         "request disconnected",
+			})
+		}
 		logging.BindContext(s.Logger, ctx,
 			zap.String("owner.id", ownerID),
 			zap.String("conversation.id", turn.ConversationID),
@@ -135,7 +142,16 @@ func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*
 		zap.String("conversation.id", conversation.ID),
 		zap.String("request.id", turn.RequestID),
 	).Info("pending stream created")
+	go s.disconnectOnRequestDone(conversation.ID, ctx.Err, turn.RequestID)
 	return turn, conversation, nil
+}
+
+func (s *Service) DisconnectRecoveredPending(ctx context.Context, reason string) (ExpireResult, error) {
+	result, err := s.Store.DisconnectAllPendingTurns(ctx, reason)
+	if err != nil {
+		return ExpireResult{}, err
+	}
+	return ExpireResult{ExpiredConversations: result.ExpiredConversations}, nil
 }
 
 func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk string) (map[string]any, error) {
@@ -403,4 +419,42 @@ type pendingRegistryLike interface {
 	GetByConversationID(string) (*PendingTurn, bool)
 	FindByToolCallID(string, string) (*PendingTurn, bool)
 	FindConversationIDByToolCallID(string, string) (string, bool)
+}
+
+func (s *Service) disconnectOnRequestDone(conversationID string, errFn func() error, requestID string) {
+	if s == nil {
+		return
+	}
+	for {
+		time.Sleep(50 * time.Millisecond)
+		if errFn == nil {
+			return
+		}
+		err := errFn()
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		if _, pending := s.Pending.GetByConversationID(conversationID); !pending {
+			return
+		}
+		_, _, _ = s.Store.DisconnectPendingTurn(context.Background(), common.DisconnectPendingInput{
+			ConversationID: conversationID,
+			Reason:         "request disconnected",
+		})
+		_ = s.Pending.Abort(conversationID, map[string]any{
+			"error": map[string]any{
+				"message": "request disconnected",
+				"type":    "request_disconnected",
+				"code":    "request_disconnected",
+			},
+		})
+		logging.BindContext(s.Logger, context.Background(),
+			zap.String("conversation.id", conversationID),
+			zap.String("request.id", requestID),
+		).Info("pending request disconnected")
+		return
+	}
 }

@@ -156,6 +156,9 @@ func run() error {
 		},
 		Logger: logFactory.Layer(logging.LayerTurn),
 	}
+	if _, err := turnService.DisconnectRecoveredPending(ctx, "server restarted"); err != nil {
+		return fmt.Errorf("disconnect recovered pending turns: %w", err)
+	}
 
 	handler := httprouter.New(httprouter.Deps{
 		Config:         cfg,

@@ -44,6 +44,10 @@ func extractResponsesTurnInputParts(input []any) []InputPart {
 			continue
 		}
 		role := stringValue(record["role"], stringValue(record["type"], ""))
+		if _, hasContent := record["content"]; hasContent && role == "" {
+			parts = append(parts, extractPartsFromMessageContent(record["content"])...)
+			continue
+		}
 		switch role {
 		case "user":
 			parts = append(parts, extractPartsFromMessageContent(record["content"])...)

@@ -26,6 +26,8 @@ type Writer interface {
 	UpdateDraft(context.Context, common.UpdateDraftInput) (common.Conversation, error)
 	CompletePendingTurn(context.Context, common.CompletePendingInput) (common.Conversation, common.Message, error)
 	AbortPendingTurn(context.Context, common.AbortPendingInput) (common.Conversation, common.Message, error)
+	DisconnectPendingTurn(context.Context, common.DisconnectPendingInput) (common.Conversation, common.Message, error)
+	DisconnectAllPendingTurns(context.Context, string) (common.ExpirePendingTurnsResult, error)
 }
 
 type Store interface {

@@ -1,9 +1,9 @@
 package admincontrol
 
 import (
-	"github.com/zyf/chatapi/internal/repository/authrepo"
-	"github.com/zyf/chatapi/internal/repository/chatrepo"
-	"github.com/zyf/chatapi/internal/repository/storagerepo"
+	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf/chatapi/internal/repository/chat"
+	"github.com/zyf/chatapi/internal/repository/storage"
 	"github.com/zyf/chatapi/internal/service/account"
 	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
 	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
@@ -15,9 +15,9 @@ type Deps struct {
 	Accounts       *account.Service
 	Query          *turnquerysvc.Service
 	Turn           *turnsvc.Service
-	ChatStore      chatrepo.Store
-	StorageStore   storagerepo.Store
-	KeyStore       authrepo.KeyStore
+	ChatStore      chat.Store
+	StorageStore   storage.Store
+	KeyStore       auth.KeyStore
 	AuthSettings   *authsettings.Service
 	AccessSettings *authaccess.SettingsService
 }
@@ -26,9 +26,9 @@ type Service struct {
 	accounts       *account.Service
 	query          *turnquerysvc.Service
 	turn           *turnsvc.Service
-	chatStore      chatrepo.Store
-	storageStore   storagerepo.Store
-	keyStore       authrepo.KeyStore
+	chatStore      chat.Store
+	storageStore   storage.Store
+	keyStore       auth.KeyStore
 	authSettings   *authsettings.Service
 	accessSettings *authaccess.SettingsService
 }

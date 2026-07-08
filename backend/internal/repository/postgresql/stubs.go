@@ -3,13 +3,13 @@ package postgresql
 import (
 	"context"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, error) {
+func (s *Store) MigrationStatus(ctx context.Context) (common.MigrationStatus, error) {
 	rows, err := s.pool.Query(ctx, `SELECT key, value FROM db_meta`)
 	if err != nil {
-		return store.MigrationStatus{}, err
+		return common.MigrationStatus{}, err
 	}
 	defer rows.Close()
 
@@ -18,12 +18,12 @@ func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, err
 		var key string
 		var value string
 		if err := rows.Scan(&key, &value); err != nil {
-			return store.MigrationStatus{}, err
+			return common.MigrationStatus{}, err
 		}
 		meta[key] = value
 	}
 	if err := rows.Err(); err != nil {
-		return store.MigrationStatus{}, err
+		return common.MigrationStatus{}, err
 	}
 
 	rows, err = s.pool.Query(ctx, `
@@ -32,16 +32,16 @@ func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, err
 		ORDER BY version ASC
 	`)
 	if err != nil {
-		return store.MigrationStatus{}, err
+		return common.MigrationStatus{}, err
 	}
 	defer rows.Close()
 
-	applied := make([]store.AppliedMigration, 0)
+	applied := make([]common.AppliedMigration, 0)
 	dirty := meta["migration_dirty"] == "1"
 	for rows.Next() {
-		var item store.AppliedMigration
+		var item common.AppliedMigration
 		if err := rows.Scan(&item.Version, &item.Name, &item.AppliedAt, &item.Checksum, &item.Dirty); err != nil {
-			return store.MigrationStatus{}, err
+			return common.MigrationStatus{}, err
 		}
 		if item.Dirty {
 			dirty = true
@@ -49,10 +49,10 @@ func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, err
 		applied = append(applied, item)
 	}
 	if err := rows.Err(); err != nil {
-		return store.MigrationStatus{}, err
+		return common.MigrationStatus{}, err
 	}
 
-	return store.MigrationStatus{
+	return common.MigrationStatus{
 		SchemaVersion:  meta["schema_version"],
 		AppVersion:     meta["app_version"],
 		MigrationDirty: dirty,

@@ -13,8 +13,8 @@ import (
 
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/platform/email"
-	"github.com/zyf/chatapi/internal/repository/authrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +35,7 @@ var (
 )
 
 type Service struct {
-	store          authrepo.VerificationStore
+	store          auth.VerificationStore
 	sender         email.Sender
 	now            func() time.Time
 	generateCode   func() (string, error)
@@ -51,7 +51,7 @@ type SendResult struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-func NewService(dataStore authrepo.VerificationStore, sender email.Sender) *Service {
+func NewService(dataStore auth.VerificationStore, sender email.Sender) *Service {
 	return &Service{
 		store:          dataStore,
 		sender:         sender,
@@ -80,7 +80,7 @@ func (s *Service) SendCode(ctx context.Context, emailAddress string, purpose str
 		if now.Sub(existing.LastSentAt) < s.resendCooldown {
 			return SendResult{}, ErrCodeRateLimited
 		}
-	} else if !errors.Is(err, store.ErrNotFound) {
+	} else if !errors.Is(err, common.ErrNotFound) {
 		return SendResult{}, err
 	}
 
@@ -89,7 +89,7 @@ func (s *Service) SendCode(ctx context.Context, emailAddress string, purpose str
 		return SendResult{}, err
 	}
 	expiresAt := now.Add(s.ttl)
-	if _, err := s.store.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+	if _, err := s.store.UpsertAuthVerificationCode(ctx, common.UpsertAuthVerificationCodeInput{
 		Email:          emailAddress,
 		Purpose:        purpose,
 		CodeHash:       hashCode(code),
@@ -126,7 +126,7 @@ func (s *Service) VerifyCode(ctx context.Context, emailAddress string, purpose s
 	}
 	item, err := s.store.GetAuthVerificationCode(ctx, emailAddress, purpose)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, common.ErrNotFound) {
 			return ErrCodeNotFound
 		}
 		return err
@@ -142,7 +142,7 @@ func (s *Service) VerifyCode(ctx context.Context, emailAddress string, purpose s
 			_ = s.store.DeleteAuthVerificationCode(ctx, emailAddress, purpose)
 			return ErrCodeAttemptsLimit
 		}
-		_, updateErr := s.store.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+		_, updateErr := s.store.UpsertAuthVerificationCode(ctx, common.UpsertAuthVerificationCodeInput{
 			Email:          emailAddress,
 			Purpose:        purpose,
 			CodeHash:       item.CodeHash,

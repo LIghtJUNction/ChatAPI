@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	"github.com/zyf/chatapi/internal/repository/repositorycontract"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
@@ -13,13 +14,12 @@ import (
 	appkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	modelkeysvc "github.com/zyf/chatapi/internal/service/auth/authz/modelkey"
 	userkeys "github.com/zyf/chatapi/internal/service/usercontrol/keys"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestKeysServiceCreateListRevoke(t *testing.T) {
 	st := openKeysStore(t)
 	ctx := context.Background()
-	if _, err := st.CreateUser(ctx, store.CreateUserInput{ID: "user_a", Username: "alice", Email: "alice@example.com", IsActive: true}); err != nil {
+	if _, err := st.CreateUser(ctx, common.CreateUserInput{ID: "user_a", Username: "alice", Email: "alice@example.com", IsActive: true}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	accountService := account.NewService(st)

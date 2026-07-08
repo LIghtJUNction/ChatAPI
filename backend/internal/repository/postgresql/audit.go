@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogInput) (store.AuditLog, error) {
+func (s *Store) CreateAuditLog(ctx context.Context, input common.CreateAuditLogInput) (common.AuditLog, error) {
 	createdAt := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO audit_logs(
@@ -37,9 +37,9 @@ func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogIn
 	)
 	if err != nil {
 		s.logger(ctx).Warn("postgresql create audit log failed", zap.String("audit.event_type", input.EventType), zap.String("audit.action", input.Action), zap.Error(err))
-		return store.AuditLog{}, err
+		return common.AuditLog{}, err
 	}
-	return store.AuditLog{
+	return common.AuditLog{
 		ID:           input.ID,
 		ActorUserID:  input.ActorUserID,
 		ActorRole:    input.ActorRole,
@@ -56,7 +56,7 @@ func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogIn
 	}, nil
 }
 
-func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInput) ([]store.AuditLog, error) {
+func (s *Store) ListAuditLogs(ctx context.Context, input common.ListAuditLogsInput) ([]common.AuditLog, error) {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 50
@@ -90,7 +90,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 	}
 	defer rows.Close()
 
-	items := make([]store.AuditLog, 0)
+	items := make([]common.AuditLog, 0)
 	for rows.Next() {
 		item, err := scanAuditLog(rows)
 		if err != nil {
@@ -105,7 +105,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 	return items, nil
 }
 
-func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsInput) (int, error) {
+func (s *Store) CountAuditLogs(ctx context.Context, input common.CountAuditLogsInput) (int, error) {
 	args := make([]any, 0, 5)
 	conditions := make([]string, 0, 5)
 	if strings.TrimSpace(input.EventType) != "" {
@@ -140,8 +140,8 @@ func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsIn
 	return count, nil
 }
 
-func scanAuditLog(row rowScanner) (store.AuditLog, error) {
-	var item store.AuditLog
+func scanAuditLog(row rowScanner) (common.AuditLog, error) {
+	var item common.AuditLog
 	var metadataJSON []byte
 	if err := row.Scan(
 		&item.ID,
@@ -159,9 +159,9 @@ func scanAuditLog(row rowScanner) (store.AuditLog, error) {
 		&item.CreatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.AuditLog{}, store.ErrNotFound
+			return common.AuditLog{}, common.ErrNotFound
 		}
-		return store.AuditLog{}, err
+		return common.AuditLog{}, err
 	}
 	item.Metadata = parseJSONMap(metadataJSON)
 	return item, nil

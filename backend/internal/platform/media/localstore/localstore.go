@@ -3,10 +3,10 @@ package localstore
 import (
 	"context"
 	"fmt"
+	"github.com/zyf/chatapi/internal/platform/media"
 	"os"
 	"path/filepath"
 	"strings"
-	"github.com/zyf/chatapi/internal/platform/media"
 )
 
 type StoredAsset struct {

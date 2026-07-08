@@ -1,4 +1,4 @@
-package store
+package storage
 
 import "time"
 
@@ -57,4 +57,26 @@ type StorageFileDeletionFailure struct {
 	Attempts  int       `json:"attempts"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type CreateUploadedImageInput struct {
+	ID               string
+	OwnerID          string
+	Filename         string
+	OriginalFilename string
+	ContentType      string
+	Bytes            int64
+	URL              string
+}
+
+type UpsertStorageFileDeletionFailureInput struct {
+	Path      string
+	Filename  string
+	OwnerID   string
+	Bytes     int64
+	LastError string
+}
+
+type DeleteUploadedImagesResult struct {
+	DeletedImages int `json:"deleted_images"`
 }

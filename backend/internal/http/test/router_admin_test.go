@@ -16,6 +16,7 @@ import (
 	httpapi "github.com/zyf/chatapi/internal/http"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/platform/password"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service/account"
@@ -32,7 +33,6 @@ import (
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestRouterAdminFlow(t *testing.T) {
@@ -59,7 +59,7 @@ func TestRouterAdminFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("user password hash: %v", err)
 	}
-	if _, err := st.CreateUser(context.Background(), store.CreateUserInput{
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:           "admin_user",
 		Username:     "admin",
 		Email:        "admin@example.com",
@@ -70,7 +70,7 @@ func TestRouterAdminFlow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create admin user: %v", err)
 	}
-	if _, err := st.CreateUser(context.Background(), store.CreateUserInput{
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:           "normal_user",
 		Username:     "bob",
 		Email:        "bob@example.com",

@@ -3,8 +3,8 @@ package policy
 import (
 	"strings"
 
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func (s *Service) IsAuthenticated(pr principal.Principal) bool {
@@ -33,14 +33,14 @@ func (s *Service) IsAdmin(pr principal.Principal) bool {
 	return strings.EqualFold(strings.TrimSpace(pr.Role), "admin")
 }
 
-func (s *Service) IsAdminUser(user store.User) bool {
+func (s *Service) IsAdminUser(user common.User) bool {
 	if user.LocalAdmin {
 		return true
 	}
 	return strings.EqualFold(strings.TrimSpace(user.Role), "admin")
 }
 
-func (s *Service) EffectiveRole(user store.User) string {
+func (s *Service) EffectiveRole(user common.User) string {
 	if s.IsAdminUser(user) {
 		return "admin"
 	}
@@ -51,7 +51,7 @@ func (s *Service) EffectiveRole(user store.User) string {
 	return role
 }
 
-func (s *Service) SessionPrincipal(user store.User, sessionID string, authMethod string) principal.Principal {
+func (s *Service) SessionPrincipal(user common.User, sessionID string, authMethod string) principal.Principal {
 	return principal.Principal{
 		Kind:       principal.KindHumanSession,
 		SubjectID:  strings.TrimSpace(sessionID),

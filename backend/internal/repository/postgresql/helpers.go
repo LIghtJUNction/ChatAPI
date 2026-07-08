@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 type rowScanner interface {
@@ -25,8 +25,8 @@ func (s *Store) countInt(ctx context.Context, query string, args ...any) (int, e
 	return count, nil
 }
 
-func scanUser(row rowScanner) (store.User, error) {
-	var item store.User
+func scanUser(row rowScanner) (common.User, error) {
+	var item common.User
 	var lastLoginAt *time.Time
 	if err := row.Scan(
 		&item.ID,
@@ -41,16 +41,16 @@ func scanUser(row rowScanner) (store.User, error) {
 		&lastLoginAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.User{}, store.ErrNotFound
+			return common.User{}, common.ErrNotFound
 		}
-		return store.User{}, err
+		return common.User{}, err
 	}
 	item.LastLoginAt = lastLoginAt
 	return item, nil
 }
 
-func scanUserIdentity(row rowScanner) (store.UserIdentity, error) {
-	var item store.UserIdentity
+func scanUserIdentity(row rowScanner) (common.UserIdentity, error) {
+	var item common.UserIdentity
 	var profileJSON []byte
 	var lastLoginAt *time.Time
 	if err := row.Scan(
@@ -66,47 +66,47 @@ func scanUserIdentity(row rowScanner) (store.UserIdentity, error) {
 		&lastLoginAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.UserIdentity{}, store.ErrNotFound
+			return common.UserIdentity{}, common.ErrNotFound
 		}
-		return store.UserIdentity{}, err
+		return common.UserIdentity{}, err
 	}
 	item.Profile = parseJSONMap(profileJSON)
 	item.LastLoginAt = lastLoginAt
 	return item, nil
 }
 
-func scanSystemConfig(row rowScanner) (store.SystemConfig, error) {
-	var item store.SystemConfig
+func scanSystemConfig(row rowScanner) (common.SystemConfig, error) {
+	var item common.SystemConfig
 	var valueJSON []byte
 	if err := row.Scan(&item.Key, &valueJSON, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.SystemConfig{}, store.ErrNotFound
+			return common.SystemConfig{}, common.ErrNotFound
 		}
-		return store.SystemConfig{}, err
+		return common.SystemConfig{}, err
 	}
 	item.Value = parseJSONMap(valueJSON)
 	return item, nil
 }
 
-func scanAuthVerificationCode(row rowScanner) (store.AuthVerificationCode, error) {
-	var item store.AuthVerificationCode
+func scanAuthVerificationCode(row rowScanner) (common.AuthVerificationCode, error) {
+	var item common.AuthVerificationCode
 	if err := row.Scan(&item.Email, &item.Purpose, &item.CodeHash, &item.FailedAttempts, &item.ExpiresAt, &item.LastSentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.AuthVerificationCode{}, store.ErrNotFound
+			return common.AuthVerificationCode{}, common.ErrNotFound
 		}
-		return store.AuthVerificationCode{}, err
+		return common.AuthVerificationCode{}, err
 	}
 	return item, nil
 }
 
-func scanUserConfig(row rowScanner) (store.UserConfig, error) {
-	var item store.UserConfig
+func scanUserConfig(row rowScanner) (common.UserConfig, error) {
+	var item common.UserConfig
 	var valueJSON []byte
 	if err := row.Scan(&item.UserID, &item.Key, &valueJSON, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.UserConfig{}, store.ErrNotFound
+			return common.UserConfig{}, common.ErrNotFound
 		}
-		return store.UserConfig{}, err
+		return common.UserConfig{}, err
 	}
 	item.Value = parseJSONMap(valueJSON)
 	return item, nil

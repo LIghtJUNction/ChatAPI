@@ -4,15 +4,15 @@ import (
 	"context"
 	"strings"
 
+	"github.com/zyf/chatapi/internal/repository/common"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
-	"github.com/zyf/chatapi/internal/store"
 )
 
-func (s *Service) ListRequests(ctx context.Context) ([]store.Request, error) {
+func (s *Service) ListRequests(ctx context.Context) ([]common.Request, error) {
 	return s.query.ListRequests(ctx)
 }
 
-func (s *Service) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
+func (s *Service) GetRequest(ctx context.Context, requestID string) (common.Request, error) {
 	return s.query.GetRequest(ctx, strings.TrimSpace(requestID))
 }
 

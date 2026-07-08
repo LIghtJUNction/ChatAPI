@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/actor"
-	"github.com/zyf/chatapi/internal/repository/auditrepo"
-	"github.com/zyf/chatapi/internal/store"
+	auditrepo "github.com/zyf/chatapi/internal/repository/audit"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 type Service struct {
@@ -27,7 +27,7 @@ func NewService(dataStore auditrepo.Store) *Service {
 	return &Service{store: dataStore}
 }
 
-func (s *Service) Record(ctx context.Context, input store.CreateAuditLogInput) (store.AuditLog, error) {
+func (s *Service) Record(ctx context.Context, input common.CreateAuditLogInput) (common.AuditLog, error) {
 	if strings.TrimSpace(input.ID) == "" {
 		input.ID = "audit_" + uuid.NewString()
 	}
@@ -37,8 +37,8 @@ func (s *Service) Record(ctx context.Context, input store.CreateAuditLogInput) (
 	return s.store.CreateAuditLog(ctx, input)
 }
 
-func (s *Service) RecordActor(ctx context.Context, act actor.Actor, eventType string, resourceType string, resourceID string, action string, outcome string, metadata map[string]any) (store.AuditLog, error) {
-	return s.Record(ctx, store.CreateAuditLogInput{
+func (s *Service) RecordActor(ctx context.Context, act actor.Actor, eventType string, resourceType string, resourceID string, action string, outcome string, metadata map[string]any) (common.AuditLog, error) {
+	return s.Record(ctx, common.CreateAuditLogInput{
 		ActorUserID:  strings.TrimSpace(act.UserID),
 		ActorRole:    strings.TrimSpace(act.Role),
 		ActorSource:  strings.TrimSpace(act.Source),
@@ -56,7 +56,7 @@ func (s *Service) List(ctx context.Context, input ListInput) ([]map[string]any, 
 	if limit <= 0 {
 		limit = 50
 	}
-	items, err := s.store.ListAuditLogs(ctx, store.ListAuditLogsInput{
+	items, err := s.store.ListAuditLogs(ctx, common.ListAuditLogsInput{
 		Limit:       limit,
 		EventType:   strings.TrimSpace(input.EventType),
 		ActorUserID: strings.TrimSpace(input.ActorUserID),
@@ -69,7 +69,7 @@ func (s *Service) List(ctx context.Context, input ListInput) ([]map[string]any, 
 		result = append(result, mapAuditLog(item))
 	}
 	if input.IncludeAppAPI {
-		appLogs, err := s.store.ListAppAPIKeyAuditLogs(ctx, store.ListAppAPIKeyAuditLogsInput{
+		appLogs, err := s.store.ListAppAPIKeyAuditLogs(ctx, common.ListAppAPIKeyAuditLogsInput{
 			Limit:  limit,
 			UserID: strings.TrimSpace(input.ActorUserID),
 		})
@@ -92,7 +92,7 @@ func (s *Service) List(ctx context.Context, input ListInput) ([]map[string]any, 
 	return result, nil
 }
 
-func mapAuditLog(item store.AuditLog) map[string]any {
+func mapAuditLog(item common.AuditLog) map[string]any {
 	return map[string]any{
 		"id":            item.ID,
 		"type":          "audit_log",
@@ -111,7 +111,7 @@ func mapAuditLog(item store.AuditLog) map[string]any {
 	}
 }
 
-func mapAppAuditLog(item store.AppAPIKeyAuditLog) map[string]any {
+func mapAppAuditLog(item common.AppAPIKeyAuditLog) map[string]any {
 	return map[string]any{
 		"id":             item.ID,
 		"type":           "app_api_audit_log",

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) CreateUploadedImage(ctx context.Context, input store.CreateUploadedImageInput) (store.UploadedImage, error) {
+func (s *Store) CreateUploadedImage(ctx context.Context, input common.CreateUploadedImageInput) (common.UploadedImage, error) {
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO uploaded_images(
@@ -27,9 +27,9 @@ func (s *Store) CreateUploadedImage(ctx context.Context, input store.CreateUploa
 		input.URL,
 		formatTime(createdAt),
 	); err != nil {
-		return store.UploadedImage{}, err
+		return common.UploadedImage{}, err
 	}
-	return store.UploadedImage{
+	return common.UploadedImage{
 		ID:               input.ID,
 		OwnerID:          input.OwnerID,
 		Filename:         input.Filename,
@@ -41,7 +41,7 @@ func (s *Store) CreateUploadedImage(ctx context.Context, input store.CreateUploa
 	}, nil
 }
 
-func (s *Store) ListUploadedImagesByOwner(ctx context.Context, ownerID string) ([]store.UploadedImage, error) {
+func (s *Store) ListUploadedImagesByOwner(ctx context.Context, ownerID string) ([]common.UploadedImage, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, owner_id, filename, original_filename, content_type, bytes, url, created_at
 		FROM uploaded_images
@@ -53,7 +53,7 @@ func (s *Store) ListUploadedImagesByOwner(ctx context.Context, ownerID string) (
 	}
 	defer rows.Close()
 
-	items := make([]store.UploadedImage, 0)
+	items := make([]common.UploadedImage, 0)
 	for rows.Next() {
 		item, err := scanUploadedImage(rows)
 		if err != nil {
@@ -64,7 +64,7 @@ func (s *Store) ListUploadedImagesByOwner(ctx context.Context, ownerID string) (
 	return items, rows.Err()
 }
 
-func (s *Store) ListUploadedImages(ctx context.Context) ([]store.UploadedImage, error) {
+func (s *Store) ListUploadedImages(ctx context.Context) ([]common.UploadedImage, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, owner_id, filename, original_filename, content_type, bytes, url, created_at
 		FROM uploaded_images
@@ -75,7 +75,7 @@ func (s *Store) ListUploadedImages(ctx context.Context) ([]store.UploadedImage, 
 	}
 	defer rows.Close()
 
-	items := make([]store.UploadedImage, 0)
+	items := make([]common.UploadedImage, 0)
 	for rows.Next() {
 		item, err := scanUploadedImage(rows)
 		if err != nil {
@@ -86,10 +86,10 @@ func (s *Store) ListUploadedImages(ctx context.Context) ([]store.UploadedImage, 
 	return items, rows.Err()
 }
 
-func (s *Store) DeleteUploadedImagesByFilenames(ctx context.Context, filenames []string) (store.DeleteUploadedImagesResult, error) {
+func (s *Store) DeleteUploadedImagesByFilenames(ctx context.Context, filenames []string) (common.DeleteUploadedImagesResult, error) {
 	filenames = uniqueNonEmptyStrings(filenames)
 	if len(filenames) == 0 {
-		return store.DeleteUploadedImagesResult{}, nil
+		return common.DeleteUploadedImagesResult{}, nil
 	}
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(filenames)), ",")
 	args := make([]any, 0, len(filenames))
@@ -99,16 +99,16 @@ func (s *Store) DeleteUploadedImagesByFilenames(ctx context.Context, filenames [
 	query := fmt.Sprintf(`DELETE FROM uploaded_images WHERE filename IN (%s)`, placeholders)
 	res, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return store.DeleteUploadedImagesResult{}, err
+		return common.DeleteUploadedImagesResult{}, err
 	}
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return store.DeleteUploadedImagesResult{}, err
+		return common.DeleteUploadedImagesResult{}, err
 	}
-	return store.DeleteUploadedImagesResult{DeletedImages: int(rowsAffected)}, nil
+	return common.DeleteUploadedImagesResult{DeletedImages: int(rowsAffected)}, nil
 }
 
-func (s *Store) UpsertStorageFileDeletionFailure(ctx context.Context, input store.UpsertStorageFileDeletionFailureInput) (store.StorageFileDeletionFailure, error) {
+func (s *Store) UpsertStorageFileDeletionFailure(ctx context.Context, input common.UpsertStorageFileDeletionFailureInput) (common.StorageFileDeletionFailure, error) {
 	now := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO storage_file_deletion_failures(
@@ -130,12 +130,12 @@ func (s *Store) UpsertStorageFileDeletionFailure(ctx context.Context, input stor
 		formatTime(now),
 		formatTime(now),
 	); err != nil {
-		return store.StorageFileDeletionFailure{}, err
+		return common.StorageFileDeletionFailure{}, err
 	}
 	return s.getStorageFileDeletionFailure(ctx, input.Path)
 }
 
-func (s *Store) ListStorageFileDeletionFailures(ctx context.Context, limit int) ([]store.StorageFileDeletionFailure, error) {
+func (s *Store) ListStorageFileDeletionFailures(ctx context.Context, limit int) ([]common.StorageFileDeletionFailure, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -153,7 +153,7 @@ func (s *Store) ListStorageFileDeletionFailures(ctx context.Context, limit int) 
 	}
 	defer rows.Close()
 
-	items := make([]store.StorageFileDeletionFailure, 0)
+	items := make([]common.StorageFileDeletionFailure, 0)
 	for rows.Next() {
 		item, err := scanStorageFileDeletionFailure(rows)
 		if err != nil {
@@ -179,19 +179,19 @@ func (s *Store) DeleteStorageFileDeletionFailures(ctx context.Context, paths []s
 	return err
 }
 
-func (s *Store) getStorageFileDeletionFailure(ctx context.Context, path string) (store.StorageFileDeletionFailure, error) {
+func (s *Store) getStorageFileDeletionFailure(ctx context.Context, path string) (common.StorageFileDeletionFailure, error) {
 	item, err := scanStorageFileDeletionFailure(s.db.QueryRowContext(ctx, `
 		SELECT path, filename, owner_id, bytes, last_error, attempts, created_at, updated_at
 		FROM storage_file_deletion_failures
 		WHERE path = ?
 	`, path))
 	if err != nil {
-		return store.StorageFileDeletionFailure{}, err
+		return common.StorageFileDeletionFailure{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) ListStorageUserQuotas(ctx context.Context) ([]store.StorageUserQuota, error) {
+func (s *Store) ListStorageUserQuotas(ctx context.Context) ([]common.StorageUserQuota, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT owner_id, quota_bytes, created_at, updated_at
 		FROM storage_user_quotas
@@ -202,7 +202,7 @@ func (s *Store) ListStorageUserQuotas(ctx context.Context) ([]store.StorageUserQ
 	}
 	defer rows.Close()
 
-	items := make([]store.StorageUserQuota, 0)
+	items := make([]common.StorageUserQuota, 0)
 	for rows.Next() {
 		item, err := scanStorageUserQuota(rows)
 		if err != nil {
@@ -213,7 +213,7 @@ func (s *Store) ListStorageUserQuotas(ctx context.Context) ([]store.StorageUserQ
 	return items, rows.Err()
 }
 
-func (s *Store) GetStorageUserQuota(ctx context.Context, ownerID string) (store.StorageUserQuota, error) {
+func (s *Store) GetStorageUserQuota(ctx context.Context, ownerID string) (common.StorageUserQuota, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT owner_id, quota_bytes, created_at, updated_at
 		FROM storage_user_quotas
@@ -222,14 +222,14 @@ func (s *Store) GetStorageUserQuota(ctx context.Context, ownerID string) (store.
 	item, err := scanStorageUserQuota(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.StorageUserQuota{}, errNotFound
+			return common.StorageUserQuota{}, errNotFound
 		}
-		return store.StorageUserQuota{}, err
+		return common.StorageUserQuota{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) SetStorageUserQuota(ctx context.Context, ownerID string, quotaBytes int64) (store.StorageUserQuota, error) {
+func (s *Store) SetStorageUserQuota(ctx context.Context, ownerID string, quotaBytes int64) (common.StorageUserQuota, error) {
 	now := formatTime(time.Now().UTC())
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO storage_user_quotas(owner_id, quota_bytes, created_at, updated_at)
@@ -238,7 +238,7 @@ func (s *Store) SetStorageUserQuota(ctx context.Context, ownerID string, quotaBy
 			quota_bytes = excluded.quota_bytes,
 			updated_at = excluded.updated_at
 	`, ownerID, quotaBytes, now, now); err != nil {
-		return store.StorageUserQuota{}, err
+		return common.StorageUserQuota{}, err
 	}
 	return s.GetStorageUserQuota(ctx, ownerID)
 }

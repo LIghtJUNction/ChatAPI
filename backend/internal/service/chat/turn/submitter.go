@@ -7,12 +7,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/zyf/chatapi/internal/protocol"
+	"github.com/zyf/chatapi/internal/repository/common"
 	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type Store interface {
-	CreatePendingTurn(context.Context, store.CreatePendingInput) (store.Conversation, store.Message, error)
+	CreatePendingTurn(context.Context, common.CreatePendingInput) (common.Conversation, common.Message, error)
 }
 
 type PendingRegistrar interface {
@@ -21,7 +21,7 @@ type PendingRegistrar interface {
 }
 
 type RealtimePublisher interface {
-	PublishConversationUpsert(store.Conversation, []store.Message)
+	PublishConversationUpsert(common.Conversation, []common.Message)
 }
 
 type PreparedImageCleaner interface {
@@ -41,12 +41,12 @@ type Submitter struct {
 	PreparedImageClean PreparedImageCleaner
 }
 
-func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn, store.Conversation, store.Message, error) {
+func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn, common.Conversation, common.Message, error) {
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
 	conversationID := "conv_" + uuid.NewString()
 
-	conversation, message, err := s.Store.CreatePendingTurn(ctx, store.CreatePendingInput{
+	conversation, message, err := s.Store.CreatePendingTurn(ctx, common.CreatePendingInput{
 		ConversationID:   conversationID,
 		RequestID:        requestID,
 		ResponseID:       responseID,
@@ -64,8 +64,8 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		RequestHeaders:   input.RequestMeta.RequestHeaders,
 		RequestBody:      input.RawBody,
 		ToolSchemas:      protocol.RawToolSchemas(input.Request.ToolSchemas),
-		ToolChoice:       store.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
-		ResponseFormat: store.RequestResponseFormat{
+		ToolChoice:       common.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
+		ResponseFormat: common.RequestResponseFormat{
 			Type:   input.Request.ResponseFormat.Type,
 			Name:   input.Request.ResponseFormat.Name,
 			Schema: input.Request.ResponseFormat.Schema,
@@ -74,7 +74,7 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	})
 	if err != nil {
 		s.cleanupPreparedImages(ctx, input.PreparedImages)
-		return nil, store.Conversation{}, store.Message{}, err
+		return nil, common.Conversation{}, common.Message{}, err
 	}
 
 	turn := &PendingTurn{
@@ -92,7 +92,7 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		Done:              make(chan PendingResult, 1),
 	}
 	s.Pending.Add(turn)
-	s.Realtime.PublishConversationUpsert(conversation, []store.Message{message})
+	s.Realtime.PublishConversationUpsert(conversation, []common.Message{message})
 	if s.Hooks.AfterCreate != nil {
 		s.Hooks.AfterCreate(ctx, input.Request, conversationID, responseID)
 	}
@@ -104,13 +104,13 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	return turn, conversation, message, nil
 }
 
-func toCreatePendingImageAssets(images []preprocesssvc.PreparedImage) []store.CreatePendingImageAssetInput {
+func toCreatePendingImageAssets(images []preprocesssvc.PreparedImage) []common.CreatePendingImageAssetInput {
 	if len(images) == 0 {
 		return nil
 	}
-	items := make([]store.CreatePendingImageAssetInput, 0, len(images))
+	items := make([]common.CreatePendingImageAssetInput, 0, len(images))
 	for _, image := range images {
-		items = append(items, store.CreatePendingImageAssetInput{
+		items = append(items, common.CreatePendingImageAssetInput{
 			FileID:            image.FileID,
 			Path:              image.Path,
 			MediaType:         image.MediaType,
@@ -136,13 +136,13 @@ func (s *Submitter) cleanupPreparedImages(ctx context.Context, images []preproce
 	}
 }
 
-func toStoreInputParts(parts []protocol.InputPart) []store.RequestInputPart {
+func toStoreInputParts(parts []protocol.InputPart) []common.RequestInputPart {
 	if len(parts) == 0 {
 		return nil
 	}
-	items := make([]store.RequestInputPart, 0, len(parts))
+	items := make([]common.RequestInputPart, 0, len(parts))
 	for _, item := range parts {
-		items = append(items, store.RequestInputPart{
+		items = append(items, common.RequestInputPart{
 			Type:      item.Type,
 			Text:      item.Text,
 			MediaType: item.MediaType,

@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/service/account"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 var (
@@ -38,8 +38,8 @@ type Service struct {
 }
 
 type AuthResult struct {
-	User         store.User
-	Identity     store.UserIdentity
+	User         common.User
+	Identity     common.UserIdentity
 	PreviousRole string
 	RoleChanged  bool
 }
@@ -72,7 +72,7 @@ func (s *Service) AuthenticateResult(ctx context.Context, claims Claims) (AuthRe
 		}
 		return s.updateLogin(ctx, user, claims)
 	}
-	if !errors.Is(err, store.ErrNotFound) {
+	if !errors.Is(err, common.ErrNotFound) {
 		return AuthResult{}, err
 	}
 	user, err := s.lookupOrCreateUser(ctx, claims)
@@ -109,17 +109,17 @@ func (s *Service) BindIdentity(ctx context.Context, userID string, claims Claims
 	if err == nil && identity.UserID != user.ID {
 		return AuthResult{}, ErrIdentityConflict
 	}
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err != nil && !errors.Is(err, common.ErrNotFound) {
 		return AuthResult{}, err
 	}
 	return s.updateUserAndIdentity(ctx, user, identity, claims)
 }
 
-func (s *Service) updateLogin(ctx context.Context, user store.User, claims Claims) (AuthResult, error) {
-	return s.updateUserAndIdentity(ctx, user, store.UserIdentity{}, claims)
+func (s *Service) updateLogin(ctx context.Context, user common.User, claims Claims) (AuthResult, error) {
+	return s.updateUserAndIdentity(ctx, user, common.UserIdentity{}, claims)
 }
 
-func (s *Service) updateUserAndIdentity(ctx context.Context, user store.User, existingIdentity store.UserIdentity, claims Claims) (AuthResult, error) {
+func (s *Service) updateUserAndIdentity(ctx context.Context, user common.User, existingIdentity common.UserIdentity, claims Claims) (AuthResult, error) {
 	if !user.IsActive {
 		return AuthResult{}, ErrAccessDenied
 	}
@@ -139,7 +139,7 @@ func (s *Service) updateUserAndIdentity(ctx context.Context, user store.User, ex
 	if err != nil {
 		return AuthResult{}, err
 	}
-	identity, err := s.accounts.UpsertIdentity(ctx, store.UpsertUserIdentityInput{
+	identity, err := s.accounts.UpsertIdentity(ctx, common.UpsertUserIdentityInput{
 		ID:            identityID(existingIdentity),
 		UserID:        updated.ID,
 		Provider:      "oidc",
@@ -160,22 +160,22 @@ func (s *Service) updateUserAndIdentity(ctx context.Context, user store.User, ex
 	}, nil
 }
 
-func (s *Service) lookupOrCreateUser(ctx context.Context, claims Claims) (store.User, error) {
+func (s *Service) lookupOrCreateUser(ctx context.Context, claims Claims) (common.User, error) {
 	email := normalizeEmail(claims.Email)
 	if email != "" {
 		if !claims.EmailVerified {
-			return store.User{}, ErrEmailUnverified
+			return common.User{}, ErrEmailUnverified
 		}
 		user, err := s.accounts.GetUserByEmail(ctx, email)
 		if err == nil {
 			return user, nil
 		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return store.User{}, err
+		if !errors.Is(err, common.ErrNotFound) {
+			return common.User{}, err
 		}
 	}
 	if !s.cfg.OIDCAutoCreateUser {
-		return store.User{}, ErrUserNotFound
+		return common.User{}, ErrUserNotFound
 	}
 	return s.accounts.CreateUser(ctx, account.CreateUserInput{
 		Username:   usernameFromClaims(claims),
@@ -186,7 +186,7 @@ func (s *Service) lookupOrCreateUser(ctx context.Context, claims Claims) (store.
 	})
 }
 
-func (s *Service) nextRole(user store.User, email string, verified bool) string {
+func (s *Service) nextRole(user common.User, email string, verified bool) string {
 	role := s.roleForEmail(email, verified)
 	if user.LocalAdmin {
 		return "admin"
@@ -236,7 +236,7 @@ func (s *Service) roleForEmail(email string, verified bool) string {
 	return "user"
 }
 
-func identityID(existing store.UserIdentity) string {
+func identityID(existing common.UserIdentity) string {
 	if strings.TrimSpace(existing.ID) != "" {
 		return strings.TrimSpace(existing.ID)
 	}
@@ -287,7 +287,7 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func userRole(user store.User) string {
+func userRole(user common.User) string {
 	if user.LocalAdmin || strings.EqualFold(strings.TrimSpace(user.Role), "admin") {
 		return "admin"
 	}

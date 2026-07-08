@@ -1,4 +1,4 @@
-package store
+package auth
 
 import "time"
 
@@ -99,4 +99,36 @@ type UserIdentity struct {
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 	LastLoginAt   *time.Time     `json:"last_login_at,omitempty"`
+}
+
+type CreateUserInput struct {
+	ID           string
+	Username     string
+	Email        string
+	PasswordHash string
+	Role         string
+	IsActive     bool
+	LocalAdmin   bool
+}
+
+type UpdateUserInput struct {
+	ID           string
+	Username     string
+	Email        string
+	PasswordHash string
+	Role         string
+	IsActive     bool
+	LocalAdmin   bool
+	LastLoginAt  *time.Time
+}
+
+type UpsertUserIdentityInput struct {
+	ID            string
+	UserID        string
+	Provider      string
+	Subject       string
+	Email         string
+	EmailVerified bool
+	Profile       map[string]any
+	LastLoginAt   *time.Time
 }

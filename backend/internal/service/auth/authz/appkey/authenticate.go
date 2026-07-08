@@ -6,23 +6,23 @@ import (
 	"time"
 
 	keyutil "github.com/zyf/chatapi/internal/platform/apikey"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 func (s *Service) Authenticate(ctx context.Context, rawKey string) (Principal, error) {
 	rawKey = strings.TrimSpace(rawKey)
 	if rawKey == "" {
-		return Principal{}, store.ErrNotFound
+		return Principal{}, common.ErrNotFound
 	}
 	item, err := s.store.GetAppAPIKeyByPrefix(ctx, keyutil.Prefix(rawKey))
 	if err != nil || item.RevokedAt != nil {
-		return Principal{}, store.ErrNotFound
+		return Principal{}, common.ErrNotFound
 	}
 	if item.ExpiresAt != nil && item.ExpiresAt.Before(time.Now().UTC()) {
-		return Principal{}, store.ErrNotFound
+		return Principal{}, common.ErrNotFound
 	}
 	if !keyutil.Verify(rawKey, item.KeyHash) {
-		return Principal{}, store.ErrNotFound
+		return Principal{}, common.ErrNotFound
 	}
 	now := time.Now().UTC()
 	if item.LastUsedAt == nil || now.Sub(*item.LastUsedAt) >= appLastUsedMinInterval {

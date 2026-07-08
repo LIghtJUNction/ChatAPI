@@ -10,9 +10,9 @@ import (
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/http/httpx"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/service/chat/turn"
 	"github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -128,7 +128,7 @@ func (h LabHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.Req
 	})
 	if err != nil {
 		switch {
-		case errors.Is(err, store.ErrTurnConflict):
+		case errors.Is(err, common.ErrTurnConflict):
 			http.Error(w, err.Error(), http.StatusConflict)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)

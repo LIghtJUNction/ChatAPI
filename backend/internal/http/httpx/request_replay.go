@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 func RequestBaseURL(r *http.Request) string {
@@ -29,7 +29,7 @@ func RequestBaseURL(r *http.Request) string {
 	return (&url.URL{Scheme: scheme, Host: host}).String()
 }
 
-func BuildReplayCurl(baseURL string, item store.Request) string {
+func BuildReplayCurl(baseURL string, item common.Request) string {
 	method := strings.TrimSpace(item.RequestMethod)
 	if method == "" {
 		method = http.MethodPost

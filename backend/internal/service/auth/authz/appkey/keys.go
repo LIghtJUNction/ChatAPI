@@ -8,12 +8,12 @@ import (
 	"github.com/google/uuid"
 
 	keyutil "github.com/zyf/chatapi/internal/platform/apikey"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Service) CreateKey(ctx context.Context, userID string, name string, scopes []string, resourceLimits map[string]any, expiresAt *time.Time) (store.AppAPIKey, string, error) {
+func (s *Service) CreateKey(ctx context.Context, userID string, name string, scopes []string, resourceLimits map[string]any, expiresAt *time.Time) (common.AppAPIKey, string, error) {
 	raw := "ak-" + uuid.NewString()
-	item, err := s.store.CreateAppAPIKey(ctx, store.CreateAppAPIKeyInput{
+	item, err := s.store.CreateAppAPIKey(ctx, common.CreateAppAPIKeyInput{
 		ID:             "appkey_" + uuid.NewString(),
 		UserID:         strings.TrimSpace(userID),
 		Name:           strings.TrimSpace(name),
@@ -24,7 +24,7 @@ func (s *Service) CreateKey(ctx context.Context, userID string, name string, sco
 		ExpiresAt:      expiresAt,
 	})
 	if err != nil {
-		return store.AppAPIKey{}, "", err
+		return common.AppAPIKey{}, "", err
 	}
 	return item, raw, nil
 }

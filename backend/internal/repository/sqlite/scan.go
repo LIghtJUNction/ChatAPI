@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 type requestScanner interface {
@@ -59,8 +59,8 @@ type auditLogScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanRequestRow(scanner requestScanner) (store.Request, error) {
-	var item store.Request
+func scanRequestRow(scanner requestScanner) (common.Request, error) {
+	var item common.Request
 	var createdAt string
 	var updatedAt string
 	var messageMetadataJSON string
@@ -72,7 +72,7 @@ func scanRequestRow(scanner requestScanner) (store.Request, error) {
 		&updatedAt,
 		&conversationMetadataJSON,
 	); err != nil {
-		return store.Request{}, err
+		return common.Request{}, err
 	}
 
 	messageMetadata := parseJSONMap(messageMetadataJSON)
@@ -104,18 +104,18 @@ func scanRequestRow(scanner requestScanner) (store.Request, error) {
 	return item, nil
 }
 
-func parseRequestInputParts(value any) []store.RequestInputPart {
+func parseRequestInputParts(value any) []common.RequestInputPart {
 	items, ok := value.([]any)
 	if !ok {
 		return nil
 	}
-	parts := make([]store.RequestInputPart, 0, len(items))
+	parts := make([]common.RequestInputPart, 0, len(items))
 	for _, item := range items {
 		record, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		parts = append(parts, store.RequestInputPart{
+		parts = append(parts, common.RequestInputPart{
 			Type:      metadataString(record, "type", ""),
 			Text:      metadataString(record, "text", ""),
 			MediaType: metadataString(record, "media_type", ""),
@@ -155,17 +155,17 @@ func parseStringSliceMap(value any) map[string][]string {
 	return result
 }
 
-func parseRequestToolChoice(value any) store.RequestToolChoice {
+func parseRequestToolChoice(value any) common.RequestToolChoice {
 	record, _ := value.(map[string]any)
-	return store.RequestToolChoice{
+	return common.RequestToolChoice{
 		Type: metadataString(record, "type", ""),
 		Name: metadataString(record, "name", ""),
 	}
 }
 
-func parseRequestResponseFormat(value any) store.RequestResponseFormat {
+func parseRequestResponseFormat(value any) common.RequestResponseFormat {
 	record, _ := value.(map[string]any)
-	format := store.RequestResponseFormat{
+	format := common.RequestResponseFormat{
 		Type: metadataString(record, "type", ""),
 		Name: metadataString(record, "name", ""),
 	}
@@ -173,8 +173,8 @@ func parseRequestResponseFormat(value any) store.RequestResponseFormat {
 	return format
 }
 
-func scanAppAPIKey(scanner appAPIKeyScanner) (store.AppAPIKey, error) {
-	var item store.AppAPIKey
+func scanAppAPIKey(scanner appAPIKeyScanner) (common.AppAPIKey, error) {
+	var item common.AppAPIKey
 	var scopesJSON string
 	var resourceLimitsJSON string
 	var expiresAt sql.NullString
@@ -194,7 +194,7 @@ func scanAppAPIKey(scanner appAPIKeyScanner) (store.AppAPIKey, error) {
 		&createdAt,
 		&revokedAt,
 	); err != nil {
-		return store.AppAPIKey{}, err
+		return common.AppAPIKey{}, err
 	}
 	item.Scopes = parseJSONStringArray(scopesJSON)
 	item.ResourceLimits = parseJSONMap(resourceLimitsJSON)
@@ -214,8 +214,8 @@ func scanAppAPIKey(scanner appAPIKeyScanner) (store.AppAPIKey, error) {
 	return item, nil
 }
 
-func scanAppAPIKeyAuditLog(scanner appAPIKeyAuditLogScanner) (store.AppAPIKeyAuditLog, error) {
-	var item store.AppAPIKeyAuditLog
+func scanAppAPIKeyAuditLog(scanner appAPIKeyAuditLogScanner) (common.AppAPIKeyAuditLog, error) {
+	var item common.AppAPIKeyAuditLog
 	var createdAt string
 	if err := scanner.Scan(
 		&item.ID,
@@ -226,14 +226,14 @@ func scanAppAPIKeyAuditLog(scanner appAPIKeyAuditLogScanner) (store.AppAPIKeyAud
 		&item.ErrorCode,
 		&createdAt,
 	); err != nil {
-		return store.AppAPIKeyAuditLog{}, err
+		return common.AppAPIKeyAuditLog{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
 	return item, nil
 }
 
-func scanModelAPIKey(scanner modelAPIKeyScanner) (store.ModelAPIKey, error) {
-	var item store.ModelAPIKey
+func scanModelAPIKey(scanner modelAPIKeyScanner) (common.ModelAPIKey, error) {
+	var item common.ModelAPIKey
 	var model string
 	var lastUsedAt sql.NullString
 	var createdAt string
@@ -249,7 +249,7 @@ func scanModelAPIKey(scanner modelAPIKeyScanner) (store.ModelAPIKey, error) {
 		&createdAt,
 		&revokedAt,
 	); err != nil {
-		return store.ModelAPIKey{}, err
+		return common.ModelAPIKey{}, err
 	}
 	item.Model = strings.TrimSpace(model)
 	if lastUsedAt.Valid {
@@ -264,8 +264,8 @@ func scanModelAPIKey(scanner modelAPIKeyScanner) (store.ModelAPIKey, error) {
 	return item, nil
 }
 
-func scanUser(scanner userScanner) (store.User, error) {
-	var item store.User
+func scanUser(scanner userScanner) (common.User, error) {
+	var item common.User
 	var isActive int
 	var localAdmin int
 	var createdAt string
@@ -283,7 +283,7 @@ func scanUser(scanner userScanner) (store.User, error) {
 		&updatedAt,
 		&lastLoginAt,
 	); err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
 	item.IsActive = isActive != 0
 	item.LocalAdmin = localAdmin != 0
@@ -296,8 +296,8 @@ func scanUser(scanner userScanner) (store.User, error) {
 	return item, nil
 }
 
-func scanUserIdentity(scanner userIdentityScanner) (store.UserIdentity, error) {
-	var item store.UserIdentity
+func scanUserIdentity(scanner userIdentityScanner) (common.UserIdentity, error) {
+	var item common.UserIdentity
 	var emailVerified int
 	var profileJSON string
 	var createdAt string
@@ -315,7 +315,7 @@ func scanUserIdentity(scanner userIdentityScanner) (store.UserIdentity, error) {
 		&updatedAt,
 		&lastLoginAt,
 	); err != nil {
-		return store.UserIdentity{}, err
+		return common.UserIdentity{}, err
 	}
 	item.EmailVerified = emailVerified != 0
 	item.Profile = parseJSONMap(profileJSON)
@@ -328,13 +328,13 @@ func scanUserIdentity(scanner userIdentityScanner) (store.UserIdentity, error) {
 	return item, nil
 }
 
-func scanSystemConfig(scanner systemConfigScanner) (store.SystemConfig, error) {
-	var item store.SystemConfig
+func scanSystemConfig(scanner systemConfigScanner) (common.SystemConfig, error) {
+	var item common.SystemConfig
 	var valueJSON string
 	var createdAt string
 	var updatedAt string
 	if err := scanner.Scan(&item.Key, &valueJSON, &createdAt, &updatedAt); err != nil {
-		return store.SystemConfig{}, err
+		return common.SystemConfig{}, err
 	}
 	item.Value = parseJSONMap(valueJSON)
 	item.CreatedAt = parseTime(createdAt)
@@ -342,13 +342,13 @@ func scanSystemConfig(scanner systemConfigScanner) (store.SystemConfig, error) {
 	return item, nil
 }
 
-func scanUserConfig(scanner userConfigScanner) (store.UserConfig, error) {
-	var item store.UserConfig
+func scanUserConfig(scanner userConfigScanner) (common.UserConfig, error) {
+	var item common.UserConfig
 	var valueJSON string
 	var createdAt string
 	var updatedAt string
 	if err := scanner.Scan(&item.UserID, &item.Key, &valueJSON, &createdAt, &updatedAt); err != nil {
-		return store.UserConfig{}, err
+		return common.UserConfig{}, err
 	}
 	item.Value = parseJSONMap(valueJSON)
 	item.CreatedAt = parseTime(createdAt)
@@ -356,8 +356,8 @@ func scanUserConfig(scanner userConfigScanner) (store.UserConfig, error) {
 	return item, nil
 }
 
-func scanAutomationRule(scanner automationRuleScanner) (store.AutomationRule, error) {
-	var item store.AutomationRule
+func scanAutomationRule(scanner automationRuleScanner) (common.AutomationRule, error) {
+	var item common.AutomationRule
 	var enabled int
 	var payloadJSON string
 	var createdAt string
@@ -370,7 +370,7 @@ func scanAutomationRule(scanner automationRuleScanner) (store.AutomationRule, er
 		&createdAt,
 		&updatedAt,
 	); err != nil {
-		return store.AutomationRule{}, err
+		return common.AutomationRule{}, err
 	}
 	item.Enabled = enabled != 0
 	item.Payload = parseJSONMap(payloadJSON)
@@ -383,14 +383,14 @@ type authVerificationCodeScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanAuthVerificationCode(scanner authVerificationCodeScanner) (store.AuthVerificationCode, error) {
-	var item store.AuthVerificationCode
+func scanAuthVerificationCode(scanner authVerificationCodeScanner) (common.AuthVerificationCode, error) {
+	var item common.AuthVerificationCode
 	var lastSentAt string
 	var expiresAt string
 	var createdAt string
 	var updatedAt string
 	if err := scanner.Scan(&item.Email, &item.Purpose, &item.CodeHash, &item.FailedAttempts, &expiresAt, &lastSentAt, &createdAt, &updatedAt); err != nil {
-		return store.AuthVerificationCode{}, err
+		return common.AuthVerificationCode{}, err
 	}
 	item.ExpiresAt = parseTime(expiresAt)
 	item.LastSentAt = parseTime(lastSentAt)
@@ -399,8 +399,8 @@ func scanAuthVerificationCode(scanner authVerificationCodeScanner) (store.AuthVe
 	return item, nil
 }
 
-func scanUploadedImage(scanner uploadedImageScanner) (store.UploadedImage, error) {
-	var item store.UploadedImage
+func scanUploadedImage(scanner uploadedImageScanner) (common.UploadedImage, error) {
+	var item common.UploadedImage
 	var createdAt string
 	if err := scanner.Scan(
 		&item.ID,
@@ -412,7 +412,7 @@ func scanUploadedImage(scanner uploadedImageScanner) (store.UploadedImage, error
 		&item.URL,
 		&createdAt,
 	); err != nil {
-		return store.UploadedImage{}, err
+		return common.UploadedImage{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
 	return item, nil
@@ -422,8 +422,8 @@ type mediaAssetScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanMediaAsset(scanner mediaAssetScanner) (store.MediaAsset, error) {
-	var item store.MediaAsset
+func scanMediaAsset(scanner mediaAssetScanner) (common.MediaAsset, error) {
+	var item common.MediaAsset
 	var createdAt string
 	if err := scanner.Scan(
 		&item.ID,
@@ -440,14 +440,14 @@ func scanMediaAsset(scanner mediaAssetScanner) (store.MediaAsset, error) {
 		&item.OriginalMediaType,
 		&createdAt,
 	); err != nil {
-		return store.MediaAsset{}, err
+		return common.MediaAsset{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
 	return item, nil
 }
 
-func scanStorageFileDeletionFailure(scanner storageFileDeletionFailureScanner) (store.StorageFileDeletionFailure, error) {
-	var item store.StorageFileDeletionFailure
+func scanStorageFileDeletionFailure(scanner storageFileDeletionFailureScanner) (common.StorageFileDeletionFailure, error) {
+	var item common.StorageFileDeletionFailure
 	var createdAt string
 	var updatedAt string
 	if err := scanner.Scan(
@@ -460,15 +460,15 @@ func scanStorageFileDeletionFailure(scanner storageFileDeletionFailureScanner) (
 		&createdAt,
 		&updatedAt,
 	); err != nil {
-		return store.StorageFileDeletionFailure{}, err
+		return common.StorageFileDeletionFailure{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return item, nil
 }
 
-func scanStorageUserQuota(scanner storageUserQuotaScanner) (store.StorageUserQuota, error) {
-	var item store.StorageUserQuota
+func scanStorageUserQuota(scanner storageUserQuotaScanner) (common.StorageUserQuota, error) {
+	var item common.StorageUserQuota
 	var createdAt, updatedAt string
 	if err := scanner.Scan(
 		&item.OwnerID,
@@ -476,15 +476,15 @@ func scanStorageUserQuota(scanner storageUserQuotaScanner) (store.StorageUserQuo
 		&createdAt,
 		&updatedAt,
 	); err != nil {
-		return store.StorageUserQuota{}, err
+		return common.StorageUserQuota{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
 	return item, nil
 }
 
-func scanAuditLog(scanner auditLogScanner) (store.AuditLog, error) {
-	var item store.AuditLog
+func scanAuditLog(scanner auditLogScanner) (common.AuditLog, error) {
+	var item common.AuditLog
 	var metadataJSON string
 	var createdAt string
 	if err := scanner.Scan(
@@ -502,7 +502,7 @@ func scanAuditLog(scanner auditLogScanner) (store.AuditLog, error) {
 		&metadataJSON,
 		&createdAt,
 	); err != nil {
-		return store.AuditLog{}, err
+		return common.AuditLog{}, err
 	}
 	item.Metadata = parseJSONMap(metadataJSON)
 	item.CreatedAt = parseTime(createdAt)

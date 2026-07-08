@@ -8,16 +8,16 @@ import (
 
 	keyutil "github.com/zyf/chatapi/internal/platform/apikey"
 	"github.com/zyf/chatapi/internal/platform/secretbox"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Service) CreateKey(ctx context.Context, userID string, name string, modelName string) (store.ModelAPIKey, string, error) {
+func (s *Service) CreateKey(ctx context.Context, userID string, name string, modelName string) (common.ModelAPIKey, string, error) {
 	raw := "sk-" + uuid.NewString()
 	ciphertext, err := secretbox.Seal(raw, s.masterKey)
 	if err != nil {
-		return store.ModelAPIKey{}, "", err
+		return common.ModelAPIKey{}, "", err
 	}
-	item, err := s.store.CreateModelAPIKey(ctx, store.CreateModelAPIKeyInput{
+	item, err := s.store.CreateModelAPIKey(ctx, common.CreateModelAPIKeyInput{
 		ID:            "modelkey_" + uuid.NewString(),
 		UserID:        strings.TrimSpace(userID),
 		Name:          strings.TrimSpace(name),
@@ -26,7 +26,7 @@ func (s *Service) CreateKey(ctx context.Context, userID string, name string, mod
 		Model:         strings.TrimSpace(modelName),
 	})
 	if err != nil {
-		return store.ModelAPIKey{}, "", err
+		return common.ModelAPIKey{}, "", err
 	}
 	item.RawKey = raw
 	return item, raw, nil

@@ -14,12 +14,12 @@ import (
 	"github.com/zyf/chatapi/internal/ops/readiness"
 	"github.com/zyf/chatapi/internal/ops/setup"
 	"github.com/zyf/chatapi/internal/platform/media/localstore"
-	"github.com/zyf/chatapi/internal/repository/auditrepo"
-	"github.com/zyf/chatapi/internal/repository/authrepo"
-	"github.com/zyf/chatapi/internal/repository/chatrepo"
-	"github.com/zyf/chatapi/internal/repository/configrepo"
-	"github.com/zyf/chatapi/internal/repository/platformrepo"
-	"github.com/zyf/chatapi/internal/repository/storagerepo"
+	"github.com/zyf/chatapi/internal/repository/audit"
+	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf/chatapi/internal/repository/chat"
+	configrepo "github.com/zyf/chatapi/internal/repository/config"
+	"github.com/zyf/chatapi/internal/repository/platform"
+	"github.com/zyf/chatapi/internal/repository/storage"
 	"github.com/zyf/chatapi/internal/service/account"
 	"github.com/zyf/chatapi/internal/service/admincontrol"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
@@ -46,12 +46,12 @@ import (
 
 type Deps struct {
 	Config         config.Config
-	ChatRepo       chatrepo.Store
-	AuthRepo       authrepo.Store
+	ChatRepo       chat.Store
+	AuthRepo       auth.Store
 	ConfigRepo     configrepo.Store
-	StorageRepo    storagerepo.Store
-	AuditRepo      auditrepo.Store
-	PlatformRepo   platformrepo.MaintenanceStore
+	StorageRepo    storage.Store
+	AuditRepo      audit.Store
+	PlatformRepo   platform.MaintenanceStore
 	Turn           *turn.Service
 	Query          *turnquery.Service
 	ModelAPIKeys   *modelkey.Service

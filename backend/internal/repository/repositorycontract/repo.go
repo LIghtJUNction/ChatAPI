@@ -1,19 +1,19 @@
 package repositorycontract
 
 import (
-	"github.com/zyf/chatapi/internal/repository/auditrepo"
-	"github.com/zyf/chatapi/internal/repository/authrepo"
-	"github.com/zyf/chatapi/internal/repository/chatrepo"
-	"github.com/zyf/chatapi/internal/repository/configrepo"
-	"github.com/zyf/chatapi/internal/repository/platformrepo"
-	"github.com/zyf/chatapi/internal/repository/storagerepo"
+	"github.com/zyf/chatapi/internal/repository/audit"
+	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf/chatapi/internal/repository/chat"
+	"github.com/zyf/chatapi/internal/repository/config"
+	"github.com/zyf/chatapi/internal/repository/platform"
+	"github.com/zyf/chatapi/internal/repository/storage"
 )
 
 type Store interface {
-	platformrepo.MaintenanceStore
-	authrepo.Store
-	configrepo.Store
-	storagerepo.Store
-	auditrepo.Store
-	chatrepo.Store
+	platform.MaintenanceStore
+	auth.Store
+	config.Store
+	storage.Store
+	audit.Store
+	chat.Store
 }

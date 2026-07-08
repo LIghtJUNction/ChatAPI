@@ -6,13 +6,13 @@ import (
 	"strings"
 
 	"github.com/zyf/chatapi/internal/platform/media/localstore"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 type Store interface {
-	ListOrphanMediaAssets(context.Context) ([]store.MediaAsset, error)
+	ListOrphanMediaAssets(context.Context) ([]common.MediaAsset, error)
 	DeleteMediaAssetsByIDs(context.Context, []string) (int, error)
-	UpsertStorageFileDeletionFailure(context.Context, store.UpsertStorageFileDeletionFailureInput) (store.StorageFileDeletionFailure, error)
+	UpsertStorageFileDeletionFailure(context.Context, common.UpsertStorageFileDeletionFailureInput) (common.StorageFileDeletionFailure, error)
 }
 
 type Service struct {
@@ -52,7 +52,7 @@ func (s *Service) CleanupOrphanImages(ctx context.Context) (CleanupOrphanImagesR
 			deleteIDs = append(deleteIDs, item.ID)
 		default:
 			result.DeletionFailurePaths = append(result.DeletionFailurePaths, item.Path)
-			_, _ = s.store.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+			_, _ = s.store.UpsertStorageFileDeletionFailure(ctx, common.UpsertStorageFileDeletionFailureInput{
 				Path:      item.Path,
 				Filename:  item.FileID + ".avif",
 				OwnerID:   item.OwnerID,

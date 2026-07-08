@@ -11,10 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, error) {
+func (s *Store) ListConversations(ctx context.Context) ([]common.Conversation, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(metadata_json->>'response_id', '')
 		FROM conversations
@@ -26,7 +26,7 @@ func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, er
 	}
 	defer rows.Close()
 
-	items := make([]store.Conversation, 0)
+	items := make([]common.Conversation, 0)
 	for rows.Next() {
 		item, err := scanConversation(rows)
 		if err != nil {
@@ -41,7 +41,7 @@ func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, er
 	return items, nil
 }
 
-func (s *Store) GetConversation(ctx context.Context, conversationID string) (store.Conversation, error) {
+func (s *Store) GetConversation(ctx context.Context, conversationID string) (common.Conversation, error) {
 	return scanConversation(s.pool.QueryRow(ctx, `
 		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(metadata_json->>'response_id', '')
 		FROM conversations
@@ -49,7 +49,7 @@ func (s *Store) GetConversation(ctx context.Context, conversationID string) (sto
 	`, strings.TrimSpace(conversationID)))
 }
 
-func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
+func (s *Store) ListRequests(ctx context.Context) ([]common.Request, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT
 			c.id,
@@ -68,7 +68,7 @@ func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
 	}
 	defer rows.Close()
 
-	items := make([]store.Request, 0)
+	items := make([]common.Request, 0)
 	for rows.Next() {
 		item, err := scanRequestRow(rows)
 		if err != nil {
@@ -79,7 +79,7 @@ func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
 	return items, rows.Err()
 }
 
-func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
+func (s *Store) GetRequest(ctx context.Context, requestID string) (common.Request, error) {
 	item, err := scanRequestRow(s.pool.QueryRow(ctx, `
 		SELECT
 			m.conversation_id,
@@ -96,7 +96,7 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request
 	`, strings.TrimSpace(requestID)))
 	if err != nil {
 		s.logger(ctx).Warn("postgresql get request failed", zap.String("request.id", requestID), zap.Error(err))
-		return store.Request{}, err
+		return common.Request{}, err
 	}
 	if item.RequestID == "" {
 		item.RequestID = strings.TrimSpace(requestID)
@@ -104,7 +104,7 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request
 	return item, nil
 }
 
-func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
+func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]common.Message, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json
 		FROM messages
@@ -117,7 +117,7 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 	}
 	defer rows.Close()
 
-	items := make([]store.Message, 0)
+	items := make([]common.Message, 0)
 	for rows.Next() {
 		item, err := scanMessage(rows)
 		if err != nil {
@@ -132,37 +132,37 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 	return items, nil
 }
 
-func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (store.DeleteConversationsResult, error) {
+func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (common.DeleteConversationsResult, error) {
 	conversationIDs = uniqueNonEmptyStrings(conversationIDs)
 	if len(conversationIDs) == 0 {
-		return store.DeleteConversationsResult{}, nil
+		return common.DeleteConversationsResult{}, nil
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var result store.DeleteConversationsResult
+	var result common.DeleteConversationsResult
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE conversation_id = ANY($1)`, conversationIDs).Scan(&result.DeletedMessages); err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id = ANY($1)`, conversationIDs).Scan(&result.DeletedAssetRefs); err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	tag, err := tx.Exec(ctx, `DELETE FROM conversations WHERE id = ANY($1)`, conversationIDs)
 	if err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	result.DeletedConversations = int(tag.RowsAffected())
 	if err := tx.Commit(ctx); err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	return result, nil
 }
 
-func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store.ExpirePendingTurnsResult, error) {
+func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (common.ExpirePendingTurnsResult, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, metadata_json
 		FROM conversations
@@ -170,7 +170,7 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store
 			AND COALESCE(metadata_json->>'realtime_status', '') IN ('waiting', 'streaming')
 	`, cutoff)
 	if err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	type candidate struct {
 		id       string
@@ -182,7 +182,7 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store
 		var metadataJSON []byte
 		if err := rows.Scan(&item.id, &metadataJSON); err != nil {
 			rows.Close()
-			return store.ExpirePendingTurnsResult{}, err
+			return common.ExpirePendingTurnsResult{}, err
 		}
 		item.metadata = ensureMap(parseJSONMap(metadataJSON))
 		item.metadata["realtime_status"] = "expired"
@@ -191,20 +191,20 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	if len(candidates) == 0 {
-		return store.ExpirePendingTurnsResult{}, nil
+		return common.ExpirePendingTurnsResult{}, nil
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	now := time.Now().UTC()
-	var result store.ExpirePendingTurnsResult
+	var result common.ExpirePendingTurnsResult
 	for _, item := range candidates {
 		tag, err := tx.Exec(ctx, `
 			UPDATE conversations
@@ -213,17 +213,17 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store
 				AND COALESCE(metadata_json->>'realtime_status', '') IN ('waiting', 'streaming')
 		`, now, mustJSON(item.metadata), item.id)
 		if err != nil {
-			return store.ExpirePendingTurnsResult{}, err
+			return common.ExpirePendingTurnsResult{}, err
 		}
 		result.ExpiredConversations += int(tag.RowsAffected())
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	return result, nil
 }
 
-func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePendingInput) (store.Conversation, store.Message, error) {
+func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendingInput) (common.Conversation, common.Message, error) {
 	now := time.Now().UTC()
 	metadata := map[string]any{
 		"owner_id":            strings.TrimSpace(input.OwnerID),
@@ -257,7 +257,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			"response_format": input.ResponseFormat,
 		},
 	}
-	conversation := store.Conversation{
+	conversation := common.Conversation{
 		ID:                 strings.TrimSpace(input.ConversationID),
 		Title:              buildConversationTitle(input.UserContent),
 		LastUserText:       input.UserContent,
@@ -270,7 +270,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		ResponseID:         strings.TrimSpace(input.ResponseID),
 	}
 	responseID := strings.TrimSpace(input.ResponseID)
-	message := store.Message{
+	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "user",
 		Content:    input.UserContent,
@@ -283,7 +283,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		s.logger(ctx).Warn("postgresql create pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -303,7 +303,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		conversation.LastUserText,
 		mustJSON(metadata),
 	); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -320,7 +320,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		responseID,
 		mustJSON(userMessageMetadata),
 	); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 
 	for _, asset := range input.PreparedImages {
@@ -345,7 +345,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			strings.TrimSpace(asset.OriginalMediaType),
 			now,
 		); err != nil {
-			return store.Conversation{}, store.Message{}, err
+			return common.Conversation{}, common.Message{}, err
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO media_asset_refs(
@@ -362,26 +362,26 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			asset.InputPartIndex,
 			now,
 		); err != nil {
-			return store.Conversation{}, store.Message{}, err
+			return common.Conversation{}, common.Message{}, err
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		s.logger(ctx).Warn("postgresql create pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	s.logger(ctx).Debug("postgresql pending turn created", zap.String("conversation.id", input.ConversationID), zap.String("request.id", input.RequestID), zap.String("owner.id", input.OwnerID))
 	return conversation, message, nil
 }
 
-func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (store.Conversation, error) {
+func (s *Store) UpdateDraft(ctx context.Context, input common.UpdateDraftInput) (common.Conversation, error) {
 	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
-		return store.Conversation{}, err
+		return common.Conversation{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
 	if !isDraftWritable(metadata) {
-		return store.Conversation{}, store.ErrTurnConflict
+		return common.Conversation{}, common.ErrTurnConflict
 	}
 	metadata["realtime_draft_text"] = input.DraftText
 	metadata["realtime_status"] = "streaming"
@@ -394,20 +394,20 @@ func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (
 		WHERE id = $3
 	`, conversation.UpdatedAt, mustJSON(metadata), conversation.ID); err != nil {
 		s.logger(ctx).Warn("postgresql update draft failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, err
+		return common.Conversation{}, err
 	}
 	s.logger(ctx).Debug("postgresql draft updated", zap.String("conversation.id", input.ConversationID), zap.Int("draft.length", len([]rune(input.DraftText))))
 	return conversation, nil
 }
 
-func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePendingInput) (store.Conversation, store.Message, error) {
+func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePendingInput) (common.Conversation, common.Message, error) {
 	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
 	if !isTurnCompletable(metadata) {
-		return store.Conversation{}, store.Message{}, store.ErrTurnConflict
+		return common.Conversation{}, common.Message{}, common.ErrTurnConflict
 	}
 	draftText, _ := metadata["realtime_draft_text"].(string)
 	finalText := strings.TrimSpace(input.OutputText)
@@ -441,7 +441,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 		messageMetadata["reasoning_stream_mode"] = input.ReasoningStreamMode
 	}
 	responseID := strings.TrimSpace(input.ResponseID)
-	message := store.Message{
+	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "assistant",
 		Content:    messageContent,
@@ -460,7 +460,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		s.logger(ctx).Warn("postgresql complete pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -469,37 +469,37 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 			id, conversation_id, role, content, created_at, status, response_id, metadata_json
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
 	`, message.ID, conversation.ID, message.Role, message.Content, now, message.Status, responseID, mustJSON(messageMetadata)); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE conversations
 		SET updated_at = $1, last_message_at = $2, message_count = $3, last_message_preview = $4, metadata_json = $5::jsonb
 		WHERE id = $6
 	`, now, now, conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		s.logger(ctx).Warn("postgresql complete pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	s.logger(ctx).Debug("postgresql pending turn completed", zap.String("conversation.id", input.ConversationID), zap.String("response.id", input.ResponseID), zap.String("mode", input.Mode))
 	return conversation, message, nil
 }
 
-func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingInput) (store.Conversation, store.Message, error) {
+func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingInput) (common.Conversation, common.Message, error) {
 	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
 	if !isTurnCompletable(metadata) {
-		return store.Conversation{}, store.Message{}, store.ErrTurnConflict
+		return common.Conversation{}, common.Message{}, common.ErrTurnConflict
 	}
 	metadata["realtime_status"] = "aborted"
 	metadata["realtime_draft_text"] = ""
 	now := time.Now().UTC()
 
-	message := store.Message{
+	message := common.Message{
 		ID:        "msg_" + uuid.NewString(),
 		Role:      "assistant",
 		Content:   input.Reason,
@@ -518,7 +518,7 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		s.logger(ctx).Warn("postgresql abort pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -527,25 +527,25 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 			id, conversation_id, role, content, created_at, status, response_id, metadata_json
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
 	`, message.ID, conversation.ID, message.Role, message.Content, now, message.Status, nil, mustJSON(message.Metadata)); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE conversations
 		SET updated_at = $1, last_message_at = $2, message_count = $3, last_message_preview = $4, metadata_json = $5::jsonb
 		WHERE id = $6
 	`, now, now, conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		s.logger(ctx).Warn("postgresql abort pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	s.logger(ctx).Debug("postgresql pending turn aborted", zap.String("conversation.id", input.ConversationID))
 	return conversation, message, nil
 }
 
-func scanConversation(row rowScanner) (store.Conversation, error) {
-	var item store.Conversation
+func scanConversation(row rowScanner) (common.Conversation, error) {
+	var item common.Conversation
 	var metadataJSON []byte
 	if err := row.Scan(
 		&item.ID,
@@ -560,16 +560,16 @@ func scanConversation(row rowScanner) (store.Conversation, error) {
 		&item.ResponseID,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.Conversation{}, store.ErrNotFound
+			return common.Conversation{}, common.ErrNotFound
 		}
-		return store.Conversation{}, err
+		return common.Conversation{}, err
 	}
 	item.Metadata = parseJSONMap(metadataJSON)
 	return item, nil
 }
 
-func scanRequestRow(scanner rowScanner) (store.Request, error) {
-	var item store.Request
+func scanRequestRow(scanner rowScanner) (common.Request, error) {
+	var item common.Request
 	var messageMetadataJSON []byte
 	var conversationMetadataJSON []byte
 	if err := scanner.Scan(
@@ -580,9 +580,9 @@ func scanRequestRow(scanner rowScanner) (store.Request, error) {
 		&conversationMetadataJSON,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.Request{}, store.ErrNotFound
+			return common.Request{}, common.ErrNotFound
 		}
-		return store.Request{}, err
+		return common.Request{}, err
 	}
 
 	messageMetadata := parseJSONMap(messageMetadataJSON)
@@ -612,18 +612,18 @@ func scanRequestRow(scanner rowScanner) (store.Request, error) {
 	return item, nil
 }
 
-func parseRequestInputParts(value any) []store.RequestInputPart {
+func parseRequestInputParts(value any) []common.RequestInputPart {
 	items, ok := value.([]any)
 	if !ok {
 		return nil
 	}
-	parts := make([]store.RequestInputPart, 0, len(items))
+	parts := make([]common.RequestInputPart, 0, len(items))
 	for _, item := range items {
 		record, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
-		parts = append(parts, store.RequestInputPart{
+		parts = append(parts, common.RequestInputPart{
 			Type:      metadataString(record, "type", ""),
 			Text:      metadataString(record, "text", ""),
 			MediaType: metadataString(record, "media_type", ""),
@@ -663,17 +663,17 @@ func parseStringSliceMap(value any) map[string][]string {
 	return result
 }
 
-func parseRequestToolChoice(value any) store.RequestToolChoice {
+func parseRequestToolChoice(value any) common.RequestToolChoice {
 	record, _ := value.(map[string]any)
-	return store.RequestToolChoice{
+	return common.RequestToolChoice{
 		Type: metadataString(record, "type", ""),
 		Name: metadataString(record, "name", ""),
 	}
 }
 
-func parseRequestResponseFormat(value any) store.RequestResponseFormat {
+func parseRequestResponseFormat(value any) common.RequestResponseFormat {
 	record, _ := value.(map[string]any)
-	format := store.RequestResponseFormat{
+	format := common.RequestResponseFormat{
 		Type: metadataString(record, "type", ""),
 		Name: metadataString(record, "name", ""),
 	}
@@ -681,16 +681,16 @@ func parseRequestResponseFormat(value any) store.RequestResponseFormat {
 	return format
 }
 
-func scanMessage(row rowScanner) (store.Message, error) {
-	var item store.Message
+func scanMessage(row rowScanner) (common.Message, error) {
+	var item common.Message
 	var status *string
 	var responseID *string
 	var metadataJSON []byte
 	if err := row.Scan(&item.ID, &item.Role, &item.Content, &item.CreatedAt, &status, &responseID, &metadataJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.Message{}, store.ErrNotFound
+			return common.Message{}, common.ErrNotFound
 		}
-		return store.Message{}, err
+		return common.Message{}, err
 	}
 	if status != nil {
 		item.Status = *status

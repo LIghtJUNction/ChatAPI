@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/repository/authrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 const systemSettingsKey = "system_settings"
@@ -31,11 +31,11 @@ type PublicSettings struct {
 }
 
 type Service struct {
-	store authrepo.SettingsStore
+	store auth.SettingsStore
 	cfg   config.Config
 }
 
-func NewService(dataStore authrepo.SettingsStore, cfg config.Config) *Service {
+func NewService(dataStore auth.SettingsStore, cfg config.Config) *Service {
 	return &Service{store: dataStore, cfg: cfg}
 }
 
@@ -59,7 +59,7 @@ func (s *Service) Public(ctx context.Context) (PublicSettings, error) {
 		OIDCProviderName:                   providerName(s.cfg),
 	}
 	item, err := s.store.GetSystemConfig(ctx, systemSettingsKey)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err != nil && !errors.Is(err, common.ErrNotFound) {
 		return PublicSettings{}, err
 	}
 	if err == nil {
@@ -132,7 +132,7 @@ func (s *Service) Set(ctx context.Context, input map[string]any) (map[string]any
 	if !s.cfg.SMTPEnabled {
 		value["password_reset_enabled"] = false
 	}
-	if _, err := s.store.SetSystemConfig(ctx, store.SetSystemConfigInput{
+	if _, err := s.store.SetSystemConfig(ctx, common.SetSystemConfigInput{
 		Key:   systemSettingsKey,
 		Value: value,
 	}); err != nil {

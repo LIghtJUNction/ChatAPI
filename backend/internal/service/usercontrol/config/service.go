@@ -6,29 +6,29 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/repository/chatrepo"
-	"github.com/zyf/chatapi/internal/repository/configrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/chat"
+	"github.com/zyf/chatapi/internal/repository/common"
+	configrepo "github.com/zyf/chatapi/internal/repository/config"
 	"go.uber.org/zap"
 )
 
 type Deps struct {
 	Configs configrepo.Store
-	Chat    chatrepo.Store
-	Logger *zap.Logger
+	Chat    chat.Store
+	Logger  *zap.Logger
 }
 
 type Service struct {
 	configs configrepo.Store
-	chat    chatrepo.Store
-	logger *zap.Logger
+	chat    chat.Store
+	logger  *zap.Logger
 }
 
 func New(deps Deps) *Service {
 	return &Service{configs: deps.Configs, chat: deps.Chat, logger: deps.Logger}
 }
 
-func (s *Service) GetUserConfig(ctx context.Context, userID string) (store.UserConfig, error) {
+func (s *Service) GetUserConfig(ctx context.Context, userID string) (common.UserConfig, error) {
 	item, err := s.configs.GetUserConfig(ctx, strings.TrimSpace(userID), "settings")
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.String("config.key", "settings")).Debug("usercontrol config fetched user config")
@@ -36,8 +36,8 @@ func (s *Service) GetUserConfig(ctx context.Context, userID string) (store.UserC
 	return item, err
 }
 
-func (s *Service) UpdateUserConfig(ctx context.Context, userID string, value map[string]any) (store.UserConfig, error) {
-	item, err := s.configs.SetUserConfig(ctx, store.SetUserConfigInput{
+func (s *Service) UpdateUserConfig(ctx context.Context, userID string, value map[string]any) (common.UserConfig, error) {
+	item, err := s.configs.SetUserConfig(ctx, common.SetUserConfigInput{
 		UserID: strings.TrimSpace(userID),
 		Key:    "settings",
 		Value:  cloneMap(value),
@@ -48,7 +48,7 @@ func (s *Service) UpdateUserConfig(ctx context.Context, userID string, value map
 	return item, err
 }
 
-func (s *Service) ListAutomationRules(ctx context.Context, userID string) ([]store.AutomationRule, error) {
+func (s *Service) ListAutomationRules(ctx context.Context, userID string) ([]common.AutomationRule, error) {
 	items, err := s.configs.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.Int("rules.count", len(items))).Debug("usercontrol config listed automation rules")
@@ -56,8 +56,8 @@ func (s *Service) ListAutomationRules(ctx context.Context, userID string) ([]sto
 	return items, err
 }
 
-func (s *Service) ReplaceAutomationRules(ctx context.Context, userID string, rules []map[string]any) ([]store.AutomationRule, error) {
-	inputs := make([]store.UpsertAutomationRuleInput, 0, len(rules))
+func (s *Service) ReplaceAutomationRules(ctx context.Context, userID string, rules []map[string]any) ([]common.AutomationRule, error) {
+	inputs := make([]common.UpsertAutomationRuleInput, 0, len(rules))
 	for _, item := range rules {
 		payload := cloneMap(item)
 		id := stringValue(payload["id"], "")
@@ -67,7 +67,7 @@ func (s *Service) ReplaceAutomationRules(ctx context.Context, userID string, rul
 		if strings.TrimSpace(id) == "" {
 			id = "rule_" + uuid.NewString()
 		}
-		inputs = append(inputs, store.UpsertAutomationRuleInput{
+		inputs = append(inputs, common.UpsertAutomationRuleInput{
 			ID:      id,
 			UserID:  userID,
 			Enabled: enabled,
@@ -94,11 +94,11 @@ func (s *Service) ReplaceAutomationRules(ctx context.Context, userID string, rul
 	return items, err
 }
 
-func (s *Service) DeleteConversation(ctx context.Context, conversationID string) (store.DeleteConversationsResult, error) {
+func (s *Service) DeleteConversation(ctx context.Context, conversationID string) (common.DeleteConversationsResult, error) {
 	return s.chat.DeleteConversations(ctx, []string{strings.TrimSpace(conversationID)})
 }
 
-func (s *Service) DeleteConversations(ctx context.Context, conversationIDs []string) (store.DeleteConversationsResult, error) {
+func (s *Service) DeleteConversations(ctx context.Context, conversationIDs []string) (common.DeleteConversationsResult, error) {
 	return s.chat.DeleteConversations(ctx, conversationIDs)
 }
 

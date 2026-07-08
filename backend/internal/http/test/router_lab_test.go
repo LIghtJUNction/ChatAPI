@@ -13,6 +13,7 @@ import (
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	authaccess "github.com/zyf/chatapi/internal/service/auth/access"
@@ -23,7 +24,6 @@ import (
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestRouterLabModeAccessAndEndpoints(t *testing.T) {
@@ -201,7 +201,7 @@ func TestRouterPrincipalAccessRateLimitForAppKey(t *testing.T) {
 	if err := migrations.Bootstrap(context.Background(), st.DB()); err != nil {
 		t.Fatalf("bootstrap migrations: %v", err)
 	}
-	if _, err := st.CreateUser(context.Background(), store.CreateUserInput{
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:       "user_a",
 		Username: "alice",
 		Email:    "alice@example.com",

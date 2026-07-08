@@ -14,6 +14,7 @@ import (
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	"github.com/zyf/chatapi/internal/service/account"
@@ -30,7 +31,6 @@ import (
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestRouterUserFlow(t *testing.T) {
@@ -57,7 +57,7 @@ func TestRouterUserFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("other password hash: %v", err)
 	}
-	if _, err := st.CreateUser(context.Background(), store.CreateUserInput{
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:           "user_a",
 		Username:     "alice",
 		Email:        "alice@example.com",
@@ -67,7 +67,7 @@ func TestRouterUserFlow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user a: %v", err)
 	}
-	if _, err := st.CreateUser(context.Background(), store.CreateUserInput{
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:           "user_b",
 		Username:     "bob",
 		Email:        "bob@example.com",
@@ -77,7 +77,7 @@ func TestRouterUserFlow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user b: %v", err)
 	}
-	if _, err := st.UpsertUserIdentity(context.Background(), store.UpsertUserIdentityInput{
+	if _, err := st.UpsertUserIdentity(context.Background(), common.UpsertUserIdentityInput{
 		ID:            "identity_local_alice",
 		UserID:        "user_a",
 		Provider:      "local",
@@ -311,7 +311,7 @@ func TestRouterUserFlow(t *testing.T) {
 	}
 }
 
-func waitForPendingRequestForOwnerExcluding(t *testing.T, query *turnquerysvc.Service, ownerID string, excludeConversationID string) store.Request {
+func waitForPendingRequestForOwnerExcluding(t *testing.T, query *turnquerysvc.Service, ownerID string, excludeConversationID string) common.Request {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -329,7 +329,7 @@ func waitForPendingRequestForOwnerExcluding(t *testing.T, query *turnquerysvc.Se
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for pending request")
-	return store.Request{}
+	return common.Request{}
 }
 
 func deleteTextWithCookie(t *testing.T, url string, cookie *http.Cookie) (int, string) {

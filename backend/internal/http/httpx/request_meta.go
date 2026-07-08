@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 var filteredRequestHeaders = map[string]struct{}{
@@ -15,11 +15,11 @@ var filteredRequestHeaders = map[string]struct{}{
 	"Set-Cookie":          {},
 }
 
-func CaptureRequestMeta(r *http.Request) store.Request {
+func CaptureRequestMeta(r *http.Request) common.Request {
 	if r == nil {
-		return store.Request{}
+		return common.Request{}
 	}
-	return store.Request{
+	return common.Request{
 		RequestMethod:  strings.TrimSpace(r.Method),
 		RequestPath:    requestPathOnly(r),
 		RequestQuery:   cloneValues(r.URL.Query()),

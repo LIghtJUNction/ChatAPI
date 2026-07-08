@@ -7,10 +7,10 @@ import (
 
 	"github.com/zyf/chatapi/internal/actor"
 	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
+	"github.com/zyf/chatapi/internal/repository/common"
 	sessionrestore "github.com/zyf/chatapi/internal/service/auth/authn/sessionrestore"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +22,7 @@ func TestLoadUserSessionRestoresPrincipalAndActor(t *testing.T) {
 		t.Fatalf("new session service: %v", err)
 	}
 	policies := policy.NewService()
-	pr := policies.SessionPrincipal(store.User{
+	pr := policies.SessionPrincipal(common.User{
 		ID:         "user_123",
 		Username:   "alice",
 		Role:       "admin",

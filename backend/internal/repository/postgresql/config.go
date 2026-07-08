@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) GetSystemConfig(ctx context.Context, key string) (store.SystemConfig, error) {
+func (s *Store) GetSystemConfig(ctx context.Context, key string) (common.SystemConfig, error) {
 	return scanSystemConfig(s.pool.QueryRow(ctx, `
 		SELECT key, value_json, created_at, updated_at
 		FROM config
@@ -16,7 +16,7 @@ func (s *Store) GetSystemConfig(ctx context.Context, key string) (store.SystemCo
 	`, strings.TrimSpace(key)))
 }
 
-func (s *Store) SetSystemConfig(ctx context.Context, input store.SetSystemConfigInput) (store.SystemConfig, error) {
+func (s *Store) SetSystemConfig(ctx context.Context, input common.SetSystemConfigInput) (common.SystemConfig, error) {
 	now := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO config(key, value_json, created_at, updated_at)
@@ -26,7 +26,7 @@ func (s *Store) SetSystemConfig(ctx context.Context, input store.SetSystemConfig
 			updated_at = excluded.updated_at
 	`, strings.TrimSpace(input.Key), mustJSON(ensureMap(input.Value)), now, now)
 	if err != nil {
-		return store.SystemConfig{}, err
+		return common.SystemConfig{}, err
 	}
 	return s.GetSystemConfig(ctx, input.Key)
 }
@@ -37,12 +37,12 @@ func (s *Store) DeleteSystemConfig(ctx context.Context, key string) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
+		return common.ErrNotFound
 	}
 	return nil
 }
 
-func (s *Store) ListSystemConfigs(ctx context.Context) ([]store.SystemConfig, error) {
+func (s *Store) ListSystemConfigs(ctx context.Context) ([]common.SystemConfig, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT key, value_json, created_at, updated_at
 		FROM config
@@ -53,7 +53,7 @@ func (s *Store) ListSystemConfigs(ctx context.Context) ([]store.SystemConfig, er
 	}
 	defer rows.Close()
 
-	items := make([]store.SystemConfig, 0)
+	items := make([]common.SystemConfig, 0)
 	for rows.Next() {
 		item, err := scanSystemConfig(rows)
 		if err != nil {
@@ -64,7 +64,7 @@ func (s *Store) ListSystemConfigs(ctx context.Context) ([]store.SystemConfig, er
 	return items, rows.Err()
 }
 
-func (s *Store) GetUserConfig(ctx context.Context, userID string, key string) (store.UserConfig, error) {
+func (s *Store) GetUserConfig(ctx context.Context, userID string, key string) (common.UserConfig, error) {
 	return scanUserConfig(s.pool.QueryRow(ctx, `
 		SELECT user_id, key, value_json, created_at, updated_at
 		FROM user_configs
@@ -72,7 +72,7 @@ func (s *Store) GetUserConfig(ctx context.Context, userID string, key string) (s
 	`, strings.TrimSpace(userID), strings.TrimSpace(key)))
 }
 
-func (s *Store) SetUserConfig(ctx context.Context, input store.SetUserConfigInput) (store.UserConfig, error) {
+func (s *Store) SetUserConfig(ctx context.Context, input common.SetUserConfigInput) (common.UserConfig, error) {
 	now := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_configs(user_id, key, value_json, created_at, updated_at)
@@ -82,7 +82,7 @@ func (s *Store) SetUserConfig(ctx context.Context, input store.SetUserConfigInpu
 			updated_at = excluded.updated_at
 	`, strings.TrimSpace(input.UserID), strings.TrimSpace(input.Key), mustJSON(ensureMap(input.Value)), now, now)
 	if err != nil {
-		return store.UserConfig{}, err
+		return common.UserConfig{}, err
 	}
 	return s.GetUserConfig(ctx, input.UserID, input.Key)
 }
@@ -96,12 +96,12 @@ func (s *Store) DeleteUserConfig(ctx context.Context, userID string, key string)
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
+		return common.ErrNotFound
 	}
 	return nil
 }
 
-func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.UserConfig, error) {
+func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]common.UserConfig, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT user_id, key, value_json, created_at, updated_at
 		FROM user_configs
@@ -113,7 +113,7 @@ func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.Use
 	}
 	defer rows.Close()
 
-	items := make([]store.UserConfig, 0)
+	items := make([]common.UserConfig, 0)
 	for rows.Next() {
 		item, err := scanUserConfig(rows)
 		if err != nil {
@@ -124,7 +124,7 @@ func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.Use
 	return items, rows.Err()
 }
 
-func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpose string) (store.AuthVerificationCode, error) {
+func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpose string) (common.AuthVerificationCode, error) {
 	return scanAuthVerificationCode(s.pool.QueryRow(ctx, `
 		SELECT email, purpose, code_hash, failed_attempts, expires_at, last_sent_at, created_at, updated_at
 		FROM auth_verification_codes
@@ -132,7 +132,7 @@ func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpo
 	`, strings.TrimSpace(strings.ToLower(email)), strings.TrimSpace(purpose)))
 }
 
-func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input store.UpsertAuthVerificationCodeInput) (store.AuthVerificationCode, error) {
+func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input common.UpsertAuthVerificationCodeInput) (common.AuthVerificationCode, error) {
 	now := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO auth_verification_codes(email, purpose, code_hash, failed_attempts, expires_at, last_sent_at, created_at, updated_at)
@@ -145,7 +145,7 @@ func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input store.Upse
 			updated_at = excluded.updated_at
 	`, strings.TrimSpace(strings.ToLower(input.Email)), strings.TrimSpace(input.Purpose), strings.TrimSpace(input.CodeHash), input.FailedAttempts, input.ExpiresAt.UTC(), input.LastSentAt.UTC(), now, now)
 	if err != nil {
-		return store.AuthVerificationCode{}, err
+		return common.AuthVerificationCode{}, err
 	}
 	return s.GetAuthVerificationCode(ctx, input.Email, input.Purpose)
 }
@@ -159,7 +159,7 @@ func (s *Store) DeleteAuthVerificationCode(ctx context.Context, email string, pu
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
+		return common.ErrNotFound
 	}
 	return nil
 }

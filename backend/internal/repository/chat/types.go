@@ -1,4 +1,4 @@
-package store
+package chat
 
 import "time"
 
@@ -67,4 +67,72 @@ type RequestResponseFormat struct {
 	Type   string         `json:"type,omitempty"`
 	Name   string         `json:"name,omitempty"`
 	Schema map[string]any `json:"schema,omitempty"`
+}
+
+type CreatePendingInput struct {
+	ConversationID   string
+	RequestID        string
+	ResponseID       string
+	OwnerID          string
+	RequestFormat    string
+	Model            string
+	SystemContent    string
+	DeveloperContent string
+	AssistantContent string
+	UserContent      string
+	InputParts       []RequestInputPart
+	RequestMethod    string
+	RequestPath      string
+	RequestQuery     map[string][]string
+	RequestHeaders   map[string][]string
+	RequestBody      map[string]any
+	ToolSchemas      []any
+	ToolChoice       RequestToolChoice
+	ResponseFormat   RequestResponseFormat
+	PreparedImages   []CreatePendingImageAssetInput
+}
+
+type CreatePendingImageAssetInput struct {
+	FileID            string
+	Path              string
+	MediaType         string
+	Bytes             int64
+	SHA256            string
+	Width             int
+	Height            int
+	SourceKind        string
+	OriginalName      string
+	OriginalMediaType string
+	InputPartIndex    int
+}
+
+type CompletePendingInput struct {
+	ConversationID      string
+	ResponseID          string
+	OutputText          string
+	Mode                string
+	ToolName            string
+	ToolCallID          string
+	ToolOutput          string
+	ReasoningStreamMode string
+}
+
+type UpdateDraftInput struct {
+	ConversationID string
+	DraftText      string
+}
+
+type AbortPendingInput struct {
+	ConversationID string
+	Reason         string
+}
+
+type DeleteConversationsResult struct {
+	DeletedConversations int `json:"deleted_conversations"`
+	DeletedMessages      int `json:"deleted_messages"`
+	DeletedAssetRefs     int `json:"deleted_asset_refs"`
+}
+
+type ExpirePendingTurnsResult struct {
+	ExpiredConversations int `json:"expired_conversations"`
 }

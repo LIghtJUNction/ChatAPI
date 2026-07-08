@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]store.AutomationRule, error) {
+func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]common.AutomationRule, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, user_id, enabled, rule_json, created_at, updated_at
 		FROM automation_rules
@@ -20,7 +20,7 @@ func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([
 	}
 	defer rows.Close()
 
-	items := make([]store.AutomationRule, 0)
+	items := make([]common.AutomationRule, 0)
 	for rows.Next() {
 		item, err := scanAutomationRule(rows)
 		if err != nil {
@@ -31,7 +31,7 @@ func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([
 	return items, rows.Err()
 }
 
-func (s *Store) ReplaceAutomationRulesForUser(ctx context.Context, userID string, replaceIDs map[string]struct{}, inputs []store.UpsertAutomationRuleInput) ([]store.AutomationRule, error) {
+func (s *Store) ReplaceAutomationRulesForUser(ctx context.Context, userID string, replaceIDs map[string]struct{}, inputs []common.UpsertAutomationRuleInput) ([]common.AutomationRule, error) {
 	userID = strings.TrimSpace(userID)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -79,8 +79,8 @@ func (s *Store) ReplaceAutomationRulesForUser(ctx context.Context, userID string
 	return s.ListAutomationRulesByUser(ctx, userID)
 }
 
-func scanAutomationRule(row rowScanner) (store.AutomationRule, error) {
-	var item store.AutomationRule
+func scanAutomationRule(row rowScanner) (common.AutomationRule, error) {
+	var item common.AutomationRule
 	var payloadJSON []byte
 	if err := row.Scan(
 		&item.ID,
@@ -90,7 +90,7 @@ func scanAutomationRule(row rowScanner) (store.AutomationRule, error) {
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	); err != nil {
-		return store.AutomationRule{}, err
+		return common.AutomationRule{}, err
 	}
 	item.Payload = parseJSONMap(payloadJSON)
 	return item, nil

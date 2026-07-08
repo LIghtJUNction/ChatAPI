@@ -8,30 +8,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zyf/chatapi/internal/repository/common"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	userconv "github.com/zyf/chatapi/internal/service/usercontrol/conversations"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type fakeQuery struct {
-	conversations   map[string][]store.Conversation
-	messages        map[string][]store.Message
+	conversations   map[string][]common.Conversation
+	messages        map[string][]common.Message
 	messageErr      error
 	conversationErr error
 }
 
-func (f *fakeQuery) ListConversationsForOwner(_ context.Context, ownerID string) ([]store.Conversation, error) {
+func (f *fakeQuery) ListConversationsForOwner(_ context.Context, ownerID string) ([]common.Conversation, error) {
 	if f.conversationErr != nil {
 		return nil, f.conversationErr
 	}
-	return append([]store.Conversation(nil), f.conversations[ownerID]...), nil
+	return append([]common.Conversation(nil), f.conversations[ownerID]...), nil
 }
 
-func (f *fakeQuery) ListMessagesForOwner(_ context.Context, conversationID string, _ string) ([]store.Message, error) {
+func (f *fakeQuery) ListMessagesForOwner(_ context.Context, conversationID string, _ string) ([]common.Message, error) {
 	if f.messageErr != nil {
 		return nil, f.messageErr
 	}
-	return append([]store.Message(nil), f.messages[conversationID]...), nil
+	return append([]common.Message(nil), f.messages[conversationID]...), nil
 }
 
 type fakeTurn struct {
@@ -53,7 +53,7 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 	deleteCalled := 0
 	svc := userconv.New(userconv.Deps{
 		Query: &fakeQuery{
-			conversations: map[string][]store.Conversation{
+			conversations: map[string][]common.Conversation{
 				"user_a": {
 					{ID: "conv_wait", Metadata: map[string]any{"realtime_status": "waiting"}},
 					{ID: "conv_ok", Metadata: map[string]any{"realtime_status": "done"}},
@@ -61,19 +61,19 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 			},
 		},
 		Turn: &fakeTurn{},
-		DeleteOne: func(_ context.Context, id string) (store.DeleteConversationsResult, error) {
+		DeleteOne: func(_ context.Context, id string) (common.DeleteConversationsResult, error) {
 			deleteCalled++
-			return store.DeleteConversationsResult{DeletedConversations: 1}, nil
+			return common.DeleteConversationsResult{DeletedConversations: 1}, nil
 		},
-		DeleteMany: func(context.Context, []string) (store.DeleteConversationsResult, error) {
-			return store.DeleteConversationsResult{}, nil
+		DeleteMany: func(context.Context, []string) (common.DeleteConversationsResult, error) {
+			return common.DeleteConversationsResult{}, nil
 		},
 	})
 
 	if _, err := svc.DeleteConversation(context.Background(), "user_a", "conv_wait"); !errors.Is(err, userconv.ErrWaitingConversationDelete) {
 		t.Fatalf("expected waiting delete error, got %v", err)
 	}
-	if _, err := svc.DeleteConversation(context.Background(), "user_a", "missing"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := svc.DeleteConversation(context.Background(), "user_a", "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
 	}
 	result, err := svc.DeleteConversation(context.Background(), "user_a", "conv_ok")
@@ -84,7 +84,7 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 
 func TestConversationsPruneRandomized(t *testing.T) {
 	rng := rand.New(rand.NewSource(99))
-	items := make([]store.Conversation, 0, 30)
+	items := make([]common.Conversation, 0, 30)
 	waitingCount := 0
 	for i := 0; i < 30; i++ {
 		status := "done"
@@ -92,7 +92,7 @@ func TestConversationsPruneRandomized(t *testing.T) {
 			status = "waiting"
 			waitingCount++
 		}
-		items = append(items, store.Conversation{
+		items = append(items, common.Conversation{
 			ID:        fmt.Sprintf("conv_%02d", i),
 			UpdatedAt: time.Unix(int64(rng.Intn(100000)), 0).UTC(),
 			Metadata:  map[string]any{"realtime_status": status},
@@ -101,14 +101,14 @@ func TestConversationsPruneRandomized(t *testing.T) {
 
 	var deleted []string
 	svc := userconv.New(userconv.Deps{
-		Query: &fakeQuery{conversations: map[string][]store.Conversation{"user_a": items}},
+		Query: &fakeQuery{conversations: map[string][]common.Conversation{"user_a": items}},
 		Turn:  &fakeTurn{},
-		DeleteOne: func(context.Context, string) (store.DeleteConversationsResult, error) {
-			return store.DeleteConversationsResult{}, nil
+		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
+			return common.DeleteConversationsResult{}, nil
 		},
-		DeleteMany: func(_ context.Context, ids []string) (store.DeleteConversationsResult, error) {
+		DeleteMany: func(_ context.Context, ids []string) (common.DeleteConversationsResult, error) {
 			deleted = append([]string(nil), ids...)
-			return store.DeleteConversationsResult{DeletedConversations: len(ids)}, nil
+			return common.DeleteConversationsResult{DeletedConversations: len(ids)}, nil
 		},
 	})
 
@@ -128,16 +128,16 @@ func TestConversationsAbortConversationChecksOwnershipAndForwardsReason(t *testi
 	turn := &fakeTurn{}
 	svc := userconv.New(userconv.Deps{
 		Query: &fakeQuery{
-			messages: map[string][]store.Message{
+			messages: map[string][]common.Message{
 				"conv_ok": {{ID: "msg_1", Role: "user", Content: "hello"}},
 			},
 		},
 		Turn: turn,
-		DeleteOne: func(context.Context, string) (store.DeleteConversationsResult, error) {
-			return store.DeleteConversationsResult{}, nil
+		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
+			return common.DeleteConversationsResult{}, nil
 		},
-		DeleteMany: func(context.Context, []string) (store.DeleteConversationsResult, error) {
-			return store.DeleteConversationsResult{}, nil
+		DeleteMany: func(context.Context, []string) (common.DeleteConversationsResult, error) {
+			return common.DeleteConversationsResult{}, nil
 		},
 	})
 
@@ -161,11 +161,11 @@ func TestConversationsAbortConversationRejectsForbidden(t *testing.T) {
 	svc := userconv.New(userconv.Deps{
 		Query: &fakeQuery{messageErr: userconv.ErrForbidden},
 		Turn:  &fakeTurn{},
-		DeleteOne: func(context.Context, string) (store.DeleteConversationsResult, error) {
-			return store.DeleteConversationsResult{}, nil
+		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
+			return common.DeleteConversationsResult{}, nil
 		},
-		DeleteMany: func(context.Context, []string) (store.DeleteConversationsResult, error) {
-			return store.DeleteConversationsResult{}, nil
+		DeleteMany: func(context.Context, []string) (common.DeleteConversationsResult, error) {
+			return common.DeleteConversationsResult{}, nil
 		},
 	})
 

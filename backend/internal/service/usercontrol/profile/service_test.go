@@ -6,19 +6,19 @@ import (
 	"testing"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/repository/common"
 	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
 	userprofile "github.com/zyf/chatapi/internal/service/usercontrol/profile"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type fakeIdentity struct {
-	user store.User
+	user common.User
 	err  error
 }
 
-func (f fakeIdentity) GetUser(context.Context, string) (store.User, error) {
+func (f fakeIdentity) GetUser(context.Context, string) (common.User, error) {
 	if f.err != nil {
-		return store.User{}, f.err
+		return common.User{}, f.err
 	}
 	return f.user, nil
 }
@@ -85,7 +85,7 @@ func TestProfileErrAlias(t *testing.T) {
 
 func TestProfileServiceBuildAuthenticatedSessionViewWithRoleAndTOTP(t *testing.T) {
 	svc := userprofile.New(userprofile.Deps{
-		Identity: fakeIdentity{user: store.User{
+		Identity: fakeIdentity{user: common.User{
 			ID:         "user_a",
 			Username:   "alice",
 			Role:       "",
@@ -129,7 +129,7 @@ func TestProfileServiceBuildAuthenticatedSessionViewPropagatesErrors(t *testing.
 	}
 
 	svc = userprofile.New(userprofile.Deps{
-		Identity: fakeIdentity{user: store.User{ID: "user_a"}},
+		Identity: fakeIdentity{user: common.User{ID: "user_a"}},
 		Settings: fakeSettings{err: want},
 	})
 	if _, err := svc.BuildAuthenticatedSessionView(context.Background(), config.Config{}, "user_a"); !errors.Is(err, want) {

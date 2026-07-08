@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"github.com/zyf/chatapi/internal/platform/media/localstore"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestCleanupOrphanImagesDeletesFilesAndRecords(t *testing.T) {
@@ -58,4 +58,4 @@ func TestCleanupOrphanImagesDeletesFilesAndRecords(t *testing.T) {
 }
 
 var _ Store = (*sqlitestore.Store)(nil)
-var _ = store.MediaAsset{}
+var _ = common.MediaAsset{}

@@ -16,6 +16,7 @@ import (
 	"github.com/zyf/chatapi/internal/config"
 	httpapi "github.com/zyf/chatapi/internal/http"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
@@ -23,12 +24,11 @@ import (
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type noopRealtime struct{}
 
-func (noopRealtime) PublishConversationUpsert(store.Conversation, []store.Message) {}
+func (noopRealtime) PublishConversationUpsert(common.Conversation, []common.Message) {}
 
 func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
@@ -41,7 +41,7 @@ func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 		t.Fatalf("bootstrap migrations: %v", err)
 	}
 
-	if _, err := st.CreateUser(context.Background(), store.CreateUserInput{
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:       "user_a",
 		Username: "user-a",
 		Email:    "user-a@example.com",
@@ -50,7 +50,7 @@ func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create user a: %v", err)
 	}
-	if _, err := st.CreateUser(context.Background(), store.CreateUserInput{
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:       "user_b",
 		Username: "user-b",
 		Email:    "user-b@example.com",
@@ -210,7 +210,7 @@ func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	}
 }
 
-func waitForRequestForOwner(t *testing.T, query *turnquerysvc.Service, ownerID string) store.Request {
+func waitForRequestForOwner(t *testing.T, query *turnquerysvc.Service, ownerID string) common.Request {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -221,7 +221,7 @@ func waitForRequestForOwner(t *testing.T, query *turnquerysvc.Service, ownerID s
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for request")
-	return store.Request{}
+	return common.Request{}
 }
 
 func postJSONWithHeaders(t *testing.T, url string, body map[string]any, headers map[string]string, wantStatus int) map[string]any {

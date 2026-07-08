@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zyf/chatapi/internal/repository/authrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 const systemAccessSettingsKey = "system_access_settings"
@@ -31,7 +31,7 @@ type Settings struct {
 }
 
 type SettingsService struct {
-	store       authrepo.SettingsStore
+	store       auth.SettingsStore
 	defaults    Settings
 	cacheTTL    time.Duration
 	mu          sync.RWMutex
@@ -61,7 +61,7 @@ type ResponseSchema struct {
 	UpdateStrategy string        `json:"update_strategy"`
 }
 
-func NewSettingsService(dataStore authrepo.SettingsStore, defaults Settings) *SettingsService {
+func NewSettingsService(dataStore auth.SettingsStore, defaults Settings) *SettingsService {
 	return &SettingsService{
 		store:    dataStore,
 		defaults: defaults,
@@ -272,7 +272,7 @@ func (s *SettingsService) Set(ctx context.Context, input map[string]any) (map[st
 	if err := validateSettings(next); err != nil {
 		return nil, err
 	}
-	if _, err := s.store.SetSystemConfig(ctx, store.SetSystemConfigInput{
+	if _, err := s.store.SetSystemConfig(ctx, common.SetSystemConfigInput{
 		Key:   systemAccessSettingsKey,
 		Value: settingsMap(next),
 	}); err != nil {
@@ -289,7 +289,7 @@ func (s *SettingsService) load(ctx context.Context) (Settings, error) {
 	value := s.defaults
 	item, err := s.store.GetSystemConfig(ctx, systemAccessSettingsKey)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, common.ErrNotFound) {
 			if err := validateSettings(value); err != nil {
 				return Settings{}, err
 			}

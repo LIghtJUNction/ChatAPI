@@ -4,15 +4,15 @@ import (
 	"context"
 	"strings"
 
+	"github.com/zyf/chatapi/internal/repository/common"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
-	"github.com/zyf/chatapi/internal/store"
 )
 
-func (s *Service) ListConversations(ctx context.Context) ([]store.Conversation, error) {
+func (s *Service) ListConversations(ctx context.Context) ([]common.Conversation, error) {
 	return s.chatStore.ListConversations(ctx)
 }
 
-func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
+func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]common.Message, error) {
 	return s.query.ListMessages(ctx, strings.TrimSpace(conversationID))
 }
 
@@ -36,6 +36,6 @@ func (s *Service) CompleteConversation(ctx context.Context, conversationID strin
 	})
 }
 
-func (s *Service) DeleteConversation(ctx context.Context, conversationID string) (store.DeleteConversationsResult, error) {
+func (s *Service) DeleteConversation(ctx context.Context, conversationID string) (common.DeleteConversationsResult, error) {
 	return s.chatStore.DeleteConversations(ctx, []string{strings.TrimSpace(conversationID)})
 }

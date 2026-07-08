@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/platform/password"
-	"github.com/zyf/chatapi/internal/repository/authrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 var (
@@ -18,7 +18,7 @@ var (
 )
 
 type Service struct {
-	store authrepo.Store
+	store auth.Store
 	now   func() time.Time
 }
 
@@ -46,26 +46,26 @@ type UpdateUserInput struct {
 	LastLoginAt  *time.Time
 }
 
-func NewService(dataStore authrepo.Store) *Service {
+func NewService(dataStore auth.Store) *Service {
 	return &Service{
 		store: dataStore,
 		now:   func() time.Time { return time.Now().UTC() },
 	}
 }
 
-func (s *Service) GetUser(ctx context.Context, userID string) (store.User, error) {
+func (s *Service) GetUser(ctx context.Context, userID string) (common.User, error) {
 	return s.store.GetUser(ctx, strings.TrimSpace(userID))
 }
 
-func (s *Service) GetUserByEmail(ctx context.Context, email string) (store.User, error) {
+func (s *Service) GetUserByEmail(ctx context.Context, email string) (common.User, error) {
 	return s.store.GetUserByEmail(ctx, normalizeEmail(email))
 }
 
-func (s *Service) GetUserByUsername(ctx context.Context, username string) (store.User, error) {
+func (s *Service) GetUserByUsername(ctx context.Context, username string) (common.User, error) {
 	return s.store.GetUserByUsername(ctx, strings.TrimSpace(username))
 }
 
-func (s *Service) LookupUserByIdentifier(ctx context.Context, identifier string) (store.User, error) {
+func (s *Service) LookupUserByIdentifier(ctx context.Context, identifier string) (common.User, error) {
 	identifier = strings.TrimSpace(identifier)
 	if strings.Contains(identifier, "@") {
 		return s.GetUserByEmail(ctx, identifier)
@@ -73,30 +73,30 @@ func (s *Service) LookupUserByIdentifier(ctx context.Context, identifier string)
 	return s.GetUserByUsername(ctx, identifier)
 }
 
-func (s *Service) ListUsers(ctx context.Context) ([]store.User, error) {
+func (s *Service) ListUsers(ctx context.Context) ([]common.User, error) {
 	return s.store.ListUsers(ctx)
 }
 
-func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (store.User, error) {
+func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (common.User, error) {
 	email := normalizeEmail(input.Email)
 	username := strings.TrimSpace(input.Username)
 	if email != "" {
 		if _, err := s.store.GetUserByEmail(ctx, email); err == nil {
-			return store.User{}, ErrUserExists
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return store.User{}, err
+			return common.User{}, ErrUserExists
+		} else if !errors.Is(err, common.ErrNotFound) {
+			return common.User{}, err
 		}
 	}
 	if username != "" {
 		if _, err := s.store.GetUserByUsername(ctx, username); err == nil {
-			return store.User{}, ErrUserExists
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return store.User{}, err
+			return common.User{}, ErrUserExists
+		} else if !errors.Is(err, common.ErrNotFound) {
+			return common.User{}, err
 		}
 	}
 	passwordHash, err := resolvePasswordHash(strings.TrimSpace(input.Password), strings.TrimSpace(input.PasswordHash))
 	if err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
 	id := strings.TrimSpace(input.ID)
 	if id == "" {
@@ -106,7 +106,7 @@ func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (store.
 	if role == "" {
 		role = "user"
 	}
-	return s.store.CreateUser(ctx, store.CreateUserInput{
+	return s.store.CreateUser(ctx, common.CreateUserInput{
 		ID:           id,
 		Username:     username,
 		Email:        email,
@@ -117,12 +117,12 @@ func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (store.
 	})
 }
 
-func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (store.User, error) {
+func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (common.User, error) {
 	passwordHash, err := resolvePasswordHash(strings.TrimSpace(input.Password), strings.TrimSpace(input.PasswordHash))
 	if err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
-	return s.store.UpdateUser(ctx, store.UpdateUserInput{
+	return s.store.UpdateUser(ctx, common.UpdateUserInput{
 		ID:           strings.TrimSpace(input.ID),
 		Username:     strings.TrimSpace(input.Username),
 		Email:        normalizeEmail(input.Email),
@@ -134,10 +134,10 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (store.
 	})
 }
 
-func (s *Service) SetUserState(ctx context.Context, userID string, isActive bool) (store.User, error) {
+func (s *Service) SetUserState(ctx context.Context, userID string, isActive bool) (common.User, error) {
 	user, err := s.GetUser(ctx, userID)
 	if err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
 	return s.UpdateUser(ctx, UpdateUserInput{
 		ID:           user.ID,
@@ -151,10 +151,10 @@ func (s *Service) SetUserState(ctx context.Context, userID string, isActive bool
 	})
 }
 
-func (s *Service) SetPassword(ctx context.Context, userID string, newPassword string) (store.User, error) {
+func (s *Service) SetPassword(ctx context.Context, userID string, newPassword string) (common.User, error) {
 	user, err := s.GetUser(ctx, userID)
 	if err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
 	return s.UpdateUser(ctx, UpdateUserInput{
 		ID:          user.ID,
@@ -168,7 +168,7 @@ func (s *Service) SetPassword(ctx context.Context, userID string, newPassword st
 	})
 }
 
-func (s *Service) PreviewDeletion(ctx context.Context, userID string) (store.UserDeletionPreview, error) {
+func (s *Service) PreviewDeletion(ctx context.Context, userID string) (common.UserDeletionPreview, error) {
 	return s.store.PreviewUserDeletion(ctx, strings.TrimSpace(userID))
 }
 
@@ -176,35 +176,35 @@ func (s *Service) DeleteUser(ctx context.Context, userID string) error {
 	return s.store.DeleteUserAccount(ctx, strings.TrimSpace(userID))
 }
 
-func (s *Service) TransferOwnership(ctx context.Context, sourceUserID string, targetUserID string) (store.UserOwnershipTransferResult, error) {
+func (s *Service) TransferOwnership(ctx context.Context, sourceUserID string, targetUserID string) (common.UserOwnershipTransferResult, error) {
 	return s.store.TransferUserOwnership(ctx, strings.TrimSpace(sourceUserID), strings.TrimSpace(targetUserID))
 }
 
-func (s *Service) TransferOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (store.UserOwnershipTransferResult, error) {
+func (s *Service) TransferOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (common.UserOwnershipTransferResult, error) {
 	return s.store.TransferUserOwnershipSelection(ctx, strings.TrimSpace(sourceUserID), strings.TrimSpace(targetUserID), conversationIDs, filenames)
 }
 
-func (s *Service) GetUserIdentity(ctx context.Context, provider string, subject string) (store.UserIdentity, error) {
+func (s *Service) GetUserIdentity(ctx context.Context, provider string, subject string) (common.UserIdentity, error) {
 	return s.store.GetUserIdentity(ctx, strings.TrimSpace(provider), strings.TrimSpace(subject))
 }
 
-func (s *Service) ResolveIdentity(ctx context.Context, provider string, subject string) (store.User, store.UserIdentity, error) {
+func (s *Service) ResolveIdentity(ctx context.Context, provider string, subject string) (common.User, common.UserIdentity, error) {
 	identity, err := s.GetUserIdentity(ctx, provider, subject)
 	if err != nil {
-		return store.User{}, store.UserIdentity{}, err
+		return common.User{}, common.UserIdentity{}, err
 	}
 	user, err := s.GetUser(ctx, identity.UserID)
 	if err != nil {
-		return store.User{}, store.UserIdentity{}, err
+		return common.User{}, common.UserIdentity{}, err
 	}
 	return user, identity, nil
 }
 
-func (s *Service) ListUserIdentities(ctx context.Context, userID string) ([]store.UserIdentity, error) {
+func (s *Service) ListUserIdentities(ctx context.Context, userID string) ([]common.UserIdentity, error) {
 	return s.store.ListUserIdentities(ctx, strings.TrimSpace(userID))
 }
 
-func (s *Service) UpsertIdentity(ctx context.Context, input store.UpsertUserIdentityInput) (store.UserIdentity, error) {
+func (s *Service) UpsertIdentity(ctx context.Context, input common.UpsertUserIdentityInput) (common.UserIdentity, error) {
 	input.Provider = strings.TrimSpace(input.Provider)
 	input.Subject = strings.TrimSpace(input.Subject)
 	input.UserID = strings.TrimSpace(input.UserID)

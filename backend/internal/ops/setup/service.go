@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/repository/authrepo"
+	"github.com/zyf/chatapi/internal/repository/auth"
 )
 
 var ErrUnavailable = errors.New("setup is unavailable")
 var ErrEnvExists = errors.New(".env already exists")
 
 type Service struct {
-	store authrepo.UserStore
+	store auth.UserStore
 	cfg   config.Config
 }
 
@@ -50,7 +50,7 @@ type Report struct {
 	GeneratedAt   string   `json:"generated_at"`
 }
 
-func NewService(dataStore authrepo.UserStore, cfg config.Config) *Service {
+func NewService(dataStore auth.UserStore, cfg config.Config) *Service {
 	return &Service{store: dataStore, cfg: cfg}
 }
 

@@ -9,13 +9,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/platform/password"
-	"github.com/zyf/chatapi/internal/repository/auditrepo"
+	auditrepo "github.com/zyf/chatapi/internal/repository/audit"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/service/account"
 	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +59,7 @@ type ResetPasswordInput struct {
 }
 
 type AuthResult struct {
-	User      store.User          `json:"user"`
+	User      common.User         `json:"user"`
 	Principal principal.Principal `json:"principal"`
 	Claims    session.Claims      `json:"claims"`
 }
@@ -75,34 +75,34 @@ func NewService(accounts *account.Service, auditStore auditrepo.Store, policies 
 	}
 }
 
-func (s *Service) Register(ctx context.Context, input RegisterInput) (store.User, error) {
+func (s *Service) Register(ctx context.Context, input RegisterInput) (common.User, error) {
 	username := strings.TrimSpace(input.Username)
 	emailAddress := strings.ToLower(strings.TrimSpace(input.Email))
 	passwordText := strings.TrimSpace(input.Password)
 	if username == "" {
-		return store.User{}, ErrUsernameRequired
+		return common.User{}, ErrUsernameRequired
 	}
 	if emailAddress == "" {
-		return store.User{}, ErrEmailRequired
+		return common.User{}, ErrEmailRequired
 	}
 	if passwordText == "" {
-		return store.User{}, ErrPasswordRequired
+		return common.User{}, ErrPasswordRequired
 	}
 	if s.verification != nil && strings.TrimSpace(input.VerificationCode) != "" {
 		if err := s.verification.VerifyCode(ctx, emailAddress, verification.PurposeRegister, input.VerificationCode); err != nil {
-			return store.User{}, err
+			return common.User{}, err
 		}
 	}
 
 	if _, err := s.accounts.GetUserByEmail(ctx, emailAddress); err == nil {
-		return store.User{}, ErrUserExists
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return store.User{}, err
+		return common.User{}, ErrUserExists
+	} else if !errors.Is(err, common.ErrNotFound) {
+		return common.User{}, err
 	}
 	if _, err := s.accounts.GetUserByUsername(ctx, username); err == nil {
-		return store.User{}, ErrUserExists
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return store.User{}, err
+		return common.User{}, ErrUserExists
+	} else if !errors.Is(err, common.ErrNotFound) {
+		return common.User{}, err
 	}
 	user, err := s.accounts.CreateUser(ctx, account.CreateUserInput{
 		ID:       "user_" + uuid.NewString(),
@@ -114,11 +114,11 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (store.User
 	})
 	if err != nil {
 		if errors.Is(err, account.ErrUserExists) {
-			return store.User{}, ErrUserExists
+			return common.User{}, ErrUserExists
 		}
-		return store.User{}, err
+		return common.User{}, err
 	}
-	_, _ = s.auditStore.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	_, _ = s.auditStore.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_" + uuid.NewString(),
 		ActorUserID:  user.ID,
 		ActorRole:    user.Role,
@@ -147,7 +147,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (AuthResult, erro
 	}
 	user, err := s.accounts.LookupUserByIdentifier(ctx, identifier)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, common.ErrNotFound) {
 			return AuthResult{}, ErrInvalidCredentials
 		}
 		return AuthResult{}, err
@@ -160,7 +160,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (AuthResult, erro
 		return AuthResult{}, ErrInvalidCredentials
 	}
 	now := s.now()
-	update := store.UpdateUserInput{
+	update := common.UpdateUserInput{
 		ID:           user.ID,
 		Username:     user.Username,
 		Email:        user.Email,
@@ -199,7 +199,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (AuthResult, erro
 	if err != nil {
 		return AuthResult{}, err
 	}
-	_, _ = s.auditStore.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	_, _ = s.auditStore.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_" + uuid.NewString(),
 		ActorUserID:  user.ID,
 		ActorRole:    pr.Role,
@@ -230,7 +230,7 @@ func (s *Service) SendPasswordReset(ctx context.Context, emailAddress string) (v
 		return verification.SendResult{}, ErrEmailRequired
 	}
 	if _, err := s.accounts.GetUserByEmail(ctx, emailAddress); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, common.ErrNotFound) {
 			return verification.SendResult{}, ErrInvalidCredentials
 		}
 		return verification.SendResult{}, err
@@ -263,7 +263,7 @@ func (s *Service) ResetPassword(ctx context.Context, input ResetPasswordInput) e
 	if err != nil {
 		return err
 	}
-	_, _ = s.auditStore.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	_, _ = s.auditStore.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_" + uuid.NewString(),
 		ActorUserID:  user.ID,
 		ActorRole:    user.Role,
@@ -294,7 +294,7 @@ func (s *Service) UpdatePasswordForUser(ctx context.Context, userID string, newP
 	if err != nil {
 		return err
 	}
-	_, _ = s.auditStore.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	_, _ = s.auditStore.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_" + uuid.NewString(),
 		ActorUserID:  user.ID,
 		ActorRole:    user.Role,

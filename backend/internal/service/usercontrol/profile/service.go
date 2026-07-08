@@ -6,17 +6,17 @@ import (
 
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
 	authsettings "github.com/zyf/chatapi/internal/service/auth/authn/settings"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
 var ErrNewPasswordRequired = localauth.ErrNewPasswordRequired
 
 type identityService interface {
-	GetUser(context.Context, string) (store.User, error)
+	GetUser(context.Context, string) (common.User, error)
 }
 
 type localAuthService interface {
@@ -32,7 +32,7 @@ type totpService interface {
 }
 
 type rolePolicy interface {
-	EffectiveRole(store.User) string
+	EffectiveRole(common.User) string
 }
 
 type Deps struct {
@@ -190,9 +190,9 @@ func (s *Service) PublicSettings(ctx context.Context, cfg config.Config) (authse
 	return settings, nil
 }
 
-func (s *Service) GetUser(ctx context.Context, userID string) (store.User, error) {
+func (s *Service) GetUser(ctx context.Context, userID string) (common.User, error) {
 	if s.identity == nil {
-		return store.User{}, store.ErrNotFound
+		return common.User{}, common.ErrNotFound
 	}
 	return s.identity.GetUser(ctx, userID)
 }

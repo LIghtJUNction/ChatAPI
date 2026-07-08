@@ -4,19 +4,19 @@ import (
 	"context"
 	"errors"
 
-	"github.com/zyf/chatapi/internal/repository/chatrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/chat"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"go.uber.org/zap"
 )
 
 var ErrForbidden = errors.New("forbidden")
 
 type Service struct {
-	Store  chatrepo.Store
+	Store  chat.Store
 	Logger *zap.Logger
 }
 
-func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
+func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]common.Message, error) {
 	items, err := s.Store.ListMessages(ctx, conversationID)
 	if err != nil {
 		s.logger().Warn("list messages failed", zap.String("conversation.id", conversationID), zap.Error(err))
@@ -26,7 +26,7 @@ func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]st
 	return items, nil
 }
 
-func (s *Service) ListMessagesForOwner(ctx context.Context, conversationID string, ownerID string) ([]store.Message, error) {
+func (s *Service) ListMessagesForOwner(ctx context.Context, conversationID string, ownerID string) ([]common.Message, error) {
 	conversation, err := s.Store.GetConversation(ctx, conversationID)
 	if err != nil {
 		s.logger().Warn("owner message lookup failed at conversation fetch", zap.String("conversation.id", conversationID), zap.String("owner.id", ownerID), zap.Error(err))
@@ -45,13 +45,13 @@ func (s *Service) ListMessagesForOwner(ctx context.Context, conversationID strin
 	return items, nil
 }
 
-func (s *Service) ListConversationsForOwner(ctx context.Context, ownerID string) ([]store.Conversation, error) {
+func (s *Service) ListConversationsForOwner(ctx context.Context, ownerID string) ([]common.Conversation, error) {
 	items, err := s.Store.ListConversations(ctx)
 	if err != nil {
 		s.logger().Warn("list conversations failed", zap.String("owner.id", ownerID), zap.Error(err))
 		return nil, err
 	}
-	filtered := make([]store.Conversation, 0, len(items))
+	filtered := make([]common.Conversation, 0, len(items))
 	for _, item := range items {
 		if ownerID == "" || stringValue(item.Metadata["owner_id"], "") == ownerID {
 			filtered = append(filtered, item)
@@ -61,7 +61,7 @@ func (s *Service) ListConversationsForOwner(ctx context.Context, ownerID string)
 	return filtered, nil
 }
 
-func (s *Service) ListRequests(ctx context.Context) ([]store.Request, error) {
+func (s *Service) ListRequests(ctx context.Context) ([]common.Request, error) {
 	items, err := s.Store.ListRequests(ctx)
 	if err != nil {
 		s.logger().Warn("list requests failed", zap.Error(err))
@@ -71,13 +71,13 @@ func (s *Service) ListRequests(ctx context.Context) ([]store.Request, error) {
 	return items, nil
 }
 
-func (s *Service) ListRequestsForOwner(ctx context.Context, ownerID string) ([]store.Request, error) {
+func (s *Service) ListRequestsForOwner(ctx context.Context, ownerID string) ([]common.Request, error) {
 	items, err := s.Store.ListRequests(ctx)
 	if err != nil {
 		s.logger().Warn("list requests for owner failed", zap.String("owner.id", ownerID), zap.Error(err))
 		return nil, err
 	}
-	filtered := make([]store.Request, 0, len(items))
+	filtered := make([]common.Request, 0, len(items))
 	for _, item := range items {
 		if ownerID == "" || item.OwnerID == ownerID {
 			filtered = append(filtered, item)
@@ -87,25 +87,25 @@ func (s *Service) ListRequestsForOwner(ctx context.Context, ownerID string) ([]s
 	return filtered, nil
 }
 
-func (s *Service) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
+func (s *Service) GetRequest(ctx context.Context, requestID string) (common.Request, error) {
 	item, err := s.Store.GetRequest(ctx, requestID)
 	if err != nil {
 		s.logger().Warn("get request failed", zap.String("request.id", requestID), zap.Error(err))
-		return store.Request{}, err
+		return common.Request{}, err
 	}
 	s.logger().Debug("fetched request", zap.String("request.id", requestID), zap.String("owner.id", item.OwnerID))
 	return item, nil
 }
 
-func (s *Service) GetRequestForOwner(ctx context.Context, requestID string, ownerID string) (store.Request, error) {
+func (s *Service) GetRequestForOwner(ctx context.Context, requestID string, ownerID string) (common.Request, error) {
 	item, err := s.Store.GetRequest(ctx, requestID)
 	if err != nil {
 		s.logger().Warn("get request for owner failed", zap.String("request.id", requestID), zap.String("owner.id", ownerID), zap.Error(err))
-		return store.Request{}, err
+		return common.Request{}, err
 	}
 	if ownerID != "" && item.OwnerID != ownerID {
 		s.logger().Warn("get request for owner forbidden", zap.String("request.id", requestID), zap.String("owner.id", ownerID), zap.String("request.owner_id", item.OwnerID))
-		return store.Request{}, ErrForbidden
+		return common.Request{}, ErrForbidden
 	}
 	s.logger().Debug("fetched request for owner", zap.String("request.id", requestID), zap.String("owner.id", ownerID))
 	return item, nil

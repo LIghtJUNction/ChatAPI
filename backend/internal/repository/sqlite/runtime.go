@@ -11,8 +11,8 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrations"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type Store struct {
@@ -20,8 +20,8 @@ type Store struct {
 	Logger *zap.Logger
 }
 
-var errNotFound = store.ErrNotFound
-var errConflict = store.ErrTurnConflict
+var errNotFound = common.ErrNotFound
+var errConflict = common.ErrTurnConflict
 
 func Open(dsn string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dsn), 0o755); err != nil {
@@ -63,14 +63,14 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.db.PingContext(ctx)
 }
 
-func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, error) {
+func (s *Store) MigrationStatus(ctx context.Context) (common.MigrationStatus, error) {
 	status, err := migrations.StatusReport(ctx, s.db)
 	if err != nil {
-		return store.MigrationStatus{}, err
+		return common.MigrationStatus{}, err
 	}
-	applied := make([]store.AppliedMigration, 0, len(status.Applied))
+	applied := make([]common.AppliedMigration, 0, len(status.Applied))
 	for _, item := range status.Applied {
-		applied = append(applied, store.AppliedMigration{
+		applied = append(applied, common.AppliedMigration{
 			Version:   item.Version,
 			Name:      item.Name,
 			AppliedAt: item.AppliedAt,
@@ -78,7 +78,7 @@ func (s *Store) MigrationStatus(ctx context.Context) (store.MigrationStatus, err
 			Dirty:     item.Dirty,
 		})
 	}
-	return store.MigrationStatus{
+	return common.MigrationStatus{
 		SchemaVersion:  status.SchemaVersion,
 		AppVersion:     status.AppVersion,
 		MigrationDirty: status.MigrationDirty,

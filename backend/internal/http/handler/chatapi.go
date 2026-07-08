@@ -13,13 +13,13 @@ import (
 	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/protocol"
+	"github.com/zyf/chatapi/internal/repository/common"
 	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	pendingsvc "github.com/zyf/chatapi/internal/service/chat/pending"
 	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type ChatAPIHandler struct {
@@ -113,7 +113,7 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	httpx.WriteJSON(w, http.StatusOK, responseBody)
 }
 
-func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, preparedImages []preprocesssvc.PreparedImage, body map[string]any, requestMeta store.Request) {
+func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, preparedImages []preprocesssvc.PreparedImage, body map[string]any, requestMeta common.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		logging.BindContext(h.Logger, r.Context()).Error("streaming not supported by response writer")
@@ -238,7 +238,7 @@ func (h ChatAPIHandler) executeTurnControl(w http.ResponseWriter, r *http.Reques
 	result, err := h.Turn.ExecuteTurnControl(r.Context(), command)
 	if err != nil {
 		switch {
-		case errors.Is(err, pendingsvc.ErrPendingConflict), errors.Is(err, store.ErrTurnConflict):
+		case errors.Is(err, pendingsvc.ErrPendingConflict), errors.Is(err, common.ErrTurnConflict):
 			logging.BindContext(h.Logger, r.Context(),
 				zap.String("turn.control", string(kind)),
 				zap.String("conversation.id", command.ConversationID),

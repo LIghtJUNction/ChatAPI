@@ -17,6 +17,7 @@ import (
 	httpapi "github.com/zyf/chatapi/internal/http"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/platform/media/localstore"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrations"
 	sqlitestore "github.com/zyf/chatapi/internal/repository/sqlite"
 	adminops "github.com/zyf/chatapi/internal/service/admincontrol/ops"
@@ -24,7 +25,6 @@ import (
 	"github.com/zyf/chatapi/internal/service/chat/pending"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
@@ -41,7 +41,7 @@ func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
 		t.Fatalf("logger: %v", err)
 	}
 	st.Logger = logFactory.Layer(logging.LayerRepository)
-	if _, err := st.CreateUser(context.Background(), store.CreateUserInput{
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:       "user_media",
 		Username: "media",
 		Email:    "media@example.com",
@@ -115,7 +115,7 @@ func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
 		t.Fatalf("expected asset file to exist: %v", err)
 	}
 
-	if _, err := turnService.CompleteConversation(context.Background(), store.CompletePendingInput{
+	if _, err := turnService.CompleteConversation(context.Background(), common.CompletePendingInput{
 		ConversationID: req.ConversationID,
 		ResponseID:     "resp_done",
 		OutputText:     "done",

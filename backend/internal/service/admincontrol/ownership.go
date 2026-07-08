@@ -3,30 +3,30 @@ package admincontrol
 import (
 	"context"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Service) TransferOwnership(ctx context.Context, sourceUserID string, targetUserID string) (store.UserOwnershipTransferResult, error) {
+func (s *Service) TransferOwnership(ctx context.Context, sourceUserID string, targetUserID string) (common.UserOwnershipTransferResult, error) {
 	return s.accounts.TransferOwnership(ctx, sourceUserID, targetUserID)
 }
 
-func (s *Service) TransferOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (store.UserOwnershipTransferResult, error) {
+func (s *Service) TransferOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (common.UserOwnershipTransferResult, error) {
 	return s.accounts.TransferOwnershipSelection(ctx, sourceUserID, targetUserID, conversationIDs, filenames)
 }
 
-func (s *Service) OwnershipItems(ctx context.Context, userID string) (store.UserOwnershipSelection, error) {
+func (s *Service) OwnershipItems(ctx context.Context, userID string) (common.UserOwnershipSelection, error) {
 	user, err := s.GetUser(ctx, userID)
 	if err != nil {
-		return store.UserOwnershipSelection{}, err
+		return common.UserOwnershipSelection{}, err
 	}
 	conversations, err := s.chatStore.ListConversations(ctx)
 	if err != nil {
-		return store.UserOwnershipSelection{}, err
+		return common.UserOwnershipSelection{}, err
 	}
-	filteredConversations := make([]store.UserOwnedConversationItem, 0)
+	filteredConversations := make([]common.UserOwnedConversationItem, 0)
 	for _, item := range conversations {
 		if stringValue(item.Metadata["owner_id"], "") == user.ID {
-			filteredConversations = append(filteredConversations, store.UserOwnedConversationItem{
+			filteredConversations = append(filteredConversations, common.UserOwnedConversationItem{
 				ConversationID: item.ID,
 				Title:          item.Title,
 				LastMessageAt:  item.LastMessageAt,
@@ -36,18 +36,18 @@ func (s *Service) OwnershipItems(ctx context.Context, userID string) (store.User
 	}
 	uploads, err := s.storageStore.ListUploadedImagesByOwner(ctx, user.ID)
 	if err != nil {
-		return store.UserOwnershipSelection{}, err
+		return common.UserOwnershipSelection{}, err
 	}
-	filteredUploads := make([]store.UserOwnedUploadItem, 0, len(uploads))
+	filteredUploads := make([]common.UserOwnedUploadItem, 0, len(uploads))
 	for _, item := range uploads {
-		filteredUploads = append(filteredUploads, store.UserOwnedUploadItem{
+		filteredUploads = append(filteredUploads, common.UserOwnedUploadItem{
 			ID:        item.ID,
 			Filename:  item.Filename,
 			Bytes:     item.Bytes,
 			CreatedAt: item.CreatedAt,
 		})
 	}
-	return store.UserOwnershipSelection{User: user, Conversations: filteredConversations, Uploads: filteredUploads}, nil
+	return common.UserOwnershipSelection{User: user, Conversations: filteredConversations, Uploads: filteredUploads}, nil
 }
 
 func stringValue(value any, fallback string) string {

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/zyf/chatapi/internal/protocol"
+	"github.com/zyf/chatapi/internal/repository/common"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -295,22 +295,22 @@ func cloneTurnRequest(input protocol.TurnRequest) protocol.TurnRequest {
 	return cloned
 }
 
-func cloneRequestMeta(input store.Request) store.Request {
+func cloneRequestMeta(input common.Request) common.Request {
 	cloned := input
 	cloned.RequestQuery = pendingCloneStringSliceMap(input.RequestQuery)
 	cloned.RequestHeaders = pendingCloneStringSliceMap(input.RequestHeaders)
 	cloned.RequestBody = pendingCloneAnyMap(input.RequestBody)
 	if len(input.InputParts) > 0 {
-		cloned.InputParts = append([]store.RequestInputPart(nil), input.InputParts...)
+		cloned.InputParts = append([]common.RequestInputPart(nil), input.InputParts...)
 	}
 	if len(input.ToolSchemas) > 0 {
 		cloned.ToolSchemas = pendingCloneAnySlice(input.ToolSchemas)
 	}
-	cloned.ToolChoice = store.RequestToolChoice{
+	cloned.ToolChoice = common.RequestToolChoice{
 		Type: input.ToolChoice.Type,
 		Name: input.ToolChoice.Name,
 	}
-	cloned.ResponseFormat = store.RequestResponseFormat{
+	cloned.ResponseFormat = common.RequestResponseFormat{
 		Type:   input.ResponseFormat.Type,
 		Name:   input.ResponseFormat.Name,
 		Schema: pendingCloneAnyMap(input.ResponseFormat.Schema),

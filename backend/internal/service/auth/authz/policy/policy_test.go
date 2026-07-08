@@ -3,14 +3,14 @@ package policy_test
 import (
 	"testing"
 
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/principal"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 func TestSessionPrincipalMarksAdminUser(t *testing.T) {
 	svc := policy.NewService()
-	pr := svc.SessionPrincipal(store.User{
+	pr := svc.SessionPrincipal(common.User{
 		ID:         "user_admin",
 		Username:   "alice",
 		Email:      "alice@example.com",

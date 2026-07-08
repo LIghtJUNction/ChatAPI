@@ -5,7 +5,7 @@ import (
 
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/protocol"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 type PendingResult struct {
@@ -33,7 +33,7 @@ type PendingTurn struct {
 	RequestFormat     string
 	Model             string
 	NormalizedRequest protocol.TurnRequest
-	RequestMeta       store.Request
+	RequestMeta       common.Request
 	CreatedAt         time.Time
 	State             string
 	Events            chan PendingEvent

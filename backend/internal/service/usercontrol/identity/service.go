@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/service/account"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -23,7 +23,7 @@ func New(deps Deps) *Service {
 	return &Service{accounts: deps.Accounts, logger: deps.Logger}
 }
 
-func (s *Service) ListLinkedIdentities(ctx context.Context, userID string) ([]store.UserIdentity, error) {
+func (s *Service) ListLinkedIdentities(ctx context.Context, userID string) ([]common.UserIdentity, error) {
 	items, err := s.accounts.ListUserIdentities(ctx, userID)
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", userID), zap.Int("identities.count", len(items))).Debug("usercontrol identity listed linked identities")

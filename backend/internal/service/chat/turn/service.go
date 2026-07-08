@@ -8,8 +8,8 @@ import (
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/protocol"
-	"github.com/zyf/chatapi/internal/repository/chatrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/chat"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +28,7 @@ type ExpireResult struct {
 type Service struct {
 	Submitter                   *Submitter
 	Pending                     pendingRegistryLike
-	Store                       chatrepo.Store
+	Store                       chat.Store
 	ResolveMutationError        MutationErrorResolver
 	NotifyText                  TextNotifier
 	EnsureMessageAdmission      AdmissionHook
@@ -106,17 +106,17 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 	return result.ResponseBody, nil
 }
 
-func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*PendingTurn, store.Conversation, error) {
+func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*PendingTurn, common.Conversation, error) {
 	ownerID := s.ownerID(ctx)
 	if err := s.ensureAdmissions(ctx, ownerID); err != nil {
-		return nil, store.Conversation{}, err
+		return nil, common.Conversation{}, err
 	}
 	input.OwnerID = ownerID
 	input.Actor = s.actor(ctx)
 	turn, conversation, _, err := s.Submitter.Submit(ctx, input)
 	if err != nil {
 		logging.BindContext(s.Logger, ctx, zap.String("owner.id", ownerID)).Error("create pending stream submit failed", zap.Error(err))
-		return nil, store.Conversation{}, err
+		return nil, common.Conversation{}, err
 	}
 	logging.BindContext(s.Logger, ctx,
 		zap.String("owner.id", ownerID),
@@ -139,7 +139,7 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 	metadata := conversation.Metadata
 	existing, _ := metadata["realtime_draft_text"].(string)
 	nextDraft := existing + chunk
-	updated, err := s.Store.UpdateDraft(ctx, store.UpdateDraftInput{
+	updated, err := s.Store.UpdateDraft(ctx, common.UpdateDraftInput{
 		ConversationID: conversationID,
 		DraftText:      nextDraft,
 	})
@@ -153,7 +153,7 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 	return map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}, nil
 }
 
-func (s *Service) CompleteConversation(ctx context.Context, input store.CompletePendingInput) (map[string]any, error) {
+func (s *Service) CompleteConversation(ctx context.Context, input common.CompletePendingInput) (map[string]any, error) {
 	previousState, err := s.Pending.StartComplete(input.ConversationID)
 	if err != nil {
 		return nil, s.resolveMutationError(ctx, input.ConversationID, err)
@@ -167,7 +167,7 @@ func (s *Service) CompleteConversation(ctx context.Context, input store.Complete
 	if err == nil {
 		s.Submitter.Realtime.PublishConversationUpsert(conversation, messages)
 	} else {
-		s.Submitter.Realtime.PublishConversationUpsert(conversation, []store.Message{message})
+		s.Submitter.Realtime.PublishConversationUpsert(conversation, []common.Message{message})
 	}
 	responseBody := protocol.BuildResponseForMeta(protocol.ConversationMeta{
 		Protocol:   protocol.ParseProtocol(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses))),
@@ -206,7 +206,7 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 		).Warn("turn abort start rejected", zap.Error(err))
 		return s.resolveMutationError(ctx, conversationID, err)
 	}
-	conversation, message, err := s.Store.AbortPendingTurn(ctx, store.AbortPendingInput{ConversationID: conversationID, Reason: reason})
+	conversation, message, err := s.Store.AbortPendingTurn(ctx, common.AbortPendingInput{ConversationID: conversationID, Reason: reason})
 	if err != nil {
 		s.Pending.RevertFinalize(conversationID, previousState)
 		logging.BindContext(s.Logger, ctx,
@@ -219,7 +219,7 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 	if listErr == nil {
 		s.Submitter.Realtime.PublishConversationUpsert(conversation, messages)
 	} else {
-		s.Submitter.Realtime.PublishConversationUpsert(conversation, []store.Message{message})
+		s.Submitter.Realtime.PublishConversationUpsert(conversation, []common.Message{message})
 	}
 	body := protocol.AbortError(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses)), reason)
 	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "abort", ErrorBody: body})
@@ -265,7 +265,7 @@ func (s *Service) ExecuteTurnControl(ctx context.Context, command TurnControlCom
 	).Debug("turn control dispatch")
 	switch command.Kind {
 	case TurnControlRespond, TurnControlStreamComplete:
-		return s.CompleteConversation(ctx, store.CompletePendingInput{
+		return s.CompleteConversation(ctx, common.CompletePendingInput{
 			ConversationID:      command.ConversationID,
 			ResponseID:          command.ResponseID,
 			OutputText:          command.OutputText,

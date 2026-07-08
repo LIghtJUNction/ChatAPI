@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) GetSystemConfig(ctx context.Context, key string) (store.SystemConfig, error) {
+func (s *Store) GetSystemConfig(ctx context.Context, key string) (common.SystemConfig, error) {
 	item, err := scanSystemConfig(s.db.QueryRowContext(ctx, `
 		SELECT key, value_json, created_at, updated_at
 		FROM config
@@ -18,14 +18,14 @@ func (s *Store) GetSystemConfig(ctx context.Context, key string) (store.SystemCo
 	`, strings.TrimSpace(key)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.SystemConfig{}, errNotFound
+			return common.SystemConfig{}, errNotFound
 		}
-		return store.SystemConfig{}, err
+		return common.SystemConfig{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) SetSystemConfig(ctx context.Context, input store.SetSystemConfigInput) (store.SystemConfig, error) {
+func (s *Store) SetSystemConfig(ctx context.Context, input common.SetSystemConfigInput) (common.SystemConfig, error) {
 	now := time.Now().UTC()
 	key := strings.TrimSpace(input.Key)
 	if _, err := s.db.ExecContext(ctx, `
@@ -35,7 +35,7 @@ func (s *Store) SetSystemConfig(ctx context.Context, input store.SetSystemConfig
 			value_json = excluded.value_json,
 			updated_at = excluded.updated_at
 	`, key, mustJSON(ensureMap(input.Value)), formatTime(now), formatTime(now)); err != nil {
-		return store.SystemConfig{}, err
+		return common.SystemConfig{}, err
 	}
 	return s.GetSystemConfig(ctx, key)
 }
@@ -45,7 +45,7 @@ func (s *Store) DeleteSystemConfig(ctx context.Context, key string) error {
 	return err
 }
 
-func (s *Store) ListSystemConfigs(ctx context.Context) ([]store.SystemConfig, error) {
+func (s *Store) ListSystemConfigs(ctx context.Context) ([]common.SystemConfig, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT key, value_json, created_at, updated_at
 		FROM config
@@ -56,7 +56,7 @@ func (s *Store) ListSystemConfigs(ctx context.Context) ([]store.SystemConfig, er
 	}
 	defer rows.Close()
 
-	items := make([]store.SystemConfig, 0)
+	items := make([]common.SystemConfig, 0)
 	for rows.Next() {
 		item, err := scanSystemConfig(rows)
 		if err != nil {
@@ -67,7 +67,7 @@ func (s *Store) ListSystemConfigs(ctx context.Context) ([]store.SystemConfig, er
 	return items, rows.Err()
 }
 
-func (s *Store) GetUserConfig(ctx context.Context, userID string, key string) (store.UserConfig, error) {
+func (s *Store) GetUserConfig(ctx context.Context, userID string, key string) (common.UserConfig, error) {
 	item, err := scanUserConfig(s.db.QueryRowContext(ctx, `
 		SELECT user_id, key, value_json, created_at, updated_at
 		FROM user_configs
@@ -75,14 +75,14 @@ func (s *Store) GetUserConfig(ctx context.Context, userID string, key string) (s
 	`, strings.TrimSpace(userID), strings.TrimSpace(key)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.UserConfig{}, errNotFound
+			return common.UserConfig{}, errNotFound
 		}
-		return store.UserConfig{}, err
+		return common.UserConfig{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) SetUserConfig(ctx context.Context, input store.SetUserConfigInput) (store.UserConfig, error) {
+func (s *Store) SetUserConfig(ctx context.Context, input common.SetUserConfigInput) (common.UserConfig, error) {
 	now := time.Now().UTC()
 	userID := strings.TrimSpace(input.UserID)
 	key := strings.TrimSpace(input.Key)
@@ -93,7 +93,7 @@ func (s *Store) SetUserConfig(ctx context.Context, input store.SetUserConfigInpu
 			value_json = excluded.value_json,
 			updated_at = excluded.updated_at
 	`, userID, key, mustJSON(ensureMap(input.Value)), formatTime(now), formatTime(now)); err != nil {
-		return store.UserConfig{}, err
+		return common.UserConfig{}, err
 	}
 	return s.GetUserConfig(ctx, userID, key)
 }
@@ -106,7 +106,7 @@ func (s *Store) DeleteUserConfig(ctx context.Context, userID string, key string)
 	return err
 }
 
-func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.UserConfig, error) {
+func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]common.UserConfig, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT user_id, key, value_json, created_at, updated_at
 		FROM user_configs
@@ -118,7 +118,7 @@ func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.Use
 	}
 	defer rows.Close()
 
-	items := make([]store.UserConfig, 0)
+	items := make([]common.UserConfig, 0)
 	for rows.Next() {
 		item, err := scanUserConfig(rows)
 		if err != nil {
@@ -129,7 +129,7 @@ func (s *Store) ListUserConfigs(ctx context.Context, userID string) ([]store.Use
 	return items, rows.Err()
 }
 
-func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpose string) (store.AuthVerificationCode, error) {
+func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpose string) (common.AuthVerificationCode, error) {
 	item, err := scanAuthVerificationCode(s.db.QueryRowContext(ctx, `
 		SELECT email, purpose, code_hash, failed_attempts, expires_at, last_sent_at, created_at, updated_at
 		FROM auth_verification_codes
@@ -137,14 +137,14 @@ func (s *Store) GetAuthVerificationCode(ctx context.Context, email string, purpo
 	`, strings.TrimSpace(email), strings.TrimSpace(purpose)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.AuthVerificationCode{}, errNotFound
+			return common.AuthVerificationCode{}, errNotFound
 		}
-		return store.AuthVerificationCode{}, err
+		return common.AuthVerificationCode{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input store.UpsertAuthVerificationCodeInput) (store.AuthVerificationCode, error) {
+func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input common.UpsertAuthVerificationCodeInput) (common.AuthVerificationCode, error) {
 	now := time.Now().UTC()
 	email := strings.TrimSpace(strings.ToLower(input.Email))
 	purpose := strings.TrimSpace(input.Purpose)
@@ -158,7 +158,7 @@ func (s *Store) UpsertAuthVerificationCode(ctx context.Context, input store.Upse
 			last_sent_at = excluded.last_sent_at,
 			updated_at = excluded.updated_at
 	`, email, purpose, strings.TrimSpace(input.CodeHash), input.FailedAttempts, formatTime(input.ExpiresAt.UTC()), formatTime(input.LastSentAt.UTC()), formatTime(now), formatTime(now)); err != nil {
-		return store.AuthVerificationCode{}, err
+		return common.AuthVerificationCode{}, err
 	}
 	return s.GetAuthVerificationCode(ctx, email, purpose)
 }
@@ -186,7 +186,7 @@ func (s *Store) DeleteExpiredAuthVerificationCodes(ctx context.Context, before t
 	return int(rows), nil
 }
 
-func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]store.AutomationRule, error) {
+func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([]common.AutomationRule, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, enabled, rule_json, created_at, updated_at
 		FROM automation_rules
@@ -198,7 +198,7 @@ func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([
 	}
 	defer rows.Close()
 
-	items := make([]store.AutomationRule, 0)
+	items := make([]common.AutomationRule, 0)
 	for rows.Next() {
 		item, err := scanAutomationRule(rows)
 		if err != nil {
@@ -209,7 +209,7 @@ func (s *Store) ListAutomationRulesByUser(ctx context.Context, userID string) ([
 	return items, rows.Err()
 }
 
-func (s *Store) ReplaceAutomationRulesForUser(ctx context.Context, userID string, replaceIDs map[string]struct{}, inputs []store.UpsertAutomationRuleInput) ([]store.AutomationRule, error) {
+func (s *Store) ReplaceAutomationRulesForUser(ctx context.Context, userID string, replaceIDs map[string]struct{}, inputs []common.UpsertAutomationRuleInput) ([]common.AutomationRule, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err

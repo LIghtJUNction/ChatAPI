@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/repositorycontract"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type NewStoreFunc func(t *testing.T) repositorycontract.Store
@@ -105,7 +105,7 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 	ctx := context.Background()
 	st := newStore(t)
 
-	alice, err := st.CreateUser(ctx, store.CreateUserInput{
+	alice, err := st.CreateUser(ctx, common.CreateUserInput{
 		ID:           "user_alice",
 		Username:     "alice",
 		Email:        "alice@example.com",
@@ -121,7 +121,7 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 		t.Fatalf("unexpected alice: %#v", alice)
 	}
 
-	bob, err := st.CreateUser(ctx, store.CreateUserInput{
+	bob, err := st.CreateUser(ctx, common.CreateUserInput{
 		ID:           "user_bob",
 		Username:     "bob",
 		Email:        "bob@example.com",
@@ -151,7 +151,7 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 	}
 
 	lastLogin := time.Date(2026, 7, 6, 1, 2, 3, 0, time.UTC)
-	updated, err := st.UpdateUser(ctx, store.UpdateUserInput{
+	updated, err := st.UpdateUser(ctx, common.UpdateUserInput{
 		ID:           alice.ID,
 		Username:     "alice2",
 		Email:        "alice2@example.com",
@@ -179,10 +179,10 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 		t.Fatalf("expected two users, got %#v", items)
 	}
 
-	if _, err := st.GetUser(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetUser(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing user, got %v", err)
 	}
-	if _, err := st.GetUserByUsername(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetUserByUsername(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing username, got %v", err)
 	}
 }
@@ -192,7 +192,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	ctx := context.Background()
 	st := newStore(t)
 
-	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+	if _, err := st.CreateUser(ctx, common.CreateUserInput{
 		ID:           "user_delete_blocked",
 		Username:     "blocked",
 		Email:        "blocked@example.com",
@@ -201,7 +201,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}); err != nil {
 		t.Fatalf("create blocked user: %v", err)
 	}
-	if _, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+	if _, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
 		ConversationID: "conv_delete_blocked",
 		RequestID:      "req_delete_blocked",
 		ResponseID:     "resp_delete_blocked",
@@ -221,11 +221,11 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	if blockedPreview.CanDelete || blockedPreview.Counts.OwnedConversations != 1 {
 		t.Fatalf("expected blocked preview with owned conversation: %#v", blockedPreview)
 	}
-	if err := st.DeleteUserAccount(ctx, "user_delete_blocked"); !errors.Is(err, store.ErrTurnConflict) {
+	if err := st.DeleteUserAccount(ctx, "user_delete_blocked"); !errors.Is(err, common.ErrTurnConflict) {
 		t.Fatalf("expected blocked delete conflict, got %v", err)
 	}
 
-	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+	if _, err := st.CreateUser(ctx, common.CreateUserInput{
 		ID:           "user_delete_ready",
 		Username:     "ready",
 		Email:        "ready@example.com",
@@ -234,7 +234,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}); err != nil {
 		t.Fatalf("create ready user: %v", err)
 	}
-	if _, err := st.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
+	if _, err := st.UpsertUserIdentity(ctx, common.UpsertUserIdentityInput{
 		ID:       "identity_delete_ready",
 		UserID:   "user_delete_ready",
 		Provider: "oidc",
@@ -243,21 +243,21 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}); err != nil {
 		t.Fatalf("create ready identity: %v", err)
 	}
-	if _, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+	if _, err := st.SetUserConfig(ctx, common.SetUserConfigInput{
 		UserID: "user_delete_ready",
 		Key:    "workspace",
 		Value:  map[string]any{"theme": "dark"},
 	}); err != nil {
 		t.Fatalf("set ready config: %v", err)
 	}
-	if _, err := st.ReplaceAutomationRulesForUser(ctx, "user_delete_ready", nil, []store.UpsertAutomationRuleInput{{
+	if _, err := st.ReplaceAutomationRulesForUser(ctx, "user_delete_ready", nil, []common.UpsertAutomationRuleInput{{
 		ID:      "rule_delete_ready",
 		Enabled: true,
 		Payload: map[string]any{"match": "x"},
 	}}); err != nil {
 		t.Fatalf("set ready automation rule: %v", err)
 	}
-	if _, err := st.CreateAppAPIKey(ctx, store.CreateAppAPIKeyInput{
+	if _, err := st.CreateAppAPIKey(ctx, common.CreateAppAPIKeyInput{
 		ID:        "app_key_delete_ready",
 		UserID:    "user_delete_ready",
 		Name:      "ready-app",
@@ -267,7 +267,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}); err != nil {
 		t.Fatalf("create ready app api key: %v", err)
 	}
-	if err := st.CreateAppAPIKeyAuditLog(ctx, store.AppAPIKeyAuditLog{
+	if err := st.CreateAppAPIKeyAuditLog(ctx, common.AppAPIKeyAuditLog{
 		ID:          "app_audit_delete_ready",
 		AppAPIKeyID: "app_key_delete_ready",
 		UserID:      "user_delete_ready",
@@ -277,7 +277,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}); err != nil {
 		t.Fatalf("create ready app api key audit log: %v", err)
 	}
-	if _, err := st.CreateModelAPIKey(ctx, store.CreateModelAPIKeyInput{
+	if _, err := st.CreateModelAPIKey(ctx, common.CreateModelAPIKeyInput{
 		ID:            "model_key_delete_ready",
 		UserID:        "user_delete_ready",
 		Name:          "ready-model",
@@ -290,7 +290,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	if _, err := st.SetStorageUserQuota(ctx, "user_delete_ready", 1024); err != nil {
 		t.Fatalf("set ready quota: %v", err)
 	}
-	if _, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+	if _, err := st.UpsertStorageFileDeletionFailure(ctx, common.UpsertStorageFileDeletionFailureInput{
 		Path:      "/tmp/ready.png",
 		Filename:  "ready.png",
 		OwnerID:   "user_delete_ready",
@@ -299,7 +299,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}); err != nil {
 		t.Fatalf("set ready deletion failure: %v", err)
 	}
-	if _, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	if _, err := st.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_delete_ready_actor",
 		ActorUserID:  "user_delete_ready",
 		ActorRole:    "user",
@@ -313,7 +313,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}); err != nil {
 		t.Fatalf("create ready actor audit log: %v", err)
 	}
-	if _, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	if _, err := st.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_delete_ready_ref",
 		ActorUserID:  "admin",
 		ActorRole:    "admin",
@@ -345,7 +345,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	if err := st.DeleteUserAccount(ctx, "user_delete_ready"); err != nil {
 		t.Fatalf("delete ready user account: %v", err)
 	}
-	if _, err := st.GetUser(ctx, "user_delete_ready"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetUser(ctx, "user_delete_ready"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected deleted user to be missing, got %v", err)
 	}
 	if identities, err := st.ListUserIdentities(ctx, "user_delete_ready"); err != nil || len(identities) != 0 {
@@ -363,7 +363,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	if keys, err := st.ListModelAPIKeysByUser(ctx, "user_delete_ready"); err != nil || len(keys) != 0 {
 		t.Fatalf("expected deleted model api keys to be gone, keys=%#v err=%v", keys, err)
 	}
-	if _, err := st.GetStorageUserQuota(ctx, "user_delete_ready"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetStorageUserQuota(ctx, "user_delete_ready"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected deleted user quota to be missing, got %v", err)
 	}
 	failures, err := st.ListStorageFileDeletionFailures(ctx, 10)
@@ -375,7 +375,7 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 			t.Fatalf("expected deletion failures for deleted user to be removed: %#v", failures)
 		}
 	}
-	auditCount, err := st.CountAuditLogs(ctx, store.CountAuditLogsInput{ActorUserID: "user_delete_ready"})
+	auditCount, err := st.CountAuditLogs(ctx, common.CountAuditLogsInput{ActorUserID: "user_delete_ready"})
 	if err != nil {
 		t.Fatalf("count actor audit logs after delete: %v", err)
 	}
@@ -389,7 +389,7 @@ func testUserRepositoryTransfersOwnership(t *testing.T, newStore NewStoreFunc) {
 	ctx := context.Background()
 	st := newStore(t)
 
-	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+	if _, err := st.CreateUser(ctx, common.CreateUserInput{
 		ID:           "user_transfer_source",
 		Username:     "source",
 		Email:        "source@example.com",
@@ -398,7 +398,7 @@ func testUserRepositoryTransfersOwnership(t *testing.T, newStore NewStoreFunc) {
 	}); err != nil {
 		t.Fatalf("create source user: %v", err)
 	}
-	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+	if _, err := st.CreateUser(ctx, common.CreateUserInput{
 		ID:           "user_transfer_target",
 		Username:     "target",
 		Email:        "target@example.com",
@@ -407,7 +407,7 @@ func testUserRepositoryTransfersOwnership(t *testing.T, newStore NewStoreFunc) {
 	}); err != nil {
 		t.Fatalf("create target user: %v", err)
 	}
-	if _, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+	if _, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
 		ConversationID: "conv_transfer_source",
 		RequestID:      "req_transfer_source",
 		ResponseID:     "resp_transfer_source",
@@ -419,7 +419,7 @@ func testUserRepositoryTransfersOwnership(t *testing.T, newStore NewStoreFunc) {
 	}); err != nil {
 		t.Fatalf("create source conversation: %v", err)
 	}
-	if _, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+	if _, err := st.CreateUploadedImage(ctx, common.CreateUploadedImageInput{
 		ID:               "img_transfer_source",
 		OwnerID:          "user_transfer_source",
 		Filename:         "transfer-source.png",
@@ -430,7 +430,7 @@ func testUserRepositoryTransfersOwnership(t *testing.T, newStore NewStoreFunc) {
 	}); err != nil {
 		t.Fatalf("create source image: %v", err)
 	}
-	if _, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+	if _, err := st.UpsertStorageFileDeletionFailure(ctx, common.UpsertStorageFileDeletionFailureInput{
 		Path:      "/tmp/transfer-source.png",
 		Filename:  "transfer-source.png",
 		OwnerID:   "user_transfer_source",
@@ -491,7 +491,7 @@ func testUserRepositoryTransfersOwnership(t *testing.T, newStore NewStoreFunc) {
 	if len(failures) != 1 || failures[0].OwnerID != "user_transfer_target" {
 		t.Fatalf("expected deletion failure owner to move: %#v", failures)
 	}
-	if _, err := st.GetStorageUserQuota(ctx, "user_transfer_source"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetStorageUserQuota(ctx, "user_transfer_source"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected source quota to be removed, got %v", err)
 	}
 	targetQuota, err := st.GetStorageUserQuota(ctx, "user_transfer_target")
@@ -523,7 +523,7 @@ func testUserRepositoryTransfersOwnershipSelection(t *testing.T, newStore NewSto
 	ctx := context.Background()
 	st := newStore(t)
 
-	for _, item := range []store.CreateUserInput{
+	for _, item := range []common.CreateUserInput{
 		{ID: "user_transfer_select_source", Username: "select-source", Email: "select-source@example.com", PasswordHash: "hash", IsActive: true},
 		{ID: "user_transfer_select_target", Username: "select-target", Email: "select-target@example.com", PasswordHash: "hash", IsActive: true},
 	} {
@@ -532,7 +532,7 @@ func testUserRepositoryTransfersOwnershipSelection(t *testing.T, newStore NewSto
 		}
 	}
 	for _, conversationID := range []string{"conv_select_one", "conv_select_two"} {
-		if _, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+		if _, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
 			ConversationID: conversationID,
 			RequestID:      "req_" + conversationID,
 			ResponseID:     "resp_" + conversationID,
@@ -546,7 +546,7 @@ func testUserRepositoryTransfersOwnershipSelection(t *testing.T, newStore NewSto
 		}
 	}
 	for _, filename := range []string{"select-one.png", "select-two.png"} {
-		if _, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+		if _, err := st.CreateUploadedImage(ctx, common.CreateUploadedImageInput{
 			ID:               "img_" + filename,
 			OwnerID:          "user_transfer_select_source",
 			Filename:         filename,
@@ -557,7 +557,7 @@ func testUserRepositoryTransfersOwnershipSelection(t *testing.T, newStore NewSto
 		}); err != nil {
 			t.Fatalf("create upload %s: %v", filename, err)
 		}
-		if _, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+		if _, err := st.UpsertStorageFileDeletionFailure(ctx, common.UpsertStorageFileDeletionFailureInput{
 			Path:      "/tmp/" + filename,
 			Filename:  filename,
 			OwnerID:   "user_transfer_select_source",
@@ -617,7 +617,7 @@ func testAuditRepositoryCreatesFiltersAndLimitsLogs(t *testing.T, newStore NewSt
 	t.Helper()
 	ctx := context.Background()
 	st := newStore(t)
-	first, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	first, err := st.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_1",
 		ActorUserID:  "user_audit",
 		ActorRole:    "user",
@@ -640,7 +640,7 @@ func testAuditRepositoryCreatesFiltersAndLimitsLogs(t *testing.T, newStore NewSt
 	if first.ID != "audit_1" || first.CreatedAt.IsZero() || first.Metadata["safe"] != "value" {
 		t.Fatalf("unexpected created audit log: %#v", first)
 	}
-	if _, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	if _, err := st.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_2",
 		ActorUserID:  "other_user",
 		ActorRole:    "admin",
@@ -656,7 +656,7 @@ func testAuditRepositoryCreatesFiltersAndLimitsLogs(t *testing.T, newStore NewSt
 	}); err != nil {
 		t.Fatalf("create second audit log: %v", err)
 	}
-	if _, err := st.CreateAuditLog(ctx, store.CreateAuditLogInput{
+	if _, err := st.CreateAuditLog(ctx, common.CreateAuditLogInput{
 		ID:           "audit_3",
 		ActorUserID:  "user_audit",
 		ActorRole:    "user",
@@ -670,7 +670,7 @@ func testAuditRepositoryCreatesFiltersAndLimitsLogs(t *testing.T, newStore NewSt
 		t.Fatalf("create third audit log: %v", err)
 	}
 
-	filtered, err := st.ListAuditLogs(ctx, store.ListAuditLogsInput{
+	filtered, err := st.ListAuditLogs(ctx, common.ListAuditLogsInput{
 		Limit:       10,
 		EventType:   "user.identity",
 		ActorUserID: "user_audit",
@@ -685,7 +685,7 @@ func testAuditRepositoryCreatesFiltersAndLimitsLogs(t *testing.T, newStore NewSt
 		t.Fatalf("unexpected filtered metadata: %#v", filtered[1])
 	}
 
-	limited, err := st.ListAuditLogs(ctx, store.ListAuditLogsInput{Limit: 1})
+	limited, err := st.ListAuditLogs(ctx, common.ListAuditLogsInput{Limit: 1})
 	if err != nil {
 		t.Fatalf("list limited audit logs: %v", err)
 	}
@@ -698,7 +698,7 @@ func testAutomationRuleRepositoryReplacesByScope(t *testing.T, newStore NewStore
 	t.Helper()
 	ctx := context.Background()
 	st := newStore(t)
-	initial, err := st.ReplaceAutomationRulesForUser(ctx, "user_rules", nil, []store.UpsertAutomationRuleInput{
+	initial, err := st.ReplaceAutomationRulesForUser(ctx, "user_rules", nil, []common.UpsertAutomationRuleInput{
 		{
 			ID:      "rule_a",
 			UserID:  "user_rules",
@@ -728,7 +728,7 @@ func testAutomationRuleRepositoryReplacesByScope(t *testing.T, newStore NewStore
 	}
 
 	replaceIDs := map[string]struct{}{"rule_a": {}}
-	scoped, err := st.ReplaceAutomationRulesForUser(ctx, "user_rules", replaceIDs, []store.UpsertAutomationRuleInput{
+	scoped, err := st.ReplaceAutomationRulesForUser(ctx, "user_rules", replaceIDs, []common.UpsertAutomationRuleInput{
 		{
 			ID:      "rule_a",
 			UserID:  "user_rules",
@@ -746,7 +746,7 @@ func testAutomationRuleRepositoryReplacesByScope(t *testing.T, newStore NewStore
 	if len(scoped) != 2 {
 		t.Fatalf("expected scoped replace to keep other rules, got %#v", scoped)
 	}
-	byID := map[string]store.AutomationRule{}
+	byID := map[string]common.AutomationRule{}
 	for _, item := range scoped {
 		byID[item.ID] = item
 	}
@@ -772,7 +772,7 @@ func testAuthVerificationCodeRepositoryDeletesExpiredCodes(t *testing.T, newStor
 	st := newStore(t)
 	now := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)
 
-	if _, err := st.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+	if _, err := st.UpsertAuthVerificationCode(ctx, common.UpsertAuthVerificationCodeInput{
 		Email:          "expired-a@example.com",
 		Purpose:        "register",
 		CodeHash:       "hash-expired-a",
@@ -782,7 +782,7 @@ func testAuthVerificationCodeRepositoryDeletesExpiredCodes(t *testing.T, newStor
 	}); err != nil {
 		t.Fatalf("create expired code A: %v", err)
 	}
-	if _, err := st.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+	if _, err := st.UpsertAuthVerificationCode(ctx, common.UpsertAuthVerificationCodeInput{
 		Email:          "expired-b@example.com",
 		Purpose:        "password_reset",
 		CodeHash:       "hash-expired-b",
@@ -792,7 +792,7 @@ func testAuthVerificationCodeRepositoryDeletesExpiredCodes(t *testing.T, newStor
 	}); err != nil {
 		t.Fatalf("create expired code B: %v", err)
 	}
-	if _, err := st.UpsertAuthVerificationCode(ctx, store.UpsertAuthVerificationCodeInput{
+	if _, err := st.UpsertAuthVerificationCode(ctx, common.UpsertAuthVerificationCodeInput{
 		Email:          "active@example.com",
 		Purpose:        "register",
 		CodeHash:       "hash-active",
@@ -811,10 +811,10 @@ func testAuthVerificationCodeRepositoryDeletesExpiredCodes(t *testing.T, newStor
 		t.Fatalf("expected to delete 2 expired codes, got %d", deleted)
 	}
 
-	if _, err := st.GetAuthVerificationCode(ctx, "expired-a@example.com", "register"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetAuthVerificationCode(ctx, "expired-a@example.com", "register"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected expired code A to be deleted, got %v", err)
 	}
-	if _, err := st.GetAuthVerificationCode(ctx, "expired-b@example.com", "password_reset"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetAuthVerificationCode(ctx, "expired-b@example.com", "password_reset"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected expired code B to be deleted, got %v", err)
 	}
 	active, err := st.GetAuthVerificationCode(ctx, "active@example.com", "register")
@@ -839,7 +839,7 @@ func testAppAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore Ne
 	ctx := context.Background()
 	st := newStore(t)
 	expiresAt := time.Date(2026, 7, 7, 1, 2, 3, 0, time.UTC)
-	created, err := st.CreateAppAPIKey(ctx, store.CreateAppAPIKeyInput{
+	created, err := st.CreateAppAPIKey(ctx, common.CreateAppAPIKeyInput{
 		ID:        "appkey_1",
 		UserID:    "user_keys",
 		Name:      "automation",
@@ -879,7 +879,7 @@ func testAppAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore Ne
 		t.Fatalf("unexpected app key list after last used: %#v", items)
 	}
 
-	if err := st.RevokeAppAPIKey(ctx, created.ID, "other_user"); !errors.Is(err, store.ErrNotFound) {
+	if err := st.RevokeAppAPIKey(ctx, created.ID, "other_user"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound revoking other user key, got %v", err)
 	}
 	if err := st.RevokeAppAPIKey(ctx, created.ID, "user_keys"); err != nil {
@@ -892,7 +892,7 @@ func testAppAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore Ne
 	if revoked.RevokedAt == nil {
 		t.Fatalf("expected revoked_at after revoke: %#v", revoked)
 	}
-	if err := st.RevokeAppAPIKey(ctx, created.ID, "user_keys"); !errors.Is(err, store.ErrNotFound) {
+	if err := st.RevokeAppAPIKey(ctx, created.ID, "user_keys"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound revoking already revoked key, got %v", err)
 	}
 }
@@ -901,7 +901,7 @@ func testAppAPIKeyRepositoryAuditsRequests(t *testing.T, newStore NewStoreFunc) 
 	t.Helper()
 	ctx := context.Background()
 	st := newStore(t)
-	if err := st.CreateAppAPIKeyAuditLog(ctx, store.AppAPIKeyAuditLog{
+	if err := st.CreateAppAPIKeyAuditLog(ctx, common.AppAPIKeyAuditLog{
 		ID:          "applog_1",
 		AppAPIKeyID: "appkey_1",
 		UserID:      "user_audit",
@@ -912,7 +912,7 @@ func testAppAPIKeyRepositoryAuditsRequests(t *testing.T, newStore NewStoreFunc) 
 	}); err != nil {
 		t.Fatalf("create app audit log: %v", err)
 	}
-	if err := st.CreateAppAPIKeyAuditLog(ctx, store.AppAPIKeyAuditLog{
+	if err := st.CreateAppAPIKeyAuditLog(ctx, common.AppAPIKeyAuditLog{
 		ID:          "applog_2",
 		AppAPIKeyID: "appkey_2",
 		UserID:      "other_user",
@@ -923,14 +923,14 @@ func testAppAPIKeyRepositoryAuditsRequests(t *testing.T, newStore NewStoreFunc) 
 	}); err != nil {
 		t.Fatalf("create second app audit log: %v", err)
 	}
-	items, err := st.ListAppAPIKeyAuditLogs(ctx, store.ListAppAPIKeyAuditLogsInput{UserID: "user_audit", Limit: 10})
+	items, err := st.ListAppAPIKeyAuditLogs(ctx, common.ListAppAPIKeyAuditLogsInput{UserID: "user_audit", Limit: 10})
 	if err != nil {
 		t.Fatalf("list filtered app audit logs: %v", err)
 	}
 	if len(items) != 1 || items[0].ID != "applog_1" || items[0].StatusCode != httpStatusOK {
 		t.Fatalf("unexpected filtered app audit logs: %#v", items)
 	}
-	all, err := st.ListAppAPIKeyAuditLogs(ctx, store.ListAppAPIKeyAuditLogsInput{Limit: 10})
+	all, err := st.ListAppAPIKeyAuditLogs(ctx, common.ListAppAPIKeyAuditLogsInput{Limit: 10})
 	if err != nil {
 		t.Fatalf("list app audit logs: %v", err)
 	}
@@ -943,7 +943,7 @@ func testModelAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore 
 	t.Helper()
 	ctx := context.Background()
 	st := newStore(t)
-	created, err := st.CreateModelAPIKey(ctx, store.CreateModelAPIKeyInput{
+	created, err := st.CreateModelAPIKey(ctx, common.CreateModelAPIKeyInput{
 		ID:            "modelkey_1",
 		UserID:        "user_model_keys",
 		Name:          "default virtual model",
@@ -984,7 +984,7 @@ func testModelAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore 
 		t.Fatalf("unexpected model key list after last used: %#v", items)
 	}
 
-	if err := st.RevokeModelAPIKey(ctx, created.ID, "other_user"); !errors.Is(err, store.ErrNotFound) {
+	if err := st.RevokeModelAPIKey(ctx, created.ID, "other_user"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound revoking other user model key, got %v", err)
 	}
 	if err := st.RevokeModelAPIKey(ctx, created.ID, "user_model_keys"); err != nil {
@@ -997,7 +997,7 @@ func testModelAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore 
 	if revoked.RevokedAt == nil {
 		t.Fatalf("expected revoked_at after model revoke: %#v", revoked)
 	}
-	if _, err := st.GetModelAPIKeyByPrefix(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetModelAPIKeyByPrefix(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing model prefix, got %v", err)
 	}
 }
@@ -1006,7 +1006,7 @@ func testUserIdentityRepositoryUpsertsByProviderSubject(t *testing.T, newStore N
 	t.Helper()
 	ctx := context.Background()
 	st := newStore(t)
-	if _, err := st.CreateUser(ctx, store.CreateUserInput{
+	if _, err := st.CreateUser(ctx, common.CreateUserInput{
 		ID:       "user_oidc",
 		Email:    "first@example.com",
 		Role:     "user",
@@ -1016,7 +1016,7 @@ func testUserIdentityRepositoryUpsertsByProviderSubject(t *testing.T, newStore N
 	}
 
 	lastLogin := time.Date(2026, 7, 6, 4, 5, 6, 0, time.UTC)
-	identity, err := st.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
+	identity, err := st.UpsertUserIdentity(ctx, common.UpsertUserIdentityInput{
 		ID:            "identity_1",
 		UserID:        "user_oidc",
 		Provider:      "kirari",
@@ -1034,7 +1034,7 @@ func testUserIdentityRepositoryUpsertsByProviderSubject(t *testing.T, newStore N
 		t.Fatalf("unexpected inserted identity: %#v", identity)
 	}
 
-	updated, err := st.UpsertUserIdentity(ctx, store.UpsertUserIdentityInput{
+	updated, err := st.UpsertUserIdentity(ctx, common.UpsertUserIdentityInput{
 		ID:            "identity_ignored",
 		UserID:        "user_oidc",
 		Provider:      "kirari",
@@ -1075,16 +1075,16 @@ func testUserIdentityRepositoryUpsertsByProviderSubject(t *testing.T, newStore N
 		t.Fatalf("unexpected identities: %#v", items)
 	}
 
-	if _, err := st.GetUserIdentity(ctx, "kirari", "missing"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetUserIdentity(ctx, "kirari", "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing identity, got %v", err)
 	}
-	if err := st.DeleteUserIdentity(ctx, updated.ID, "other_user"); !errors.Is(err, store.ErrNotFound) {
+	if err := st.DeleteUserIdentity(ctx, updated.ID, "other_user"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound deleting identity for wrong user, got %v", err)
 	}
 	if err := st.DeleteUserIdentity(ctx, updated.ID, "user_oidc"); err != nil {
 		t.Fatalf("delete identity: %v", err)
 	}
-	if _, err := st.GetUserIdentity(ctx, "kirari", "sub-123"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetUserIdentity(ctx, "kirari", "sub-123"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected deleted identity to be missing, got %v", err)
 	}
 }
@@ -1094,7 +1094,7 @@ func testConfigRepositoryUpsertsListsAndDeletesSystemConfig(t *testing.T, newSto
 	ctx := context.Background()
 	st := newStore(t)
 
-	item, err := st.SetSystemConfig(ctx, store.SetSystemConfigInput{
+	item, err := st.SetSystemConfig(ctx, common.SetSystemConfigInput{
 		Key: "runtime.gc",
 		Value: map[string]any{
 			"gogc": 125,
@@ -1107,7 +1107,7 @@ func testConfigRepositoryUpsertsListsAndDeletesSystemConfig(t *testing.T, newSto
 		t.Fatalf("unexpected system config: %#v", item)
 	}
 
-	updated, err := st.SetSystemConfig(ctx, store.SetSystemConfigInput{
+	updated, err := st.SetSystemConfig(ctx, common.SetSystemConfigInput{
 		Key: "runtime.gc",
 		Value: map[string]any{
 			"gogc":         80,
@@ -1124,7 +1124,7 @@ func testConfigRepositoryUpsertsListsAndDeletesSystemConfig(t *testing.T, newSto
 		t.Fatalf("upsert should keep created_at, before=%s after=%s", item.CreatedAt, updated.CreatedAt)
 	}
 
-	if _, err := st.SetSystemConfig(ctx, store.SetSystemConfigInput{
+	if _, err := st.SetSystemConfig(ctx, common.SetSystemConfigInput{
 		Key: "storage.cleanup",
 		Value: map[string]any{
 			"enabled": true,
@@ -1144,7 +1144,7 @@ func testConfigRepositoryUpsertsListsAndDeletesSystemConfig(t *testing.T, newSto
 	if err := st.DeleteSystemConfig(ctx, "runtime.gc"); err != nil {
 		t.Fatalf("delete system config: %v", err)
 	}
-	if _, err := st.GetSystemConfig(ctx, "runtime.gc"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetSystemConfig(ctx, "runtime.gc"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
 	}
 }
@@ -1154,7 +1154,7 @@ func testConfigRepositoryUpsertsListsAndDeletesUserConfig(t *testing.T, newStore
 	ctx := context.Background()
 	st := newStore(t)
 
-	if _, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+	if _, err := st.SetUserConfig(ctx, common.SetUserConfigInput{
 		UserID: "user_1",
 		Key:    "workspace",
 		Value: map[string]any{
@@ -1163,7 +1163,7 @@ func testConfigRepositoryUpsertsListsAndDeletesUserConfig(t *testing.T, newStore
 	}); err != nil {
 		t.Fatalf("set user config: %v", err)
 	}
-	updated, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+	updated, err := st.SetUserConfig(ctx, common.SetUserConfigInput{
 		UserID: "user_1",
 		Key:    "workspace",
 		Value: map[string]any{
@@ -1181,7 +1181,7 @@ func testConfigRepositoryUpsertsListsAndDeletesUserConfig(t *testing.T, newStore
 		t.Fatalf("unexpected user config value: %#v", updated)
 	}
 
-	if _, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+	if _, err := st.SetUserConfig(ctx, common.SetUserConfigInput{
 		UserID: "user_1",
 		Key:    "notifications",
 		Value: map[string]any{
@@ -1190,7 +1190,7 @@ func testConfigRepositoryUpsertsListsAndDeletesUserConfig(t *testing.T, newStore
 	}); err != nil {
 		t.Fatalf("set second user config: %v", err)
 	}
-	if _, err := st.SetUserConfig(ctx, store.SetUserConfigInput{
+	if _, err := st.SetUserConfig(ctx, common.SetUserConfigInput{
 		UserID: "user_2",
 		Key:    "workspace",
 		Value: map[string]any{
@@ -1211,7 +1211,7 @@ func testConfigRepositoryUpsertsListsAndDeletesUserConfig(t *testing.T, newStore
 	if err := st.DeleteUserConfig(ctx, "user_1", "workspace"); err != nil {
 		t.Fatalf("delete user config: %v", err)
 	}
-	if _, err := st.GetUserConfig(ctx, "user_1", "workspace"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetUserConfig(ctx, "user_1", "workspace"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
 	}
 
@@ -1229,7 +1229,7 @@ func testStorageRepositoryCreatesListsAndDeletesUploadedImages(t *testing.T, new
 	ctx := context.Background()
 	st := newStore(t)
 
-	first, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+	first, err := st.CreateUploadedImage(ctx, common.CreateUploadedImageInput{
 		ID:               "img_1",
 		OwnerID:          "user_a",
 		Filename:         "img-a.png",
@@ -1245,7 +1245,7 @@ func testStorageRepositoryCreatesListsAndDeletesUploadedImages(t *testing.T, new
 		t.Fatalf("unexpected first uploaded image: %#v", first)
 	}
 
-	second, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+	second, err := st.CreateUploadedImage(ctx, common.CreateUploadedImageInput{
 		ID:               "img_2",
 		OwnerID:          "user_a",
 		Filename:         "img-b.png",
@@ -1258,7 +1258,7 @@ func testStorageRepositoryCreatesListsAndDeletesUploadedImages(t *testing.T, new
 		t.Fatalf("create second uploaded image: %v", err)
 	}
 
-	if _, err := st.CreateUploadedImage(ctx, store.CreateUploadedImageInput{
+	if _, err := st.CreateUploadedImage(ctx, common.CreateUploadedImageInput{
 		ID:               "img_3",
 		OwnerID:          "user_b",
 		Filename:         "img-c.png",
@@ -1316,7 +1316,7 @@ func testStorageRepositoryUpsertsListsAndDeletesDeletionFailures(t *testing.T, n
 	ctx := context.Background()
 	st := newStore(t)
 
-	first, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+	first, err := st.UpsertStorageFileDeletionFailure(ctx, common.UpsertStorageFileDeletionFailureInput{
 		Path:      "/tmp/img-a.png",
 		Filename:  "img-a.png",
 		OwnerID:   "user_a",
@@ -1330,7 +1330,7 @@ func testStorageRepositoryUpsertsListsAndDeletesDeletionFailures(t *testing.T, n
 		t.Fatalf("unexpected first deletion failure: %#v", first)
 	}
 
-	second, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+	second, err := st.UpsertStorageFileDeletionFailure(ctx, common.UpsertStorageFileDeletionFailureInput{
 		Path:      "/tmp/img-b.png",
 		Filename:  "img-b.png",
 		OwnerID:   "user_b",
@@ -1341,7 +1341,7 @@ func testStorageRepositoryUpsertsListsAndDeletesDeletionFailures(t *testing.T, n
 		t.Fatalf("create second deletion failure: %v", err)
 	}
 
-	updated, err := st.UpsertStorageFileDeletionFailure(ctx, store.UpsertStorageFileDeletionFailureInput{
+	updated, err := st.UpsertStorageFileDeletionFailure(ctx, common.UpsertStorageFileDeletionFailureInput{
 		Path:      "/tmp/img-a.png",
 		Filename:  "img-a.png",
 		OwnerID:   "user_a",
@@ -1392,7 +1392,7 @@ func testStorageRepositorySetsListsAndDeletesUserQuotas(t *testing.T, newStore N
 	ctx := context.Background()
 	st := newStore(t)
 
-	if _, err := st.GetStorageUserQuota(ctx, "missing"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetStorageUserQuota(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing storage quota, got %v", err)
 	}
 
@@ -1439,7 +1439,7 @@ func testStorageRepositorySetsListsAndDeletesUserQuotas(t *testing.T, newStore N
 	if err := st.DeleteStorageUserQuota(ctx, "user_b"); err != nil {
 		t.Fatalf("delete storage quota: %v", err)
 	}
-	if _, err := st.GetStorageUserQuota(ctx, "user_b"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetStorageUserQuota(ctx, "user_b"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after deleting storage quota, got %v", err)
 	}
 }
@@ -1449,7 +1449,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	ctx := context.Background()
 	st := newStore(t)
 
-	firstConversation, firstUserMessage, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+	firstConversation, firstUserMessage, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
 		ConversationID:   "conv_waiting",
 		RequestID:        "req_waiting",
 		ResponseID:       "resp_waiting",
@@ -1460,7 +1460,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		DeveloperContent: "developer hint",
 		AssistantContent: "previous assistant answer",
 		UserContent:      "First question for waiting turn",
-		InputParts: []store.RequestInputPart{
+		InputParts: []common.RequestInputPart{
 			{Type: "text", Text: "First question for waiting turn"},
 			{Type: "image", URL: "https://example.com/tool.png", MediaType: "image/png"},
 		},
@@ -1471,11 +1471,11 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		ToolSchemas: []any{
 			map[string]any{"name": "tool_a"},
 		},
-		ToolChoice: store.RequestToolChoice{
+		ToolChoice: common.RequestToolChoice{
 			Type: "function",
 			Name: "tool_a",
 		},
-		ResponseFormat: store.RequestResponseFormat{
+		ResponseFormat: common.RequestResponseFormat{
 			Type: "json_schema",
 			Name: "answer",
 			Schema: map[string]any{
@@ -1493,7 +1493,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("unexpected first user message: %#v", firstUserMessage)
 	}
 
-	secondConversation, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+	secondConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
 		ConversationID: "conv_abort",
 		RequestID:      "req_abort",
 		ResponseID:     "resp_abort",
@@ -1560,7 +1560,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("expected two requests, got %#v", requests)
 	}
 
-	draftConversation, err := st.UpdateDraft(ctx, store.UpdateDraftInput{
+	draftConversation, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
 		ConversationID: firstConversation.ID,
 		DraftText:      "draft answer",
 	})
@@ -1571,7 +1571,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("unexpected draft conversation: %#v", draftConversation)
 	}
 
-	completedConversation, completedMessage, err := st.CompletePendingTurn(ctx, store.CompletePendingInput{
+	completedConversation, completedMessage, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
 		ConversationID:      firstConversation.ID,
 		ResponseID:          "resp_waiting",
 		OutputText:          "",
@@ -1590,22 +1590,22 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("unexpected completed message: %#v", completedMessage)
 	}
 
-	if _, err := st.UpdateDraft(ctx, store.UpdateDraftInput{
+	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
 		ConversationID: firstConversation.ID,
 		DraftText:      "should fail",
-	}); !errors.Is(err, store.ErrTurnConflict) {
+	}); !errors.Is(err, common.ErrTurnConflict) {
 		t.Fatalf("expected ErrTurnConflict updating closed draft, got %v", err)
 	}
-	if _, _, err := st.CompletePendingTurn(ctx, store.CompletePendingInput{
+	if _, _, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
 		ConversationID: firstConversation.ID,
 		ResponseID:     "resp_waiting",
 		OutputText:     "again",
 		Mode:           "assistant_message",
-	}); !errors.Is(err, store.ErrTurnConflict) {
+	}); !errors.Is(err, common.ErrTurnConflict) {
 		t.Fatalf("expected ErrTurnConflict completing closed turn, got %v", err)
 	}
 
-	abortedConversation, abortedMessage, err := st.AbortPendingTurn(ctx, store.AbortPendingInput{
+	abortedConversation, abortedMessage, err := st.AbortPendingTurn(ctx, common.AbortPendingInput{
 		ConversationID: secondConversation.ID,
 		Reason:         "manual abort",
 	})
@@ -1619,14 +1619,14 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("unexpected aborted message: %#v", abortedMessage)
 	}
 
-	if _, _, err := st.AbortPendingTurn(ctx, store.AbortPendingInput{
+	if _, _, err := st.AbortPendingTurn(ctx, common.AbortPendingInput{
 		ConversationID: secondConversation.ID,
 		Reason:         "again",
-	}); !errors.Is(err, store.ErrTurnConflict) {
+	}); !errors.Is(err, common.ErrTurnConflict) {
 		t.Fatalf("expected ErrTurnConflict aborting closed turn, got %v", err)
 	}
 
-	expiringConversation, _, err := st.CreatePendingTurn(ctx, store.CreatePendingInput{
+	expiringConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
 		ConversationID: "conv_expire",
 		RequestID:      "req_expire",
 		ResponseID:     "resp_expire",
@@ -1642,7 +1642,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	if err != nil {
 		t.Fatalf("create expiring pending turn: %v", err)
 	}
-	if _, err := st.UpdateDraft(ctx, store.UpdateDraftInput{
+	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
 		ConversationID: expiringConversation.ID,
 		DraftText:      "stale draft",
 	}); err != nil {
@@ -1679,7 +1679,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	if deleted.DeletedConversations != 1 || deleted.DeletedMessages != 2 {
 		t.Fatalf("unexpected delete conversations result: %#v", deleted)
 	}
-	if _, err := st.GetConversation(ctx, firstConversation.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.GetConversation(ctx, firstConversation.ID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected deleted conversation missing, got %v", err)
 	}
 }

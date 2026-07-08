@@ -9,10 +9,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) CreateAppAPIKey(ctx context.Context, input store.CreateAppAPIKeyInput) (store.AppAPIKey, error) {
+func (s *Store) CreateAppAPIKey(ctx context.Context, input common.CreateAppAPIKeyInput) (common.AppAPIKey, error) {
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO user_app_api_keys(
@@ -31,9 +31,9 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input store.CreateAppAPIKey
 		formatTime(createdAt),
 		nil,
 	); err != nil {
-		return store.AppAPIKey{}, err
+		return common.AppAPIKey{}, err
 	}
-	return store.AppAPIKey{
+	return common.AppAPIKey{
 		ID:             input.ID,
 		UserID:         input.UserID,
 		Name:           input.Name,
@@ -46,7 +46,7 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input store.CreateAppAPIKey
 	}, nil
 }
 
-func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]store.AppAPIKey, error) {
+func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]common.AppAPIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
 		FROM user_app_api_keys
@@ -58,7 +58,7 @@ func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]stor
 	}
 	defer rows.Close()
 
-	items := make([]store.AppAPIKey, 0)
+	items := make([]common.AppAPIKey, 0)
 	for rows.Next() {
 		item, err := scanAppAPIKey(rows)
 		if err != nil {
@@ -69,7 +69,7 @@ func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]stor
 	return items, rows.Err()
 }
 
-func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (store.AppAPIKey, error) {
+func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (common.AppAPIKey, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
 		FROM user_app_api_keys
@@ -80,9 +80,9 @@ func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (store.
 	item, err := scanAppAPIKey(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.AppAPIKey{}, errNotFound
+			return common.AppAPIKey{}, errNotFound
 		}
-		return store.AppAPIKey{}, err
+		return common.AppAPIKey{}, err
 	}
 	return item, nil
 }
@@ -115,7 +115,7 @@ func (s *Store) RevokeAppAPIKey(ctx context.Context, id string, userID string) e
 	return nil
 }
 
-func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKeyAuditLog) error {
+func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item common.AppAPIKeyAuditLog) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO app_api_key_audit_logs(
 			id, app_api_key_id, user_id, route, status_code, error_code, created_at
@@ -127,7 +127,7 @@ func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKe
 	return err
 }
 
-func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppAPIKeyAuditLogsInput) ([]store.AppAPIKeyAuditLog, error) {
+func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input common.ListAppAPIKeyAuditLogsInput) ([]common.AppAPIKeyAuditLog, error) {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 50
@@ -154,7 +154,7 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppA
 	}
 	defer rows.Close()
 
-	items := make([]store.AppAPIKeyAuditLog, 0)
+	items := make([]common.AppAPIKeyAuditLog, 0)
 	for rows.Next() {
 		item, err := scanAppAPIKeyAuditLog(rows)
 		if err != nil {
@@ -169,7 +169,7 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppA
 	return items, nil
 }
 
-func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogInput) (store.AuditLog, error) {
+func (s *Store) CreateAuditLog(ctx context.Context, input common.CreateAuditLogInput) (common.AuditLog, error) {
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO audit_logs(
@@ -192,9 +192,9 @@ func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogIn
 		formatTime(createdAt),
 	); err != nil {
 		s.logger(ctx).Warn("sqlite create audit log failed", zap.String("audit.event_type", input.EventType), zap.String("audit.action", input.Action), zap.Error(err))
-		return store.AuditLog{}, err
+		return common.AuditLog{}, err
 	}
-	return store.AuditLog{
+	return common.AuditLog{
 		ID:           input.ID,
 		ActorUserID:  input.ActorUserID,
 		ActorRole:    input.ActorRole,
@@ -211,7 +211,7 @@ func (s *Store) CreateAuditLog(ctx context.Context, input store.CreateAuditLogIn
 	}, nil
 }
 
-func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInput) ([]store.AuditLog, error) {
+func (s *Store) ListAuditLogs(ctx context.Context, input common.ListAuditLogsInput) ([]common.AuditLog, error) {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 50
@@ -247,7 +247,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 	}
 	defer rows.Close()
 
-	items := make([]store.AuditLog, 0)
+	items := make([]common.AuditLog, 0)
 	for rows.Next() {
 		item, err := scanAuditLog(rows)
 		if err != nil {
@@ -262,7 +262,7 @@ func (s *Store) ListAuditLogs(ctx context.Context, input store.ListAuditLogsInpu
 	return items, nil
 }
 
-func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsInput) (int, error) {
+func (s *Store) CountAuditLogs(ctx context.Context, input common.CountAuditLogsInput) (int, error) {
 	query := `SELECT COUNT(*) FROM audit_logs`
 	args := make([]any, 0, 5)
 	conditions := make([]string, 0, 5)
@@ -297,7 +297,7 @@ func (s *Store) CountAuditLogs(ctx context.Context, input store.CountAuditLogsIn
 	return count, nil
 }
 
-func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAPIKeyInput) (store.ModelAPIKey, error) {
+func (s *Store) CreateModelAPIKey(ctx context.Context, input common.CreateModelAPIKeyInput) (common.ModelAPIKey, error) {
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO user_api_keys(
@@ -314,9 +314,9 @@ func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAP
 		formatTime(createdAt),
 		nil,
 	); err != nil {
-		return store.ModelAPIKey{}, err
+		return common.ModelAPIKey{}, err
 	}
-	return store.ModelAPIKey{
+	return common.ModelAPIKey{
 		ID:            input.ID,
 		UserID:        input.UserID,
 		Name:          input.Name,
@@ -327,7 +327,7 @@ func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAP
 	}, nil
 }
 
-func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]store.ModelAPIKey, error) {
+func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]common.ModelAPIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
 		FROM user_api_keys
@@ -339,7 +339,7 @@ func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]st
 	}
 	defer rows.Close()
 
-	items := make([]store.ModelAPIKey, 0)
+	items := make([]common.ModelAPIKey, 0)
 	for rows.Next() {
 		item, err := scanModelAPIKey(rows)
 		if err != nil {
@@ -350,7 +350,7 @@ func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]st
 	return items, rows.Err()
 }
 
-func (s *Store) GetModelAPIKeyByPrefix(ctx context.Context, prefix string) (store.ModelAPIKey, error) {
+func (s *Store) GetModelAPIKeyByPrefix(ctx context.Context, prefix string) (common.ModelAPIKey, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
 		FROM user_api_keys
@@ -360,14 +360,14 @@ func (s *Store) GetModelAPIKeyByPrefix(ctx context.Context, prefix string) (stor
 	item, err := scanModelAPIKey(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.ModelAPIKey{}, errNotFound
+			return common.ModelAPIKey{}, errNotFound
 		}
-		return store.ModelAPIKey{}, err
+		return common.ModelAPIKey{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) GetModelAPIKeyByID(ctx context.Context, id string) (store.ModelAPIKey, error) {
+func (s *Store) GetModelAPIKeyByID(ctx context.Context, id string) (common.ModelAPIKey, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
 		FROM user_api_keys
@@ -377,9 +377,9 @@ func (s *Store) GetModelAPIKeyByID(ctx context.Context, id string) (store.ModelA
 	item, err := scanModelAPIKey(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.ModelAPIKey{}, errNotFound
+			return common.ModelAPIKey{}, errNotFound
 		}
-		return store.ModelAPIKey{}, err
+		return common.ModelAPIKey{}, err
 	}
 	return item, nil
 }
@@ -412,7 +412,7 @@ func (s *Store) RevokeModelAPIKey(ctx context.Context, id string, userID string)
 	return nil
 }
 
-func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (store.User, error) {
+func (s *Store) CreateUser(ctx context.Context, input common.CreateUserInput) (common.User, error) {
 	now := time.Now().UTC()
 	role := strings.TrimSpace(input.Role)
 	if role == "" {
@@ -434,9 +434,9 @@ func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (st
 		formatTime(now),
 		nil,
 	); err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
-	return store.User{
+	return common.User{
 		ID:           input.ID,
 		Username:     strings.TrimSpace(input.Username),
 		Email:        strings.TrimSpace(input.Email),
@@ -449,7 +449,7 @@ func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (st
 	}, nil
 }
 
-func (s *Store) UpdateUser(ctx context.Context, input store.UpdateUserInput) (store.User, error) {
+func (s *Store) UpdateUser(ctx context.Context, input common.UpdateUserInput) (common.User, error) {
 	now := time.Now().UTC()
 	role := strings.TrimSpace(input.Role)
 	if role == "" {
@@ -471,19 +471,19 @@ func (s *Store) UpdateUser(ctx context.Context, input store.UpdateUserInput) (st
 		input.ID,
 	)
 	if err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
 	if affected == 0 {
-		return store.User{}, errNotFound
+		return common.User{}, errNotFound
 	}
 	return s.GetUser(ctx, input.ID)
 }
 
-func (s *Store) GetUser(ctx context.Context, id string) (store.User, error) {
+func (s *Store) GetUser(ctx context.Context, id string) (common.User, error) {
 	item, err := scanUser(s.db.QueryRowContext(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
 		FROM users
@@ -491,14 +491,14 @@ func (s *Store) GetUser(ctx context.Context, id string) (store.User, error) {
 	`, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.User{}, errNotFound
+			return common.User{}, errNotFound
 		}
-		return store.User{}, err
+		return common.User{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) GetUserByEmail(ctx context.Context, email string) (store.User, error) {
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (common.User, error) {
 	item, err := scanUser(s.db.QueryRowContext(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
 		FROM users
@@ -506,14 +506,14 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (store.User, e
 	`, strings.TrimSpace(email)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.User{}, errNotFound
+			return common.User{}, errNotFound
 		}
-		return store.User{}, err
+		return common.User{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) GetUserByUsername(ctx context.Context, username string) (store.User, error) {
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (common.User, error) {
 	item, err := scanUser(s.db.QueryRowContext(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
 		FROM users
@@ -521,14 +521,14 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (store.U
 	`, strings.TrimSpace(username)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.User{}, errNotFound
+			return common.User{}, errNotFound
 		}
-		return store.User{}, err
+		return common.User{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
+func (s *Store) ListUsers(ctx context.Context) ([]common.User, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
 		FROM users
@@ -539,7 +539,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
 	}
 	defer rows.Close()
 
-	items := make([]store.User, 0)
+	items := make([]common.User, 0)
 	for rows.Next() {
 		item, err := scanUser(rows)
 		if err != nil {
@@ -550,17 +550,17 @@ func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
 	return items, rows.Err()
 }
 
-func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (store.UserDeletionPreview, error) {
+func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (common.UserDeletionPreview, error) {
 	userID = strings.TrimSpace(userID)
 	user, err := s.GetUser(ctx, userID)
 	if err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 
-	preview := store.UserDeletionPreview{
+	preview := common.UserDeletionPreview{
 		User:      user,
 		CanDelete: true,
-		PreserveRef: store.UserDeletionPreserveRef{
+		PreserveRef: common.UserDeletionPreserveRef{
 			AuditLogs:     true,
 			Conversations: true,
 			Uploads:       true,
@@ -569,40 +569,40 @@ func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (store.U
 	counts := &preview.Counts
 
 	if counts.Identities, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_identities WHERE user_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.UserConfigs, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_configs WHERE user_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AutomationRules, err = s.countInt(ctx, `SELECT COUNT(*) FROM automation_rules WHERE user_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AppAPIKeys, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AppAPIKeyAuditLogs, err = s.countInt(ctx, `SELECT COUNT(*) FROM app_api_key_audit_logs WHERE user_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.ModelAPIKeys, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_api_keys WHERE user_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.StorageUserQuotas, err = s.countInt(ctx, `SELECT COUNT(*) FROM storage_user_quotas WHERE owner_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.StorageDeletionFailures, err = s.countInt(ctx, `SELECT COUNT(*) FROM storage_file_deletion_failures WHERE owner_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.OwnedConversations, err = s.countInt(ctx, `SELECT COUNT(*) FROM conversations WHERE COALESCE(json_extract(metadata_json, '$.owner_id'), '') = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.OwnedUploadedImages, err = s.countInt(ctx, `SELECT COUNT(*) FROM uploaded_images WHERE owner_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AuditActorLogs, err = s.countInt(ctx, `SELECT COUNT(*) FROM audit_logs WHERE actor_user_id = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AuditMetadataUserReferences, err = s.countInt(ctx, `SELECT COUNT(*) FROM audit_logs WHERE COALESCE(json_extract(metadata_json, '$.user_id'), '') = ?`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 
 	if counts.OwnedConversations > 0 {
@@ -651,26 +651,26 @@ func (s *Store) DeleteUserAccount(ctx context.Context, userID string) error {
 	return tx.Commit()
 }
 
-func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, targetUserID string) (store.UserOwnershipTransferResult, error) {
+func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, targetUserID string) (common.UserOwnershipTransferResult, error) {
 	sourceUserID = strings.TrimSpace(sourceUserID)
 	targetUserID = strings.TrimSpace(targetUserID)
 	if sourceUserID == "" || targetUserID == "" || sourceUserID == targetUserID {
-		return store.UserOwnershipTransferResult{}, errConflict
+		return common.UserOwnershipTransferResult{}, errConflict
 	}
 	if _, err := s.GetUser(ctx, sourceUserID); err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	if _, err := s.GetUser(ctx, targetUserID); err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result := store.UserOwnershipTransferResult{
+	result := common.UserOwnershipTransferResult{
 		SourceUserID: sourceUserID,
 		TargetUserID: targetUserID,
 	}
@@ -681,12 +681,12 @@ func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, 
 		WHERE COALESCE(json_extract(metadata_json, '$.owner_id'), '') = ?
 	`, targetUserID, sourceUserID)
 	if err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	if rows, err := conversationsRes.RowsAffected(); err == nil {
 		result.TransferredConversations = int(rows)
 	} else {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 
 	imagesRes, err := tx.ExecContext(ctx, `
@@ -695,12 +695,12 @@ func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, 
 		WHERE owner_id = ?
 	`, targetUserID, sourceUserID)
 	if err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	if rows, err := imagesRes.RowsAffected(); err == nil {
 		result.TransferredUploadedImages = int(rows)
 	} else {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 
 	failuresRes, err := tx.ExecContext(ctx, `
@@ -709,12 +709,12 @@ func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, 
 		WHERE owner_id = ?
 	`, targetUserID, sourceUserID)
 	if err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	if rows, err := failuresRes.RowsAffected(); err == nil {
 		result.TransferredDeletionFailures = int(rows)
 	} else {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 
 	var sourceQuota int64
@@ -724,7 +724,7 @@ func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, 
 		WHERE owner_id = ?
 	`, sourceUserID).Scan(&sourceQuota)
 	if sourceQuotaErr != nil && !errors.Is(sourceQuotaErr, sql.ErrNoRows) {
-		return store.UserOwnershipTransferResult{}, sourceQuotaErr
+		return common.UserOwnershipTransferResult{}, sourceQuotaErr
 	}
 	if sourceQuotaErr == nil {
 		var targetQuota int64
@@ -741,48 +741,48 @@ func (s *Store) TransferUserOwnership(ctx context.Context, sourceUserID string, 
 				FROM storage_user_quotas
 				WHERE owner_id = ?
 			`, targetUserID, formatTime(time.Now().UTC()), sourceUserID); err != nil {
-				return store.UserOwnershipTransferResult{}, err
+				return common.UserOwnershipTransferResult{}, err
 			}
 			result.TargetQuotaCreatedFromSource = true
 		case targetQuotaErr == nil:
 			result.TargetQuotaPreserved = true
 		default:
-			return store.UserOwnershipTransferResult{}, targetQuotaErr
+			return common.UserOwnershipTransferResult{}, targetQuotaErr
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM storage_user_quotas WHERE owner_id = ?`, sourceUserID); err != nil {
-			return store.UserOwnershipTransferResult{}, err
+			return common.UserOwnershipTransferResult{}, err
 		}
 		result.SourceQuotaDeleted = true
 	}
 
 	if err := tx.Commit(); err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	return result, nil
 }
 
-func (s *Store) TransferUserOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (store.UserOwnershipTransferResult, error) {
+func (s *Store) TransferUserOwnershipSelection(ctx context.Context, sourceUserID string, targetUserID string, conversationIDs []string, filenames []string) (common.UserOwnershipTransferResult, error) {
 	sourceUserID = strings.TrimSpace(sourceUserID)
 	targetUserID = strings.TrimSpace(targetUserID)
 	conversationIDs = uniqueNonEmptyStrings(conversationIDs)
 	filenames = uniqueNonEmptyStrings(filenames)
 	if sourceUserID == "" || targetUserID == "" || sourceUserID == targetUserID || (len(conversationIDs) == 0 && len(filenames) == 0) {
-		return store.UserOwnershipTransferResult{}, errConflict
+		return common.UserOwnershipTransferResult{}, errConflict
 	}
 	if _, err := s.GetUser(ctx, sourceUserID); err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	if _, err := s.GetUser(ctx, targetUserID); err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result := store.UserOwnershipTransferResult{
+	result := common.UserOwnershipTransferResult{
 		SourceUserID: sourceUserID,
 		TargetUserID: targetUserID,
 	}
@@ -801,12 +801,12 @@ func (s *Store) TransferUserOwnershipSelection(ctx context.Context, sourceUserID
 				AND id IN (`+placeholders+`)
 		`, args...)
 		if err != nil {
-			return store.UserOwnershipTransferResult{}, err
+			return common.UserOwnershipTransferResult{}, err
 		}
 		if rows, err := res.RowsAffected(); err == nil {
 			result.TransferredConversations = int(rows)
 		} else {
-			return store.UserOwnershipTransferResult{}, err
+			return common.UserOwnershipTransferResult{}, err
 		}
 	}
 
@@ -824,12 +824,12 @@ func (s *Store) TransferUserOwnershipSelection(ctx context.Context, sourceUserID
 				AND filename IN (`+placeholders+`)
 		`, imageArgs...)
 		if err != nil {
-			return store.UserOwnershipTransferResult{}, err
+			return common.UserOwnershipTransferResult{}, err
 		}
 		if rows, err := res.RowsAffected(); err == nil {
 			result.TransferredUploadedImages = int(rows)
 		} else {
-			return store.UserOwnershipTransferResult{}, err
+			return common.UserOwnershipTransferResult{}, err
 		}
 
 		failureArgs := make([]any, 0, len(filenames)+2)
@@ -844,22 +844,22 @@ func (s *Store) TransferUserOwnershipSelection(ctx context.Context, sourceUserID
 				AND filename IN (`+placeholders+`)
 		`, failureArgs...)
 		if err != nil {
-			return store.UserOwnershipTransferResult{}, err
+			return common.UserOwnershipTransferResult{}, err
 		}
 		if rows, err := failureRes.RowsAffected(); err == nil {
 			result.TransferredDeletionFailures = int(rows)
 		} else {
-			return store.UserOwnershipTransferResult{}, err
+			return common.UserOwnershipTransferResult{}, err
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return store.UserOwnershipTransferResult{}, err
+		return common.UserOwnershipTransferResult{}, err
 	}
 	return result, nil
 }
 
-func (s *Store) UpsertUserIdentity(ctx context.Context, input store.UpsertUserIdentityInput) (store.UserIdentity, error) {
+func (s *Store) UpsertUserIdentity(ctx context.Context, input common.UpsertUserIdentityInput) (common.UserIdentity, error) {
 	now := time.Now().UTC()
 	profile := ensureMap(input.Profile)
 	if _, err := s.db.ExecContext(ctx, `
@@ -885,12 +885,12 @@ func (s *Store) UpsertUserIdentity(ctx context.Context, input store.UpsertUserId
 		formatTime(now),
 		formatNullableTime(input.LastLoginAt),
 	); err != nil {
-		return store.UserIdentity{}, err
+		return common.UserIdentity{}, err
 	}
 	return s.GetUserIdentity(ctx, strings.TrimSpace(input.Provider), strings.TrimSpace(input.Subject))
 }
 
-func (s *Store) GetUserIdentity(ctx context.Context, provider string, subject string) (store.UserIdentity, error) {
+func (s *Store) GetUserIdentity(ctx context.Context, provider string, subject string) (common.UserIdentity, error) {
 	item, err := scanUserIdentity(s.db.QueryRowContext(ctx, `
 		SELECT id, user_id, provider, subject, email, email_verified, profile_json, created_at, updated_at, last_login_at
 		FROM user_identities
@@ -898,14 +898,14 @@ func (s *Store) GetUserIdentity(ctx context.Context, provider string, subject st
 	`, strings.TrimSpace(provider), strings.TrimSpace(subject)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return store.UserIdentity{}, errNotFound
+			return common.UserIdentity{}, errNotFound
 		}
-		return store.UserIdentity{}, err
+		return common.UserIdentity{}, err
 	}
 	return item, nil
 }
 
-func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]store.UserIdentity, error) {
+func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]common.UserIdentity, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, user_id, provider, subject, email, email_verified, profile_json, created_at, updated_at, last_login_at
 		FROM user_identities
@@ -917,7 +917,7 @@ func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]store.
 	}
 	defer rows.Close()
 
-	items := make([]store.UserIdentity, 0)
+	items := make([]common.UserIdentity, 0)
 	for rows.Next() {
 		item, err := scanUserIdentity(rows)
 		if err != nil {

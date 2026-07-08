@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) CreateAppAPIKey(ctx context.Context, input store.CreateAppAPIKeyInput) (store.AppAPIKey, error) {
+func (s *Store) CreateAppAPIKey(ctx context.Context, input common.CreateAppAPIKeyInput) (common.AppAPIKey, error) {
 	createdAt := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_app_api_keys(
@@ -31,9 +31,9 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input store.CreateAppAPIKey
 		createdAt,
 	)
 	if err != nil {
-		return store.AppAPIKey{}, err
+		return common.AppAPIKey{}, err
 	}
-	return store.AppAPIKey{
+	return common.AppAPIKey{
 		ID:             input.ID,
 		UserID:         input.UserID,
 		Name:           input.Name,
@@ -46,7 +46,7 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input store.CreateAppAPIKey
 	}, nil
 }
 
-func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]store.AppAPIKey, error) {
+func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]common.AppAPIKey, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
 		FROM user_app_api_keys
@@ -58,7 +58,7 @@ func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]stor
 	}
 	defer rows.Close()
 
-	items := make([]store.AppAPIKey, 0)
+	items := make([]common.AppAPIKey, 0)
 	for rows.Next() {
 		item, err := scanAppAPIKey(rows)
 		if err != nil {
@@ -69,7 +69,7 @@ func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]stor
 	return items, rows.Err()
 }
 
-func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (store.AppAPIKey, error) {
+func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (common.AppAPIKey, error) {
 	return scanAppAPIKey(s.pool.QueryRow(ctx, `
 		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
 		FROM user_app_api_keys
@@ -97,12 +97,12 @@ func (s *Store) RevokeAppAPIKey(ctx context.Context, id string, userID string) e
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
+		return common.ErrNotFound
 	}
 	return nil
 }
 
-func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKeyAuditLog) error {
+func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item common.AppAPIKeyAuditLog) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO app_api_key_audit_logs(id, app_api_key_id, user_id, route, status_code, error_code, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -113,7 +113,7 @@ func (s *Store) CreateAppAPIKeyAuditLog(ctx context.Context, item store.AppAPIKe
 	return err
 }
 
-func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppAPIKeyAuditLogsInput) ([]store.AppAPIKeyAuditLog, error) {
+func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input common.ListAppAPIKeyAuditLogsInput) ([]common.AppAPIKeyAuditLog, error) {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 50
@@ -138,9 +138,9 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppA
 	}
 	defer rows.Close()
 
-	items := make([]store.AppAPIKeyAuditLog, 0)
+	items := make([]common.AppAPIKeyAuditLog, 0)
 	for rows.Next() {
-		var item store.AppAPIKeyAuditLog
+		var item common.AppAPIKeyAuditLog
 		if err := rows.Scan(&item.ID, &item.AppAPIKeyID, &item.UserID, &item.Route, &item.StatusCode, &item.ErrorCode, &item.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -153,16 +153,16 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input store.ListAppA
 	return items, nil
 }
 
-func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAPIKeyInput) (store.ModelAPIKey, error) {
+func (s *Store) CreateModelAPIKey(ctx context.Context, input common.CreateModelAPIKeyInput) (common.ModelAPIKey, error) {
 	createdAt := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_api_keys(id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at)
 		VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, NULL)
 	`, input.ID, input.UserID, input.Name, input.KeyCiphertext, input.KeyPrefix, input.Model, createdAt)
 	if err != nil {
-		return store.ModelAPIKey{}, err
+		return common.ModelAPIKey{}, err
 	}
-	return store.ModelAPIKey{
+	return common.ModelAPIKey{
 		ID:            input.ID,
 		UserID:        input.UserID,
 		Name:          input.Name,
@@ -173,7 +173,7 @@ func (s *Store) CreateModelAPIKey(ctx context.Context, input store.CreateModelAP
 	}, nil
 }
 
-func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]store.ModelAPIKey, error) {
+func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]common.ModelAPIKey, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
 		FROM user_api_keys
@@ -185,7 +185,7 @@ func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]st
 	}
 	defer rows.Close()
 
-	items := make([]store.ModelAPIKey, 0)
+	items := make([]common.ModelAPIKey, 0)
 	for rows.Next() {
 		item, err := scanModelAPIKey(rows)
 		if err != nil {
@@ -196,7 +196,7 @@ func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]st
 	return items, rows.Err()
 }
 
-func (s *Store) GetModelAPIKeyByPrefix(ctx context.Context, prefix string) (store.ModelAPIKey, error) {
+func (s *Store) GetModelAPIKeyByPrefix(ctx context.Context, prefix string) (common.ModelAPIKey, error) {
 	return scanModelAPIKey(s.pool.QueryRow(ctx, `
 		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
 		FROM user_api_keys
@@ -205,7 +205,7 @@ func (s *Store) GetModelAPIKeyByPrefix(ctx context.Context, prefix string) (stor
 	`, strings.TrimSpace(prefix)))
 }
 
-func (s *Store) GetModelAPIKeyByID(ctx context.Context, id string) (store.ModelAPIKey, error) {
+func (s *Store) GetModelAPIKeyByID(ctx context.Context, id string) (common.ModelAPIKey, error) {
 	return scanModelAPIKey(s.pool.QueryRow(ctx, `
 		SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
 		FROM user_api_keys
@@ -233,13 +233,13 @@ func (s *Store) RevokeModelAPIKey(ctx context.Context, id string, userID string)
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
+		return common.ErrNotFound
 	}
 	return nil
 }
 
-func scanAppAPIKey(row rowScanner) (store.AppAPIKey, error) {
-	var item store.AppAPIKey
+func scanAppAPIKey(row rowScanner) (common.AppAPIKey, error) {
+	var item common.AppAPIKey
 	var scopesJSON []byte
 	var limitsJSON []byte
 	var expiresAt *time.Time
@@ -259,9 +259,9 @@ func scanAppAPIKey(row rowScanner) (store.AppAPIKey, error) {
 		&revokedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.AppAPIKey{}, store.ErrNotFound
+			return common.AppAPIKey{}, common.ErrNotFound
 		}
-		return store.AppAPIKey{}, err
+		return common.AppAPIKey{}, err
 	}
 	item.Scopes = parseJSONStringSlice(scopesJSON)
 	item.ResourceLimits = parseJSONMap(limitsJSON)
@@ -271,8 +271,8 @@ func scanAppAPIKey(row rowScanner) (store.AppAPIKey, error) {
 	return item, nil
 }
 
-func scanModelAPIKey(row rowScanner) (store.ModelAPIKey, error) {
-	var item store.ModelAPIKey
+func scanModelAPIKey(row rowScanner) (common.ModelAPIKey, error) {
+	var item common.ModelAPIKey
 	var lastUsedAt *time.Time
 	var revokedAt *time.Time
 	if err := row.Scan(
@@ -287,9 +287,9 @@ func scanModelAPIKey(row rowScanner) (store.ModelAPIKey, error) {
 		&revokedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.ModelAPIKey{}, store.ErrNotFound
+			return common.ModelAPIKey{}, common.ErrNotFound
 		}
-		return store.ModelAPIKey{}, err
+		return common.ModelAPIKey{}, err
 	}
 	item.LastUsedAt = lastUsedAt
 	item.RevokedAt = revokedAt

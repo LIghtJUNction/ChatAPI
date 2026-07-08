@@ -16,6 +16,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	"github.com/zyf/chatapi/internal/service/auth/authn/geetest"
 	localauth "github.com/zyf/chatapi/internal/service/auth/authn/local"
@@ -26,7 +27,6 @@ import (
 	"github.com/zyf/chatapi/internal/service/auth/authn/verification"
 	"github.com/zyf/chatapi/internal/service/auth/authz/policy"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 
@@ -632,7 +632,7 @@ func (h AuthHandler) issueSessionForUser(w http.ResponseWriter, user any, authMe
 	if h.Sessions == nil || h.Policy == nil {
 		return session.ErrMissingSecret
 	}
-	storeUser, ok := user.(store.User)
+	storeUser, ok := user.(common.User)
 	if !ok {
 		return session.ErrInvalidSession
 	}
@@ -692,7 +692,7 @@ func (h AuthHandler) recordAuthAudit(r *http.Request, actorUserID string, actorR
 	if h.Audit == nil {
 		return
 	}
-	_, _ = h.Audit.Record(r.Context(), store.CreateAuditLogInput{
+	_, _ = h.Audit.Record(r.Context(), common.CreateAuditLogInput{
 		ActorUserID:  strings.TrimSpace(actorUserID),
 		ActorRole:    strings.TrimSpace(actorRole),
 		ActorSource:  strings.TrimSpace(actorSource),

@@ -16,8 +16,8 @@ import (
 	"github.com/skip2/go-qrcode"
 
 	"github.com/zyf/chatapi/internal/platform/secretbox"
-	"github.com/zyf/chatapi/internal/repository/authrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/auth"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 const userConfigKey = "security.totp"
@@ -35,7 +35,7 @@ type Setup struct {
 }
 
 type Service struct {
-	store     authrepo.SettingsStore
+	store     auth.SettingsStore
 	masterKey string
 	issuer    string
 	now       func() time.Time
@@ -46,7 +46,7 @@ type configRecord struct {
 	Enabled          bool
 }
 
-func NewService(dataStore authrepo.SettingsStore, masterKey string, issuer string) *Service {
+func NewService(dataStore auth.SettingsStore, masterKey string, issuer string) *Service {
 	issuer = strings.TrimSpace(issuer)
 	if issuer == "" {
 		issuer = "ChatAPI"
@@ -77,7 +77,7 @@ func (s *Service) Setup(ctx context.Context, userID string, accountName string) 
 		return Setup{}, err
 	}
 	uri := buildURI(s.issuer, accountName, secret)
-	if _, err := s.store.SetUserConfig(ctx, store.SetUserConfigInput{
+	if _, err := s.store.SetUserConfig(ctx, common.SetUserConfigInput{
 		UserID: userID,
 		Key:    userConfigKey,
 		Value: map[string]any{
@@ -114,7 +114,7 @@ func (s *Service) Confirm(ctx context.Context, userID string, secret string, cod
 	if !totp.Validate(strings.TrimSpace(code), storedSecret) {
 		return ErrCodeInvalid
 	}
-	_, err = s.store.SetUserConfig(ctx, store.SetUserConfigInput{
+	_, err = s.store.SetUserConfig(ctx, common.SetUserConfigInput{
 		UserID: strings.TrimSpace(userID),
 		Key:    userConfigKey,
 		Value: map[string]any{
@@ -166,7 +166,7 @@ func (s *Service) loadConfig(ctx context.Context, userID string) (configRecord, 
 	}
 	item, err := s.store.GetUserConfig(ctx, strings.TrimSpace(userID), userConfigKey)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, common.ErrNotFound) {
 			return configRecord{}, ErrNotConfigured
 		}
 		return configRecord{}, err

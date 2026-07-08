@@ -10,12 +10,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zyf/chatapi/internal/config"
 	"github.com/zyf/chatapi/internal/http/httpx"
+	"github.com/zyf/chatapi/internal/repository/common"
 	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	"github.com/zyf/chatapi/internal/service/usercontrol"
 	usercontrolconversations "github.com/zyf/chatapi/internal/service/usercontrol/conversations"
 	usercontrolprofile "github.com/zyf/chatapi/internal/service/usercontrol/profile"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -169,7 +169,7 @@ func (h UserHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.UserControl.Config.GetUserConfig(r.Context(), pr.UserID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, common.ErrNotFound) {
 			httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
 		}

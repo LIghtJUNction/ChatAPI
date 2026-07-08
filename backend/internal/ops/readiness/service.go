@@ -5,13 +5,13 @@ import (
 	"time"
 
 	"github.com/zyf/chatapi/internal/config"
-	"github.com/zyf/chatapi/internal/repository/platformrepo"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
+	"github.com/zyf/chatapi/internal/repository/platform"
 )
 
 type Service struct {
 	cfg   config.Config
-	store platformrepo.HealthStore
+	store platform.HealthStore
 }
 
 type Report struct {
@@ -29,16 +29,16 @@ type Check struct {
 }
 
 type MigrationCheck struct {
-	OK             bool                     `json:"ok"`
-	SchemaVersion  string                   `json:"schema_version,omitempty"`
-	MigrationDirty bool                     `json:"migration_dirty"`
-	MigrationLock  string                   `json:"migration_lock,omitempty"`
-	LastMigratedAt string                   `json:"last_migrated_at,omitempty"`
-	Applied        []store.AppliedMigration `json:"applied,omitempty"`
-	Error          string                   `json:"error,omitempty"`
+	OK             bool                      `json:"ok"`
+	SchemaVersion  string                    `json:"schema_version,omitempty"`
+	MigrationDirty bool                      `json:"migration_dirty"`
+	MigrationLock  string                    `json:"migration_lock,omitempty"`
+	LastMigratedAt string                    `json:"last_migrated_at,omitempty"`
+	Applied        []common.AppliedMigration `json:"applied,omitempty"`
+	Error          string                    `json:"error,omitempty"`
 }
 
-func NewService(cfg config.Config, dataStore platformrepo.HealthStore) *Service {
+func NewService(cfg config.Config, dataStore platform.HealthStore) *Service {
 	return &Service{cfg: cfg, store: dataStore}
 }
 

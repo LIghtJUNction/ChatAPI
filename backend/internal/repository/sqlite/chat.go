@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, error) {
+func (s *Store) ListConversations(ctx context.Context) ([]common.Conversation, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(json_extract(metadata_json, '$.response_id'), '')
 		FROM conversations
@@ -25,9 +25,9 @@ func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, er
 	}
 	defer rows.Close()
 
-	items := make([]store.Conversation, 0)
+	items := make([]common.Conversation, 0)
 	for rows.Next() {
-		var item store.Conversation
+		var item common.Conversation
 		var createdAt, updatedAt, lastMessageAt string
 		var metadataJSON string
 		if err := rows.Scan(
@@ -53,14 +53,14 @@ func (s *Store) ListConversations(ctx context.Context) ([]store.Conversation, er
 	return items, rows.Err()
 }
 
-func (s *Store) GetConversation(ctx context.Context, conversationID string) (store.Conversation, error) {
+func (s *Store) GetConversation(ctx context.Context, conversationID string) (common.Conversation, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(json_extract(metadata_json, '$.response_id'), '')
 		FROM conversations
 		WHERE id = ?
 	`, conversationID)
 
-	var item store.Conversation
+	var item common.Conversation
 	var createdAt, updatedAt, lastMessageAt string
 	var metadataJSON string
 	if err := row.Scan(
@@ -77,10 +77,10 @@ func (s *Store) GetConversation(ctx context.Context, conversationID string) (sto
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.logger(ctx).Warn("sqlite get conversation not found", zap.String("conversation.id", conversationID))
-			return store.Conversation{}, errNotFound
+			return common.Conversation{}, errNotFound
 		}
 		s.logger(ctx).Warn("sqlite get conversation failed", zap.String("conversation.id", conversationID), zap.Error(err))
-		return store.Conversation{}, err
+		return common.Conversation{}, err
 	}
 	item.CreatedAt = parseTime(createdAt)
 	item.UpdatedAt = parseTime(updatedAt)
@@ -89,7 +89,7 @@ func (s *Store) GetConversation(ctx context.Context, conversationID string) (sto
 	return item, nil
 }
 
-func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
+func (s *Store) ListRequests(ctx context.Context) ([]common.Request, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			c.id,
@@ -109,7 +109,7 @@ func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
 	}
 	defer rows.Close()
 
-	items := make([]store.Request, 0)
+	items := make([]common.Request, 0)
 	for rows.Next() {
 		item, err := scanRequestRow(rows)
 		if err != nil {
@@ -124,7 +124,7 @@ func (s *Store) ListRequests(ctx context.Context) ([]store.Request, error) {
 	return items, nil
 }
 
-func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request, error) {
+func (s *Store) GetRequest(ctx context.Context, requestID string) (common.Request, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
 			m.conversation_id,
@@ -144,10 +144,10 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			s.logger(ctx).Warn("sqlite get request not found", zap.String("request.id", requestID))
-			return store.Request{}, errNotFound
+			return common.Request{}, errNotFound
 		}
 		s.logger(ctx).Warn("sqlite get request failed", zap.String("request.id", requestID), zap.Error(err))
-		return store.Request{}, err
+		return common.Request{}, err
 	}
 	if item.RequestID == "" {
 		item.RequestID = requestID
@@ -155,7 +155,7 @@ func (s *Store) GetRequest(ctx context.Context, requestID string) (store.Request
 	return item, nil
 }
 
-func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]store.Message, error) {
+func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]common.Message, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, role, content, created_at, status, response_id, metadata_json
 		FROM messages
@@ -168,9 +168,9 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 	}
 	defer rows.Close()
 
-	items := make([]store.Message, 0)
+	items := make([]common.Message, 0)
 	for rows.Next() {
-		var item store.Message
+		var item common.Message
 		var createdAt string
 		var status sql.NullString
 		var responseID sql.NullString
@@ -193,10 +193,10 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]stor
 	return items, nil
 }
 
-func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (store.DeleteConversationsResult, error) {
+func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (common.DeleteConversationsResult, error) {
 	conversationIDs = uniqueNonEmptyStrings(conversationIDs)
 	if len(conversationIDs) == 0 {
-		return store.DeleteConversationsResult{}, nil
+		return common.DeleteConversationsResult{}, nil
 	}
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(conversationIDs)), ",")
 	args := make([]any, 0, len(conversationIDs))
@@ -206,36 +206,36 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var result store.DeleteConversationsResult
+	var result common.DeleteConversationsResult
 	countMessagesQuery := fmt.Sprintf(`SELECT COUNT(*) FROM messages WHERE conversation_id IN (%s)`, placeholders)
 	if err := tx.QueryRowContext(ctx, countMessagesQuery, args...).Scan(&result.DeletedMessages); err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	countAssetRefsQuery := fmt.Sprintf(`SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id IN (%s)`, placeholders)
 	if err := tx.QueryRowContext(ctx, countAssetRefsQuery, args...).Scan(&result.DeletedAssetRefs); err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	deleteQuery := fmt.Sprintf(`DELETE FROM conversations WHERE id IN (%s)`, placeholders)
 	res, err := tx.ExecContext(ctx, deleteQuery, args...)
 	if err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	result.DeletedConversations = int(rowsAffected)
 	if err := tx.Commit(); err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	return result, nil
 }
 
-func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store.ExpirePendingTurnsResult, error) {
+func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (common.ExpirePendingTurnsResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, metadata_json
 		FROM conversations
@@ -243,7 +243,7 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store
 			AND COALESCE(json_extract(metadata_json, '$.realtime_status'), '') IN ('waiting', 'streaming')
 	`, formatTime(cutoff))
 	if err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	type candidate struct {
 		id       string
@@ -255,7 +255,7 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store
 		var metadataJSON string
 		if err := rows.Scan(&item.id, &metadataJSON); err != nil {
 			_ = rows.Close()
-			return store.ExpirePendingTurnsResult{}, err
+			return common.ExpirePendingTurnsResult{}, err
 		}
 		item.metadata = ensureMap(parseJSONMap(metadataJSON))
 		item.metadata["realtime_status"] = "expired"
@@ -263,23 +263,23 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store
 		candidates = append(candidates, item)
 	}
 	if err := rows.Close(); err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	if err := rows.Err(); err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	if len(candidates) == 0 {
-		return store.ExpirePendingTurnsResult{}, nil
+		return common.ExpirePendingTurnsResult{}, nil
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC()
-	var result store.ExpirePendingTurnsResult
+	var result common.ExpirePendingTurnsResult
 	for _, item := range candidates {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE conversations
@@ -288,21 +288,21 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (store
 				AND COALESCE(json_extract(metadata_json, '$.realtime_status'), '') IN ('waiting', 'streaming')
 		`, formatTime(now), mustJSON(item.metadata), item.id)
 		if err != nil {
-			return store.ExpirePendingTurnsResult{}, err
+			return common.ExpirePendingTurnsResult{}, err
 		}
 		affected, err := res.RowsAffected()
 		if err != nil {
-			return store.ExpirePendingTurnsResult{}, err
+			return common.ExpirePendingTurnsResult{}, err
 		}
 		result.ExpiredConversations += int(affected)
 	}
 	if err := tx.Commit(); err != nil {
-		return store.ExpirePendingTurnsResult{}, err
+		return common.ExpirePendingTurnsResult{}, err
 	}
 	return result, nil
 }
 
-func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePendingInput) (store.Conversation, store.Message, error) {
+func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendingInput) (common.Conversation, common.Message, error) {
 	now := time.Now().UTC()
 	metadata := map[string]any{
 		"owner_id":            input.OwnerID,
@@ -336,7 +336,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			"response_format": input.ResponseFormat,
 		},
 	}
-	conversation := store.Conversation{
+	conversation := common.Conversation{
 		ID:                 input.ConversationID,
 		Title:              buildConversationTitle(input.UserContent),
 		LastUserText:       input.UserContent,
@@ -349,7 +349,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		ResponseID:         input.ResponseID,
 	}
 	responseID := input.ResponseID
-	message := store.Message{
+	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "user",
 		Content:    input.UserContent,
@@ -362,7 +362,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		s.logger(ctx).Warn("sqlite create pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -382,7 +382,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		conversation.LastUserText,
 		mustJSON(metadata),
 	); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -399,7 +399,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 		responseID,
 		mustJSON(userMessageMetadata),
 	); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 
 	for _, asset := range input.PreparedImages {
@@ -424,7 +424,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			asset.OriginalMediaType,
 			formatTime(now),
 		); err != nil {
-			return store.Conversation{}, store.Message{}, err
+			return common.Conversation{}, common.Message{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO media_asset_refs(
@@ -441,19 +441,19 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input store.CreatePending
 			asset.InputPartIndex,
 			formatTime(now),
 		); err != nil {
-			return store.Conversation{}, store.Message{}, err
+			return common.Conversation{}, common.Message{}, err
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		s.logger(ctx).Warn("sqlite create pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	s.logger(ctx).Debug("sqlite pending turn created", zap.String("conversation.id", input.ConversationID), zap.String("request.id", input.RequestID), zap.String("owner.id", input.OwnerID))
 	return conversation, message, nil
 }
 
-func (s *Store) ListMediaAssets(ctx context.Context) ([]store.MediaAsset, error) {
+func (s *Store) ListMediaAssets(ctx context.Context) ([]common.MediaAsset, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
 		FROM media_assets
@@ -464,7 +464,7 @@ func (s *Store) ListMediaAssets(ctx context.Context) ([]store.MediaAsset, error)
 	}
 	defer rows.Close()
 
-	items := make([]store.MediaAsset, 0)
+	items := make([]common.MediaAsset, 0)
 	for rows.Next() {
 		item, err := scanMediaAsset(rows)
 		if err != nil {
@@ -475,7 +475,7 @@ func (s *Store) ListMediaAssets(ctx context.Context) ([]store.MediaAsset, error)
 	return items, rows.Err()
 }
 
-func (s *Store) ListOrphanMediaAssets(ctx context.Context) ([]store.MediaAsset, error) {
+func (s *Store) ListOrphanMediaAssets(ctx context.Context) ([]common.MediaAsset, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT a.id, a.owner_id, a.file_id, a.path, a.media_type, a.bytes, a.sha256, a.width, a.height, a.source_kind, a.original_name, a.original_media_type, a.created_at
 		FROM media_assets a
@@ -488,7 +488,7 @@ func (s *Store) ListOrphanMediaAssets(ctx context.Context) ([]store.MediaAsset, 
 	}
 	defer rows.Close()
 
-	items := make([]store.MediaAsset, 0)
+	items := make([]common.MediaAsset, 0)
 	for rows.Next() {
 		item, err := scanMediaAsset(rows)
 		if err != nil {
@@ -521,14 +521,14 @@ func (s *Store) DeleteMediaAssetsByIDs(ctx context.Context, ids []string) (int, 
 	return int(rowsAffected), nil
 }
 
-func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (store.Conversation, error) {
+func (s *Store) UpdateDraft(ctx context.Context, input common.UpdateDraftInput) (common.Conversation, error) {
 	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
-		return store.Conversation{}, err
+		return common.Conversation{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
 	if !isDraftWritable(metadata) {
-		return store.Conversation{}, errConflict
+		return common.Conversation{}, errConflict
 	}
 	metadata["realtime_draft_text"] = input.DraftText
 	metadata["realtime_status"] = "streaming"
@@ -541,20 +541,20 @@ func (s *Store) UpdateDraft(ctx context.Context, input store.UpdateDraftInput) (
 		WHERE id = ?
 	`, formatTime(conversation.UpdatedAt), mustJSON(metadata), conversation.ID); err != nil {
 		s.logger(ctx).Warn("sqlite update draft failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, err
+		return common.Conversation{}, err
 	}
 	s.logger(ctx).Debug("sqlite draft updated", zap.String("conversation.id", input.ConversationID), zap.Int("draft.length", len([]rune(input.DraftText))))
 	return conversation, nil
 }
 
-func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePendingInput) (store.Conversation, store.Message, error) {
+func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePendingInput) (common.Conversation, common.Message, error) {
 	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
 	if !isTurnCompletable(metadata) {
-		return store.Conversation{}, store.Message{}, errConflict
+		return common.Conversation{}, common.Message{}, errConflict
 	}
 	draftText, _ := metadata["realtime_draft_text"].(string)
 	finalText := strings.TrimSpace(input.OutputText)
@@ -588,7 +588,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 		messageMetadata["reasoning_stream_mode"] = input.ReasoningStreamMode
 	}
 	responseID := input.ResponseID
-	message := store.Message{
+	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "assistant",
 		Content:    messageContent,
@@ -607,7 +607,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		s.logger(ctx).Warn("sqlite complete pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -616,7 +616,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 			id, conversation_id, role, content, created_at, status, response_id, metadata_json
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, message.ID, conversation.ID, message.Role, message.Content, formatTime(now), message.Status, responseID, mustJSON(messageMetadata)); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -624,31 +624,31 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input store.CompletePen
 		SET updated_at = ?, last_message_at = ?, message_count = ?, last_message_preview = ?, metadata_json = ?
 		WHERE id = ?
 	`, formatTime(now), formatTime(now), conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
 		s.logger(ctx).Warn("sqlite complete pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	s.logger(ctx).Debug("sqlite pending turn completed", zap.String("conversation.id", input.ConversationID), zap.String("response.id", input.ResponseID), zap.String("mode", input.Mode))
 	return conversation, message, nil
 }
 
-func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingInput) (store.Conversation, store.Message, error) {
+func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingInput) (common.Conversation, common.Message, error) {
 	conversation, err := s.GetConversation(ctx, input.ConversationID)
 	if err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	metadata := ensureMap(conversation.Metadata)
 	if !isTurnCompletable(metadata) {
-		return store.Conversation{}, store.Message{}, errConflict
+		return common.Conversation{}, common.Message{}, errConflict
 	}
 	metadata["realtime_status"] = "aborted"
 	metadata["realtime_draft_text"] = ""
 	now := time.Now().UTC()
 
-	message := store.Message{
+	message := common.Message{
 		ID:        "msg_" + uuid.NewString(),
 		Role:      "assistant",
 		Content:   input.Reason,
@@ -667,7 +667,7 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		s.logger(ctx).Warn("sqlite abort pending turn begin tx failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -676,18 +676,18 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input store.AbortPendingIn
 			id, conversation_id, role, content, created_at, status, response_id, metadata_json
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, message.ID, conversation.ID, message.Role, message.Content, formatTime(now), message.Status, nil, mustJSON(message.Metadata)); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE conversations
 		SET updated_at = ?, last_message_at = ?, message_count = ?, last_message_preview = ?, metadata_json = ?
 		WHERE id = ?
 	`, formatTime(now), formatTime(now), conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		s.logger(ctx).Warn("sqlite abort pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
-		return store.Conversation{}, store.Message{}, err
+		return common.Conversation{}, common.Message{}, err
 	}
 	s.logger(ctx).Debug("sqlite pending turn aborted", zap.String("conversation.id", input.ConversationID))
 	return conversation, message, nil

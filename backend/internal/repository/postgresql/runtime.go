@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/repository/migrationplan"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type Store struct {
@@ -18,7 +18,7 @@ type Store struct {
 	Logger *zap.Logger
 }
 
-var errConflict = store.ErrTurnConflict
+var errConflict = common.ErrTurnConflict
 
 const BootstrapVersion = "0001_bootstrap"
 const LatestVersion = "0004_postgresql_auth_verification_code_limits"
@@ -117,8 +117,8 @@ func Reset(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-func applyPendingMigrations(ctx context.Context, pool *pgxpool.Pool, status store.MigrationStatus) error {
-	applied := make(map[string]store.AppliedMigration, len(status.Applied))
+func applyPendingMigrations(ctx context.Context, pool *pgxpool.Pool, status common.MigrationStatus) error {
+	applied := make(map[string]common.AppliedMigration, len(status.Applied))
 	for _, item := range status.Applied {
 		applied[item.Version] = item
 	}

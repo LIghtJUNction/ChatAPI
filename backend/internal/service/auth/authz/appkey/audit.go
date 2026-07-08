@@ -7,12 +7,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"go.uber.org/zap"
 )
 
 func (s *Service) RecordAudit(ctx context.Context, principal Principal, route string, statusCode int, errorCode string) {
-	item := store.AppAPIKeyAuditLog{
+	item := common.AppAPIKeyAuditLog{
 		ID:          "applog_" + uuid.NewString(),
 		AppAPIKeyID: principal.KeyID,
 		UserID:      principal.UserID,

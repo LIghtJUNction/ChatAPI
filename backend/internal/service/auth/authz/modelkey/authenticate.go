@@ -7,21 +7,21 @@ import (
 
 	keyutil "github.com/zyf/chatapi/internal/platform/apikey"
 	"github.com/zyf/chatapi/internal/platform/secretbox"
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
 func (s *Service) Authenticate(ctx context.Context, rawKey string) (Principal, error) {
 	rawKey = strings.TrimSpace(rawKey)
 	if rawKey == "" {
-		return Principal{}, store.ErrNotFound
+		return Principal{}, common.ErrNotFound
 	}
 	item, err := s.store.GetModelAPIKeyByPrefix(ctx, keyutil.Prefix(rawKey))
 	if err != nil || item.RevokedAt != nil {
-		return Principal{}, store.ErrNotFound
+		return Principal{}, common.ErrNotFound
 	}
 	storedRaw, err := secretbox.Open(item.KeyCiphertext, s.masterKey)
 	if err != nil || storedRaw != rawKey {
-		return Principal{}, store.ErrNotFound
+		return Principal{}, common.ErrNotFound
 	}
 	now := time.Now().UTC()
 	if item.LastUsedAt == nil || now.Sub(*item.LastUsedAt) >= lastUsedMinInterval {

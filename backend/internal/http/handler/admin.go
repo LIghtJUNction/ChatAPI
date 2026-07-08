@@ -11,9 +11,9 @@ import (
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	"github.com/zyf/chatapi/internal/service/admincontrol"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -420,10 +420,10 @@ func statusForStoreError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, common.ErrNotFound) {
 		return http.StatusNotFound
 	}
-	if errors.Is(err, store.ErrTurnConflict) {
+	if errors.Is(err, common.ErrTurnConflict) {
 		return http.StatusConflict
 	}
 	return http.StatusBadRequest

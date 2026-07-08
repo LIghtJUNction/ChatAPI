@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zyf/chatapi/internal/store"
+	"github.com/zyf/chatapi/internal/repository/common"
 )
 
-func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (store.User, error) {
+func (s *Store) CreateUser(ctx context.Context, input common.CreateUserInput) (common.User, error) {
 	now := time.Now().UTC()
 	role := strings.TrimSpace(input.Role)
 	if role == "" {
@@ -29,9 +29,9 @@ func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (st
 		now,
 	)
 	if err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
-	return store.User{
+	return common.User{
 		ID:           input.ID,
 		Username:     strings.TrimSpace(input.Username),
 		Email:        strings.TrimSpace(input.Email),
@@ -44,7 +44,7 @@ func (s *Store) CreateUser(ctx context.Context, input store.CreateUserInput) (st
 	}, nil
 }
 
-func (s *Store) UpdateUser(ctx context.Context, input store.UpdateUserInput) (store.User, error) {
+func (s *Store) UpdateUser(ctx context.Context, input common.UpdateUserInput) (common.User, error) {
 	now := time.Now().UTC()
 	role := strings.TrimSpace(input.Role)
 	if role == "" {
@@ -66,15 +66,15 @@ func (s *Store) UpdateUser(ctx context.Context, input store.UpdateUserInput) (st
 		input.ID,
 	)
 	if err != nil {
-		return store.User{}, err
+		return common.User{}, err
 	}
 	if tag.RowsAffected() == 0 {
-		return store.User{}, store.ErrNotFound
+		return common.User{}, common.ErrNotFound
 	}
 	return s.GetUser(ctx, input.ID)
 }
 
-func (s *Store) GetUser(ctx context.Context, id string) (store.User, error) {
+func (s *Store) GetUser(ctx context.Context, id string) (common.User, error) {
 	return scanUser(s.pool.QueryRow(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
 		FROM users
@@ -82,7 +82,7 @@ func (s *Store) GetUser(ctx context.Context, id string) (store.User, error) {
 	`, id))
 }
 
-func (s *Store) GetUserByEmail(ctx context.Context, email string) (store.User, error) {
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (common.User, error) {
 	return scanUser(s.pool.QueryRow(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
 		FROM users
@@ -90,7 +90,7 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (store.User, e
 	`, strings.TrimSpace(email)))
 }
 
-func (s *Store) GetUserByUsername(ctx context.Context, username string) (store.User, error) {
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (common.User, error) {
 	return scanUser(s.pool.QueryRow(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
 		FROM users
@@ -98,7 +98,7 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (store.U
 	`, strings.TrimSpace(username)))
 }
 
-func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
+func (s *Store) ListUsers(ctx context.Context) ([]common.User, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
 		FROM users
@@ -109,7 +109,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
 	}
 	defer rows.Close()
 
-	items := make([]store.User, 0)
+	items := make([]common.User, 0)
 	for rows.Next() {
 		item, err := scanUser(rows)
 		if err != nil {
@@ -120,17 +120,17 @@ func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
 	return items, rows.Err()
 }
 
-func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (store.UserDeletionPreview, error) {
+func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (common.UserDeletionPreview, error) {
 	userID = strings.TrimSpace(userID)
 	user, err := s.GetUser(ctx, userID)
 	if err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 
-	preview := store.UserDeletionPreview{
+	preview := common.UserDeletionPreview{
 		User:      user,
 		CanDelete: true,
-		PreserveRef: store.UserDeletionPreserveRef{
+		PreserveRef: common.UserDeletionPreserveRef{
 			AuditLogs:     true,
 			Conversations: true,
 			Uploads:       true,
@@ -139,40 +139,40 @@ func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (store.U
 	counts := &preview.Counts
 
 	if counts.Identities, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_identities WHERE user_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.UserConfigs, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_configs WHERE user_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AutomationRules, err = s.countInt(ctx, `SELECT COUNT(*) FROM automation_rules WHERE user_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AppAPIKeys, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AppAPIKeyAuditLogs, err = s.countInt(ctx, `SELECT COUNT(*) FROM app_api_key_audit_logs WHERE user_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.ModelAPIKeys, err = s.countInt(ctx, `SELECT COUNT(*) FROM user_api_keys WHERE user_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.StorageUserQuotas, err = s.countInt(ctx, `SELECT COUNT(*) FROM storage_user_quotas WHERE owner_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.StorageDeletionFailures, err = s.countInt(ctx, `SELECT COUNT(*) FROM storage_file_deletion_failures WHERE owner_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.OwnedConversations, err = s.countInt(ctx, `SELECT COUNT(*) FROM conversations WHERE COALESCE(metadata_json->>'owner_id', '') = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.OwnedUploadedImages, err = s.countInt(ctx, `SELECT COUNT(*) FROM uploaded_images WHERE owner_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AuditActorLogs, err = s.countInt(ctx, `SELECT COUNT(*) FROM audit_logs WHERE actor_user_id = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 	if counts.AuditMetadataUserReferences, err = s.countInt(ctx, `SELECT COUNT(*) FROM audit_logs WHERE COALESCE(metadata_json->>'user_id', '') = $1`, userID); err != nil {
-		return store.UserDeletionPreview{}, err
+		return common.UserDeletionPreview{}, err
 	}
 
 	if counts.OwnedConversations > 0 {
@@ -221,7 +221,7 @@ func (s *Store) DeleteUserAccount(ctx context.Context, userID string) error {
 	return tx.Commit(ctx)
 }
 
-func (s *Store) UpsertUserIdentity(ctx context.Context, input store.UpsertUserIdentityInput) (store.UserIdentity, error) {
+func (s *Store) UpsertUserIdentity(ctx context.Context, input common.UpsertUserIdentityInput) (common.UserIdentity, error) {
 	now := time.Now().UTC()
 	profileJSON := mustJSON(ensureMap(input.Profile))
 	_, err := s.pool.Exec(ctx, `
@@ -247,12 +247,12 @@ func (s *Store) UpsertUserIdentity(ctx context.Context, input store.UpsertUserId
 		input.LastLoginAt,
 	)
 	if err != nil {
-		return store.UserIdentity{}, err
+		return common.UserIdentity{}, err
 	}
 	return s.GetUserIdentity(ctx, strings.TrimSpace(input.Provider), strings.TrimSpace(input.Subject))
 }
 
-func (s *Store) GetUserIdentity(ctx context.Context, provider string, subject string) (store.UserIdentity, error) {
+func (s *Store) GetUserIdentity(ctx context.Context, provider string, subject string) (common.UserIdentity, error) {
 	return scanUserIdentity(s.pool.QueryRow(ctx, `
 		SELECT id, user_id, provider, subject, email, email_verified, profile_json, created_at, updated_at, last_login_at
 		FROM user_identities
@@ -260,7 +260,7 @@ func (s *Store) GetUserIdentity(ctx context.Context, provider string, subject st
 	`, strings.TrimSpace(provider), strings.TrimSpace(subject)))
 }
 
-func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]store.UserIdentity, error) {
+func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]common.UserIdentity, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, user_id, provider, subject, email, email_verified, profile_json, created_at, updated_at, last_login_at
 		FROM user_identities
@@ -272,7 +272,7 @@ func (s *Store) ListUserIdentities(ctx context.Context, userID string) ([]store.
 	}
 	defer rows.Close()
 
-	items := make([]store.UserIdentity, 0)
+	items := make([]common.UserIdentity, 0)
 	for rows.Next() {
 		item, err := scanUserIdentity(rows)
 		if err != nil {
@@ -292,7 +292,7 @@ func (s *Store) DeleteUserIdentity(ctx context.Context, id string, userID string
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return store.ErrNotFound
+		return common.ErrNotFound
 	}
 	return nil
 }

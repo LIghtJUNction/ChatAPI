@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
+	"github.com/zyf/chatapi/internal/repository/common"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf/chatapi/internal/service/chat/turnquery"
-	"github.com/zyf/chatapi/internal/store"
 	"go.uber.org/zap"
 )
 
@@ -17,8 +17,8 @@ var ErrWaitingConversationDelete = errors.New("waiting conversation cannot be de
 var ErrForbidden = turnquerysvc.ErrForbidden
 
 type queryService interface {
-	ListConversationsForOwner(context.Context, string) ([]store.Conversation, error)
-	ListMessagesForOwner(context.Context, string, string) ([]store.Message, error)
+	ListConversationsForOwner(context.Context, string) ([]common.Conversation, error)
+	ListMessagesForOwner(context.Context, string, string) ([]common.Message, error)
 }
 
 type turnService interface {
@@ -28,16 +28,16 @@ type turnService interface {
 type Deps struct {
 	Query      queryService
 	Turn       turnService
-	DeleteOne  func(context.Context, string) (store.DeleteConversationsResult, error)
-	DeleteMany func(context.Context, []string) (store.DeleteConversationsResult, error)
+	DeleteOne  func(context.Context, string) (common.DeleteConversationsResult, error)
+	DeleteMany func(context.Context, []string) (common.DeleteConversationsResult, error)
 	Logger     *zap.Logger
 }
 
 type Service struct {
 	query      queryService
 	turn       turnService
-	deleteOne  func(context.Context, string) (store.DeleteConversationsResult, error)
-	deleteMany func(context.Context, []string) (store.DeleteConversationsResult, error)
+	deleteOne  func(context.Context, string) (common.DeleteConversationsResult, error)
+	deleteMany func(context.Context, []string) (common.DeleteConversationsResult, error)
 	logger     *zap.Logger
 }
 
@@ -51,7 +51,7 @@ func New(deps Deps) *Service {
 	}
 }
 
-func (s *Service) ListConversations(ctx context.Context, ownerID string) ([]store.Conversation, error) {
+func (s *Service) ListConversations(ctx context.Context, ownerID string) ([]common.Conversation, error) {
 	items, err := s.query.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.Int("conversations.count", len(items))).Debug("usercontrol conversations listed conversations")
@@ -59,7 +59,7 @@ func (s *Service) ListConversations(ctx context.Context, ownerID string) ([]stor
 	return items, err
 }
 
-func (s *Service) ListConversationMessages(ctx context.Context, ownerID string, conversationID string) ([]store.Message, error) {
+func (s *Service) ListConversationMessages(ctx context.Context, ownerID string, conversationID string) ([]common.Message, error) {
 	items, err := s.query.ListMessagesForOwner(ctx, strings.TrimSpace(conversationID), strings.TrimSpace(ownerID))
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID)), zap.Int("messages.count", len(items))).Debug("usercontrol conversations listed messages")
@@ -83,10 +83,10 @@ func (s *Service) AbortConversation(ctx context.Context, ownerID string, convers
 	return result, err
 }
 
-func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conversationID string) (store.DeleteConversationsResult, error) {
+func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conversationID string) (common.DeleteConversationsResult, error) {
 	conversations, err := s.query.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
 	if err != nil {
-		return store.DeleteConversationsResult{}, err
+		return common.DeleteConversationsResult{}, err
 	}
 	found := false
 	for _, item := range conversations {
@@ -94,14 +94,14 @@ func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conver
 			found = true
 			if stringValue(item.Metadata["realtime_status"]) == "waiting" {
 				logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Warn("usercontrol conversations delete rejected waiting conversation")
-				return store.DeleteConversationsResult{}, ErrWaitingConversationDelete
+				return common.DeleteConversationsResult{}, ErrWaitingConversationDelete
 			}
 			break
 		}
 	}
 	if !found {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Warn("usercontrol conversations delete rejected missing conversation")
-		return store.DeleteConversationsResult{}, store.ErrNotFound
+		return common.DeleteConversationsResult{}, common.ErrNotFound
 	}
 	result, err := s.deleteOne(ctx, strings.TrimSpace(conversationID))
 	if err == nil {
@@ -110,10 +110,10 @@ func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conver
 	return result, err
 }
 
-func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCount int) (store.DeleteConversationsResult, int, error) {
+func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCount int) (common.DeleteConversationsResult, int, error) {
 	items, err := s.query.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
 	if err != nil {
-		return store.DeleteConversationsResult{}, 0, err
+		return common.DeleteConversationsResult{}, 0, err
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
 	deleteIDs := make([]string, 0)
@@ -130,7 +130,7 @@ func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCo
 	}
 	result, err := s.deleteMany(ctx, deleteIDs)
 	if err != nil {
-		return store.DeleteConversationsResult{}, 0, err
+		return common.DeleteConversationsResult{}, 0, err
 	}
 	logging.BindContext(s.logger, ctx,
 		zap.String("owner.id", strings.TrimSpace(ownerID)),

@@ -3,8 +3,8 @@ package turn
 import (
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/protocol"
+	"github.com/zyf/chatapi/internal/repository/common"
 	preprocesssvc "github.com/zyf/chatapi/internal/service/chat/preprocess"
-	"github.com/zyf/chatapi/internal/store"
 )
 
 type SubmitInput struct {
@@ -12,6 +12,6 @@ type SubmitInput struct {
 	Actor          actor.Actor
 	Request        protocol.TurnRequest
 	PreparedImages []preprocesssvc.PreparedImage
-	RequestMeta    store.Request
+	RequestMeta    common.Request
 	RawBody        map[string]any
 }

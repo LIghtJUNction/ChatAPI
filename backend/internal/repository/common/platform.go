@@ -1,4 +1,4 @@
-package store
+package common
 
 type MigrationStatus struct {
 	SchemaVersion  string             `json:"schema_version"`

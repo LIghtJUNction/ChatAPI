@@ -22,6 +22,7 @@ import (
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
@@ -29,6 +30,7 @@ import (
 type noopRealtime struct{}
 
 func (noopRealtime) PublishConversationUpsert(common.Conversation, []common.Message) {}
+func (noopRealtime) PublishTimelineItemAppend(string, common.Conversation, timelinesvc.Item) {}
 func (noopRealtime) PublishConversationDelete(string, string)                        {}
 
 func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {

@@ -6,7 +6,9 @@ import (
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
 	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 )
 
 func firstCatalog(current *catalogsvc.Service, modelKeys *modelkey.Service) *catalogsvc.Service {
@@ -28,4 +30,11 @@ func firstStreaming(current *streamingsvc.Service) *streamingsvc.Service {
 		return current
 	}
 	return streamingsvc.New()
+}
+
+func firstTimeline(current *timelinesvc.Service, store chat.Store) *timelinesvc.Service {
+	if current != nil {
+		return current
+	}
+	return timelinesvc.New(store, nil)
 }

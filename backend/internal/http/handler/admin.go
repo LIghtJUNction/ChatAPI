@@ -14,11 +14,13 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"github.com/zyf2007/ChatAPI/internal/service/admincontrol"
 	auditsvc "github.com/zyf2007/ChatAPI/internal/service/audit"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	"go.uber.org/zap"
 )
 
 type AdminHandler struct {
 	Control *admincontrol.Service
+	Timeline *timelinesvc.Service
 	Audit   *auditsvc.Service
 	Logger  *zap.Logger
 }
@@ -275,6 +277,16 @@ func (h AdminHandler) ListConversations(w http.ResponseWriter, r *http.Request) 
 func (h AdminHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {
 	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
 	items, err := h.Control.ListMessages(r.Context(), conversationID)
+	if err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+}
+
+func (h AdminHandler) ListConversationTimeline(w http.ResponseWriter, r *http.Request) {
+	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
+	items, err := h.Timeline.ListTimeline(r.Context(), conversationID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return

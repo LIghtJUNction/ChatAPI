@@ -13,6 +13,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
 	usercontrolconversations "github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversations"
 	usercontrolprofile "github.com/zyf2007/ChatAPI/internal/service/usercontrol/profile"
@@ -22,6 +23,7 @@ import (
 type UserHandler struct {
 	Config      config.Config
 	UserControl *usercontrol.Service
+	Timeline    *timelinesvc.Service
 	Logger      *zap.Logger
 }
 
@@ -66,6 +68,25 @@ func (h UserHandler) ListConversationMessages(w http.ResponseWriter, r *http.Req
 	}
 	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
 	items, err := h.UserControl.Conversations.ListConversationMessages(r.Context(), ownerID, conversationID)
+	if err != nil {
+		status := http.StatusNotFound
+		if errors.Is(err, usercontrolconversations.ErrForbidden) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+}
+
+func (h UserHandler) ListConversationTimeline(w http.ResponseWriter, r *http.Request) {
+	ownerID, ok := h.ownerIDFromContext(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
+	items, err := h.Timeline.ListTimelineForOwner(r.Context(), conversationID, ownerID)
 	if err != nil {
 		status := http.StatusNotFound
 		if errors.Is(err, usercontrolconversations.ErrForbidden) {

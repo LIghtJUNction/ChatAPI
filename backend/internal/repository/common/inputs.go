@@ -192,6 +192,19 @@ type DisconnectPendingInput struct {
 	Reason         string
 }
 
+type AppendConversationEventInput struct {
+	ID             string
+	ConversationID string
+	OwnerID        string
+	Type           string
+	Level          string
+	Title          string
+	Detail         string
+	RequestID      string
+	Metadata       map[string]any
+	CreatedAt      time.Time
+}
+
 type DeleteConversationsResult struct {
 	DeletedConversations int `json:"deleted_conversations"`
 	DeletedMessages      int `json:"deleted_messages"`

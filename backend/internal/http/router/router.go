@@ -44,6 +44,7 @@ import (
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
 	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
@@ -64,6 +65,7 @@ type Deps struct {
 	Catalog        *catalogsvc.Service
 	Ingress        *ingresssvc.Service
 	Streaming      *streamingsvc.Service
+	Timeline       *timelinesvc.Service
 	AppAPIKeys     *appkey.Service
 	Lab            *labauth.Service
 	LocalAuth      *localauth.Service
@@ -174,6 +176,7 @@ func New(deps Deps) http.Handler {
 	chatHandler := httphandler.ChatAPIHandler{
 		Turn:      deps.Turn,
 		Query:     deps.Query,
+		Timeline:  firstTimeline(deps.Timeline, deps.ChatRepo),
 		Ingress:   firstIngress(deps.Ingress, preprocesssvc.New(deps.Config, localstore.Store{RootDir: deps.Config.MediaDerivedDir}), deps.Turn),
 		Streaming: firstStreaming(deps.Streaming),
 		Catalog:   firstCatalog(deps.Catalog, deps.ModelAPIKeys),
@@ -201,10 +204,12 @@ func New(deps Deps) http.Handler {
 	userHandler := httphandler.UserHandler{
 		Config:      deps.Config,
 		UserControl: deps.UserControl,
+		Timeline:    firstTimeline(deps.Timeline, deps.ChatRepo),
 		Logger:      deps.logger(logging.LayerAuth),
 	}
 	adminHandler := httphandler.AdminHandler{
 		Control: deps.AdminControl,
+		Timeline: firstTimeline(deps.Timeline, deps.ChatRepo),
 		Audit:   deps.Audit,
 		Logger:  deps.logger(logging.LayerAudit),
 	}
@@ -279,6 +284,7 @@ func New(deps Deps) http.Handler {
 
 	router.With(userOrAppAuth("conversations:read")).Get("/api/conversations", userHandler.ListConversations)
 	router.With(userOrAppAuth("conversations:read")).Get("/api/conversations/{conversationID}/messages", userHandler.ListConversationMessages)
+	router.With(userOrAppAuth("conversations:read")).Get("/api/conversations/{conversationID}/timeline", userHandler.ListConversationTimeline)
 	router.With(userAuth, userPrincipalAccess).Post("/api/conversations/{conversationID}/abort", userHandler.AbortConversation)
 	router.With(userAuth, userPrincipalAccess).Delete("/api/conversations/{conversationID}", userHandler.DeleteConversation)
 	router.With(userAuth, userPrincipalAccess).Post("/api/conversations/prune", userHandler.PruneConversations)
@@ -322,6 +328,7 @@ func New(deps Deps) http.Handler {
 	router.With(adminAuth).Get("/api/admin/requests/{requestID}", adminHandler.GetRequest)
 	router.With(adminAuth).Get("/api/admin/conversations", adminHandler.ListConversations)
 	router.With(adminAuth).Get("/api/admin/conversations/{conversationID}/messages", adminHandler.ListConversationMessages)
+	router.With(adminAuth).Get("/api/admin/conversations/{conversationID}/timeline", adminHandler.ListConversationTimeline)
 	router.With(adminAuth).Post("/api/admin/conversations/{conversationID}/abort", adminHandler.AbortConversation)
 	router.With(adminAuth).Post("/api/admin/conversations/{conversationID}/complete", adminHandler.CompleteConversation)
 	router.With(adminAuth).Delete("/api/admin/conversations/{conversationID}", adminHandler.DeleteConversation)

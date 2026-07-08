@@ -10,7 +10,7 @@ import (
 )
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0005_media_assets"
+const LatestVersion = "0006_conversation_events"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS
@@ -23,6 +23,7 @@ var bootstrapTables = []string{
 	"storage_user_quotas",
 	"media_asset_refs",
 	"media_assets",
+	"conversation_events",
 	"uploaded_images",
 	"audit_logs",
 	"app_api_key_audit_logs",

@@ -14,6 +14,7 @@ type Reader interface {
 	ListRequests(context.Context) ([]common.Request, error)
 	GetRequest(context.Context, string) (common.Request, error)
 	ListMessages(context.Context, string) ([]common.Message, error)
+	ListConversationEvents(context.Context, string) ([]common.ConversationEvent, error)
 	ListMediaAssets(context.Context) ([]common.MediaAsset, error)
 	ListOrphanMediaAssets(context.Context) ([]common.MediaAsset, error)
 }
@@ -28,6 +29,7 @@ type Writer interface {
 	AbortPendingTurn(context.Context, common.AbortPendingInput) (common.Conversation, common.Message, error)
 	DisconnectPendingTurn(context.Context, common.DisconnectPendingInput) (common.Conversation, common.Message, error)
 	DisconnectAllPendingTurns(context.Context, string) (common.ExpirePendingTurnsResult, error)
+	AppendConversationEvent(context.Context, common.AppendConversationEventInput) (common.ConversationEvent, error)
 }
 
 type Store interface {

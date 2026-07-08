@@ -98,6 +98,9 @@ func RunConversationRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Run("pending_turn_lifecycle", func(t *testing.T) {
 		testConversationRepositoryPendingTurnLifecycle(t, newStore)
 	})
+	t.Run("conversation_events", func(t *testing.T) {
+		testConversationRepositoryConversationEvents(t, newStore)
+	})
 }
 
 func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewStoreFunc) {
@@ -1612,10 +1615,10 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	if err != nil {
 		t.Fatalf("abort pending turn: %v", err)
 	}
-	if abortedConversation.Metadata["realtime_status"] != "aborted" || abortedConversation.MessageCount != 2 {
+	if abortedConversation.Metadata["realtime_status"] != "aborted" || abortedConversation.MessageCount != 1 {
 		t.Fatalf("unexpected aborted conversation: %#v", abortedConversation)
 	}
-	if abortedMessage.Status != "aborted" || abortedMessage.Content != "manual abort" {
+	if abortedMessage.ID != "" || abortedMessage.Content != "" {
 		t.Fatalf("unexpected aborted message: %#v", abortedMessage)
 	}
 
@@ -1624,6 +1627,42 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		Reason:         "again",
 	}); !errors.Is(err, common.ErrTurnConflict) {
 		t.Fatalf("expected ErrTurnConflict aborting closed turn, got %v", err)
+	}
+
+	disconnectedConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_disconnect",
+		RequestID:      "req_disconnect",
+		ResponseID:     "resp_disconnect",
+		OwnerID:        "user_d",
+		RequestFormat:  "responses",
+		Model:          "disconnect-test",
+		UserContent:    "disconnect me",
+		RequestBody:    map[string]any{"model": "disconnect-test"},
+	})
+	if err != nil {
+		t.Fatalf("create disconnect pending turn: %v", err)
+	}
+	disconnectedConversation, disconnectedMessage, err := st.DisconnectPendingTurn(ctx, common.DisconnectPendingInput{
+		ConversationID: disconnectedConversation.ID,
+		Reason:         "request disconnected",
+	})
+	if err != nil {
+		t.Fatalf("disconnect pending turn: %v", err)
+	}
+	if disconnectedConversation.Metadata["realtime_status"] != "disconnected" {
+		t.Fatalf("unexpected disconnected conversation: %#v", disconnectedConversation)
+	}
+	if disconnectedConversation.MessageCount != 1 {
+		t.Fatalf("unexpected disconnected conversation message count: %#v", disconnectedConversation)
+	}
+	if disconnectedMessage.ID != "" || disconnectedMessage.Content != "" {
+		t.Fatalf("unexpected disconnected message: %#v", disconnectedMessage)
+	}
+	if _, _, err := st.DisconnectPendingTurn(ctx, common.DisconnectPendingInput{
+		ConversationID: disconnectedConversation.ID,
+		Reason:         "again",
+	}); !errors.Is(err, common.ErrPendingDisconnected) {
+		t.Fatalf("expected ErrPendingDisconnected, got %v", err)
 	}
 
 	expiringConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
@@ -1681,5 +1720,62 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	}
 	if _, err := st.GetConversation(ctx, firstConversation.ID); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected deleted conversation missing, got %v", err)
+	}
+}
+
+func testConversationRepositoryConversationEvents(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+
+	conversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_events",
+		RequestID:      "req_events",
+		ResponseID:     "resp_events",
+		OwnerID:        "user_events",
+		RequestFormat:  "responses",
+		Model:          "events-model",
+		UserContent:    "hello events",
+		RequestBody:    map[string]any{"model": "events-model"},
+	})
+	if err != nil {
+		t.Fatalf("create pending turn: %v", err)
+	}
+
+	first, err := st.AppendConversationEvent(ctx, common.AppendConversationEventInput{
+		ConversationID: conversation.ID,
+		OwnerID:        "user_events",
+		Type:           "request_disconnected",
+		Level:          "warn",
+		Title:          "Request Disconnected",
+		Detail:         "client closed request",
+		RequestID:      "req_events",
+	})
+	if err != nil {
+		t.Fatalf("append first conversation event: %v", err)
+	}
+	second, err := st.AppendConversationEvent(ctx, common.AppendConversationEventInput{
+		ConversationID: conversation.ID,
+		OwnerID:        "user_events",
+		Type:           "request_aborted",
+		Level:          "warn",
+		Title:          "Request Aborted",
+		Detail:         "manual abort",
+		RequestID:      "req_events",
+		CreatedAt:      first.CreatedAt.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("append second conversation event: %v", err)
+	}
+
+	items, err := st.ListConversationEvents(ctx, conversation.ID)
+	if err != nil {
+		t.Fatalf("list conversation events: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected two conversation events, got %#v", items)
+	}
+	if items[0].ID != first.ID || items[1].ID != second.ID {
+		t.Fatalf("unexpected event order: %#v", items)
 	}
 }

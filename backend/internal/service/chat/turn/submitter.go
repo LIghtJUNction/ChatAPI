@@ -10,6 +10,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 )
 
 type Store interface {
@@ -23,6 +24,7 @@ type PendingRegistrar interface {
 
 type RealtimePublisher interface {
 	PublishConversationUpsert(common.Conversation, []common.Message)
+	PublishTimelineItemAppend(string, common.Conversation, timelinesvc.Item)
 }
 
 type PreparedImageCleaner interface {

@@ -559,22 +559,8 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingI
 	metadata["realtime_status"] = "aborted"
 	metadata["realtime_draft_text"] = ""
 	now := time.Now().UTC()
-
-	message := common.Message{
-		ID:        "msg_" + uuid.NewString(),
-		Role:      "assistant",
-		Content:   input.Reason,
-		CreatedAt: now,
-		Status:    "aborted",
-		Metadata: map[string]any{
-			"response_mode": "assistant_message",
-		},
-	}
 	conversation.Metadata = metadata
 	conversation.UpdatedAt = now
-	conversation.LastMessageAt = now
-	conversation.MessageCount += 1
-	conversation.LastMessagePreview = input.Reason
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -584,17 +570,10 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingI
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO messages(
-			id, conversation_id, role, content, created_at, status, response_id, metadata_json
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-	`, message.ID, conversation.ID, message.Role, message.Content, now, message.Status, nil, mustJSON(message.Metadata)); err != nil {
-		return common.Conversation{}, common.Message{}, err
-	}
-	if _, err := tx.Exec(ctx, `
 		UPDATE conversations
-		SET updated_at = $1, last_message_at = $2, message_count = $3, last_message_preview = $4, metadata_json = $5::jsonb
-		WHERE id = $6
-	`, now, now, conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
+		SET updated_at = $1, metadata_json = $2::jsonb
+		WHERE id = $3
+	`, now, mustJSON(metadata), conversation.ID); err != nil {
 		return common.Conversation{}, common.Message{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -602,7 +581,7 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingI
 		return common.Conversation{}, common.Message{}, err
 	}
 	s.logger(ctx).Debug("postgresql pending turn aborted", zap.String("conversation.id", input.ConversationID))
-	return conversation, message, nil
+	return conversation, common.Message{}, nil
 }
 
 func (s *Store) DisconnectPendingTurn(ctx context.Context, input common.DisconnectPendingInput) (common.Conversation, common.Message, error) {
@@ -620,23 +599,8 @@ func (s *Store) DisconnectPendingTurn(ctx context.Context, input common.Disconne
 	metadata["realtime_status"] = "disconnected"
 	metadata["realtime_draft_text"] = ""
 	now := time.Now().UTC()
-
-	message := common.Message{
-		ID:        "msg_" + uuid.NewString(),
-		Role:      "assistant",
-		Content:   stringValue(input.Reason, "request disconnected"),
-		CreatedAt: now,
-		Status:    "disconnected",
-		Metadata: map[string]any{
-			"response_mode": "assistant_message",
-			"disconnect":    true,
-		},
-	}
 	conversation.Metadata = metadata
 	conversation.UpdatedAt = now
-	conversation.LastMessageAt = now
-	conversation.MessageCount += 1
-	conversation.LastMessagePreview = message.Content
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -645,23 +609,16 @@ func (s *Store) DisconnectPendingTurn(ctx context.Context, input common.Disconne
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO messages(
-			id, conversation_id, role, content, created_at, status, response_id, metadata_json
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-	`, message.ID, conversation.ID, message.Role, message.Content, now, message.Status, nil, mustJSON(message.Metadata)); err != nil {
-		return common.Conversation{}, common.Message{}, err
-	}
-	if _, err := tx.Exec(ctx, `
 		UPDATE conversations
-		SET updated_at = $1, last_message_at = $2, message_count = $3, last_message_preview = $4, metadata_json = $5::jsonb
-		WHERE id = $6
-	`, now, now, conversation.MessageCount, conversation.LastMessagePreview, mustJSON(metadata), conversation.ID); err != nil {
+		SET updated_at = $1, metadata_json = $2::jsonb
+		WHERE id = $3
+	`, now, mustJSON(metadata), conversation.ID); err != nil {
 		return common.Conversation{}, common.Message{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return common.Conversation{}, common.Message{}, err
 	}
-	return conversation, message, nil
+	return conversation, common.Message{}, nil
 }
 
 func (s *Store) DisconnectAllPendingTurns(ctx context.Context, reason string) (common.ExpirePendingTurnsResult, error) {

@@ -21,6 +21,7 @@ import (
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
@@ -28,6 +29,7 @@ import (
 type ChatAPIHandler struct {
 	Turn      *turnsvc.Service
 	Query     *turnquerysvc.Service
+	Timeline  *timelinesvc.Service
 	Ingress   *ingresssvc.Service
 	Streaming *streamingsvc.Service
 	Catalog   *catalogsvc.Service

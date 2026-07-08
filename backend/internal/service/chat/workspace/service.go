@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 )
 
 type ConversationQuery interface {
@@ -38,6 +39,13 @@ type ConversationDelete struct {
 	ConversationID string `json:"conversation_id"`
 }
 
+type TimelineItemAppend struct {
+	Type           string           `json:"type"`
+	ConversationID string           `json:"conversation_id"`
+	Item           timelinesvc.Item `json:"item"`
+	Conversation   common.Conversation `json:"conversation"`
+}
+
 type ConnectionCount struct {
 	Type                   string `json:"type"`
 	CurrentConnectionCount int    `json:"current_connection_count"`
@@ -67,6 +75,13 @@ func (p *RealtimePublisher) PublishConversationDelete(ownerID string, conversati
 		return
 	}
 	p.hub.PublishConversationDelete(strings.TrimSpace(ownerID), strings.TrimSpace(conversationID))
+}
+
+func (p *RealtimePublisher) PublishTimelineItemAppend(ownerID string, conversation common.Conversation, item timelinesvc.Item) {
+	if p == nil || p.hub == nil {
+		return
+	}
+	p.hub.PublishTimelineItemAppend(strings.TrimSpace(ownerID), conversation, item)
 }
 
 type Service struct {
@@ -148,6 +163,15 @@ func (h *Hub) PublishConversationDelete(ownerID string, conversationID string) {
 	h.broadcast(ownerID, ConversationDelete{
 		Type:           "conversation_delete",
 		ConversationID: conversationID,
+	})
+}
+
+func (h *Hub) PublishTimelineItemAppend(ownerID string, conversation common.Conversation, item timelinesvc.Item) {
+	h.broadcast(ownerID, TimelineItemAppend{
+		Type:           "timeline_item_append",
+		ConversationID: conversation.ID,
+		Item:           item,
+		Conversation:   conversation,
 	})
 }
 

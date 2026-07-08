@@ -86,6 +86,21 @@ func TestSessionCSRFAllowsConfiguredFrontendOrigin(t *testing.T) {
 	}
 }
 
+func TestSessionCSRFAcceptsRequestOrigin(t *testing.T) {
+	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
+	service := authaccess.NewService(cfg, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:5000/api/user/model-keys", nil)
+	req.Host = "127.0.0.1:5000"
+	req.Header.Set("Origin", "http://127.0.0.1:5000")
+	if !service.ShouldCheckSessionCSRF(req, true) {
+		t.Fatal("expected csrf check")
+	}
+	if !service.ValidSessionCSRFSameOrigin(req) {
+		t.Fatal("expected request origin to pass csrf")
+	}
+}
+
 func TestAccessRateLimitDisabledByDefault(t *testing.T) {
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	service := authaccess.NewService(cfg, nil, nil)

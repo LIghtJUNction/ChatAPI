@@ -27,6 +27,9 @@ func (s *Service) ValidSessionCSRFSameOrigin(r *http.Request) bool {
 	if origin == "" {
 		return false
 	}
+	if origin == normalizedOrigin(requestOrigin(r)) {
+		return true
+	}
 	_, ok := s.trustedOrigins[origin]
 	return ok
 }

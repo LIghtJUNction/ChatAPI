@@ -446,3 +446,156 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 		t.Fatalf("unexpected event payload: %#v", event)
 	}
 }
+
+func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *testing.T) {
+	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer st.Close()
+	if err := migrations.Bootstrap(context.Background(), st.DB()); err != nil {
+		t.Fatalf("bootstrap migrations: %v", err)
+	}
+
+	userPasswordHash, err := passwordHash("user-pass")
+	if err != nil {
+		t.Fatalf("user password hash: %v", err)
+	}
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
+		ID:           "user_a",
+		Username:     "alice",
+		Email:        "alice@example.com",
+		PasswordHash: userPasswordHash,
+		Role:         "user",
+		IsActive:     true,
+	}); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := st.UpsertUserIdentity(context.Background(), common.UpsertUserIdentityInput{
+		ID:            "identity_local_alice",
+		UserID:        "user_a",
+		Provider:      "local",
+		Subject:       "alice@example.com",
+		Email:         "alice@example.com",
+		EmailVerified: true,
+	}); err != nil {
+		t.Fatalf("create user identity: %v", err)
+	}
+
+	logFactory, err := logging.NewFactory(logging.Config{Level: "debug", Format: "json"})
+	if err != nil {
+		t.Fatalf("new logger factory: %v", err)
+	}
+	st.Logger = logFactory.Layer(logging.LayerRepository)
+
+	policies := policy.NewService()
+	sessionService, err := session.NewService(session.Config{Secret: "01234567890123456789012345678901"})
+	if err != nil {
+		t.Fatalf("new session service: %v", err)
+	}
+	verificationService := verification.NewService(st, &memorySender{})
+	accountService := account.NewService(st)
+	localService := localauth.NewService(accountService, st, policies, sessionService, verificationService)
+	localService.Logger = logFactory.Layer(logging.LayerAuth)
+	identityService := identity.NewService(accountService)
+	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
+	workspaceService := workspacesvc.New(queryService)
+	workspaceHub := workspacesvc.NewHub(workspaceService)
+	pending := pendingsvc.NewPendingRegistry()
+	pending.Logger = logFactory.Layer(logging.LayerPending)
+	turnService := &turnsvc.Service{
+		Submitter: &turnsvc.Submitter{
+			Store:    st,
+			Pending:  pending,
+			Realtime: workspacesvc.NewRealtimePublisher(workspaceHub),
+		},
+		Pending:            pending,
+		Store:              st,
+		OwnerIDFromContext: actor.OwnerIDFromContext,
+		ActorFromContext:   actor.FromContext,
+		Logger:             logFactory.Layer(logging.LayerTurn),
+	}
+	modelKeyService := modelkey.NewService(st, "test-master-key")
+	appKeyService := appkey.NewService(st)
+
+	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
+	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
+		Config:        cfg,
+		ChatRepo:      st,
+		AuthRepo:      st,
+		ConfigRepo:    st,
+		StorageRepo:   st,
+		AuditRepo:     st,
+		PlatformRepo:  st,
+		LocalAuth:     localService,
+		Verification:  verificationService,
+		Policy:        policies,
+		Accounts:      accountService,
+		Identity:      identityService,
+		UserSessions:  sessionService,
+		Query:         queryService,
+		Turn:          turnService,
+		ModelAPIKeys:  modelKeyService,
+		AppAPIKeys:    appKeyService,
+		Workspace:     workspaceService,
+		WorkspaceHub:  workspaceHub,
+		LoggerFactory: logFactory,
+	}))
+	defer server.Close()
+
+	cookie := loginAndGetCookie(t, server.URL, "alice@example.com", "user-pass")
+	_, modelKey, err := modelKeyService.CreateKey(context.Background(), "user_a", "user-a-model", "demo-model")
+	if err != nil {
+		t.Fatalf("create model key: %v", err)
+	}
+
+	firstResultCh := make(chan map[string]any, 1)
+	go func() {
+		firstResultCh <- postJSONWithHeaders(t, server.URL+"/v1/responses", map[string]any{
+			"model": "demo-model",
+			"input": "first request",
+		}, map[string]string{
+			"Authorization": "Bearer " + modelKey,
+		}, http.StatusOK)
+	}()
+	firstRequest := waitForRequestForOwner(t, queryService, "user_a")
+	postJSONWithCookie(t, server.URL+"/api/chat/output/complete", map[string]any{
+		"conversation_id": firstRequest.ConversationID,
+		"text":            "done first",
+		"mode":            "assistant_message",
+	}, cookie, http.StatusOK)
+	<-firstResultCh
+
+	secondResultCh := make(chan map[string]any, 1)
+	go func() {
+		secondResultCh <- postJSONWithHeaders(t, server.URL+"/v1/responses", map[string]any{
+			"model":           "demo-model",
+			"input":           "second request",
+			"conversation_id": firstRequest.ConversationID,
+		}, map[string]string{
+			"Authorization": "Bearer " + modelKey,
+		}, http.StatusOK)
+	}()
+	requests := waitForRequestsForOwnerCount(t, queryService, "user_a", 2)
+	var secondRequestID string
+	for _, item := range requests {
+		if item.RequestID != firstRequest.RequestID {
+			secondRequestID = item.RequestID
+		}
+	}
+	if secondRequestID == "" {
+		t.Fatalf("failed to resolve second request id from %#v", requests)
+	}
+	postJSONWithCookie(t, server.URL+"/api/conversations/"+firstRequest.ConversationID+"/abort", map[string]any{
+		"error": "manual stop second",
+	}, cookie, http.StatusOK)
+	<-secondResultCh
+
+	timelineResp := getJSONWithCookie(t, server.URL+"/api/conversations/"+firstRequest.ConversationID+"/timeline", cookie, http.StatusOK)
+	items := timelineResp["items"].([]any)
+	last := items[len(items)-1].(map[string]any)
+	event := last["event"].(map[string]any)
+	if event["request_id"] != secondRequestID {
+		t.Fatalf("expected latest request id %q, got %#v", secondRequestID, event)
+	}
+}

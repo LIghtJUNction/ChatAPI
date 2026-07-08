@@ -29,9 +29,9 @@ import (
 
 type noopRealtime struct{}
 
-func (noopRealtime) PublishConversationUpsert(common.Conversation, []common.Message) {}
+func (noopRealtime) PublishConversationUpsert(common.Conversation, []common.Message)         {}
 func (noopRealtime) PublishTimelineItemAppend(string, common.Conversation, timelinesvc.Item) {}
-func (noopRealtime) PublishConversationDelete(string, string)                        {}
+func (noopRealtime) PublishConversationDelete(string, string)                                {}
 
 func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
@@ -225,6 +225,20 @@ func waitForRequestForOwner(t *testing.T, query *turnquerysvc.Service, ownerID s
 	}
 	t.Fatal("timed out waiting for request")
 	return common.Request{}
+}
+
+func waitForRequestsForOwnerCount(t *testing.T, query *turnquerysvc.Service, ownerID string, count int) []common.Request {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		items, err := query.ListRequestsForOwner(context.Background(), ownerID)
+		if err == nil && len(items) >= count {
+			return items
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d requests", count)
+	return nil
 }
 
 func postJSONWithHeaders(t *testing.T, url string, body map[string]any, headers map[string]string, wantStatus int) map[string]any {

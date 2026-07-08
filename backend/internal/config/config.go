@@ -41,6 +41,7 @@ type Config struct {
 	AdminPassword                         string
 	LogLevel                              string
 	LogFormat                             string
+	LogHTTPSummaryEnabled                 bool
 	CORSOrigins                           []string
 	TrustedProxies                        []string
 	MetricsEnabled                        bool
@@ -152,6 +153,7 @@ func Default(mode Mode, backendRoot string) Config {
 		AdminPassword:                         "",
 		LogLevel:                              "info",
 		LogFormat:                             defaultLogFormat(mode),
+		LogHTTPSummaryEnabled:                 defaultLogHTTPSummaryEnabled(mode),
 		CORSOrigins:                           []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		TrustedProxies:                        nil,
 		MetricsEnabled:                        false,
@@ -243,6 +245,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.SessionSecret = firstNonEmpty(os.Getenv("CHATAPI_SESSION_SECRET"), cfg.SessionSecret)
 	cfg.LogLevel = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_LEVEL"), cfg.LogLevel))
 	cfg.LogFormat = strings.ToLower(firstNonEmpty(os.Getenv("CHATAPI_LOG_FORMAT"), cfg.LogFormat))
+	cfg.LogHTTPSummaryEnabled = parseBool(os.Getenv("CHATAPI_LOG_HTTP_SUMMARY_ENABLED"), cfg.LogHTTPSummaryEnabled)
 	cfg.LabToken = strings.TrimSpace(os.Getenv("CHATAPI_LAB_TOKEN"))
 	cfg.LabPassword = strings.TrimSpace(os.Getenv("CHATAPI_LAB_PASSWORD"))
 	cfg.AdminUsername = strings.TrimSpace(os.Getenv("CHATAPI_ADMIN_USERNAME"))
@@ -612,6 +615,10 @@ func defaultLogFormat(mode Mode) string {
 		return "console"
 	}
 	return "json"
+}
+
+func defaultLogHTTPSummaryEnabled(mode Mode) bool {
+	return defaultLogFormat(mode) == "console"
 }
 
 func ParseDailyTime(value string) (hour int, minute int, err error) {

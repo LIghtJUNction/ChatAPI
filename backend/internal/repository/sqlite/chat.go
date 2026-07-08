@@ -751,6 +751,9 @@ func (s *Store) AbortPendingTurn(ctx context.Context, input common.AbortPendingI
 	`, formatTime(now), mustJSON(metadata), conversation.ID); err != nil {
 		return common.Conversation{}, common.Message{}, err
 	}
+	if err := insertConversationEventSQLite(ctx, tx, conversation, input.Event, now); err != nil {
+		return common.Conversation{}, common.Message{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		s.logger(ctx).Warn("sqlite abort pending turn commit failed", zap.String("conversation.id", input.ConversationID), zap.Error(err))
 		return common.Conversation{}, common.Message{}, err
@@ -788,6 +791,9 @@ func (s *Store) DisconnectPendingTurn(ctx context.Context, input common.Disconne
 		SET updated_at = ?, metadata_json = ?
 		WHERE id = ?
 	`, formatTime(now), mustJSON(metadata), conversation.ID); err != nil {
+		return common.Conversation{}, common.Message{}, err
+	}
+	if err := insertConversationEventSQLite(ctx, tx, conversation, input.Event, now); err != nil {
 		return common.Conversation{}, common.Message{}, err
 	}
 	if err := tx.Commit(); err != nil {

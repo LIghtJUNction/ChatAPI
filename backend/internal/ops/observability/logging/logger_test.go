@@ -2,7 +2,9 @@ package logging
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -51,5 +53,22 @@ func TestForContextIncludesActorFields(t *testing.T) {
 	}
 	if got := entry.ContextMap()["actor.entry_point"]; got != "app_api" {
 		t.Fatalf("unexpected actor.entry_point: %#v", entry.ContextMap())
+	}
+}
+
+func TestHTTPAccessFormatterSummaryWithoutColor(t *testing.T) {
+	formatter := HTTPAccessFormatter{useColor: false}
+	line := formatter.FormatSummary(HTTPAccessEntry{
+		Method:   "POST",
+		Path:     "/v1/responses",
+		Status:   502,
+		Duration: 1500 * time.Millisecond,
+		Remote:   "127.0.0.1:12345",
+	})
+
+	for _, want := range []string{"◆", "502", "POST", "/v1/responses", "1500ms", "127.0.0.1:12345"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("summary missing %q: %q", want, line)
+		}
 	}
 }

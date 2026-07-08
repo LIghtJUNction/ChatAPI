@@ -7,9 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"go.uber.org/zap"
 )
 
 func (d Deps) logger(layer string) *zap.Logger {
@@ -59,7 +58,7 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return hijacker.Hijack()
 }
 
-func requestLoggingMiddleware(base *zap.Logger) func(http.Handler) http.Handler {
+func requestLoggingMiddleware(factory *logging.Factory, base *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -71,11 +70,22 @@ func requestLoggingMiddleware(base *zap.Logger) func(http.Handler) http.Handler 
 			ctx := logging.WithLogger(r.Context(), logger)
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r.WithContext(ctx))
+			entry := logging.HTTPAccessEntry{
+				Method:   r.Method,
+				Path:     r.URL.Path,
+				Status:   logging.HTTPStatusFromRecorder(rec.status),
+				Duration: time.Since(start),
+				Remote:   r.RemoteAddr,
+			}
+			if factory != nil {
+				factory.LogHTTPAccess(entry)
+				return
+			}
 			logger = logger.With(
-				zap.Int("http.status_code", rec.status),
-				zap.Duration("http.duration", time.Since(start)),
+				zap.Int("http.status_code", entry.Status),
+				zap.Duration("http.duration", entry.Duration),
 			)
-			logger.Info("http request completed")
+			logger.Info(logging.HTTPAccessMessage())
 		})
 	}
 }

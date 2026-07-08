@@ -117,7 +117,7 @@ func New(deps Deps) http.Handler {
 		MaxAge:           300,
 	}))
 	router.Use(httpmiddleware.RecordHTTPMetrics(metricsRegistry))
-	router.Use(requestLoggingMiddleware(httpLogger))
+	router.Use(requestLoggingMiddleware(deps.LoggerFactory, httpLogger))
 	router.Use(httpmiddleware.RequireLabAccess(accessPolicy, authLogger))
 	router.Use(httpmiddleware.RequireAccessRateLimit(accessPolicy))
 	router.Use(httpmiddleware.LoadLabActor(accessPolicy, authLogger))
@@ -208,10 +208,10 @@ func New(deps Deps) http.Handler {
 		Logger:      deps.logger(logging.LayerAuth),
 	}
 	adminHandler := httphandler.AdminHandler{
-		Control: deps.AdminControl,
+		Control:  deps.AdminControl,
 		Timeline: firstTimeline(deps.Timeline, deps.ChatRepo),
-		Audit:   deps.Audit,
-		Logger:  deps.logger(logging.LayerAudit),
+		Audit:    deps.Audit,
+		Logger:   deps.logger(logging.LayerAudit),
 	}
 	labHandler := httphandler.LabHandler{
 		Config: deps.Config,

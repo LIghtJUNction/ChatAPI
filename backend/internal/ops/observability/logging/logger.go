@@ -26,20 +26,24 @@ const (
 )
 
 type Config struct {
-	Level  string
-	Format string
+	Level              string
+	Format             string
+	HTTPSummaryEnabled bool
 }
 
 type Factory struct {
-	root *zap.Logger
+	root          *zap.Logger
+	httpAccess    *zap.Logger
+	httpFormatter HTTPAccessFormatter
 }
 
 type contextKey struct{}
 
 func NewConfig(cfg config.Config) Config {
 	return Config{
-		Level:  cfg.LogLevel,
-		Format: cfg.LogFormat,
+		Level:              cfg.LogLevel,
+		Format:             cfg.LogFormat,
+		HTTPSummaryEnabled: cfg.LogHTTPSummaryEnabled,
 	}
 }
 
@@ -68,7 +72,11 @@ func NewFactory(cfg Config) (*Factory, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Factory{root: logger}, nil
+	return &Factory{
+		root:          logger,
+		httpAccess:    logger.Named(LayerHTTP).With(zap.String("layer", LayerHTTP)),
+		httpFormatter: NewHTTPAccessFormatter(cfg.HTTPSummaryEnabled),
+	}, nil
 }
 
 func (f *Factory) Root() *zap.Logger {
@@ -88,6 +96,24 @@ func (f *Factory) Layer(name string, fields ...zap.Field) *zap.Logger {
 		logger = logger.With(fields...)
 	}
 	return logger
+}
+
+func (f *Factory) LogHTTPAccess(entry HTTPAccessEntry) {
+	if f == nil {
+		return
+	}
+	_ = f.httpFormatter.WriteSummary(entry)
+	logger := f.httpAccess
+	if logger == nil {
+		logger = f.Layer(LayerHTTP)
+	}
+	logger.Info(HTTPAccessMessage(),
+		zap.String("http.method", strings.TrimSpace(entry.Method)),
+		zap.String("http.path", trimOrFallback(entry.Path, "/")),
+		zap.String("http.remote_addr", strings.TrimSpace(entry.Remote)),
+		zap.Int("http.status_code", HTTPStatusFromRecorder(entry.Status)),
+		zap.Duration("http.duration", entry.Duration),
+	)
 }
 
 func (f *Factory) ForContext(ctx context.Context, layer string, fields ...zap.Field) *zap.Logger {

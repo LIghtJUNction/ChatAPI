@@ -175,6 +175,7 @@ func BuildEnvTemplate(adminUsername string, adminPassword string) (string, error
 		"CHATAPI_DB_DSN=./data/chatapi.sqlite3",
 		"CHATAPI_DATA_DIR=./data",
 		"CHATAPI_LOG_LEVEL=info",
+		"CHATAPI_LOG_HTTP_SUMMARY_ENABLED=0",
 		"CHATAPI_METRICS_ENABLED=0",
 		"",
 	}, "\n"), nil

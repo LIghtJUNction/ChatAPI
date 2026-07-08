@@ -79,6 +79,30 @@ func TestFromEnvLoadsSessionSecret(t *testing.T) {
 	}
 }
 
+func TestDefaultLogHTTPSummaryEnabledByMode(t *testing.T) {
+	serveCfg := Default(ModeServe, t.TempDir())
+	if serveCfg.LogHTTPSummaryEnabled {
+		t.Fatal("expected serve mode http summary logging to default to disabled")
+	}
+
+	labCfg := Default(ModeLab, t.TempDir())
+	if !labCfg.LogHTTPSummaryEnabled {
+		t.Fatal("expected lab mode http summary logging to default to enabled")
+	}
+}
+
+func TestFromEnvLoadsLogHTTPSummaryEnabled(t *testing.T) {
+	t.Setenv("CHATAPI_LOG_HTTP_SUMMARY_ENABLED", "1")
+
+	cfg, err := FromEnvUnchecked(ModeServe, t.TempDir())
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.LogHTTPSummaryEnabled {
+		t.Fatal("expected http summary logging to be enabled")
+	}
+}
+
 func TestDiagnoseTrustedProxyValidation(t *testing.T) {
 	cfg := Default(ModeServe, t.TempDir())
 	cfg.MasterKey = "01234567890123456789012345678901"

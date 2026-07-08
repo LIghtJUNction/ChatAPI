@@ -156,7 +156,7 @@ func (s *Service) DisconnectRecoveredPending(ctx context.Context, reason string)
 		if status != "waiting" && status != "streaming" {
 			continue
 		}
-		requestID := strings.TrimSpace(extractConversationRequestID(ctx, s.Store, item.ID))
+		requestID := s.latestConversationRequestID(ctx, item.ID)
 		if err := s.disconnectPendingRequest(ctx, item.ID, requestID, reason, "recovered_pending_disconnected", "Recovered Pending Disconnected"); err == nil || errors.Is(err, common.ErrPendingDisconnected) {
 			result.ExpiredConversations++
 		} else {
@@ -246,7 +246,20 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 		).Warn("turn abort start rejected", zap.Error(err))
 		return s.resolveMutationError(ctx, conversationID, err)
 	}
-	conversation, _, err := s.Store.AbortPendingTurn(ctx, common.AbortPendingInput{ConversationID: conversationID, Reason: reason})
+	requestID := s.pendingRequestID(conversationID)
+	conversation, _, err := s.Store.AbortPendingTurn(ctx, common.AbortPendingInput{
+		ConversationID: conversationID,
+		Reason:         reason,
+		Event: &common.AppendConversationEventInput{
+			OwnerID:   s.ownerID(ctx),
+			Type:      "request_aborted",
+			Level:     "warn",
+			Title:     "Request Aborted",
+			Detail:    reason,
+			RequestID: requestID,
+			Metadata:  map[string]any{"reason": reason},
+		},
+	})
 	if err != nil {
 		s.Pending.RevertFinalize(conversationID, previousState)
 		logging.BindContext(s.Logger, ctx,
@@ -255,21 +268,8 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 		).Error("turn abort persistence failed", zap.Error(err))
 		return err
 	}
-	event, err := s.appendSystemEvent(ctx, conversation, common.AppendConversationEventInput{
-		OwnerID:        s.ownerID(ctx),
-		Type:           "request_aborted",
-		Level:          "warn",
-		Title:          "Request Aborted",
-		Detail:         reason,
-		RequestID:      extractConversationRequestID(ctx, s.Store, conversationID),
-		Metadata:       map[string]any{"reason": reason},
-	})
-	if err != nil {
-		s.Pending.RevertFinalize(conversationID, previousState)
-		return err
-	}
 	s.publishConversationState(ctx, conversationID)
-	s.publishTimelineEvent(conversation, event)
+	s.publishLatestTimelineEvent(ctx, conversationID, conversation)
 	body := protocol.AbortError(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses)), reason)
 	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "abort", ErrorBody: body})
 	s.notifyText(ctx, s.ownerID(ctx), conversation.Title, reason)
@@ -463,6 +463,15 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 	conversation, _, err := s.Store.DisconnectPendingTurn(ctx, common.DisconnectPendingInput{
 		ConversationID: conversationID,
 		Reason:         reason,
+		Event: &common.AppendConversationEventInput{
+			OwnerID:   s.eventOwnerID(ctx, conversationID),
+			Type:      eventType,
+			Level:     "warn",
+			Title:     title,
+			Detail:    reason,
+			RequestID: requestID,
+			Metadata:  map[string]any{"reason": reason},
+		},
 	})
 	if err != nil {
 		if errors.Is(err, common.ErrPendingDisconnected) {
@@ -470,20 +479,8 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 		}
 		return err
 	}
-	event, err := s.appendSystemEvent(ctx, conversation, common.AppendConversationEventInput{
-		OwnerID:        stringValue(conversation.Metadata["owner_id"], ""),
-		Type:           eventType,
-		Level:          "warn",
-		Title:          title,
-		Detail:         reason,
-		RequestID:      requestID,
-		Metadata:       map[string]any{"reason": reason},
-	})
-	if err != nil {
-		return err
-	}
 	s.publishConversationState(ctx, conversationID)
-	s.publishTimelineEvent(conversation, event)
+	s.publishLatestTimelineEvent(ctx, conversationID, conversation)
 	_ = s.Pending.Abort(conversationID, map[string]any{
 		"error": map[string]any{
 			"message": reason,
@@ -496,16 +493,6 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 		zap.String("request.id", requestID),
 	).Info("pending request disconnected")
 	return nil
-}
-
-func (s *Service) appendSystemEvent(ctx context.Context, conversation common.Conversation, input common.AppendConversationEventInput) (common.ConversationEvent, error) {
-	if strings.TrimSpace(input.ConversationID) == "" {
-		input.ConversationID = conversation.ID
-	}
-	if strings.TrimSpace(input.OwnerID) == "" {
-		input.OwnerID = stringValue(conversation.Metadata["owner_id"], "")
-	}
-	return s.Store.AppendConversationEvent(ctx, input)
 }
 
 func (s *Service) publishConversationState(ctx context.Context, conversationID string) {
@@ -540,19 +527,55 @@ func (s *Service) publishTimelineEvent(conversation common.Conversation, event c
 	})
 }
 
-func extractConversationRequestID(ctx context.Context, store chat.Store, conversationID string) string {
-	if store == nil || strings.TrimSpace(conversationID) == "" {
+func (s *Service) publishLatestTimelineEvent(ctx context.Context, conversationID string, conversation common.Conversation) {
+	if s == nil || s.Store == nil {
+		return
+	}
+	items, err := s.Store.ListConversationEvents(ctx, conversationID)
+	if err != nil || len(items) == 0 {
+		return
+	}
+	s.publishTimelineEvent(conversation, items[len(items)-1])
+}
+
+func (s *Service) pendingRequestID(conversationID string) string {
+	if s == nil || s.Pending == nil || strings.TrimSpace(conversationID) == "" {
 		return ""
 	}
-	items, err := store.ListMessages(ctx, conversationID)
+	turn, ok := s.Pending.GetByConversationID(conversationID)
+	if !ok || turn == nil {
+		return ""
+	}
+	return strings.TrimSpace(turn.RequestID)
+}
+
+func (s *Service) latestConversationRequestID(ctx context.Context, conversationID string) string {
+	if s == nil || s.Store == nil || strings.TrimSpace(conversationID) == "" {
+		return ""
+	}
+	items, err := s.Store.ListMessages(ctx, conversationID)
 	if err != nil {
 		return ""
 	}
-	for _, item := range items {
-		requestDebug, _ := item.Metadata["request_debug"].(map[string]any)
+	for i := len(items) - 1; i >= 0; i-- {
+		requestDebug, _ := items[i].Metadata["request_debug"].(map[string]any)
 		if requestID := strings.TrimSpace(stringValue(requestDebug["request_id"], "")); requestID != "" {
 			return requestID
 		}
 	}
 	return ""
+}
+
+func (s *Service) eventOwnerID(ctx context.Context, conversationID string) string {
+	if ownerID := strings.TrimSpace(s.ownerID(ctx)); ownerID != "" {
+		return ownerID
+	}
+	if s == nil || s.Pending == nil || strings.TrimSpace(conversationID) == "" {
+		return ""
+	}
+	turn, ok := s.Pending.GetByConversationID(conversationID)
+	if !ok || turn == nil {
+		return ""
+	}
+	return strings.TrimSpace(turn.OwnerID)
 }

@@ -1,16 +1,13 @@
-package httpapi
+package router
 
 import (
 	"net/http"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
-	"go.uber.org/zap"
 
 	"github.com/zyf/chatapi/internal/config"
+	httphandler "github.com/zyf/chatapi/internal/http/handler"
 	httpmiddleware "github.com/zyf/chatapi/internal/http/middleware"
 	"github.com/zyf/chatapi/internal/ops/observability/httpmetrics"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
@@ -47,7 +44,7 @@ import (
 	"github.com/zyf/chatapi/internal/service/usercontrol"
 )
 
-type RouterDeps struct {
+type Deps struct {
 	Config         config.Config
 	ChatRepo       chatrepo.Store
 	AuthRepo       authrepo.Store
@@ -79,7 +76,7 @@ type RouterDeps struct {
 	LoggerFactory  *logging.Factory
 }
 
-func NewRouter(deps RouterDeps) http.Handler {
+func New(deps Deps) http.Handler {
 	router := chi.NewRouter()
 
 	httpLogger := deps.logger(logging.LayerHTTP)
@@ -146,7 +143,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 		})
 	}
 
-	chatHandler := ChatAPIHandler{
+	chatHandler := httphandler.ChatAPIHandler{
 		Turn:  deps.Turn,
 		Query: deps.Query,
 		Preprocess: preprocesssvc.New(deps.Config, localstore.Store{
@@ -154,12 +151,12 @@ func NewRouter(deps RouterDeps) http.Handler {
 		}),
 		Logger: deps.logger(logging.LayerHTTP),
 	}
-	appHandler := AppAPIHandler{
+	appHandler := httphandler.AppAPIHandler{
 		Turn:   deps.Turn,
 		Query:  deps.Query,
 		Logger: deps.logger(logging.LayerTurnQuery),
 	}
-	authHandler := AuthHandler{
+	authHandler := httphandler.AuthHandler{
 		Config:       deps.Config,
 		LocalAuth:    deps.LocalAuth,
 		Verification: deps.Verification,
@@ -173,26 +170,26 @@ func NewRouter(deps RouterDeps) http.Handler {
 		Sessions:     deps.UserSessions,
 		Logger:       deps.logger(logging.LayerAuth),
 	}
-	userHandler := UserHandler{
+	userHandler := httphandler.UserHandler{
 		Config:      deps.Config,
 		UserControl: deps.UserControl,
 		Logger:      deps.logger(logging.LayerAuth),
 	}
-	adminHandler := AdminHandler{
+	adminHandler := httphandler.AdminHandler{
 		Control: deps.AdminControl,
 		Audit:   deps.Audit,
 		Logger:  deps.logger(logging.LayerAudit),
 	}
-	labHandler := LabHandler{
+	labHandler := httphandler.LabHandler{
 		Config: deps.Config,
 		Query:  deps.Query,
 		Turn:   deps.Turn,
 		Logger: deps.logger(logging.LayerHTTP),
 	}
-	healthHandler := HealthHandler{Config: deps.Config, Store: deps.PlatformRepo}
-	readinessHandler := ReadinessHandler{Service: readiness.NewService(deps.Config, deps.PlatformRepo)}
-	setupHandler := SetupHandler{Service: setup.NewService(deps.AuthRepo, deps.Config)}
-	metricsHandler := MetricsHandler{Registry: metricsRegistry}
+	healthHandler := httphandler.HealthHandler{Config: deps.Config, Store: deps.PlatformRepo}
+	readinessHandler := httphandler.ReadinessHandler{Service: readiness.NewService(deps.Config, deps.PlatformRepo)}
+	setupHandler := httphandler.SetupHandler{Service: setup.NewService(deps.AuthRepo, deps.Config)}
+	metricsHandler := httphandler.MetricsHandler{Registry: metricsRegistry}
 
 	modelAuth := httpmiddleware.RequireModelAPIKey(deps.ModelAPIKeys, authLogger)
 	modelPrincipalAccess := httpmiddleware.RequirePrincipalAccess(accessPolicy, authLogger)
@@ -309,92 +306,4 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	mountSPA(router, deps.Config)
 	return router
-}
-
-func registerProtocolRoutes(router chi.Router, cfg config.Config, modelAuth func(http.Handler) http.Handler, modelPrincipalAccess func(http.Handler) http.Handler, chatHandler ChatAPIHandler) {
-	if cfg.Mode == config.ModeLab {
-		router.Post("/v1/responses", chatHandler.Responses)
-		router.Post("/v1/chat/completions", chatHandler.ChatCompletions)
-		router.Post("/v1/messages", chatHandler.AnthropicMessages)
-		return
-	}
-	router.With(modelAuth, modelPrincipalAccess).Post("/v1/responses", chatHandler.Responses)
-	router.With(modelAuth, modelPrincipalAccess).Post("/v1/chat/completions", chatHandler.ChatCompletions)
-	router.With(modelAuth, modelPrincipalAccess).Post("/v1/messages", chatHandler.AnthropicMessages)
-}
-
-func registerLabRoutes(router chi.Router, labHandler LabHandler) {
-	router.Get("/api/lab/workspace", labHandler.Workspace)
-	router.Get("/api/ws-info", labHandler.PingInfo)
-	router.Get("/lab/requests", labHandler.ListRequests)
-	router.Get("/lab/requests/{requestID}", labHandler.GetRequest)
-	router.Post("/lab/requests/{requestID}/copy-curl", labHandler.CopyRequestCurl)
-	router.Post("/lab/requests/{requestID}/delta", labHandler.RequestDelta)
-	router.Post("/lab/requests/{requestID}/complete", labHandler.RequestComplete)
-	router.Post("/lab/requests/{requestID}/abort", labHandler.RequestAbort)
-}
-
-func mountSPA(router chi.Router, cfg config.Config) {
-	if info, err := os.Stat(cfg.WebDistDir); err == nil && info.IsDir() {
-		fs := http.FileServer(http.Dir(cfg.WebDistDir))
-		router.Handle("/*", spaFallback(fs, cfg.WebDistDir))
-	}
-}
-
-func spaFallback(next http.Handler, webDistDir string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		target := filepath.Join(webDistDir, filepath.Clean(r.URL.Path))
-		if stat, err := os.Stat(target); err == nil && !stat.IsDir() {
-			next.ServeHTTP(w, r)
-			return
-		}
-		http.ServeFile(w, r, filepath.Join(webDistDir, "index.html"))
-	})
-}
-
-func (d RouterDeps) logger(layer string) *zap.Logger {
-	if d.LoggerFactory == nil {
-		return zap.NewNop()
-	}
-	return d.LoggerFactory.Layer(layer)
-}
-
-func chainMiddleware(middlewares ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		for i := len(middlewares) - 1; i >= 0; i-- {
-			next = middlewares[i](next)
-		}
-		return next
-	}
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(status int) {
-	r.status = status
-	r.ResponseWriter.WriteHeader(status)
-}
-
-func requestLoggingMiddleware(base *zap.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			start := time.Now()
-			logger := base.With(
-				zap.String("http.method", r.Method),
-				zap.String("http.path", r.URL.Path),
-				zap.String("http.remote_addr", r.RemoteAddr),
-			)
-			ctx := logging.WithLogger(r.Context(), logger)
-			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(rec, r.WithContext(ctx))
-			logger = logger.With(
-				zap.Int("http.status_code", rec.status),
-				zap.Duration("http.duration", time.Since(start)),
-			)
-			logger.Info("http request completed")
-		})
-	}
 }

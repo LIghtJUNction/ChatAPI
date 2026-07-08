@@ -1,4 +1,4 @@
-package httpapi
+package httpx
 
 import (
 	"net/http"
@@ -15,7 +15,7 @@ var filteredRequestHeaders = map[string]struct{}{
 	"Set-Cookie":          {},
 }
 
-func captureRequestMeta(r *http.Request) store.Request {
+func CaptureRequestMeta(r *http.Request) store.Request {
 	if r == nil {
 		return store.Request{}
 	}

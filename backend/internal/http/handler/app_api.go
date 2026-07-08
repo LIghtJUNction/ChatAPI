@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"errors"
@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	turnsvc "github.com/zyf/chatapi/internal/service/chat/turn"
@@ -32,7 +33,7 @@ func (h AppAPIHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logging.BindContext(h.Logger, r.Context(), zap.Int("requests.count", len(items))).Debug("listed requests for owner")
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
 func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +57,7 @@ func (h AppAPIHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logging.BindContext(h.Logger, r.Context(), zap.String("request.id", requestID)).Debug("fetched request for owner")
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item})
 }
 
 func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +72,7 @@ func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	logging.BindContext(h.Logger, r.Context(), zap.Int("conversations.count", len(items))).Debug("listed conversations for owner")
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
 func (h AppAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {
@@ -98,5 +99,5 @@ func (h AppAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.R
 		zap.String("conversation.id", conversationID),
 		zap.Int("messages.count", len(items)),
 	).Debug("listed conversation messages for owner")
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }

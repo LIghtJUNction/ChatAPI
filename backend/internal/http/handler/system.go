@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/ops/observability/httpmetrics"
 	"github.com/zyf/chatapi/internal/ops/readiness"
 	"github.com/zyf/chatapi/internal/ops/setup"
@@ -40,7 +41,7 @@ func (h HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"mode":   string(h.Config.Mode),
 		"driver": h.Config.DatabaseDriver,
@@ -57,7 +58,7 @@ func (h ReadinessHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !report.OK {
 		status = http.StatusServiceUnavailable
 	}
-	writeJSON(w, status, report)
+	httpx.WriteJSON(w, status, report)
 }
 
 func (h MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -76,10 +77,10 @@ func (h SetupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 	status, err := h.Service.Status(r.Context())
 	if err != nil && !status.Available {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "status": status})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "status": status})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": status})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "status": status})
 }
 
 func (h SetupHandler) HTML(w http.ResponseWriter, r *http.Request) {
@@ -109,10 +110,10 @@ func (h SetupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, setup.ErrUnavailable), errors.Is(err, setup.ErrEnvExists):
 			status = http.StatusConflict
 		}
-		writeJSON(w, status, report)
+		httpx.WriteJSON(w, status, report)
 		return
 	}
-	writeJSON(w, http.StatusOK, report)
+	httpx.WriteJSON(w, http.StatusOK, report)
 }
 
 func decodeSetupInput(r *http.Request) (setup.ApplyInput, error) {

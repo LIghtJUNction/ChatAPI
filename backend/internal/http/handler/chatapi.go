@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/protocol"
 	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
@@ -47,7 +48,7 @@ func (h ChatAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
 func (h ChatAPIHandler) DeltaOutput(w http.ResponseWriter, r *http.Request) {
@@ -66,23 +67,23 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("invalid protocol request json")
-		writeJSON(w, http.StatusBadRequest, protocol.InvalidJSONError(requestFormat))
+		httpx.WriteJSON(w, http.StatusBadRequest, protocol.InvalidJSONError(requestFormat))
 		return
 	}
 	parsed, err := protocol.NormalizeRequest(requestFormat, body)
 	if err != nil {
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("protocol normalization failed")
-		writeJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
+		httpx.WriteJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
 		return
 	}
-	requestMeta := captureRequestMeta(r)
+	requestMeta := httpx.CaptureRequestMeta(r)
 	prepared := preprocesssvc.PreparedRequest{Request: parsed}
 	if h.Preprocess != nil {
 		ownerID := ownerIDForPreprocess(r.Context())
 		prepared, err = h.Preprocess.Prepare(r.Context(), ownerID, parsed)
 		if err != nil {
 			logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("protocol preprocess failed", zap.Error(err))
-			writeJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
+			httpx.WriteJSON(w, protocol.HTTPStatus(err), protocol.BuildErrorBody(requestFormat, err))
 			return
 		}
 	}
@@ -106,10 +107,10 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		requestErr := protocol.InternalError(err.Error())
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Error("create pending response failed", zap.Error(err))
-		writeJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(requestFormat, requestErr))
+		httpx.WriteJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(requestFormat, requestErr))
 		return
 	}
-	writeJSON(w, http.StatusOK, responseBody)
+	httpx.WriteJSON(w, http.StatusOK, responseBody)
 }
 
 func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, request protocol.TurnRequest, preparedImages []preprocesssvc.PreparedImage, body map[string]any, requestMeta store.Request) {
@@ -132,7 +133,7 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 			zap.String("protocol", request.Protocol.String()),
 			zap.Error(err),
 		).Error("create pending stream failed")
-		writeJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(request.Protocol.String(), requestErr))
+		httpx.WriteJSON(w, protocol.HTTPStatus(requestErr), protocol.BuildErrorBody(request.Protocol.String(), requestErr))
 		return
 	}
 	logging.BindContext(h.Logger, r.Context(),
@@ -262,7 +263,7 @@ func (h ChatAPIHandler) executeTurnControl(w http.ResponseWriter, r *http.Reques
 		zap.String("turn.control", string(kind)),
 		zap.String("conversation.id", command.ConversationID),
 	).Info("turn control executed")
-	writeJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func buildTurnControlCommand(kind turnsvc.TurnControlKind, body map[string]any) (turnsvc.TurnControlCommand, error) {
@@ -292,12 +293,6 @@ func ownerIDForPreprocess(ctx context.Context) string {
 		return strings.TrimSpace(principal.UserID)
 	}
 	return ""
-}
-
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
 }
 
 func writeSSEEvent(w http.ResponseWriter, event protocol.StreamEvent) error {

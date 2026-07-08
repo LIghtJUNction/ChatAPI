@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zyf/chatapi/internal/actor"
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/service/chat/turn"
 	"github.com/zyf/chatapi/internal/service/chat/turnquery"
 	"github.com/zyf/chatapi/internal/store"
@@ -29,7 +30,7 @@ func (h LabHandler) Workspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
 		"mode":          h.Config.Mode,
 		"owner_id":      ownerID,
@@ -38,7 +39,7 @@ func (h LabHandler) Workspace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h LabHandler) PingInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"message": "lab mode active",
 	})
@@ -50,7 +51,7 @@ func (h LabHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
 func (h LabHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +65,7 @@ func (h LabHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item})
 }
 
 func (h LabHandler) CopyRequestCurl(w http.ResponseWriter, r *http.Request) {
@@ -78,10 +79,10 @@ func (h LabHandler) CopyRequestCurl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
 		"request_id": requestID,
-		"curl":       buildReplayCurl(requestBaseURL(r), item),
+		"curl":       httpx.BuildReplayCurl(httpx.RequestBaseURL(r), item),
 	})
 }
 
@@ -134,7 +135,7 @@ func (h LabHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.Req
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func decodeBodyOrEmpty(r *http.Request) map[string]any {

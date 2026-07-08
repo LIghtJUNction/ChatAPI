@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zyf/chatapi/internal/actor"
+	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	"github.com/zyf/chatapi/internal/service/admincontrol"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
@@ -28,7 +29,7 @@ func (h AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
 func (h AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +39,7 @@ func (h AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
 }
 
 func (h AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +72,7 @@ func (h AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.record(r, "admin.user", "user", item.ID, "create", "success", map[string]any{"email": item.Email})
-	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "user": item})
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "user": item})
 }
 
 func (h AdminHandler) DisableUser(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +92,7 @@ func (h AdminHandler) setUserState(w http.ResponseWriter, r *http.Request, isAct
 		action = "enable"
 	}
 	h.record(r, "admin.user", "user", userID, action, "success", nil)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
 }
 
 func (h AdminHandler) ResetUserPassword(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +110,7 @@ func (h AdminHandler) ResetUserPassword(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.record(r, "admin.user", "user", userID, "reset_password", "success", nil)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
 }
 
 func (h AdminHandler) ListUserIdentities(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +120,7 @@ func (h AdminHandler) ListUserIdentities(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
 func (h AdminHandler) DeleteUserIdentity(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +131,7 @@ func (h AdminHandler) DeleteUserIdentity(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.record(r, "admin.user", "user_identity", identityID, "unlink_identity", "success", map[string]any{"user_id": userID})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AdminHandler) ListUserAppKeys(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +141,7 @@ func (h AdminHandler) ListUserAppKeys(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
 func (h AdminHandler) RevokeUserAppKey(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +152,7 @@ func (h AdminHandler) RevokeUserAppKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.record(r, "admin.user", "app_api_key", keyID, "revoke_app_key", "success", map[string]any{"user_id": userID})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AdminHandler) ListUserModelKeys(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +162,7 @@ func (h AdminHandler) ListUserModelKeys(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
 func (h AdminHandler) RevokeUserModelKey(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +173,7 @@ func (h AdminHandler) RevokeUserModelKey(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.record(r, "admin.user", "model_api_key", keyID, "revoke_model_key", "success", map[string]any{"user_id": userID})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AdminHandler) DeletePreview(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +183,7 @@ func (h AdminHandler) DeletePreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "preview": preview})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "preview": preview})
 }
 
 func (h AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +193,7 @@ func (h AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.record(r, "admin.user", "user", userID, "delete", "success", nil)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AdminHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +211,7 @@ func (h AdminHandler) TransferOwnership(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.record(r, "admin.user", "user", userID, "transfer_ownership", "success", map[string]any{"target_user_id": body.TargetUserID})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
 }
 
 func (h AdminHandler) OwnershipItems(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +221,7 @@ func (h AdminHandler) OwnershipItems(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
 func (h AdminHandler) TransferOwnershipSelection(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +241,7 @@ func (h AdminHandler) TransferOwnershipSelection(w http.ResponseWriter, r *http.
 		return
 	}
 	h.record(r, "admin.user", "user", userID, "transfer_ownership_selection", "success", map[string]any{"target_user_id": body.TargetUserID})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
 }
 
 func (h AdminHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +250,7 @@ func (h AdminHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
 func (h AdminHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +260,7 @@ func (h AdminHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "request": item})
 }
 
 func (h AdminHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +269,7 @@ func (h AdminHandler) ListConversations(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
 func (h AdminHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +279,7 @@ func (h AdminHandler) ListConversationMessages(w http.ResponseWriter, r *http.Re
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
 func (h AdminHandler) AbortConversation(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +297,7 @@ func (h AdminHandler) AbortConversation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.record(r, "admin.request", "conversation", conversationID, "abort", "success", nil)
-	writeJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func (h AdminHandler) CompleteConversation(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +319,7 @@ func (h AdminHandler) CompleteConversation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.record(r, "admin.request", "conversation", conversationID, "complete", "success", nil)
-	writeJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func (h AdminHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
@@ -329,7 +330,7 @@ func (h AdminHandler) DeleteConversation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.record(r, "admin.request", "conversation", conversationID, "delete", "success", nil)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
 }
 
 func (h AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
@@ -349,7 +350,7 @@ func (h AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
 func (h AdminHandler) GetAuthSettings(w http.ResponseWriter, r *http.Request) {
@@ -359,7 +360,7 @@ func (h AdminHandler) GetAuthSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item["ok"] = true
-	writeJSON(w, http.StatusOK, item)
+	httpx.WriteJSON(w, http.StatusOK, item)
 }
 
 func (h AdminHandler) SetAuthSettings(w http.ResponseWriter, r *http.Request) {
@@ -375,7 +376,7 @@ func (h AdminHandler) SetAuthSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	h.record(r, "admin.auth", "auth_settings", "system_settings", "update", "success", nil)
 	item["ok"] = true
-	writeJSON(w, http.StatusOK, item)
+	httpx.WriteJSON(w, http.StatusOK, item)
 }
 
 func (h AdminHandler) GetAccessSettings(w http.ResponseWriter, r *http.Request) {
@@ -384,7 +385,7 @@ func (h AdminHandler) GetAccessSettings(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	httpx.WriteJSON(w, http.StatusOK, item)
 }
 
 func (h AdminHandler) SetAccessSettings(w http.ResponseWriter, r *http.Request) {
@@ -399,7 +400,7 @@ func (h AdminHandler) SetAccessSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.record(r, "admin.access", "access_settings", "system_access_settings", "update", "success", nil)
-	writeJSON(w, http.StatusOK, item)
+	httpx.WriteJSON(w, http.StatusOK, item)
 }
 
 func (h AdminHandler) record(r *http.Request, eventType string, resourceType string, resourceID string, action string, outcome string, metadata map[string]any) {

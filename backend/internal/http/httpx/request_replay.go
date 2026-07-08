@@ -1,4 +1,4 @@
-package httpapi
+package httpx
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"github.com/zyf/chatapi/internal/store"
 )
 
-func requestBaseURL(r *http.Request) string {
+func RequestBaseURL(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
@@ -29,7 +29,7 @@ func requestBaseURL(r *http.Request) string {
 	return (&url.URL{Scheme: scheme, Host: host}).String()
 }
 
-func buildReplayCurl(baseURL string, item store.Request) string {
+func BuildReplayCurl(baseURL string, item store.Request) string {
 	method := strings.TrimSpace(item.RequestMethod)
 	if method == "" {
 		method = http.MethodPost

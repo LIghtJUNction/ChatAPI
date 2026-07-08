@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/zyf/chatapi/internal/http/httpx"
 	"github.com/zyf/chatapi/internal/ops/observability/logging"
 	auditsvc "github.com/zyf/chatapi/internal/service/audit"
 	"github.com/zyf/chatapi/internal/service/auth/authn/geetest"
@@ -58,7 +59,7 @@ func (h AuthHandler) RegisterConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":                         true,
 		"registration_enabled":       settings.RegistrationEnabled,
 		"email_verification_enabled": settings.EmailVerificationEnabled,
@@ -102,7 +103,7 @@ func (h AuthHandler) RegisterSendCode(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification": result})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "verification": result})
 }
 
 func (h AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +158,7 @@ func (h AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.recordAuthAudit(r, user.ID, user.Role, "session", "auth.register", "user", user.ID, "register", "success", nil)
-	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "user": sanitizeUser(user)})
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "user": sanitizeUser(user)})
 }
 
 func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +218,7 @@ func (h AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.recordAuthAudit(r, result.User.ID, result.Principal.Role, "session", "auth.login", "user", result.User.ID, "login", "success", map[string]any{
 		"auth_method": result.Principal.AuthMethod,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
 		"user":      sanitizeUser(result.User),
 		"principal": result.Principal,
@@ -229,11 +230,11 @@ func (h AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	if h.Sessions != nil {
 		h.Sessions.ClearCookie(w)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AuthHandler) OIDCConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"enabled":       h.Config.Mode != config.ModeLab && h.Config.OIDCEnabled,
 		"provider_name": h.oidcProviderName(),
 		"login_url":     "/api/auth/oidc/login",
@@ -381,7 +382,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "session is not configured", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
 			"ok":       true,
 			"linked":   true,
 			"identity": result.Identity,
@@ -408,7 +409,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		"identity_id":  result.Identity.ID,
 		"identity_sub": result.Identity.Subject,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":   true,
 		"user": sanitizeUser(result.User),
 	})
@@ -420,7 +421,7 @@ func (h AuthHandler) PasswordConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":                     true,
 		"password_reset_enabled": settings.PasswordResetEnabled,
 		"geetest_enabled":        settings.GeeTestEnabled && settings.GeeTestPasswordResetEnabled,
@@ -457,7 +458,7 @@ func (h AuthHandler) PasswordSendCode(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification": result})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "verification": result})
 }
 
 func (h AuthHandler) SendVerification(w http.ResponseWriter, r *http.Request) {
@@ -474,7 +475,7 @@ func (h AuthHandler) SendVerification(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification": result})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "verification": result})
 }
 
 func (h AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
@@ -491,7 +492,7 @@ func (h AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
@@ -523,7 +524,7 @@ func (h AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "verification": result})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "verification": result})
 }
 
 func (h AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
@@ -555,7 +556,7 @@ func (h AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AuthHandler) TOTPSetup(w http.ResponseWriter, r *http.Request) {
@@ -569,7 +570,7 @@ func (h AuthHandler) TOTPSetup(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":        true,
 		"secret":    setup.Secret,
 		"uri":       setup.URI,
@@ -595,7 +596,7 @@ func (h AuthHandler) TOTPConfirm(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AuthHandler) TOTPReset(w http.ResponseWriter, r *http.Request) {
@@ -608,7 +609,7 @@ func (h AuthHandler) TOTPReset(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h AuthHandler) requireTOTP(w http.ResponseWriter, r *http.Request, userID string, code string) bool {

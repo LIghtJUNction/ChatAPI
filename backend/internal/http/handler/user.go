@@ -1,4 +1,4 @@
-package httpapi
+package handler
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zyf/chatapi/internal/config"
+	"github.com/zyf/chatapi/internal/http/httpx"
 	appkey "github.com/zyf/chatapi/internal/service/auth/authz/appkey"
 	"github.com/zyf/chatapi/internal/service/auth/authz/session"
 	"github.com/zyf/chatapi/internal/service/usercontrol"
@@ -32,7 +33,7 @@ func (h UserHandler) Session(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, view)
+		httpx.WriteJSON(w, http.StatusOK, view)
 		return
 	}
 	view, err := h.UserControl.Profile.BuildAuthenticatedSessionView(r.Context(), h.Config, pr.UserID)
@@ -40,7 +41,7 @@ func (h UserHandler) Session(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, view)
+	httpx.WriteJSON(w, http.StatusOK, view)
 }
 
 func (h UserHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +55,7 @@ func (h UserHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "conversations": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "conversations": items})
 }
 
 func (h UserHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +74,7 @@ func (h UserHandler) ListConversationMessages(w http.ResponseWriter, r *http.Req
 		http.Error(w, err.Error(), status)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
 func (h UserHandler) AbortConversation(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +100,7 @@ func (h UserHandler) AbortConversation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusOK, result)
 }
 
 func (h UserHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +119,7 @@ func (h UserHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), status)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
 }
 
 func (h UserHandler) PruneConversations(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +140,7 @@ func (h UserHandler) PruneConversations(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"deleted_count": result.DeletedConversations,
 		"skipped_count": skipped,
 		"keep_count":    body.KeepCount,
@@ -157,7 +158,7 @@ func (h UserHandler) ListAppKeys(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "api_keys": items, "api_key_limit_per_user": 0})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "api_keys": items, "api_key_limit_per_user": 0})
 }
 
 func (h UserHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +170,7 @@ func (h UserHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	item, err := h.UserControl.Config.GetUserConfig(r.Context(), pr.UserID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
 		}
 		http.Error(w, err.Error(), statusForStoreError(err))
@@ -177,7 +178,7 @@ func (h UserHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := cloneMap(item.Value)
 	payload["ok"] = true
-	writeJSON(w, http.StatusOK, payload)
+	httpx.WriteJSON(w, http.StatusOK, payload)
 }
 
 func (h UserHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +199,7 @@ func (h UserHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := cloneMap(item.Value)
 	payload["ok"] = true
-	writeJSON(w, http.StatusOK, payload)
+	httpx.WriteJSON(w, http.StatusOK, payload)
 }
 
 func (h UserHandler) CreateAppKey(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +223,7 @@ func (h UserHandler) CreateAppKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "api_key": map[string]any{
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "api_key": map[string]any{
 		"id":         item.ID,
 		"name":       item.Name,
 		"created_at": item.CreatedAt,
@@ -241,7 +242,7 @@ func (h UserHandler) RevokeAppKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h UserHandler) ListModelKeys(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +256,7 @@ func (h UserHandler) ListModelKeys(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
 func (h UserHandler) CreateModelKey(w http.ResponseWriter, r *http.Request) {
@@ -277,7 +278,7 @@ func (h UserHandler) CreateModelKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "model_key": map[string]any{
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "model_key": map[string]any{
 		"id":         item.ID,
 		"name":       item.Name,
 		"model":      item.Model,
@@ -297,7 +298,7 @@ func (h UserHandler) RevokeModelKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h UserHandler) ListIdentities(w http.ResponseWriter, r *http.Request) {
@@ -311,7 +312,7 @@ func (h UserHandler) ListIdentities(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
 }
 
 func (h UserHandler) ListAutomationRules(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +333,7 @@ func (h UserHandler) ListAutomationRules(w http.ResponseWriter, r *http.Request)
 		rule["enabled"] = item.Enabled
 		rules = append(rules, rule)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": rules})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": rules})
 }
 
 func (h UserHandler) ReplaceAutomationRules(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +361,7 @@ func (h UserHandler) ReplaceAutomationRules(w http.ResponseWriter, r *http.Reque
 		rule["enabled"] = item.Enabled
 		rules = append(rules, rule)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": rules})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": rules})
 }
 
 func (h UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
@@ -384,7 +385,7 @@ func (h UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func parseOptionalTime(raw *string) *time.Time {

@@ -19,7 +19,6 @@ import type {
   Conversation,
   TimelineItem,
   ReasoningStreamMode,
-  ResponsesPayload,
   ToolFieldValue,
   MessageItem,
 } from '../types/chat'
@@ -70,7 +69,7 @@ export function useChatWorkspace(isMobile: boolean) {
     )
   }, [])
 
-  const { applySelectedConversation } = useWorkspaceRealtime({
+  const { applySelectedConversation, sendWorkspaceCommand } = useWorkspaceRealtime({
     authenticated: auth.authenticated,
     conversations,
     onConnectionCountChange: handleConnectionCountChange,
@@ -94,9 +93,9 @@ export function useChatWorkspace(isMobile: boolean) {
     Object.prototype.hasOwnProperty.call(draftBuffers, selectedConversationId)
   const draftBuffer = hasLocalDraftBuffer
     ? draftBuffers[selectedConversationId] ?? ''
-    : selectedConversation?.metadata?.realtime_draft_text ?? ''
-  const isWaitingForUser = selectedConversation?.metadata?.realtime_status === 'waiting'
-  const selectedRequestFormat = selectedConversation?.metadata?.request_format || ''
+    : selectedConversation?.draft_text ?? ''
+  const isWaitingForUser = selectedConversation?.status === 'waiting'
+  const selectedRequestFormat = selectedConversation?.request_format || ''
   const isResponsesConversation = selectedRequestFormat === 'responses'
   const availableToolSchemas = getLastToolSchemas(messages)
   const selectedToolSchema =
@@ -104,7 +103,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const visibleMessages = buildVisibleTimeline(timeline, draftBuffer)
 
   useEffect(() => {
-    const currentStatus = String(selectedConversation?.metadata?.realtime_status || '')
+    const currentStatus = String(selectedConversation?.status || '')
     const previous = selectedRealtimeStatusRef.current
     if (
       selectedConversationId
@@ -123,7 +122,7 @@ export function useChatWorkspace(isMobile: boolean) {
       conversationId: selectedConversationId,
       status: currentStatus,
     }
-  }, [selectedConversationId, selectedConversation?.metadata?.realtime_status])
+  }, [selectedConversationId, selectedConversation?.status])
 
   function setDraftBufferForConversation(conversationId: string, value: string) {
     if (!conversationId) return
@@ -253,7 +252,7 @@ export function useChatWorkspace(isMobile: boolean) {
 
   async function handleDeleteConversation(conversationId: string) {
     const targetConversation = conversations.find((item) => item.id === conversationId)
-    if (targetConversation?.metadata?.realtime_status === 'waiting') {
+    if (targetConversation?.status === 'waiting') {
       appMessage.warning('等待中的会话不允许删除')
       return
     }
@@ -315,9 +314,10 @@ export function useChatWorkspace(isMobile: boolean) {
 
     setAbortingConversationId(conversationId)
     try {
-      await requestJson(`/api/conversations/${conversationId}/abort`, {
-        method: 'POST',
-        body: JSON.stringify({ error: reason }),
+      sendWorkspaceCommand({
+        kind: 'abort',
+        conversation_id: conversationId,
+        error: reason,
       })
       setAbortPopoverConversationId('')
       setAbortReason('')
@@ -342,23 +342,15 @@ export function useChatWorkspace(isMobile: boolean) {
     if (!rawChunk) return
     const chunk = withDraftSeparator(rawChunk)
     try {
-      const response = await requestJson<{
-        draft_text?: string
-        draft_length: number
-      }>('/api/chat/output/delta', {
-        method: 'POST',
-        body: JSON.stringify({
-          text: chunk,
-          conversation_id: selectedConversationId || undefined,
-          kind: isThinkingMode ? 'thinking' : 'answer',
-          reasoning_stream_mode:
-            isThinkingMode && isResponsesConversation ? reasoningStreamMode : undefined,
-        }),
+      sendWorkspaceCommand({
+        kind: 'stream_delta',
+        conversation_id: selectedConversationId,
+        text: chunk,
+        mode: isThinkingMode ? 'thinking' : 'answer',
+        reasoning_stream_mode:
+          isThinkingMode && isResponsesConversation ? reasoningStreamMode : undefined,
       })
-      setDraftBufferForConversation(
-        selectedConversationId,
-        typeof response.draft_text === 'string' ? response.draft_text : `${draftBuffer}${chunk}`,
-      )
+      setDraftBufferForConversation(selectedConversationId, `${draftBuffer}${chunk}`)
       if (isThinkingMode) {
         clearThinkingInput()
       } else {
@@ -404,53 +396,25 @@ export function useChatWorkspace(isMobile: boolean) {
     try {
       if (composerMode === 'assistant_message' && pendingChunk) {
         const outputChunk = withDraftSeparator(pendingChunk)
-        const draftResponse = await requestJson<{
-          draft_text?: string
-          draft_length: number
-        }>('/api/chat/output/delta', {
-          method: 'POST',
-          body: JSON.stringify({
-            text: outputChunk,
-            conversation_id: selectedConversationId || undefined,
-          }),
+        sendWorkspaceCommand({
+          kind: 'stream_delta',
+          conversation_id: selectedConversationId,
+          text: outputChunk,
         })
-        setDraftBufferForConversation(
-          selectedConversationId,
-          typeof draftResponse.draft_text === 'string'
-            ? draftResponse.draft_text
-            : `${draftBuffer}${outputChunk}`,
-        )
+        setDraftBufferForConversation(selectedConversationId, `${draftBuffer}${outputChunk}`)
       }
 
       setDraftBufferForConversation(selectedConversationId, '')
-      const payload = {
+      sendWorkspaceCommand({
+        kind: 'stream_complete',
+        conversation_id: selectedConversationId,
         text: composerMode === 'tool_call' ? finalText : undefined,
         mode: composerMode,
         tool_name: composerMode === 'tool_call' ? toolName.trim() || undefined : undefined,
-        tool_call_id:
-          composerMode === 'tool_call' ? toolCallId.trim() || undefined : undefined,
-        conversation_id: selectedConversationId || undefined,
+        tool_call_id: composerMode === 'tool_call' ? toolCallId.trim() || undefined : undefined,
         reasoning_stream_mode:
-          composerMode === 'thinking' && isResponsesConversation
-            ? reasoningStreamMode
-            : undefined,
-      }
-      const response = await requestJson<ResponsesPayload>('/api/chat/output/complete', {
-        method: 'POST',
-        body: JSON.stringify(payload),
+          composerMode === 'thinking' && isResponsesConversation ? reasoningStreamMode : undefined,
       })
-      if (response.conversation) {
-        setConversations((current) => {
-          const remaining = current.filter((item) => item.id !== response.conversation.id)
-          return [response.conversation, ...remaining].sort(
-            (left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at),
-          )
-        })
-      }
-      const nextConversationId = response.conversation?.id ?? selectedConversationId
-      if (nextConversationId) {
-        applySelectedConversation(nextConversationId)
-      }
       setComposer('')
       if (options?.resetMode !== false) {
         setComposerMode('assistant_message')

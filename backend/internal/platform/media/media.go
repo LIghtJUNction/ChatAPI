@@ -43,6 +43,32 @@ type ParsedImage struct {
 	Height            int
 }
 
+type DraftAsset struct {
+	FileID            string
+	OwnerID           string
+	Path              string
+	MediaType         string
+	PublicURL         string
+	Bytes             int64
+	SHA256            string
+	Width             int
+	Height            int
+	SourceKind        string
+	OriginalName      string
+	OriginalMediaType string
+	InputPartIndex    int
+	Data              []byte
+}
+
+type StoredAsset struct {
+	FileID    string
+	OwnerID   string
+	Path      string
+	PublicURL string
+	MediaType string
+	Bytes     int64
+}
+
 type AVIFOptions struct {
 	Quality int
 }
@@ -104,7 +130,7 @@ func parseDataURL(raw string, maxBytes int64) (ParsedImage, error) {
 	} else {
 		declared = strings.TrimSpace(strings.TrimPrefix(header, "data:"))
 	}
-	decoded, err := base64.StdEncoding.DecodeString(payload)
+	decoded, err := decodeBase64Payload(payload)
 	if err != nil {
 		return ParsedImage{}, fmt.Errorf("%w: decode data url: %v", ErrInvalidImageInput, err)
 	}
@@ -112,14 +138,43 @@ func parseDataURL(raw string, maxBytes int64) (ParsedImage, error) {
 }
 
 func parseRawBase64(raw string, declared string, maxBytes int64) (ParsedImage, error) {
-	decoded, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		decoded, err = base64.RawStdEncoding.DecodeString(raw)
-	}
+	decoded, err := decodeBase64Payload(raw)
 	if err != nil {
 		return ParsedImage{}, fmt.Errorf("%w: decode base64: %v", ErrInvalidImageInput, err)
 	}
 	return inspectDecoded(raw, SourceBase64, declared, decoded, maxBytes)
+}
+
+func decodeBase64Payload(raw string) ([]byte, error) {
+	normalized := stripBase64Whitespace(raw)
+	if normalized == "" {
+		return nil, ErrInvalidImageInput
+	}
+	var lastErr error
+	for _, encoding := range []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	} {
+		decoded, err := encoding.DecodeString(normalized)
+		if err == nil {
+			return decoded, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func stripBase64Whitespace(raw string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\n', '\r', '\t', '\f', '\v':
+			return -1
+		default:
+			return r
+		}
+	}, raw)
 }
 
 func inspectDecoded(raw string, kind SourceKind, declared string, decoded []byte, maxBytes int64) (ParsedImage, error) {
@@ -193,4 +248,31 @@ func sha256Hex(data []byte) string {
 func isLikelyRemoteURL(raw string) bool {
 	lower := strings.ToLower(strings.TrimSpace(raw))
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+func ChatAssetPublicURL(fileID string) string {
+	fileID = sanitizeAssetSegment(fileID)
+	if fileID == "" {
+		return ""
+	}
+	return "/api/media/assets/" + fileID
+}
+
+func ChatAssetFilename(fileID string) string {
+	fileID = sanitizeAssetSegment(fileID)
+	if fileID == "" {
+		return ""
+	}
+	return fileID + ".avif"
+}
+
+func sanitizeAssetSegment(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.ReplaceAll(value, "/", "_")
+	value = strings.ReplaceAll(value, "\\", "_")
+	value = strings.ReplaceAll(value, "..", "_")
+	return value
 }

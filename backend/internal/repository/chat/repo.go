@@ -17,6 +17,7 @@ type Reader interface {
 	ListMessages(context.Context, string) ([]common.Message, error)
 	ListConversationEvents(context.Context, string) ([]common.ConversationEvent, error)
 	ListMediaAssets(context.Context) ([]common.MediaAsset, error)
+	GetMediaAssetByFileID(context.Context, string) (common.MediaAsset, error)
 	ListOrphanMediaAssets(context.Context) ([]common.MediaAsset, error)
 }
 

@@ -3,12 +3,16 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
 
 type ConversationQuery interface {
@@ -21,12 +25,12 @@ type TimelineQuery interface {
 
 type Snapshot struct {
 	Type          string                `json:"type"`
-	Conversations []common.Conversation `json:"conversations"`
+	Conversations []ConversationSummary `json:"conversations"`
 }
 
 type ConversationUpsert struct {
 	Type         string              `json:"type"`
-	Conversation common.Conversation `json:"conversation"`
+	Conversation ConversationSummary `json:"conversation"`
 }
 
 type ConversationDelete struct {
@@ -35,16 +39,15 @@ type ConversationDelete struct {
 }
 
 type TimelineReset struct {
-	Type           string             `json:"type"`
-	ConversationID string             `json:"conversation_id"`
-	Items          []timelinesvc.Item `json:"items"`
+	Type           string         `json:"type"`
+	ConversationID string         `json:"conversation_id"`
+	Items          []TimelineItem `json:"items"`
 }
 
 type TimelineItemAppend struct {
-	Type           string              `json:"type"`
-	ConversationID string              `json:"conversation_id"`
-	Item           timelinesvc.Item    `json:"item"`
-	Conversation   common.Conversation `json:"conversation"`
+	Type           string       `json:"type"`
+	ConversationID string       `json:"conversation_id"`
+	Item           TimelineItem `json:"item"`
 }
 
 type ConnectionCount struct {
@@ -53,8 +56,9 @@ type ConnectionCount struct {
 }
 
 type ClientMessage struct {
-	Type           string `json:"type"`
-	ConversationID string `json:"conversation_id,omitempty"`
+	Type           string   `json:"type"`
+	ConversationID string   `json:"conversation_id,omitempty"`
+	Command        *Command `json:"command,omitempty"`
 }
 
 var ErrInvalidClientMessage = errors.New("invalid workspace client message")
@@ -62,10 +66,15 @@ var ErrInvalidClientMessage = errors.New("invalid workspace client message")
 type Service struct {
 	conversations ConversationQuery
 	timeline      TimelineQuery
+	turn          TurnExecutor
 }
 
-func New(conversations ConversationQuery, timeline TimelineQuery) *Service {
-	return &Service{conversations: conversations, timeline: timeline}
+type TurnExecutor interface {
+	Execute(context.Context, controlsvc.Command) (controlsvc.Result, error)
+}
+
+func New(conversations ConversationQuery, timeline TimelineQuery, turn TurnExecutor) *Service {
+	return &Service{conversations: conversations, timeline: timeline, turn: turn}
 }
 
 func (s *Service) Snapshot(ctx context.Context, ownerID string) (Snapshot, error) {
@@ -76,7 +85,11 @@ func (s *Service) Snapshot(ctx context.Context, ownerID string) (Snapshot, error
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
-	return Snapshot{Type: "workspace.snapshot", Conversations: items}, nil
+	summaries := make([]ConversationSummary, 0, len(items))
+	for _, item := range items {
+		summaries = append(summaries, SummaryFromConversation(item))
+	}
+	return Snapshot{Type: "workspace.snapshot", Conversations: summaries}, nil
 }
 
 func (s *Service) TimelineReset(ctx context.Context, ownerID string, conversationID string) (TimelineReset, error) {
@@ -84,10 +97,14 @@ func (s *Service) TimelineReset(ctx context.Context, ownerID string, conversatio
 	if err != nil {
 		return TimelineReset{}, err
 	}
+	out := make([]TimelineItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, TimelineItemFromRaw(item))
+	}
 	return TimelineReset{
 		Type:           "timeline.reset",
 		ConversationID: strings.TrimSpace(conversationID),
-		Items:          items,
+		Items:          out,
 	}, nil
 }
 
@@ -104,6 +121,26 @@ func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 			return ClientMessage{}, ErrInvalidClientMessage
 		}
 		return msg, nil
+	case "workspace.command":
+		commandRaw, _ := payload["command"].(map[string]any)
+		command := &Command{
+			ID:                  stringValue(commandRaw["command_id"], ""),
+			Kind:                stringValue(commandRaw["kind"], ""),
+			ConversationID:      strings.TrimSpace(stringValue(commandRaw["conversation_id"], msg.ConversationID)),
+			Text:                stringValue(commandRaw["text"], ""),
+			Mode:                stringValue(commandRaw["mode"], ""),
+			ToolName:            stringValue(commandRaw["tool_name"], ""),
+			ToolCallID:          stringValue(commandRaw["tool_call_id"], ""),
+			Output:              stringValue(commandRaw["output"], ""),
+			ReasoningStreamMode: stringValue(commandRaw["reasoning_stream_mode"], ""),
+			Error:               stringValue(commandRaw["error"], ""),
+		}
+		if command.ID == "" || command.Kind == "" || command.ConversationID == "" {
+			return ClientMessage{}, ErrInvalidClientMessage
+		}
+		msg.Command = command
+		msg.ConversationID = command.ConversationID
+		return msg, nil
 	default:
 		return ClientMessage{}, ErrInvalidClientMessage
 	}
@@ -117,11 +154,11 @@ func NewRealtimePublisher(hub *Hub) *RealtimePublisher {
 	return &RealtimePublisher{hub: hub}
 }
 
-func (p *RealtimePublisher) PublishConversationUpsert(conversation common.Conversation, messages []common.Message) {
+func (p *RealtimePublisher) PublishConversationUpsert(conversation common.Conversation) {
 	if p == nil || p.hub == nil {
 		return
 	}
-	ownerID := ownerIDOfConversation(conversation)
+	ownerID := conversationstate.OwnerID(conversation)
 	if ownerID == "" {
 		return
 	}
@@ -203,9 +240,65 @@ func (h *Hub) HandleClientMessage(ctx context.Context, ownerID string, conn *Con
 	case "timeline.unsubscribe":
 		conn.Unsubscribe(msg.ConversationID)
 		return nil
+	case "workspace.command":
+		if msg.Command == nil {
+			return ErrInvalidClientMessage
+		}
+		ack, err := h.workspace.ExecuteCommand(ctx, ownerID, *msg.Command)
+		if err != nil {
+			code, message := commandErrorPayload(err)
+			conn.Send(CommandError{
+				Type:           "workspace.command_error",
+				CommandID:      msg.Command.ID,
+				ConversationID: msg.Command.ConversationID,
+				Code:           code,
+				Message:        message,
+			})
+			return nil
+		}
+		conn.Send(ack)
+		return nil
 	default:
 		return ErrInvalidClientMessage
 	}
+}
+
+func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Command) (CommandAck, error) {
+	if s == nil || s.turn == nil {
+		return CommandAck{}, fmt.Errorf("workspace command executor unavailable")
+	}
+	kind := turnsvc.TurnControlKind(strings.TrimSpace(command.Kind))
+	_, err := s.turn.Execute(ctx, controlsvc.Command{
+		OwnerID:             strings.TrimSpace(ownerID),
+		Kind:                kind,
+		ConversationID:      strings.TrimSpace(command.ConversationID),
+		OutputText:          strings.TrimSpace(command.Text),
+		Mode:                strings.TrimSpace(command.Mode),
+		ToolName:            strings.TrimSpace(command.ToolName),
+		ToolCallID:          strings.TrimSpace(command.ToolCallID),
+		ToolOutput:          strings.TrimSpace(command.Output),
+		ReasoningStreamMode: strings.TrimSpace(command.ReasoningStreamMode),
+		AbortReason:         strings.TrimSpace(command.Error),
+	})
+	if err != nil {
+		return CommandAck{}, err
+	}
+	return CommandAck{
+		Type:           "workspace.command_ack",
+		CommandID:      command.ID,
+		ConversationID: strings.TrimSpace(command.ConversationID),
+	}, nil
+}
+
+func commandErrorPayload(err error) (string, string) {
+	var controlErr *controlsvc.Error
+	if errors.As(err, &controlErr) {
+		return controlErr.Code, controlErr.Message
+	}
+	if err == nil {
+		return "workspace_command_failed", "workspace command failed"
+	}
+	return "workspace_command_failed", err.Error()
 }
 
 func (h *Hub) ConnectionCount(ownerID string) int {
@@ -217,7 +310,7 @@ func (h *Hub) ConnectionCount(ownerID string) int {
 func (h *Hub) PublishConversationUpsert(ownerID string, conversation common.Conversation) {
 	h.broadcast(ownerID, ConversationUpsert{
 		Type:         "conversation.upsert",
-		Conversation: conversation,
+		Conversation: SummaryFromConversation(conversation),
 	}, nil)
 }
 
@@ -232,8 +325,7 @@ func (h *Hub) PublishTimelineItemAppend(ownerID string, conversation common.Conv
 	h.broadcast(ownerID, TimelineItemAppend{
 		Type:           "timeline.append",
 		ConversationID: conversation.ID,
-		Item:           item,
-		Conversation:   conversation,
+		Item:           TimelineItemFromRaw(item),
 	}, func(conn *Connection) bool {
 		return conn.IsSubscribed(conversation.ID)
 	})
@@ -329,10 +421,6 @@ func (c *Connection) IsSubscribed(conversationID string) bool {
 	}
 	_, ok := c.subscriptions[strings.TrimSpace(conversationID)]
 	return ok
-}
-
-func ownerIDOfConversation(conversation common.Conversation) string {
-	return stringValue(conversation.Metadata["owner_id"], "")
 }
 
 func stringValue(value any, fallback string) string {

@@ -7,6 +7,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/service/account"
 	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
 	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
@@ -15,6 +16,7 @@ type Deps struct {
 	Accounts       *account.Service
 	Query          *turnquerysvc.Service
 	Turn           *turnsvc.Service
+	Control        *controlsvc.Service
 	ChatStore      chat.Store
 	StorageStore   storage.Store
 	KeyStore       auth.KeyStore
@@ -25,7 +27,7 @@ type Deps struct {
 type Service struct {
 	accounts       *account.Service
 	query          *turnquerysvc.Service
-	turn           *turnsvc.Service
+	control        *controlsvc.Service
 	chatStore      chat.Store
 	storageStore   storage.Store
 	keyStore       auth.KeyStore
@@ -43,10 +45,14 @@ type CreateUserInput struct {
 }
 
 func New(deps Deps) *Service {
+	control := deps.Control
+	if control == nil {
+		control = controlsvc.New(deps.Query, deps.Turn, nil)
+	}
 	return &Service{
 		accounts:       deps.Accounts,
 		query:          deps.Query,
-		turn:           deps.Turn,
+		control:        control,
 		chatStore:      deps.ChatStore,
 		storageStore:   deps.StorageStore,
 		keyStore:       deps.KeyStore,

@@ -9,46 +9,39 @@ import (
 	"strings"
 )
 
-type StoredAsset struct {
-	FileID    string
-	Path      string
-	MediaType string
-	Bytes     int64
-	Filename  string
-}
-
 type Store struct {
 	RootDir string
 }
 
-func (s Store) PersistAVIF(_ context.Context, ownerID string, fileID string, parsed media.ParsedImage, avifBytes []byte) (StoredAsset, error) {
+func (s Store) PersistDraft(_ context.Context, draft media.DraftAsset) (media.StoredAsset, error) {
 	root := strings.TrimSpace(s.RootDir)
 	if root == "" {
-		return StoredAsset{}, fmt.Errorf("localstore root dir is required")
+		return media.StoredAsset{}, fmt.Errorf("localstore root dir is required")
 	}
-	ownerID = sanitizeSegment(ownerID)
+	ownerID := sanitizeSegment(draft.OwnerID)
 	if ownerID == "" {
 		ownerID = "anonymous"
 	}
 	dir := filepath.Join(root, ownerID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return StoredAsset{}, fmt.Errorf("create derived media dir: %w", err)
+		return media.StoredAsset{}, fmt.Errorf("create derived media dir: %w", err)
 	}
-	fileID = sanitizeSegment(fileID)
+	fileID := sanitizeSegment(draft.FileID)
 	if fileID == "" {
-		return StoredAsset{}, fmt.Errorf("file id is required")
+		return media.StoredAsset{}, fmt.Errorf("file id is required")
 	}
-	filename := fmt.Sprintf("%s.avif", fileID)
+	filename := media.ChatAssetFilename(fileID)
 	fullPath := filepath.Join(dir, filename)
-	if err := os.WriteFile(fullPath, avifBytes, 0o644); err != nil {
-		return StoredAsset{}, fmt.Errorf("write avif file: %w", err)
+	if err := os.WriteFile(fullPath, draft.Data, 0o644); err != nil {
+		return media.StoredAsset{}, fmt.Errorf("write avif file: %w", err)
 	}
-	return StoredAsset{
+	return media.StoredAsset{
 		FileID:    fileID,
+		OwnerID:   ownerID,
 		Path:      fullPath,
-		MediaType: "image/avif",
-		Bytes:     int64(len(avifBytes)),
-		Filename:  filename,
+		PublicURL: media.ChatAssetPublicURL(fileID),
+		MediaType: firstNonEmpty(draft.MediaType, "image/avif"),
+		Bytes:     int64(len(draft.Data)),
 	}, nil
 }
 
@@ -72,4 +65,13 @@ func sanitizeSegment(value string) string {
 	value = strings.ReplaceAll(value, "\\", "_")
 	value = strings.ReplaceAll(value, "..", "_")
 	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

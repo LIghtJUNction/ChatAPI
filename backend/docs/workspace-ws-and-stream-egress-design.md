@@ -1,174 +1,290 @@
-# Workspace WS And Stream Egress Design
+# Workspace WS And Submit Boundary Design
 
 ## Scope
 
-This document closes two still-mixed boundaries:
+This document closes two boundary problems that were still half-transitioned:
 
-1. Workspace realtime protocol between browser and backend.
-2. Model protocol stream egress between HTTP handler and normalized chat turn flow.
+1. workspace realtime protocol and workspace UI state authority;
+2. request prepare/materialize responsibilities in chat turn submit.
 
-The goal is to make both boundaries explicit, stable, and testable.
+The design goal is to make the workspace runtime explicitly websocket-driven, keep
+repository models from leaking directly into the UI protocol, and move media
+prepare/materialize concerns behind a dedicated boundary.
 
-## 1. Workspace Realtime Protocol
+## 1. Workspace Protocol Boundary
 
-### Module Boundary
+### Module ownership
 
 - `internal/service/chat/workspace`
-  - owns workspace websocket protocol semantics
-  - owns owner-wide conversation summary events
-  - owns conversation timeline subscription/reset/append semantics
-  - owns per-connection subscription state
+  - owns websocket protocol semantics
+  - owns workspace-facing summary/timeline DTOs
+  - owns conversation subscription rules
+  - owns workspace command dispatch semantics
 - `internal/http/handler/workspace_ws.go`
-  - only upgrades websocket
-  - restores authenticated owner from context
-  - passes incoming client frames to workspace service
-  - does not implement workspace business rules itself
+  - upgrades websocket
+  - restores authenticated owner/actor from context
+  - forwards parsed client frames to workspace service
+  - does not implement workspace business rules
+- `internal/service/chat/turn`
+  - remains owner of turn mutation rules
+  - does not define workspace protocol frames
 
-### Protocol Shape
+### Authority rule
 
-The workspace websocket is snapshot-first and increment-only afterward.
+For the workspace UI:
 
-#### Server -> client events
+- websocket is authoritative for conversation summaries;
+- websocket is authoritative for selected conversation timeline;
+- websocket is authoritative for output control commands (`delta`, `complete`,
+  `abort`);
+- HTTP endpoints remain for debug/admin/external callers, but the workspace UI
+  does not use them to keep itself in sync.
+
+This removes the previous three-way authority split across:
+
+- HTTP response payloads,
+- websocket incremental events,
+- frontend local state patching.
+
+## 2. Workspace Server DTOs
+
+Repository `Conversation.Metadata` and raw timeline items must not be the
+workspace protocol.
+
+### Conversation summary DTO
+
+The workspace sidebar receives `WorkspaceConversationSummary`.
+
+It contains:
+
+- stable conversation identity and timestamps;
+- preview/title/count fields needed by the sidebar;
+- explicit request/runtime fields:
+  - `request_format`
+  - `status`
+  - `draft_text`
+
+No frontend code should read `conversation.metadata.realtime_status`,
+`realtime_draft_text`, or `request_format` directly.
+
+Those stay internal persistence details.
+
+### Runtime summary authority
+
+The authoritative service-side projection is:
+
+- `internal/service/chat/conversationstate`
+
+It is the only service package allowed to interpret the persistence metadata
+keys that currently back runtime state:
+
+- `owner_id`
+- `request_format`
+- `model`
+- `realtime_status`
+- `realtime_draft_text`
+
+Repository metadata may continue storing these values until a schema migration
+promotes them to columns, but service/frontend-facing code must consume typed
+projection fields instead of re-reading metadata keys.
+
+The intended dependency direction is:
+
+- repository returns persisted rows;
+- `conversationstate` projects typed runtime state and workspace summaries;
+- workspace, turn control, egress, streaming, resolve, and user control consume
+  the typed projection.
+
+This keeps persistence shape from becoming the implicit websocket protocol.
+
+### Timeline entry DTO
+
+The workspace timeline receives `WorkspaceTimelineItem`.
+
+It contains:
+
+- `message` entries;
+- `system_event` entries.
+
+For message entries, the workspace DTO includes parsed `content_parts`, so the
+frontend no longer reparses `message.content` to rediscover images/thinking/text.
+
+`message.content` remains available as raw debug/source content, but workspace UI
+rendering prefers `content_parts`.
+
+### Visible timeline rule
+
+Workspace timeline is already a presentation-oriented protocol.
+
+Therefore:
+
+- workspace service projects raw chat messages/events into workspace-facing
+  timeline entries;
+- frontend does not own a second semantic layer that interprets raw message JSON
+  into visible content.
+
+The only client-side synthetic item that remains is the draft tail, which is a
+projection of summary `draft_text`.
+
+## 3. Workspace WS protocol
+
+### Server -> client
 
 - `workspace.snapshot`
-  - sent once immediately after connect
-  - contains conversation summaries only
+  - sent immediately after connect
+  - contains authoritative conversation summaries
 - `workspace.connections`
-  - owner-wide connection count update
+  - current owner connection count
 - `conversation.upsert`
-  - owner-wide conversation summary upsert
-  - no timeline payload
+  - summary upsert for one conversation
 - `conversation.remove`
-  - owner-wide conversation removal
+  - summary removal
 - `timeline.reset`
-  - authoritative full timeline payload for one conversation
-  - sent after `timeline.subscribe`
-  - can also be used after reconnect/resync
+  - authoritative timeline snapshot for one subscribed conversation
 - `timeline.append`
-  - incremental append for one conversation
-  - only sent to connections subscribed to that conversation
+  - incremental timeline append for one subscribed conversation
+  - contains only a timeline item, not a conversation summary
+- `workspace.command_ack`
+  - command accepted and executed
+- `workspace.command_error`
+  - command rejected or failed
 
-#### Client -> server events
+### Client -> server
 
 - `workspace.ping`
-  - keepalive/debug
 - `timeline.subscribe`
-  - select one conversation timeline for authoritative reset + future appends
 - `timeline.unsubscribe`
-  - stop receiving incremental timeline updates for that conversation
+- `workspace.command`
 
-### Subscription Semantics
+### Command model
 
-- Conversation summaries are owner-wide and always broadcast to all of the owner's connections.
-- Timeline items are not owner-wide broadcast.
-- A connection only receives `timeline.append` for conversations it explicitly subscribed to.
-- The workspace frontend subscribes the currently selected conversation.
+`workspace.command` is the workspace control boundary.
 
-### Consistency Rule
+It carries:
 
-`timeline.subscribe` must not race with `timeline.append` on the same connection.
+- `command_id`
+- `command.kind`
+  - `stream_delta`
+  - `stream_complete`
+  - `abort`
+- `command.conversation_id`
+- optional payload fields:
+  - `text`
+  - `mode`
+  - `tool_name`
+  - `tool_call_id`
+  - `output`
+  - `reasoning_stream_mode`
+  - `error`
 
-The required behavior is:
+Execution rule:
 
-1. serialize connection writes
-2. while that serialization lock is held:
-   - install subscription
-   - load timeline snapshot
-   - send `timeline.reset`
-3. release the lock
+1. frontend sends `workspace.command`;
+2. backend validates and executes through turn service;
+3. backend replies with `workspace.command_ack` or `workspace.command_error`;
+4. actual state convergence still comes from `conversation.upsert` and
+   `timeline.append`.
 
-This guarantees:
+So acknowledgements are control-plane only, not state-plane payloads.
 
-- no append interleaves ahead of the reset on the same socket
-- no append is lost between subscribe and reset
-- an append may be duplicated if it committed during subscribe/reset construction
+### Turn control authority
 
-Therefore the client must deduplicate `timeline.append` by timeline item id.
+All turn control entry points must call:
 
-### HTTP Timeline API
+- `internal/service/chat/control.Service.Execute`
 
-`/api/conversations/{id}/timeline` remains as a query API for admin/debug/external use.
+Adapters may still exist for compatibility:
 
-It is no longer part of the workspace UI runtime path.
+- workspace websocket command frames;
+- `/api/chat/output/*` debug HTTP endpoints;
+- user/admin abort endpoints.
 
-The workspace UI must cold-load and stay in sync through websocket only.
+Those adapters only map transport input/output. They do not perform owner
+admission, pending-state interpretation, or protocol error mapping themselves.
+The control service owns:
 
-## 2. Protocol Stream Egress Boundary
+- command validation;
+- actor/owner admission;
+- dispatch to turn mutation service;
+- transport-neutral result/error shape.
 
-### Module Boundary
+The turn mutation service remains responsible for the actual state mutation,
+pending registry updates, egress bodies, and realtime publications.
 
-- `internal/service/chat/ingress`
-  - parse protocol request into normalized request
-  - submit normalized request into turn service
-- `internal/service/chat/streaming`
-  - owns protocol stream event mapping
-  - owns SSE framing/writing
-  - owns per-stream protocol state such as Anthropic block state
-- `internal/service/chat/egress`
-  - owns non-stream response/error body generation
-- `internal/http/handler/chatapi.go`
-  - parses HTTP input
-  - delegates to ingress
-  - delegates stream writing to streaming service
-  - does not write SSE frames directly
-  - does not import protocol stream frame types directly
+## 4. Timeline publish rule
 
-### Stream Flow
+Realtime append and query/reset must use the same timeline-item builder.
 
-For streaming requests:
+That means:
 
-1. handler parses JSON body
-2. handler calls ingress parse
-3. handler calls ingress submit stream
-4. handler hands `(response writer, conversation, pending turn event channel)` to `streaming`
-5. `streaming` writes:
-   - protocol start frames
-   - mapped pending delta/complete/abort frames
-   - SSE wire format
+- query-side reset does not rebuild timeline DTOs one way;
+- realtime append does not rebuild them another way.
 
-### Responsibility Rule
+There is one builder for:
 
-The HTTP handler must not:
+- raw message -> timeline item
+- raw event -> timeline item
+- timeline item -> workspace timeline DTO
 
-- build protocol stream payloads
-- know Anthropic block lifecycle details
-- write raw `event:` / `data:` SSE lines
+## 5. Submit prepare/materialize boundary
 
-Those all belong to `service/chat/streaming`.
+`turn.Submitter` must not directly own all of:
 
-## 3. Frontend Workspace Behavior
+- preprocess;
+- media persistence;
+- media rollback cleanup;
+- request-body rebuilding.
 
-### Runtime Shape
+Those concerns are moved behind a dedicated materialization boundary.
 
-- connect `/api/ws`
-- wait for `workspace.snapshot`
-- resolve selected conversation
-- send `timeline.subscribe`
-- use `timeline.reset` as authoritative selected timeline
-- apply `timeline.append` incrementally
-- apply `conversation.upsert` / `conversation.remove` to sidebar summaries
+### Materializer responsibility
 
-### Client Cache Rule
+`RequestMaterializer` owns:
 
-- conversation list cache and timeline cache are separate
-- conversation list is driven by snapshot/upsert/remove
-- selected conversation timeline is driven by reset/append
-- no HTTP fallback fetch is used by workspace UI
+1. preprocess normalized request;
+2. persist prepared media drafts;
+3. rewrite request image references to public media ids/urls;
+4. build final request debug body;
+5. compensate persisted files on failure;
+6. record file deletion failures if compensation fails.
 
-## 4. Non-goals
+### Submitter responsibility
 
-This change does not introduce:
+`Submitter` then becomes smaller:
 
-- server-side full list resend on every update
-- multi-conversation timeline streaming by default
-- transport-independent realtime abstraction outside websocket
-- protocol normalization redesign
+1. resolve ids;
+2. call materializer;
+3. persist pending turn;
+4. register in-memory pending turn;
+5. publish conversation/timeline realtime events.
 
-## 5. Expected Outcomes
+## 6. Media public reference boundary
 
-After this change:
+Workspace/user-visible media references must not encode owner partitioning in
+the public path shape.
 
-- workspace realtime semantics are explicit and stable
-- conversation sidebar and selected timeline no longer rely on mixed HTTP + WS paths
-- chat protocol handler becomes transport-thin again
-- streaming wire details are isolated in one service
+Public references are now:
+
+- `/api/media/assets/{file_id}`
+
+Authorization still validates asset owner from the authenticated principal and
+repository lookup.
+
+This keeps:
+
+- storage partitioning;
+- authorization;
+- delivery URL shape
+
+as separate concerns.
+
+## 7. Expected outcomes
+
+After this refactor:
+
+- workspace protocol owns workspace summary/timeline/control semantics;
+- frontend workspace runtime no longer mixes HTTP control responses with WS state;
+- repository metadata stops acting as implicit UI protocol;
+- timeline query and realtime append use one item builder;
+- submit prepare/materialize complexity is moved out of `turn.Submitter`;
+- media public URLs stop leaking owner partition shape.

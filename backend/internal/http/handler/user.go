@@ -14,6 +14,7 @@ import (
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
+	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
 	usercontrolconversations "github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversations"
 	usercontrolprofile "github.com/zyf2007/ChatAPI/internal/service/usercontrol/profile"
@@ -57,7 +58,11 @@ func (h UserHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "conversations": items})
+	summaries := make([]workspacesvc.ConversationSummary, 0, len(items))
+	for _, item := range items {
+		summaries = append(summaries, workspacesvc.SummaryFromConversation(item))
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": summaries, "conversations": summaries})
 }
 
 func (h UserHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {

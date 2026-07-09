@@ -14,7 +14,13 @@ func extractChatCompletionsInputParts(body map[string]any) []InputPart {
 		case "user":
 			return extractPartsFromMessageContent(record["content"])
 		case "tool":
-			return extractToolResultParts(record["content"])
+			parts := extractToolResultParts(record["content"])
+			for idx := range parts {
+				if parts[idx].Type == "tool_result" {
+					parts[idx].ToolCallID = stringValue(record["tool_call_id"], "")
+				}
+			}
+			return parts
 		}
 	}
 	return nil

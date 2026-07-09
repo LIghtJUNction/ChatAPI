@@ -7,6 +7,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 )
 
 type PendingLookup interface {
@@ -21,7 +22,6 @@ type Service struct {
 type ResolveInput struct {
 	OwnerID string
 	Request protocol.TurnRequest
-	RawBody map[string]any
 }
 
 type Target struct {
@@ -36,7 +36,7 @@ func New(store chat.Reader, pending PendingLookup) *Service {
 
 func (s *Service) Resolve(ctx context.Context, input ResolveInput) (Target, error) {
 	ownerID := strings.TrimSpace(input.OwnerID)
-	if conversationID := explicitConversationID(input.RawBody); conversationID != "" {
+	if conversationID := strings.TrimSpace(input.Request.ConversationID); conversationID != "" {
 		conversation, err := s.Store.GetConversation(ctx, conversationID)
 		if err != nil {
 			return Target{}, err
@@ -49,7 +49,7 @@ func (s *Service) Resolve(ctx context.Context, input ResolveInput) (Target, erro
 		}
 		return Target{ConversationID: conversationID, Reuse: true, Source: "explicit_id"}, nil
 	}
-	for _, toolCallID := range extractToolCallIDs(input.RawBody) {
+	for _, toolCallID := range extractToolCallIDs(input.Request.InputParts) {
 		if s.Pending != nil {
 			if conversationID, ok := s.Pending.FindConversationIDByToolCallID(ownerID, toolCallID); ok {
 				return Target{ConversationID: conversationID, Reuse: true, Source: "pending_tool_call_id"}, nil
@@ -64,44 +64,28 @@ func (s *Service) Resolve(ctx context.Context, input ResolveInput) (Target, erro
 	return Target{}, nil
 }
 
-func explicitConversationID(body map[string]any) string {
-	return strings.TrimSpace(stringValue(body["conversation_id"], ""))
-}
-
-func extractToolCallIDs(body map[string]any) []string {
+func extractToolCallIDs(parts []protocol.InputPart) []string {
 	seen := map[string]struct{}{}
 	var ids []string
-	var visit func(any)
-	visit = func(value any) {
-		switch typed := value.(type) {
-		case map[string]any:
-			if id := strings.TrimSpace(stringValue(typed["tool_call_id"], "")); id != "" {
-				if _, ok := seen[id]; !ok {
-					seen[id] = struct{}{}
-					ids = append(ids, id)
-				}
-			}
-			if id := strings.TrimSpace(stringValue(typed["call_id"], "")); id != "" {
-				if _, ok := seen[id]; !ok {
-					seen[id] = struct{}{}
-					ids = append(ids, id)
-				}
-			}
-			for _, item := range typed {
-				visit(item)
-			}
-		case []any:
-			for _, item := range typed {
-				visit(item)
-			}
+	for _, part := range parts {
+		if part.Type != "tool_result" {
+			continue
 		}
+		id := strings.TrimSpace(part.ToolCallID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
 	}
-	visit(body)
 	return ids
 }
 
 func protocolCompatible(conversation common.Conversation, requestFormat string) bool {
-	locked := strings.TrimSpace(stringValue(conversation.Metadata["request_format"], ""))
+	locked := strings.TrimSpace(conversationstate.RequestFormatRaw(conversation))
 	if locked == "" {
 		return true
 	}
@@ -109,12 +93,5 @@ func protocolCompatible(conversation common.Conversation, requestFormat string) 
 }
 
 func ownerIDOfConversation(conversation common.Conversation) string {
-	return strings.TrimSpace(stringValue(conversation.Metadata["owner_id"], ""))
-}
-
-func stringValue(value any, fallback string) string {
-	if raw, ok := value.(string); ok && strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw)
-	}
-	return fallback
+	return conversationstate.OwnerID(conversation)
 }

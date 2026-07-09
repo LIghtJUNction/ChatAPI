@@ -296,7 +296,6 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 			"developer_text":  strings.TrimSpace(input.DeveloperContent),
 			"assistant_text":  strings.TrimSpace(input.AssistantContent),
 			"input_text":      input.UserContent,
-			"input_parts":     input.InputParts,
 			"request_body":    input.RequestBody,
 			"tool_schemas":    input.ToolSchemas,
 			"tool_choice":     input.ToolChoice,
@@ -337,7 +336,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "user",
-		Content:    input.UserContent,
+		Content:    firstNonEmpty(input.UserMessageContent, input.UserContent),
 		CreatedAt:  now,
 		Status:     "pending",
 		ResponseID: &responseID,
@@ -791,34 +790,12 @@ func scanRequestRow(scanner rowScanner) (common.Request, error) {
 	item.Metadata = messageMetadata
 	item.RequestBody, _ = requestDebug["request_body"].(map[string]any)
 	item.ToolSchemas, _ = requestDebug["tool_schemas"].([]any)
-	item.InputParts = parseRequestInputParts(requestDebug["input_parts"])
 	item.ToolChoice = parseRequestToolChoice(requestDebug["tool_choice"])
 	item.ResponseFormat = parseRequestResponseFormat(requestDebug["response_format"])
 	item.SystemText = metadataString(requestDebug, "system_text", "")
 	item.DeveloperText = metadataString(requestDebug, "developer_text", "")
 	item.AssistantText = metadataString(requestDebug, "assistant_text", "")
 	return item, nil
-}
-
-func parseRequestInputParts(value any) []common.RequestInputPart {
-	items, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	parts := make([]common.RequestInputPart, 0, len(items))
-	for _, item := range items {
-		record, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		parts = append(parts, common.RequestInputPart{
-			Type:      metadataString(record, "type", ""),
-			Text:      metadataString(record, "text", ""),
-			MediaType: metadataString(record, "media_type", ""),
-			URL:       metadataString(record, "url", ""),
-		})
-	}
-	return parts
 }
 
 func parseStringSliceMap(value any) map[string][]string {
@@ -914,6 +891,15 @@ func stringValue(value string, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func isDraftWritable(metadata map[string]any) bool {

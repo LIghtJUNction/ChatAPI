@@ -14,13 +14,14 @@ import (
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
+	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 )
 
 type AppAPIHandler struct {
-	Turn   *turnsvc.Service
-	Query  *turnquerysvc.Service
+	Turn     *turnsvc.Service
+	Query    *turnquerysvc.Service
 	Timeline *timelinesvc.Service
-	Logger *zap.Logger
+	Logger   *zap.Logger
 }
 
 func (h AppAPIHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +75,11 @@ func (h AppAPIHandler) ListConversations(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	logging.BindContext(h.Logger, r.Context(), zap.Int("conversations.count", len(items))).Debug("listed conversations for owner")
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+	summaries := make([]workspacesvc.ConversationSummary, 0, len(items))
+	for _, item := range items {
+		summaries = append(summaries, workspacesvc.SummaryFromConversation(item))
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": summaries})
 }
 
 func (h AppAPIHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {

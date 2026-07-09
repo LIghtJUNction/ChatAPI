@@ -378,9 +378,6 @@ func cloneRequestMeta(input common.Request) common.Request {
 	cloned.RequestQuery = pendingCloneStringSliceMap(input.RequestQuery)
 	cloned.RequestHeaders = pendingCloneStringSliceMap(input.RequestHeaders)
 	cloned.RequestBody = pendingCloneAnyMap(input.RequestBody)
-	if len(input.InputParts) > 0 {
-		cloned.InputParts = append([]common.RequestInputPart(nil), input.InputParts...)
-	}
 	if len(input.ToolSchemas) > 0 {
 		cloned.ToolSchemas = pendingCloneAnySlice(input.ToolSchemas)
 	}

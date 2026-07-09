@@ -10,17 +10,19 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/config"
 	"github.com/zyf2007/ChatAPI/internal/http/httpx"
-	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
+	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 	"go.uber.org/zap"
 )
 
 type LabHandler struct {
-	Config config.Config
-	Query  *turnquery.Service
-	Turn   *turn.Service
-	Logger *zap.Logger
+	Config  config.Config
+	Query   *turnquery.Service
+	Turn    *turn.Service
+	Control *controlsvc.Service
+	Logger  *zap.Logger
 }
 
 func (h LabHandler) Workspace(w http.ResponseWriter, r *http.Request) {
@@ -30,11 +32,15 @@ func (h LabHandler) Workspace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	summaries := make([]workspacesvc.ConversationSummary, 0, len(items))
+	for _, item := range items {
+		summaries = append(summaries, workspacesvc.SummaryFromConversation(item))
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"ok":            true,
 		"mode":          h.Config.Mode,
 		"owner_id":      ownerID,
-		"conversations": items,
+		"conversations": summaries,
 	})
 }
 
@@ -114,28 +120,34 @@ func (h LabHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.Req
 		return
 	}
 	body := decodeBodyOrEmpty(r)
-	result, err := h.Turn.ExecuteTurnControl(r.Context(), turn.TurnControlCommand{
+	result, err := h.control().Execute(r.Context(), controlsvc.Command{
+		OwnerID:             actor.OwnerIDFromContext(r.Context()),
 		Kind:                kind,
 		ConversationID:      strings.TrimSpace(item.ConversationID),
 		ResponseID:          stringValue(body["response_id"], ""),
 		OutputText:          stringValue(body["text"], ""),
-		Mode:                stringValue(body["mode"], "assistant_message"),
+		Mode:                stringValue(body["mode"], ""),
 		ToolName:            stringValue(body["tool_name"], ""),
 		ToolCallID:          stringValue(body["tool_call_id"], ""),
-		ToolOutput:          stringValue(body["output"], stringValue(body["text"], "")),
+		ToolOutput:          stringValue(body["output"], ""),
 		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
 		AbortReason:         stringValue(body["error"], ""),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, common.ErrTurnConflict):
-			http.Error(w, err.Error(), http.StatusConflict)
-		default:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if writeControlError(w, err) {
+			return
 		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusOK, result.Body)
+}
+
+func (h LabHandler) control() *controlsvc.Service {
+	if h.Control != nil {
+		return h.Control
+	}
+	return controlsvc.New(h.Query, h.Turn, h.Logger)
 }
 
 func decodeBodyOrEmpty(r *http.Request) map[string]any {

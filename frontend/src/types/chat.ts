@@ -98,18 +98,23 @@ export type Conversation = {
   last_message_at: string
   message_count: number
   last_message_preview: string
-  metadata?: {
-    request_format?: 'responses' | 'chat_completions' | 'anthropic_messages' | string
-    reasoning_stream_mode?: 'summary' | 'summery' | 'reasoning_text' | 'reasoning' | string
-    realtime_status?: 'waiting' | 'closed' | 'aborted' | string
-    realtime_draft_text?: string
-  }
+  request_format?: 'responses' | 'chat_completions' | 'anthropic_messages' | string
+  status?: 'waiting' | 'streaming' | 'closed' | 'aborted' | 'disconnected' | 'expired' | string
+  draft_text?: string
+}
+
+export type TimelineMessageContentPart = {
+  type: 'text' | 'image' | string
+  text?: string
+  src?: string
+  media_type?: string
 }
 
 export type MessageItem = {
   id: string
   role: 'user' | 'assistant' | 'system' | string
   content: string
+  content_parts?: TimelineMessageContentPart[]
   created_at: string
   status?: string
   response_id?: string | null
@@ -130,10 +135,9 @@ export type MessageItem = {
       api_key_name?: string
       request_keys?: string[]
       input_text?: string
-      input_payload?: unknown
       tool_schemas?: unknown[]
       request_body?: unknown
-      headers?: {
+      request_headers?: {
         user_agent?: string
         content_type?: string
         origin?: string
@@ -325,11 +329,37 @@ export type WorkspaceTimelineResetEvent = {
 export type WorkspaceTimelineItemAppendEvent = {
   type: 'timeline.append'
   conversation_id: string
-  conversation: Conversation
   item: TimelineItem
 }
 
 export type WorkspaceConnectionCountEvent = {
   type: 'workspace.connections'
   current_connection_count: number
+}
+
+export type WorkspaceCommand = {
+  command_id: string
+  kind: 'stream_delta' | 'stream_complete' | 'abort' | string
+  conversation_id: string
+  text?: string
+  mode?: string
+  tool_name?: string
+  tool_call_id?: string
+  output?: string
+  reasoning_stream_mode?: string
+  error?: string
+}
+
+export type WorkspaceCommandAckEvent = {
+  type: 'workspace.command_ack'
+  command_id: string
+  conversation_id: string
+}
+
+export type WorkspaceCommandErrorEvent = {
+  type: 'workspace.command_error'
+  command_id: string
+  conversation_id?: string
+  code: string
+  message: string
 }

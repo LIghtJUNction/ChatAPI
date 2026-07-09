@@ -406,7 +406,6 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 			"developer_text":  input.DeveloperContent,
 			"assistant_text":  input.AssistantContent,
 			"input_text":      input.UserContent,
-			"input_parts":     input.InputParts,
 			"request_body":    input.RequestBody,
 			"tool_schemas":    input.ToolSchemas,
 			"tool_choice":     input.ToolChoice,
@@ -447,7 +446,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "user",
-		Content:    input.UserContent,
+		Content:    firstNonEmpty(input.UserMessageContent, input.UserContent),
 		CreatedAt:  now,
 		Status:     "pending",
 		ResponseID: &responseID,
@@ -587,6 +586,19 @@ func (s *Store) ListMediaAssets(ctx context.Context) ([]common.MediaAsset, error
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *Store) GetMediaAssetByFileID(ctx context.Context, fileID string) (common.MediaAsset, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
+		FROM media_assets
+		WHERE file_id = ?
+	`, strings.TrimSpace(fileID))
+	item, err := scanMediaAsset(row)
+	if err != nil {
+		return common.MediaAsset{}, err
+	}
+	return item, nil
 }
 
 func (s *Store) ListOrphanMediaAssets(ctx context.Context) ([]common.MediaAsset, error) {

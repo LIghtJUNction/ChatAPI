@@ -1463,13 +1463,12 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		DeveloperContent: "developer hint",
 		AssistantContent: "previous assistant answer",
 		UserContent:      "First question for waiting turn",
-		InputParts: []common.RequestInputPart{
-			{Type: "text", Text: "First question for waiting turn"},
-			{Type: "image", URL: "https://example.com/tool.png", MediaType: "image/png"},
-		},
 		RequestBody: map[string]any{
 			"model": "gpt-test",
-			"input": "First question for waiting turn",
+			"input": []any{
+				map[string]any{"type": "input_text", "text": "First question for waiting turn"},
+				map[string]any{"type": "input_image", "image_url": "https://example.com/tool.png", "media_type": "image/png"},
+			},
 		},
 		ToolSchemas: []any{
 			map[string]any{"name": "tool_a"},
@@ -1541,9 +1540,6 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	}
 	if len(firstRequest.ToolSchemas) != 1 {
 		t.Fatalf("unexpected tool schemas: %#v", firstRequest.ToolSchemas)
-	}
-	if len(firstRequest.InputParts) != 2 || firstRequest.InputParts[1].Type != "image" {
-		t.Fatalf("unexpected input parts: %#v", firstRequest.InputParts)
 	}
 	if firstRequest.SystemText != "system rule" || firstRequest.DeveloperText != "developer hint" || firstRequest.AssistantText != "previous assistant answer" {
 		t.Fatalf("unexpected request context fields: %#v", firstRequest)

@@ -16,7 +16,7 @@ import (
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
-	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	userconfig "github.com/zyf2007/ChatAPI/internal/service/usercontrol/config"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversations"
@@ -41,7 +41,7 @@ type Deps struct {
 	TOTP                 *totpsvc.Service
 	Policy               *policy.Service
 	Query                *turnquerysvc.Service
-	Turn                 *turnsvc.Service
+	Turn                 *controlsvc.Service
 	Configs              configrepo.Store
 	Storage              storage.Store
 	Chat                 chat.Store

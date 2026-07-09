@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"strings"
 	"testing"
@@ -57,6 +58,22 @@ func TestParseImageInputSupportsDataURL(t *testing.T) {
 	}
 }
 
+func TestParseImageInputSupportsJPEGDataURLWithWhitespace(t *testing.T) {
+	rawJPEG := tinyJPEG(t)
+	base64Payload := base64.StdEncoding.EncodeToString(rawJPEG)
+	dataURL := "data:image/jpeg;base64," + base64Payload[:24] + " \n\t" + base64Payload[24:]
+	parsed, err := ParseImageInput(dataURL, "", 1<<20)
+	if err != nil {
+		t.Fatalf("parse jpeg data url with whitespace: %v", err)
+	}
+	if parsed.SourceKind != SourceDataURL || parsed.DetectedMediaType != "image/jpeg" {
+		t.Fatalf("unexpected parsed jpeg data url: %#v", parsed)
+	}
+	if parsed.Width != 2 || parsed.Height != 1 {
+		t.Fatalf("unexpected jpeg dimensions: %#v", parsed)
+	}
+}
+
 func TestParseImageInputSupportsRemoteURL(t *testing.T) {
 	parsed, err := ParseImageInput("https://example.com/cat.png", "image/png", 1<<20)
 	if err != nil {
@@ -83,6 +100,18 @@ func tinyPNG(t *testing.T) []byte {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func tinyJPEG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	img.Set(0, 0, color.NRGBA{R: 255, A: 255})
+	img.Set(1, 0, color.NRGBA{B: 255, A: 255})
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+		t.Fatalf("encode jpeg: %v", err)
 	}
 	return buf.Bytes()
 }

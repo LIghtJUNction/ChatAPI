@@ -12,6 +12,7 @@ const (
 
 type TurnRequest struct {
 	Protocol         Protocol
+	ConversationID   string
 	Model            string
 	Stream           bool
 	SystemContent    string
@@ -52,6 +53,7 @@ type InputPart struct {
 	Text      string
 	MediaType string
 	URL       string
+	ToolCallID string
 }
 
 type ToolChoice struct {
@@ -91,6 +93,7 @@ func ParseRequest(protocolValue string, body map[string]any) TurnRequest {
 	inputParts := extractRequestInputParts(proto, body)
 	return TurnRequest{
 		Protocol:         proto,
+		ConversationID:   stringValue(body["conversation_id"], ""),
 		Model:            stringValue(body["model"], "chatapi-lab"),
 		Stream:           boolValue(body["stream"]),
 		SystemContent:    extractRequestRoleContent(proto, body, "system"),

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
 
@@ -17,15 +18,16 @@ func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]co
 }
 
 func (s *Service) AbortConversation(ctx context.Context, conversationID string, reason string) (map[string]any, error) {
-	return s.turn.ExecuteTurnControl(ctx, turnsvc.TurnControlCommand{
+	result, err := s.control.Execute(ctx, controlsvc.Command{
 		Kind:           turnsvc.TurnControlAbort,
 		ConversationID: strings.TrimSpace(conversationID),
 		AbortReason:    strings.TrimSpace(reason),
 	})
+	return result.Body, err
 }
 
 func (s *Service) CompleteConversation(ctx context.Context, conversationID string, text string, mode string, toolName string, toolCallID string, toolOutput string) (map[string]any, error) {
-	return s.turn.ExecuteTurnControl(ctx, turnsvc.TurnControlCommand{
+	result, err := s.control.Execute(ctx, controlsvc.Command{
 		Kind:           turnsvc.TurnControlStreamComplete,
 		ConversationID: strings.TrimSpace(conversationID),
 		OutputText:     text,
@@ -34,6 +36,7 @@ func (s *Service) CompleteConversation(ctx context.Context, conversationID strin
 		ToolCallID:     toolCallID,
 		ToolOutput:     toolOutput,
 	})
+	return result.Body, err
 }
 
 func (s *Service) DeleteConversation(ctx context.Context, conversationID string) (common.DeleteConversationsResult, error) {

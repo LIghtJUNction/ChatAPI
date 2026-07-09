@@ -6,6 +6,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +33,7 @@ func (s *Service) ListMessagesForOwner(ctx context.Context, conversationID strin
 		s.logger().Warn("owner message lookup failed at conversation fetch", zap.String("conversation.id", conversationID), zap.String("owner.id", ownerID), zap.Error(err))
 		return nil, err
 	}
-	if ownerID != "" && stringValue(conversation.Metadata["owner_id"], "") != ownerID {
+	if ownerID != "" && conversationstate.OwnerID(conversation) != ownerID {
 		s.logger().Warn("owner message lookup forbidden", zap.String("conversation.id", conversationID), zap.String("owner.id", ownerID))
 		return nil, ErrForbidden
 	}
@@ -53,7 +54,7 @@ func (s *Service) ListConversationsForOwner(ctx context.Context, ownerID string)
 	}
 	filtered := make([]common.Conversation, 0, len(items))
 	for _, item := range items {
-		if ownerID == "" || stringValue(item.Metadata["owner_id"], "") == ownerID {
+		if ownerID == "" || conversationstate.OwnerID(item) == ownerID {
 			filtered = append(filtered, item)
 		}
 	}

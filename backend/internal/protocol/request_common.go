@@ -123,7 +123,11 @@ func extractInputPart(record map[string]any) InputPart {
 		if text == "" {
 			return InputPart{}
 		}
-		return InputPart{Type: "tool_result", Text: text}
+		return InputPart{
+			Type:       "tool_result",
+			Text:       text,
+			ToolCallID: firstNonEmptyText(record["tool_call_id"], record["call_id"], record["tool_use_id"]),
+		}
 	default:
 		if text != "" {
 			return InputPart{Type: "text", Text: text}

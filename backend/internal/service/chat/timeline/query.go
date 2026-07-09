@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
 
@@ -14,15 +15,8 @@ func (s *Service) ListTimelineForOwner(ctx context.Context, conversationID strin
 	if err != nil {
 		return nil, err
 	}
-	if ownerID != "" && strings.TrimSpace(stringValue(conversation.Metadata["owner_id"], "")) != ownerID {
+	if ownerID != "" && conversationstate.OwnerID(conversation) != ownerID {
 		return nil, turnquerysvc.ErrForbidden
 	}
 	return s.ListTimeline(ctx, conversationID)
-}
-
-func stringValue(value any, fallback string) string {
-	if raw, ok := value.(string); ok && strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw)
-	}
-	return fallback
 }

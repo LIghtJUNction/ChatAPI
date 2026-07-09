@@ -12,6 +12,7 @@ type Store interface {
 	ListUploadedImagesByOwner(context.Context, string) ([]common.UploadedImage, error)
 	DeleteUploadedImagesByFilenames(context.Context, []string) (common.DeleteUploadedImagesResult, error)
 	ListMediaAssets(context.Context) ([]common.MediaAsset, error)
+	GetMediaAssetByFileID(context.Context, string) (common.MediaAsset, error)
 	ListOrphanMediaAssets(context.Context) ([]common.MediaAsset, error)
 	DeleteMediaAssetsByIDs(context.Context, []string) (int, error)
 	UpsertStorageFileDeletionFailure(context.Context, common.UpsertStorageFileDeletionFailureInput) (common.StorageFileDeletionFailure, error)

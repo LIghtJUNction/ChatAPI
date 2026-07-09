@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	userconv "github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversations"
 )
@@ -35,18 +36,21 @@ func (f *fakeQuery) ListMessagesForOwner(_ context.Context, conversationID strin
 }
 
 type fakeTurn struct {
+	lastOwnerID        string
 	lastConversationID string
 	lastReason         string
 	err                error
 }
 
-func (f *fakeTurn) ExecuteTurnControl(_ context.Context, cmd turnsvc.TurnControlCommand) (map[string]any, error) {
+func (f *fakeTurn) Execute(_ context.Context, cmd controlsvc.Command) (controlsvc.Result, error) {
+	f.lastOwnerID = cmd.OwnerID
 	f.lastConversationID = cmd.ConversationID
 	f.lastReason = cmd.AbortReason
+	_ = turnsvc.TurnControlAbort
 	if f.err != nil {
-		return nil, f.err
+		return controlsvc.Result{}, f.err
 	}
-	return map[string]any{"ok": true}, nil
+	return controlsvc.Result{Body: map[string]any{"ok": true}}, nil
 }
 
 func TestConversationsDeleteConversationBranches(t *testing.T) {
@@ -152,15 +156,15 @@ func TestConversationsAbortConversationChecksOwnershipAndForwardsReason(t *testi
 	if result["ok"] != true {
 		t.Fatalf("unexpected abort result: %#v", result)
 	}
-	if turn.lastConversationID != "conv_ok" || turn.lastReason != "stop now" {
-		t.Fatalf("unexpected turn command forwarding: conversation=%q reason=%q", turn.lastConversationID, turn.lastReason)
+	if turn.lastOwnerID != "user_a" || turn.lastConversationID != "conv_ok" || turn.lastReason != "stop now" {
+		t.Fatalf("unexpected turn command forwarding: owner=%q conversation=%q reason=%q", turn.lastOwnerID, turn.lastConversationID, turn.lastReason)
 	}
 }
 
 func TestConversationsAbortConversationRejectsForbidden(t *testing.T) {
 	svc := userconv.New(userconv.Deps{
 		Query: &fakeQuery{messageErr: userconv.ErrForbidden},
-		Turn:  &fakeTurn{},
+		Turn:  &fakeTurn{err: userconv.ErrForbidden},
 		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
 			return common.DeleteConversationsResult{}, nil
 		},

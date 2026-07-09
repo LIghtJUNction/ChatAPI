@@ -26,6 +26,7 @@ import (
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
@@ -86,7 +87,7 @@ func TestRouterWorkspaceWebSocketUpgradeWithSession(t *testing.T) {
 	identityService := identity.NewService(accountService)
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
 	timelineService := timelinesvc.New(st, logFactory.Layer(logging.LayerTurnQuery))
-	workspaceService := workspacesvc.New(queryService, timelineService)
+	workspaceService := workspacesvc.New(queryService, timelineService, nil)
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
@@ -195,10 +196,10 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 	identityService := identity.NewService(accountService)
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
 	timelineService := timelinesvc.New(st, logFactory.Layer(logging.LayerTurnQuery))
-	workspaceService := workspacesvc.New(queryService, timelineService)
-	workspaceHub := workspacesvc.NewHub(workspaceService)
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)
+	workspaceService := workspacesvc.New(queryService, timelineService, nil)
+	workspaceHub := workspacesvc.NewHub(workspaceService)
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
 			Store:    st,
@@ -211,6 +212,10 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 		ActorFromContext:   actor.FromContext,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
+	controlService := controlsvc.New(queryService, turnService, logFactory.Layer(logging.LayerTurnQuery))
+	workspaceService = workspacesvc.New(queryService, timelineService, controlService)
+	workspaceHub = workspacesvc.NewHub(workspaceService)
+	turnService.Submitter.Realtime = workspacesvc.NewRealtimePublisher(workspaceHub)
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 
@@ -378,10 +383,10 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 	identityService := identity.NewService(accountService)
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
 	timelineService := timelinesvc.New(st, logFactory.Layer(logging.LayerTurnQuery))
-	workspaceService := workspacesvc.New(queryService, timelineService)
-	workspaceHub := workspacesvc.NewHub(workspaceService)
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)
+	workspaceService := workspacesvc.New(queryService, timelineService, nil)
+	workspaceHub := workspacesvc.NewHub(workspaceService)
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
 			Store:    st,
@@ -394,6 +399,10 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 		ActorFromContext:   actor.FromContext,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
+	controlService := controlsvc.New(queryService, turnService, logFactory.Layer(logging.LayerTurnQuery))
+	workspaceService = workspacesvc.New(queryService, timelineService, controlService)
+	workspaceHub = workspacesvc.NewHub(workspaceService)
+	turnService.Submitter.Realtime = workspacesvc.NewRealtimePublisher(workspaceHub)
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 
@@ -519,10 +528,10 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 	identityService := identity.NewService(accountService)
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
 	timelineService := timelinesvc.New(st, logFactory.Layer(logging.LayerTurnQuery))
-	workspaceService := workspacesvc.New(queryService, timelineService)
-	workspaceHub := workspacesvc.NewHub(workspaceService)
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)
+	workspaceService := workspacesvc.New(queryService, timelineService, nil)
+	workspaceHub := workspacesvc.NewHub(workspaceService)
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
 			Store:    st,
@@ -535,6 +544,10 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 		ActorFromContext:   actor.FromContext,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
+	controlService := controlsvc.New(queryService, turnService, logFactory.Layer(logging.LayerTurnQuery))
+	workspaceService = workspacesvc.New(queryService, timelineService, controlService)
+	workspaceHub = workspacesvc.NewHub(workspaceService)
+	turnService.Submitter.Realtime = workspacesvc.NewRealtimePublisher(workspaceHub)
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 

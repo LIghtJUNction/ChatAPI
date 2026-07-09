@@ -5,6 +5,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 )
 
 type Service struct{}
@@ -39,7 +40,7 @@ func (s *Service) AbortBody(conversation common.Conversation, reason string) map
 func (s *Service) CompleteBody(conversation common.Conversation, input common.CompletePendingInput, message common.Message) map[string]any {
 	return protocol.BuildResponseForMeta(protocol.ConversationMeta{
 		Protocol:   protocol.ParseProtocol(requestFormatOfConversation(conversation)),
-		Model:      stringValue(conversation.Metadata["model"], "chatapi-lab"),
+		Model:      conversationstate.Model(conversation, "chatapi-lab"),
 		ResponseID: stringValue(conversation.ResponseID, input.ResponseID),
 	}, protocol.TurnResult{
 		ResponseID: stringValue(conversation.ResponseID, input.ResponseID),
@@ -52,7 +53,7 @@ func (s *Service) CompleteBody(conversation common.Conversation, input common.Co
 }
 
 func requestFormatOfConversation(conversation common.Conversation) string {
-	return stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses))
+	return conversationstate.RequestFormat(conversation)
 }
 
 func stringValue(value any, fallback string) string {

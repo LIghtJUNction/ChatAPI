@@ -4,6 +4,9 @@ import { resolveWebSocketUrl } from '../lib/api'
 import type {
   Conversation,
   TimelineItem,
+  WorkspaceCommand,
+  WorkspaceCommandAckEvent,
+  WorkspaceCommandErrorEvent,
   WorkspaceConnectionCountEvent,
   WorkspaceConversationDeleteEvent,
   WorkspaceConversationUpsertEvent,
@@ -45,6 +48,7 @@ export function useWorkspaceRealtime({
   const selectedConversationIdRef = useRef('')
   const socketRef = useRef<WebSocket | null>(null)
   const subscribedConversationIdRef = useRef('')
+  const commandSeqRef = useRef(0)
 
   function resolvePreferredConversationId(items: Conversation[]) {
     const requested = selectedConversationIdRef.current || localStorage.getItem(STORAGE_KEY) || ''
@@ -57,6 +61,18 @@ export function useWorkspaceRealtime({
   function sendJSON(payload: unknown) {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return
     socketRef.current.send(JSON.stringify(payload))
+  }
+
+  function sendWorkspaceCommand(command: Omit<WorkspaceCommand, 'command_id'>) {
+    const commandId = `cmd_${Date.now()}_${(commandSeqRef.current += 1)}`
+    sendJSON({
+      type: 'workspace.command',
+      command: {
+        command_id: commandId,
+        ...command,
+      },
+    })
+    return commandId
   }
 
   function subscribeConversation(conversationId: string) {
@@ -98,7 +114,7 @@ export function useWorkspaceRealtime({
       let changed = false
       const next = { ...prev }
       for (const conversation of conversations) {
-        const draftText = conversation.metadata?.realtime_draft_text
+        const draftText = conversation.draft_text
         if (typeof draftText !== 'string') continue
         if (draftText) {
           if (next[conversation.id] !== draftText) {
@@ -138,6 +154,8 @@ export function useWorkspaceRealtime({
           | WorkspaceConversationDeleteEvent
           | WorkspaceTimelineResetEvent
           | WorkspaceTimelineItemAppendEvent
+          | WorkspaceCommandAckEvent
+          | WorkspaceCommandErrorEvent
           | { type: 'disconnect'; reason?: string }
           | { type: 'workspace.ping' }
         try {
@@ -148,6 +166,8 @@ export function useWorkspaceRealtime({
             | WorkspaceConversationDeleteEvent
             | WorkspaceTimelineResetEvent
             | WorkspaceTimelineItemAppendEvent
+            | WorkspaceCommandAckEvent
+            | WorkspaceCommandErrorEvent
             | { type: 'disconnect'; reason?: string }
             | { type: 'workspace.ping' }
         } catch {
@@ -173,6 +193,10 @@ export function useWorkspaceRealtime({
           return
         }
 
+        if (payload.type === 'workspace.command_ack' || payload.type === 'workspace.command_error') {
+          return
+        }
+
         if (payload.type === 'conversation.upsert') {
           const remaining = conversationsRef.current.filter((item) => item.id !== payload.conversation.id)
           const nextConversations = sortConversations([payload.conversation, ...remaining])
@@ -194,12 +218,6 @@ export function useWorkspaceRealtime({
         }
 
         if (payload.type === 'timeline.append') {
-          setConversations((current) => {
-            const remaining = current.filter((item) => item.id !== payload.conversation.id)
-            const next = sortConversations([payload.conversation, ...remaining])
-            conversationsRef.current = next
-            return next
-          })
           setTimelineByConversation((current) => {
             const existing = current[payload.conversation_id] ?? []
             if (existing.some((item) => item.id === payload.item.id)) {
@@ -266,5 +284,6 @@ export function useWorkspaceRealtime({
 
   return {
     applySelectedConversation,
+    sendWorkspaceCommand,
   }
 }

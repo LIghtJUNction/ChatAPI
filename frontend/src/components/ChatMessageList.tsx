@@ -204,6 +204,7 @@ export function ChatMessageList({
         const isToolCall = message.metadata?.response_mode === 'tool_call'
         const isToolResult = message.metadata?.response_mode === 'tool_result'
         const requestDebug = message.metadata?.request_debug
+        const userRenderableContent = message.content
         const debugSections = [
           {
             label: '请求格式',
@@ -214,8 +215,8 @@ export function ChatMessageList({
           { label: '请求 ID', value: requestDebug?.request_id || '' },
           { label: '响应 ID', value: requestDebug?.response_id || message.response_id || '' },
           { label: '请求 Keys', value: requestDebug?.request_keys?.join(', ') || '' },
-          { label: 'User-Agent', value: requestDebug?.headers?.user_agent || '' },
-          { label: 'Content-Type', value: requestDebug?.headers?.content_type || '' },
+          { label: 'User-Agent', value: requestDebug?.request_headers?.user_agent || '' },
+          { label: 'Content-Type', value: requestDebug?.request_headers?.content_type || '' },
         ].filter((section) => section.value)
         const hasDebugCard =
           isUser &&
@@ -223,7 +224,6 @@ export function ChatMessageList({
           !!(
             debugSections.length ||
             requestDebug?.tool_schemas?.length ||
-            requestDebug?.input_payload != null ||
             requestDebug?.request_body != null
           )
 
@@ -260,8 +260,8 @@ export function ChatMessageList({
             >
               {isToolCall && <div className="message-kind-badge">Tool Call</div>}
               {isToolResult && <div className="message-kind-badge tool-result">Tool Result</div>}
-              <div className="message-content">
-                {renderMessageContent(message.content, {
+                <div className="message-content">
+                {renderMessageContent(userRenderableContent, {
                   onImageClick: (src, detail, alt) => {
                     setPreviewImage({
                       alt: alt ?? 'message image',
@@ -269,7 +269,7 @@ export function ChatMessageList({
                       src,
                     })
                   },
-                })}
+                }, message.content_parts)}
               </div>
               {(isToolCall || isToolResult) && (
                 <div className="message-tool-meta">
@@ -292,19 +292,12 @@ export function ChatMessageList({
                     </div>
                   ))}
                   {(requestDebug?.tool_schemas?.length ||
-                    requestDebug?.input_payload != null ||
                     requestDebug?.request_body != null) && (
                     <AnimatedDisclosure className="message-debug-subcard" title="Debug信息">
                       {requestDebug?.tool_schemas?.length ? (
                         <div className="message-debug-block">
                           <div className="message-debug-label">Tool Schemas</div>
                           <pre>{formatJson(requestDebug.tool_schemas)}</pre>
-                        </div>
-                      ) : null}
-                      {requestDebug?.input_payload != null ? (
-                        <div className="message-debug-block">
-                          <div className="message-debug-label">Input Payload</div>
-                          <pre>{formatJson(requestDebug.input_payload)}</pre>
                         </div>
                       ) : null}
                       {requestDebug?.request_body != null ? (

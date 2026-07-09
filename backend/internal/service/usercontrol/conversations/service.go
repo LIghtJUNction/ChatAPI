@@ -8,6 +8,8 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	"go.uber.org/zap"
@@ -22,7 +24,7 @@ type queryService interface {
 }
 
 type turnService interface {
-	ExecuteTurnControl(context.Context, turnsvc.TurnControlCommand) (map[string]any, error)
+	Execute(context.Context, controlsvc.Command) (controlsvc.Result, error)
 }
 
 type Deps struct {
@@ -71,11 +73,8 @@ func (s *Service) ListConversationMessages(ctx context.Context, ownerID string, 
 }
 
 func (s *Service) AbortConversation(ctx context.Context, ownerID string, conversationID string, abortReason string) (map[string]any, error) {
-	if _, err := s.query.ListMessagesForOwner(ctx, strings.TrimSpace(conversationID), strings.TrimSpace(ownerID)); err != nil {
-		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Warn("usercontrol conversations abort rejected", zap.Error(err))
-		return nil, err
-	}
-	result, err := s.turn.ExecuteTurnControl(ctx, turnsvc.TurnControlCommand{
+	result, err := s.turn.Execute(ctx, controlsvc.Command{
+		OwnerID:        strings.TrimSpace(ownerID),
 		Kind:           turnsvc.TurnControlAbort,
 		ConversationID: strings.TrimSpace(conversationID),
 		AbortReason:    strings.TrimSpace(abortReason),
@@ -83,7 +82,7 @@ func (s *Service) AbortConversation(ctx context.Context, ownerID string, convers
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Info("usercontrol conversations aborted conversation")
 	}
-	return result, err
+	return result.Body, err
 }
 
 func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conversationID string) (common.DeleteConversationsResult, error) {
@@ -95,7 +94,7 @@ func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conver
 	for _, item := range conversations {
 		if item.ID == strings.TrimSpace(conversationID) {
 			found = true
-			if stringValue(item.Metadata["realtime_status"]) == "waiting" {
+			if conversationstate.FromConversation(item).Status == conversationstate.StatusWaiting {
 				logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Warn("usercontrol conversations delete rejected waiting conversation")
 				return common.DeleteConversationsResult{}, ErrWaitingConversationDelete
 			}
@@ -128,7 +127,7 @@ func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCo
 		if idx < keepCount {
 			continue
 		}
-		if stringValue(item.Metadata["realtime_status"]) == "waiting" {
+		if conversationstate.FromConversation(item).Status == conversationstate.StatusWaiting {
 			skipped++
 			continue
 		}
@@ -150,9 +149,4 @@ func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCo
 		zap.Int("skipped_count", skipped),
 	).Info("usercontrol conversations pruned conversations")
 	return result, skipped, nil
-}
-
-func stringValue(value any) string {
-	raw, _ := value.(string)
-	return strings.TrimSpace(raw)
 }

@@ -40,6 +40,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
@@ -64,6 +65,7 @@ type Deps struct {
 	Query          *turnquery.Service
 	ModelAPIKeys   *modelkey.Service
 	Catalog        *catalogsvc.Service
+	Control        *controlsvc.Service
 	Ingress        *ingresssvc.Service
 	Streaming      *streamingsvc.Service
 	Egress         *egresssvc.Service
@@ -126,13 +128,16 @@ func New(deps Deps) http.Handler {
 	router.Use(httpmiddleware.LoadUserSession(sessionrestore.NewService(deps.UserSessions), authLogger))
 	router.Use(httpmiddleware.RequireSessionCSRF(accessPolicy, deps.Policy, authLogger))
 
+	if deps.Control == nil {
+		deps.Control = controlsvc.New(deps.Query, deps.Turn, deps.logger(logging.LayerTurnQuery))
+	}
+	if deps.Workspace == nil {
+		deps.Workspace = workspacesvc.New(deps.Query, firstTimeline(deps.Timeline, deps.ChatRepo), deps.Control)
+	}
+	if deps.WorkspaceHub == nil {
+		deps.WorkspaceHub = workspacesvc.NewHub(deps.Workspace)
+	}
 	if deps.UserControl == nil {
-		if deps.Workspace == nil {
-			deps.Workspace = workspacesvc.New(deps.Query, firstTimeline(deps.Timeline, deps.ChatRepo))
-		}
-		if deps.WorkspaceHub == nil {
-			deps.WorkspaceHub = workspacesvc.NewHub(deps.Workspace)
-		}
 		deps.UserControl = usercontrol.New(usercontrol.Deps{
 			Identity:     deps.Identity,
 			LocalAuth:    deps.LocalAuth,
@@ -140,7 +145,7 @@ func New(deps Deps) http.Handler {
 			TOTP:         deps.TOTP,
 			Policy:       deps.Policy,
 			Query:        deps.Query,
-			Turn:         deps.Turn,
+			Turn:         deps.Control,
 			Configs:      deps.ConfigRepo,
 			Storage:      deps.StorageRepo,
 			Chat:         deps.ChatRepo,
@@ -158,7 +163,7 @@ func New(deps Deps) http.Handler {
 		deps.AdminControl = admincontrol.New(admincontrol.Deps{
 			Accounts:       deps.Accounts,
 			Query:          deps.Query,
-			Turn:           deps.Turn,
+			Control:        deps.Control,
 			ChatStore:      deps.ChatRepo,
 			StorageStore:   deps.StorageRepo,
 			KeyStore:       deps.AuthRepo,
@@ -173,6 +178,16 @@ func New(deps Deps) http.Handler {
 		if deps.Turn.Egress == nil {
 			deps.Turn.Egress = firstEgress(deps.Egress)
 		}
+		if deps.Turn.Submitter != nil {
+			if deps.Turn.Submitter.Materializer == nil {
+				deps.Turn.Submitter.Materializer = &turn.RequestMaterializer{
+					Preprocessor:       preprocesssvc.New(deps.Config),
+					AssetPersister:     localstore.Store{RootDir: deps.Config.MediaDerivedDir},
+					DeletionFailures:   deps.StorageRepo,
+					PreparedImageClean: localstore.Store{RootDir: deps.Config.MediaDerivedDir},
+				}
+			}
+		}
 		if deps.Turn.Submitter != nil && deps.Turn.Submitter.Realtime == nil && deps.WorkspaceHub != nil {
 			deps.Turn.Submitter.Realtime = workspacesvc.NewRealtimePublisher(deps.WorkspaceHub)
 		}
@@ -182,9 +197,10 @@ func New(deps Deps) http.Handler {
 		Turn:      deps.Turn,
 		Query:     deps.Query,
 		Timeline:  firstTimeline(deps.Timeline, deps.ChatRepo),
-		Ingress:   firstIngress(deps.Ingress, preprocesssvc.New(deps.Config, localstore.Store{RootDir: deps.Config.MediaDerivedDir}), deps.Turn),
+		Ingress:   firstIngress(deps.Ingress, deps.Turn),
 		Streaming: firstStreaming(deps.Streaming),
 		Catalog:   firstCatalog(deps.Catalog, deps.ModelAPIKeys),
+		Control:   deps.Control,
 		Egress:    firstEgress(deps.Egress),
 		Logger:    deps.logger(logging.LayerHTTP),
 	}
@@ -221,15 +237,17 @@ func New(deps Deps) http.Handler {
 		Logger:   deps.logger(logging.LayerAudit),
 	}
 	labHandler := httphandler.LabHandler{
-		Config: deps.Config,
-		Query:  deps.Query,
-		Turn:   deps.Turn,
-		Logger: deps.logger(logging.LayerHTTP),
+		Config:  deps.Config,
+		Query:   deps.Query,
+		Turn:    deps.Turn,
+		Control: deps.Control,
+		Logger:  deps.logger(logging.LayerHTTP),
 	}
 	workspaceHandler := httphandler.WorkspaceHandler{
 		Hub:    deps.WorkspaceHub,
 		Logger: deps.logger(logging.LayerHTTP),
 	}
+	uploadHandler := httphandler.UploadHandler{Storage: deps.StorageRepo}
 	healthHandler := httphandler.HealthHandler{Config: deps.Config, Store: deps.PlatformRepo}
 	readinessHandler := httphandler.ReadinessHandler{Service: readiness.NewService(deps.Config, deps.PlatformRepo)}
 	setupHandler := httphandler.SetupHandler{Service: setup.NewService(deps.AuthRepo, deps.Config)}
@@ -255,6 +273,7 @@ func New(deps Deps) http.Handler {
 	router.Get("/api/health", healthHandler.ServeHTTP)
 	router.Get("/api/ready", readinessHandler.ServeHTTP)
 	router.Get("/api/ws", workspaceHandler.ServeWS)
+	router.With(userAuth, userPrincipalAccess).Get("/api/media/assets/{fileID}", uploadHandler.GetImage)
 	router.Get("/api/setup/status", setupHandler.Status)
 	router.Get("/setup", setupHandler.HTML)
 	router.Post("/setup", setupHandler.Create)

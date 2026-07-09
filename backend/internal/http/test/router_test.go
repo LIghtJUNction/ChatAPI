@@ -29,7 +29,7 @@ import (
 
 type noopRealtime struct{}
 
-func (noopRealtime) PublishConversationUpsert(common.Conversation, []common.Message)         {}
+func (noopRealtime) PublishConversationUpsert(common.Conversation)                           {}
 func (noopRealtime) PublishTimelineItemAppend(string, common.Conversation, timelinesvc.Item) {}
 func (noopRealtime) PublishConversationDelete(string, string)                                {}
 

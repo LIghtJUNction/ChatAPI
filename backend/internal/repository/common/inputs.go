@@ -140,7 +140,7 @@ type CreatePendingInput struct {
 	DeveloperContent  string
 	AssistantContent  string
 	UserContent       string
-	InputParts        []RequestInputPart
+	UserMessageContent string
 	RequestMethod     string
 	RequestPath       string
 	RequestQuery      map[string][]string

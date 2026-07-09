@@ -179,7 +179,7 @@ export function ConversationSidebar({
         locale={{ emptyText: <Empty description="暂无会话" /> }}
         renderItem={(item) => {
           const active = item.id === selectedConversationId
-          const realtimeStatus = item.metadata?.realtime_status
+          const realtimeStatus = item.status
           const isWaiting = realtimeStatus === 'waiting'
           const statusColor =
             realtimeStatus === 'waiting'

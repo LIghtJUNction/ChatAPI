@@ -11,6 +11,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	"go.uber.org/zap"
@@ -31,6 +32,11 @@ type ExpireResult struct {
 type TurnIdentity struct {
 	OwnerID   string
 	RequestID string
+}
+
+type SubmitPrincipal struct {
+	OwnerID string
+	Actor   actor.Actor
 }
 
 type Service struct {
@@ -88,12 +94,12 @@ func (c TurnControlCommand) Validate() error {
 }
 
 func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) (map[string]any, error) {
-	ownerID := s.ownerID(ctx)
-	if err := s.ensureAdmissions(ctx, ownerID); err != nil {
+	principal := s.submitPrincipal(ctx)
+	if err := s.ensureAdmissions(ctx, principal.OwnerID); err != nil {
 		return nil, err
 	}
-	input.OwnerID = ownerID
-	input.Actor = s.actor(ctx)
+	input.OwnerID = principal.OwnerID
+	input.Actor = principal.Actor
 	if target, err := s.resolveTarget(ctx, input); err != nil {
 		return nil, err
 	} else {
@@ -101,11 +107,11 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 	}
 	turn, _, _, err := s.Submitter.Submit(ctx, input)
 	if err != nil {
-		logging.BindContext(s.Logger, ctx, zap.String("owner.id", ownerID)).Error("create pending response submit failed", zap.Error(err))
+		logging.BindContext(s.Logger, ctx, zap.String("owner.id", principal.OwnerID)).Error("create pending response submit failed", zap.Error(err))
 		return nil, err
 	}
 	logging.BindContext(s.Logger, ctx,
-		zap.String("owner.id", ownerID),
+		zap.String("owner.id", principal.OwnerID),
 		zap.String("conversation.id", turn.ConversationID),
 		zap.String("request.id", turn.RequestID),
 	).Info("pending response created")
@@ -116,7 +122,7 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 			_ = s.disconnectPendingRequest(context.Background(), turn.ConversationID, TurnIdentity{RequestID: turn.RequestID, OwnerID: turn.OwnerID}, "request disconnected", "request_disconnected", "Request Disconnected")
 		}
 		logging.BindContext(s.Logger, ctx,
-			zap.String("owner.id", ownerID),
+			zap.String("owner.id", principal.OwnerID),
 			zap.String("conversation.id", turn.ConversationID),
 			zap.String("request.id", turn.RequestID),
 		).Warn("pending response wait interrupted", zap.Error(err))
@@ -126,12 +132,12 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 }
 
 func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*PendingTurn, common.Conversation, error) {
-	ownerID := s.ownerID(ctx)
-	if err := s.ensureAdmissions(ctx, ownerID); err != nil {
+	principal := s.submitPrincipal(ctx)
+	if err := s.ensureAdmissions(ctx, principal.OwnerID); err != nil {
 		return nil, common.Conversation{}, err
 	}
-	input.OwnerID = ownerID
-	input.Actor = s.actor(ctx)
+	input.OwnerID = principal.OwnerID
+	input.Actor = principal.Actor
 	if target, err := s.resolveTarget(ctx, input); err != nil {
 		return nil, common.Conversation{}, err
 	} else {
@@ -139,11 +145,11 @@ func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*
 	}
 	turn, conversation, _, err := s.Submitter.Submit(ctx, input)
 	if err != nil {
-		logging.BindContext(s.Logger, ctx, zap.String("owner.id", ownerID)).Error("create pending stream submit failed", zap.Error(err))
+		logging.BindContext(s.Logger, ctx, zap.String("owner.id", principal.OwnerID)).Error("create pending stream submit failed", zap.Error(err))
 		return nil, common.Conversation{}, err
 	}
 	logging.BindContext(s.Logger, ctx,
-		zap.String("owner.id", ownerID),
+		zap.String("owner.id", principal.OwnerID),
 		zap.String("conversation.id", conversation.ID),
 		zap.String("request.id", turn.RequestID),
 	).Info("pending stream created")
@@ -158,8 +164,7 @@ func (s *Service) DisconnectRecoveredPending(ctx context.Context, reason string)
 	}
 	result := ExpireResult{}
 	for _, item := range items {
-		status := strings.TrimSpace(stringValue(item.Metadata["realtime_status"], ""))
-		if status != "waiting" && status != "streaming" {
+		if !conversationstate.IsPendingStatus(conversationstate.FromConversation(item).Status) {
 			continue
 		}
 		identity, resolveErr := s.resolveStoredTurnIdentity(ctx, item.ID)
@@ -185,8 +190,7 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		s.Pending.RevertFinalize(conversationID, previousState)
 		return nil, err
 	}
-	metadata := conversation.Metadata
-	existing, _ := metadata["realtime_draft_text"].(string)
+	existing := conversationstate.FromConversation(conversation).DraftText
 	nextDraft := existing + chunk
 	updated, err := s.Store.UpdateDraft(ctx, common.UpdateDraftInput{
 		ConversationID: conversationID,
@@ -197,7 +201,7 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		return nil, err
 	}
 	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "delta", DeltaText: chunk})
-	s.Submitter.Realtime.PublishConversationUpsert(updated, nil)
+	s.Submitter.Realtime.PublishConversationUpsert(updated)
 	s.notifyText(ctx, s.ownerID(ctx), updated.Title, chunk)
 	return map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}, nil
 }
@@ -212,12 +216,7 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 		s.Pending.RevertFinalize(input.ConversationID, previousState)
 		return nil, err
 	}
-	messages, err := s.Store.ListMessages(ctx, input.ConversationID)
-	if err == nil {
-		s.Submitter.Realtime.PublishConversationUpsert(conversation, messages)
-	} else {
-		s.Submitter.Realtime.PublishConversationUpsert(conversation, []common.Message{message})
-	}
+	s.Submitter.Realtime.PublishConversationUpsert(conversation)
 	responseBody := s.egress().CompleteBody(conversation, input, message)
 	_ = s.Pending.Publish(input.ConversationID, PendingEvent{
 		Type:         "complete",
@@ -277,7 +276,7 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 	logging.BindContext(s.Logger, ctx,
 		zap.String("owner.id", identity.OwnerID),
 		zap.String("conversation.id", conversationID),
-		zap.String("request.format", stringValue(conversation.Metadata["request_format"], "responses")),
+		zap.String("request.format", conversationstate.RequestFormat(conversation)),
 		zap.String("turn.action", "abort"),
 	).Info("turn aborted conversation")
 	return s.Pending.Abort(conversationID, body)
@@ -378,6 +377,13 @@ func (s *Service) actor(ctx context.Context) actor.Actor {
 	return value
 }
 
+func (s *Service) submitPrincipal(ctx context.Context) SubmitPrincipal {
+	return SubmitPrincipal{
+		OwnerID: strings.TrimSpace(s.ownerID(ctx)),
+		Actor:   s.actor(ctx),
+	}
+}
+
 func (s *Service) notifyText(ctx context.Context, ownerID string, title string, text string) {
 	if s.NotifyText != nil {
 		s.NotifyText(ctx, ownerID, title, text)
@@ -422,7 +428,6 @@ func (s *Service) resolveTarget(ctx context.Context, input SubmitInput) (SubmitT
 	target, err := s.Resolver.Resolve(ctx, conversationresolve.ResolveInput{
 		OwnerID: input.OwnerID,
 		Request: input.Request,
-		RawBody: input.RawBody,
 	})
 	if err != nil {
 		return SubmitTarget{}, err
@@ -513,19 +518,14 @@ func (s *Service) publishConversationState(ctx context.Context, conversationID s
 	if err != nil {
 		return
 	}
-	messages, err := s.Store.ListMessages(ctx, conversationID)
-	if err != nil {
-		s.Submitter.Realtime.PublishConversationUpsert(conversation, nil)
-		return
-	}
-	s.Submitter.Realtime.PublishConversationUpsert(conversation, messages)
+	s.Submitter.Realtime.PublishConversationUpsert(conversation)
 }
 
 func (s *Service) publishTimelineEvent(conversation common.Conversation, event common.ConversationEvent) {
 	if s == nil || s.Submitter == nil || s.Submitter.Realtime == nil {
 		return
 	}
-	ownerID := strings.TrimSpace(stringValue(conversation.Metadata["owner_id"], ""))
+	ownerID := conversationstate.OwnerID(conversation)
 	if ownerID == "" {
 		return
 	}
@@ -541,7 +541,7 @@ func (s *Service) publishMessageTimelineItem(conversation common.Conversation, m
 	if s == nil || s.Submitter == nil || s.Submitter.Realtime == nil {
 		return
 	}
-	ownerID := strings.TrimSpace(stringValue(conversation.Metadata["owner_id"], ""))
+	ownerID := conversationstate.OwnerID(conversation)
 	if ownerID == "" {
 		return
 	}

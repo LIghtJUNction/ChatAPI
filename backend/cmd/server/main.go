@@ -137,9 +137,8 @@ func run() error {
 	pendingRegistry := pendingsvc.NewPendingRegistry()
 	pendingRegistry.Logger = logFactory.Layer(logging.LayerPending)
 	submitter := &turnsvc.Submitter{
-		Store:              store,
-		Pending:            pendingRegistry,
-		PreparedImageClean: nil,
+		Store:   store,
+		Pending: pendingRegistry,
 	}
 	turnService := &turnsvc.Service{
 		Submitter: submitter,

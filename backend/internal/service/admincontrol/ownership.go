@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 )
 
 func (s *Service) TransferOwnership(ctx context.Context, sourceUserID string, targetUserID string) (common.UserOwnershipTransferResult, error) {
@@ -25,7 +26,7 @@ func (s *Service) OwnershipItems(ctx context.Context, userID string) (common.Use
 	}
 	filteredConversations := make([]common.UserOwnedConversationItem, 0)
 	for _, item := range conversations {
-		if stringValue(item.Metadata["owner_id"], "") == user.ID {
+		if conversationstate.OwnerID(item) == user.ID {
 			filteredConversations = append(filteredConversations, common.UserOwnedConversationItem{
 				ConversationID: item.ID,
 				Title:          item.Title,
@@ -48,11 +49,4 @@ func (s *Service) OwnershipItems(ctx context.Context, userID string) (common.Use
 		})
 	}
 	return common.UserOwnershipSelection{User: user, Conversations: filteredConversations, Uploads: filteredUploads}, nil
-}
-
-func stringValue(value any, fallback string) string {
-	if raw, ok := value.(string); ok && raw != "" {
-		return raw
-	}
-	return fallback
 }

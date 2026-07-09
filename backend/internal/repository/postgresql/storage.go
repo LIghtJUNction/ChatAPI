@@ -121,6 +121,19 @@ func (s *Store) ListMediaAssets(ctx context.Context) ([]common.MediaAsset, error
 	return items, rows.Err()
 }
 
+func (s *Store) GetMediaAssetByFileID(ctx context.Context, fileID string) (common.MediaAsset, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
+		FROM media_assets
+		WHERE file_id = $1
+	`, strings.TrimSpace(fileID))
+	item, err := scanMediaAsset(row)
+	if err != nil {
+		return common.MediaAsset{}, err
+	}
+	return item, nil
+}
+
 func (s *Store) ListOrphanMediaAssets(ctx context.Context) ([]common.MediaAsset, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT a.id, a.owner_id, a.file_id, a.path, a.media_type, a.bytes, a.sha256, a.width, a.height, a.source_kind, a.original_name, a.original_media_type, a.created_at

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,14 +11,13 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/http/httpx"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
-	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
+	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
-	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
@@ -33,6 +31,7 @@ type ChatAPIHandler struct {
 	Ingress   *ingresssvc.Service
 	Streaming *streamingsvc.Service
 	Catalog   *catalogsvc.Service
+	Control   *controlsvc.Service
 	Egress    *egresssvc.Service
 	Logger    *zap.Logger
 }
@@ -109,7 +108,7 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 		return
 	}
 	requestMeta := httpx.CaptureRequestMeta(r)
-	parsedReq, err := h.Ingress.Parse(r.Context(), ownerIDForPreprocess(r.Context()), requestFormat, body, requestMeta)
+	parsedReq, err := h.Ingress.Parse(r.Context(), requestFormat, body, requestMeta)
 	if err != nil {
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("protocol ingress failed", zap.Error(err))
 		httpx.WriteJSON(w, h.egress().ErrorStatus(err), h.egress().ErrorBody(requestFormat, err))
@@ -185,94 +184,56 @@ func (h ChatAPIHandler) executeTurnControl(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if principal, ok := appkey.PrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
-		if _, err := h.Query.ListMessagesForOwner(r.Context(), command.ConversationID, principal.UserID); err != nil {
-			status := http.StatusNotFound
-			if errors.Is(err, turnquerysvc.ErrForbidden) {
-				status = http.StatusForbidden
-			}
-			logging.BindContext(h.Logger, r.Context(),
-				zap.String("turn.control", string(kind)),
-				zap.String("conversation.id", command.ConversationID),
-				zap.Int("http.status_code", status),
-			).Warn("turn control owner check failed")
-			http.Error(w, err.Error(), status)
-			return
-		}
-	}
-	if principal, ok := session.PrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
-		if _, err := h.Query.ListMessagesForOwner(r.Context(), command.ConversationID, principal.UserID); err != nil {
-			status := http.StatusNotFound
-			if errors.Is(err, turnquerysvc.ErrForbidden) {
-				status = http.StatusForbidden
-			}
-			logging.BindContext(h.Logger, r.Context(),
-				zap.String("turn.control", string(kind)),
-				zap.String("conversation.id", command.ConversationID),
-				zap.Int("http.status_code", status),
-			).Warn("session turn control owner check failed")
-			http.Error(w, err.Error(), status)
-			return
-		}
-	}
-	result, err := h.Turn.ExecuteTurnControl(r.Context(), command)
+	command.OwnerID = ownerIDFromControlContext(r)
+	result, err := h.control().Execute(r.Context(), command)
 	if err != nil {
-		switch {
-		case errors.Is(err, pendingsvc.ErrPendingConflict), errors.Is(err, common.ErrTurnConflict):
-			logging.BindContext(h.Logger, r.Context(),
-				zap.String("turn.control", string(kind)),
-				zap.String("conversation.id", command.ConversationID),
-			).Warn("turn control conflict")
-			http.Error(w, err.Error(), http.StatusConflict)
-		case errors.Is(err, pendingsvc.ErrPendingNotFound):
-			logging.BindContext(h.Logger, r.Context(),
-				zap.String("turn.control", string(kind)),
-				zap.String("conversation.id", command.ConversationID),
-			).Warn("turn control target not found")
-			http.Error(w, err.Error(), http.StatusNotFound)
-		default:
-			logging.BindContext(h.Logger, r.Context(),
-				zap.String("turn.control", string(kind)),
-				zap.String("conversation.id", command.ConversationID),
-			).Error("turn control failed", zap.Error(err))
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		if writeControlError(w, err) {
+			return
 		}
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]any{"error": map[string]any{"code": "turn_control_failed", "message": err.Error()}})
 		return
 	}
 	logging.BindContext(h.Logger, r.Context(),
 		zap.String("turn.control", string(kind)),
 		zap.String("conversation.id", command.ConversationID),
 	).Info("turn control executed")
-	httpx.WriteJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusOK, result.Body)
 }
 
-func buildTurnControlCommand(kind turnsvc.TurnControlKind, body map[string]any) (turnsvc.TurnControlCommand, error) {
+func (h ChatAPIHandler) control() *controlsvc.Service {
+	if h.Control != nil {
+		return h.Control
+	}
+	return controlsvc.New(h.Query, h.Turn, h.Logger)
+}
+
+func ownerIDFromControlContext(r *http.Request) string {
+	if principal, ok := appkey.PrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
+		return strings.TrimSpace(principal.UserID)
+	}
+	if principal, ok := session.PrincipalFromContext(r.Context()); ok && strings.TrimSpace(principal.UserID) != "" {
+		return strings.TrimSpace(principal.UserID)
+	}
+	return ""
+}
+
+func buildTurnControlCommand(kind turnsvc.TurnControlKind, body map[string]any) (controlsvc.Command, error) {
 	conversationID, err := mustConversationID(body)
 	if err != nil {
-		return turnsvc.TurnControlCommand{}, err
+		return controlsvc.Command{}, err
 	}
-	return turnsvc.TurnControlCommand{
+	return controlsvc.Command{
 		Kind:                kind,
 		ConversationID:      conversationID,
 		ResponseID:          stringValue(body["response_id"], ""),
 		OutputText:          stringValue(body["text"], ""),
-		Mode:                stringValue(body["mode"], "assistant_message"),
+		Mode:                stringValue(body["mode"], ""),
 		ToolName:            stringValue(body["tool_name"], ""),
 		ToolCallID:          stringValue(body["tool_call_id"], ""),
-		ToolOutput:          stringValue(body["output"], stringValue(body["text"], "")),
+		ToolOutput:          stringValue(body["output"], ""),
 		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
 		AbortReason:         stringValue(body["error"], ""),
 	}, nil
-}
-
-func ownerIDForPreprocess(ctx context.Context) string {
-	if principal, ok := appkey.PrincipalFromContext(ctx); ok && strings.TrimSpace(principal.UserID) != "" {
-		return strings.TrimSpace(principal.UserID)
-	}
-	if principal, ok := session.PrincipalFromContext(ctx); ok && strings.TrimSpace(principal.UserID) != "" {
-		return strings.TrimSpace(principal.UserID)
-	}
-	return ""
 }
 
 func mustConversationID(input map[string]any) (string, error) {

@@ -2,14 +2,15 @@ package turn
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
-	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 )
 
@@ -23,12 +24,8 @@ type PendingRegistrar interface {
 }
 
 type RealtimePublisher interface {
-	PublishConversationUpsert(common.Conversation, []common.Message)
+	PublishConversationUpsert(common.Conversation)
 	PublishTimelineItemAppend(string, common.Conversation, timelinesvc.Item)
-}
-
-type PreparedImageCleaner interface {
-	DeletePreparedImage(context.Context, string) error
 }
 
 type SubmitHooks struct {
@@ -37,14 +34,22 @@ type SubmitHooks struct {
 }
 
 type Submitter struct {
-	Store              Store
-	Pending            PendingRegistrar
-	Realtime           RealtimePublisher
-	Hooks              SubmitHooks
-	PreparedImageClean PreparedImageCleaner
+	Store        Store
+	Pending      PendingRegistrar
+	Realtime     RealtimePublisher
+	Hooks        SubmitHooks
+	Materializer *RequestMaterializer
 }
 
 func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn, common.Conversation, common.Message, error) {
+	materialized, err := s.materializeRequest(ctx, input.OwnerID, input.Request)
+	if err != nil {
+		return nil, common.Conversation{}, common.Message{}, err
+	}
+	input.Request = materialized.Request
+	input.PreparedImages = materialized.PreparedImages
+	input.RequestBody = materialized.RequestBody
+
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
 	conversationID := input.Target.ConversationID
@@ -53,25 +58,25 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	}
 
 	conversation, message, err := s.Store.CreatePendingTurn(ctx, common.CreatePendingInput{
-		ConversationID:    conversationID,
-		RequestID:         requestID,
-		ResponseID:        responseID,
-		OwnerID:           input.OwnerID,
-		ReuseConversation: input.Target.Reuse,
-		RequestFormat:     input.Request.Protocol.String(),
-		Model:             input.Request.Model,
-		SystemContent:     input.Request.SystemContent,
-		DeveloperContent:  input.Request.DeveloperContent,
-		AssistantContent:  input.Request.AssistantContent,
-		UserContent:       input.Request.UserContent,
-		InputParts:        toStoreInputParts(input.Request.InputParts),
-		RequestMethod:     input.RequestMeta.RequestMethod,
-		RequestPath:       input.RequestMeta.RequestPath,
-		RequestQuery:      input.RequestMeta.RequestQuery,
-		RequestHeaders:    input.RequestMeta.RequestHeaders,
-		RequestBody:       input.RawBody,
-		ToolSchemas:       protocol.RawToolSchemas(input.Request.ToolSchemas),
-		ToolChoice:        common.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
+		ConversationID:     conversationID,
+		RequestID:          requestID,
+		ResponseID:         responseID,
+		OwnerID:            input.OwnerID,
+		ReuseConversation:  input.Target.Reuse,
+		RequestFormat:      input.Request.Protocol.String(),
+		Model:              input.Request.Model,
+		SystemContent:      input.Request.SystemContent,
+		DeveloperContent:   input.Request.DeveloperContent,
+		AssistantContent:   input.Request.AssistantContent,
+		UserContent:        input.Request.UserContent,
+		UserMessageContent: buildUserMessageContent(input.Request),
+		RequestMethod:      input.RequestMeta.RequestMethod,
+		RequestPath:        input.RequestMeta.RequestPath,
+		RequestQuery:       input.RequestMeta.RequestQuery,
+		RequestHeaders:     input.RequestMeta.RequestHeaders,
+		RequestBody:        input.RequestBody,
+		ToolSchemas:        protocol.RawToolSchemas(input.Request.ToolSchemas),
+		ToolChoice:         common.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
 		ResponseFormat: common.RequestResponseFormat{
 			Type:   input.Request.ResponseFormat.Type,
 			Name:   input.Request.ResponseFormat.Name,
@@ -89,7 +94,7 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		ConversationID:    conversationID,
 		ResponseID:        responseID,
 		OwnerID:           input.OwnerID,
-		ToolCallIDs:       extractSubmitToolCallIDs(input.RawBody),
+		ToolCallIDs:       extractSubmitToolCallIDs(input.Request),
 		Actor:             input.Actor,
 		RequestFormat:     input.Request.Protocol.String(),
 		Model:             input.Request.Model,
@@ -100,7 +105,7 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		Done:              make(chan PendingResult, 1),
 	}
 	s.Pending.Add(turn)
-	s.Realtime.PublishConversationUpsert(conversation, []common.Message{message})
+	s.Realtime.PublishConversationUpsert(conversation)
 	s.Realtime.PublishTimelineItemAppend(input.OwnerID, conversation, timelinesvc.Item{
 		ID:        "msg:" + message.ID,
 		Kind:      "message",
@@ -118,42 +123,37 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	return turn, conversation, message, nil
 }
 
-func extractSubmitToolCallIDs(body map[string]any) []string {
-	seen := map[string]struct{}{}
-	var ids []string
-	var visit func(any)
-	visit = func(value any) {
-		switch typed := value.(type) {
-		case map[string]any:
-			for _, key := range []string{"tool_call_id", "call_id", "tool_use_id"} {
-				if id := strings.TrimSpace(rawStringValue(typed[key], "")); id != "" {
-					if _, ok := seen[id]; !ok {
-						seen[id] = struct{}{}
-						ids = append(ids, id)
-					}
-				}
-			}
-			for _, item := range typed {
-				visit(item)
-			}
-		case []any:
-			for _, item := range typed {
-				visit(item)
-			}
-		}
+func (s *Submitter) materializeRequest(ctx context.Context, ownerID string, request protocol.TurnRequest) (MaterializedRequest, error) {
+	if s == nil || s.Materializer == nil {
+		return MaterializedRequest{
+			Request:     request,
+			RequestBody: protocol.BuildRequestBody(request),
+		}, nil
 	}
-	visit(body)
+	return s.Materializer.Materialize(ctx, ownerID, request)
+}
+
+func extractSubmitToolCallIDs(request protocol.TurnRequest) []string {
+	seen := map[string]struct{}{}
+	ids := make([]string, 0)
+	for _, part := range request.InputParts {
+		if part.ToolCallID == "" {
+			continue
+		}
+		id := strings.TrimSpace(part.ToolCallID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
 	return ids
 }
 
-func rawStringValue(value any, fallback string) string {
-	if raw, ok := value.(string); ok {
-		return raw
-	}
-	return fallback
-}
-
-func toCreatePendingImageAssets(images []preprocesssvc.PreparedImage) []common.CreatePendingImageAssetInput {
+func toCreatePendingImageAssets(images []media.DraftAsset) []common.CreatePendingImageAssetInput {
 	if len(images) == 0 {
 		return nil
 	}
@@ -176,27 +176,58 @@ func toCreatePendingImageAssets(images []preprocesssvc.PreparedImage) []common.C
 	return items
 }
 
-func (s *Submitter) cleanupPreparedImages(ctx context.Context, images []preprocesssvc.PreparedImage) {
-	if s.PreparedImageClean == nil {
+func (s *Submitter) cleanupPreparedImages(ctx context.Context, images []media.DraftAsset) {
+	if s == nil || s.Materializer == nil {
 		return
 	}
-	for _, image := range images {
-		_ = s.PreparedImageClean.DeletePreparedImage(ctx, image.Path)
-	}
+	s.Materializer.Cleanup(ctx, images)
 }
 
-func toStoreInputParts(parts []protocol.InputPart) []common.RequestInputPart {
-	if len(parts) == 0 {
-		return nil
+func buildUserMessageContent(request protocol.TurnRequest) string {
+	body := protocol.BuildRequestBody(request)
+	switch request.Protocol {
+	case protocol.ProtocolChatCompletions:
+		if messages, ok := body["messages"].([]any); ok {
+			for idx := len(messages) - 1; idx >= 0; idx-- {
+				record, ok := messages[idx].(map[string]any)
+				if !ok || strings.TrimSpace(rawStringValue(record["role"], "")) != "user" {
+					continue
+				}
+				return marshalJSON(record["content"])
+			}
+		}
+	case protocol.ProtocolAnthropicMessages:
+		if messages, ok := body["messages"].([]any); ok {
+			for idx := len(messages) - 1; idx >= 0; idx-- {
+				record, ok := messages[idx].(map[string]any)
+				if !ok || strings.TrimSpace(rawStringValue(record["role"], "")) != "user" {
+					continue
+				}
+				return marshalJSON(record["content"])
+			}
+		}
+	default:
+		if input, ok := body["input"].([]any); ok {
+			return marshalJSON(input)
+		}
 	}
-	items := make([]common.RequestInputPart, 0, len(parts))
-	for _, item := range parts {
-		items = append(items, common.RequestInputPart{
-			Type:      item.Type,
-			Text:      item.Text,
-			MediaType: item.MediaType,
-			URL:       item.URL,
-		})
+	return request.UserContent
+}
+
+func rawStringValue(value any, fallback string) string {
+	if raw, ok := value.(string); ok {
+		return raw
 	}
-	return items
+	return fallback
+}
+
+func marshalJSON(value any) string {
+	if value == nil {
+		return ""
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }

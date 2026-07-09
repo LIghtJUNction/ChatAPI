@@ -1,6 +1,7 @@
 import type {
   JsonSchema,
   MessageItem,
+  TimelineMessageContentPart,
   ToolFieldValue,
   ToolSchemaOption,
 } from '../types/chat'
@@ -154,7 +155,7 @@ export function normalizeToolFieldValue(value: unknown, schema?: JsonSchema) {
 }
 
 function isHostedImageUrl(value: string): boolean {
-  return /^(?:https?:\/\/[^/]+)?\/api\/uploads\/imgs\/[A-Za-z0-9._-]+(?:\?.*)?$/i.test(
+  return /^(?:https?:\/\/[^/]+)?\/api\/media\/assets\/[A-Za-z0-9._-]+(?:\?.*)?$/i.test(
     value.trim(),
   )
 }
@@ -168,7 +169,7 @@ function tryParseStructuredContent(rawContent: string): unknown {
     return JSON.parse(rawContent)
   } catch {
     // Some mock payloads use Python repr style:
-    // [{'type': 'input_image', 'image_url': '/api/uploads/imgs/...'}]
+    // [{'type': 'input_image', 'image_url': '/api/media/assets/...'}]
   }
 
   const trimmed = rawContent.trim()
@@ -317,9 +318,20 @@ function parseRenderableContent(rawContent: string): RenderableContentPart[] {
 export function renderMessageContent(
   rawContent: string,
   options: RenderMessageContentOptions = {},
+  contentParts?: TimelineMessageContentPart[],
 ) {
   const { onImageClick } = options
-  const parts = parseRenderableContent(rawContent)
+  const parts = Array.isArray(contentParts) && contentParts.length > 0
+    ? contentParts.flatMap((part) => {
+        if (part.type === 'image' && part.src) {
+          return [{ type: 'image', src: part.src, detail: part.media_type } satisfies RenderableContentPart]
+        }
+        if (part.type === 'text' && part.text) {
+          return splitThinkingBlocks(part.text)
+        }
+        return []
+      })
+    : parseRenderableContent(rawContent)
   if (parts.length === 0) return null
 
   const nodes: React.ReactNode[] = []

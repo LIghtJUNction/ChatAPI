@@ -7,6 +7,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
 
@@ -97,8 +98,8 @@ func conversationMeta(conversation common.Conversation, fallbackModel string) pr
 		fallbackModel = "chatapi-lab"
 	}
 	return protocol.ConversationMeta{
-		Protocol:   protocol.ParseProtocol(stringValue(conversation.Metadata["request_format"], string(protocol.ProtocolResponses))),
-		Model:      stringValue(conversation.Metadata["model"], fallbackModel),
+		Protocol:   protocol.ParseProtocol(conversationstate.RequestFormat(conversation)),
+		Model:      conversationstate.Model(conversation, fallbackModel),
 		ResponseID: stringValue(conversation.ResponseID, ""),
 	}
 }

@@ -60,7 +60,6 @@ type Request struct {
 	DeveloperText  string                `json:"developer_text,omitempty"`
 	AssistantText  string                `json:"assistant_text,omitempty"`
 	InputText      string                `json:"input_text,omitempty"`
-	InputParts     []RequestInputPart    `json:"input_parts,omitempty"`
 	Status         string                `json:"status,omitempty"`
 	CreatedAt      time.Time             `json:"created_at"`
 	UpdatedAt      time.Time             `json:"updated_at"`
@@ -73,13 +72,6 @@ type Request struct {
 	ToolChoice     RequestToolChoice     `json:"tool_choice,omitempty"`
 	ResponseFormat RequestResponseFormat `json:"response_format,omitempty"`
 	Metadata       map[string]any        `json:"metadata,omitempty"`
-}
-
-type RequestInputPart struct {
-	Type      string `json:"type,omitempty"`
-	Text      string `json:"text,omitempty"`
-	MediaType string `json:"media_type,omitempty"`
-	URL       string `json:"url,omitempty"`
 }
 
 type RequestToolChoice struct {

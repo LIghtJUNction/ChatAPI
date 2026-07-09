@@ -52,7 +52,13 @@ func extractResponsesTurnInputParts(input []any) []InputPart {
 		case "user":
 			parts = append(parts, extractPartsFromMessageContent(record["content"])...)
 		case "tool":
-			parts = append(parts, extractToolResultParts(record["content"])...)
+			toolParts := extractToolResultParts(record["content"])
+			for idx := range toolParts {
+				if toolParts[idx].Type == "tool_result" {
+					toolParts[idx].ToolCallID = stringValue(record["tool_call_id"], "")
+				}
+			}
+			parts = append(parts, toolParts...)
 		}
 	}
 	return parts

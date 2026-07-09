@@ -118,3 +118,12 @@ func stringValue(value string, fallback string) string {
 	}
 	return strings.TrimSpace(value)
 }
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}

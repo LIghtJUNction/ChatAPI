@@ -132,6 +132,9 @@ func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 			ToolName:            stringValue(commandRaw["tool_name"], ""),
 			ToolCallID:          stringValue(commandRaw["tool_call_id"], ""),
 			Output:              stringValue(commandRaw["output"], ""),
+			BuiltinToolKind:     stringValue(commandRaw["builtin_tool_kind"], ""),
+			BuiltinToolQuery:    stringValue(commandRaw["builtin_tool_query"], ""),
+			BuiltinToolResult:   stringValue(commandRaw["builtin_tool_result"], ""),
 			ReasoningStreamMode: stringValue(commandRaw["reasoning_stream_mode"], ""),
 			Error:               stringValue(commandRaw["error"], ""),
 		}
@@ -298,16 +301,21 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 	}
 	kind := turnsvc.TurnControlKind(strings.TrimSpace(command.Kind))
 	_, err := s.turn.Execute(ctx, controlsvc.Command{
-		OwnerID:             strings.TrimSpace(ownerID),
-		Kind:                kind,
-		ConversationID:      strings.TrimSpace(command.ConversationID),
-		OutputText:          command.Text,
-		Mode:                strings.TrimSpace(command.Mode),
-		ToolName:            strings.TrimSpace(command.ToolName),
-		ToolCallID:          strings.TrimSpace(command.ToolCallID),
-		ToolOutput:          command.Output,
-		ReasoningStreamMode: strings.TrimSpace(command.ReasoningStreamMode),
-		AbortReason:         strings.TrimSpace(command.Error),
+		OwnerID:        strings.TrimSpace(ownerID),
+		ConversationID: strings.TrimSpace(command.ConversationID),
+		Action: turnsvc.OutputAction{
+			Kind:                kind,
+			OutputText:          command.Text,
+			Mode:                strings.TrimSpace(command.Mode),
+			ToolName:            strings.TrimSpace(command.ToolName),
+			ToolCallID:          strings.TrimSpace(command.ToolCallID),
+			ToolOutput:          command.Output,
+			BuiltinToolKind:     strings.TrimSpace(command.BuiltinToolKind),
+			BuiltinToolQuery:    strings.TrimSpace(command.BuiltinToolQuery),
+			BuiltinToolResult:   strings.TrimSpace(command.BuiltinToolResult),
+			ReasoningStreamMode: strings.TrimSpace(command.ReasoningStreamMode),
+			AbortReason:         strings.TrimSpace(command.Error),
+		},
 	})
 	if err != nil {
 		return CommandAck{}, err

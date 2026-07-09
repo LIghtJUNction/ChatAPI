@@ -77,13 +77,23 @@ func buildResponsesRequestBody(request TurnRequest) map[string]any {
 	if request.ConversationID != "" {
 		body["conversation_id"] = request.ConversationID
 	}
-	if len(request.ToolSchemas) > 0 {
-		body["tools"] = RawToolSchemas(request.ToolSchemas)
+	if tools := buildResponsesTools(request); len(tools) > 0 {
+		body["tools"] = tools
 	}
 	if toolChoice := buildToolChoiceBody(request.ToolChoice); toolChoice != nil {
 		body["tool_choice"] = toolChoice
 	}
 	return body
+}
+
+func buildResponsesTools(request TurnRequest) []any {
+	tools := make([]any, 0, len(request.ToolSchemas)+len(request.BuiltinTools))
+	tools = append(tools, RawToolSchemas(request.ToolSchemas)...)
+	tools = append(tools, RawBuiltinTools(request.BuiltinTools)...)
+	if len(tools) == 0 {
+		return nil
+	}
+	return tools
 }
 
 func buildChatCompletionsRequestBody(request TurnRequest) map[string]any {

@@ -136,6 +136,7 @@ export type MessageItem = {
       request_keys?: string[]
       input_text?: string
       tool_schemas?: unknown[]
+      builtin_tools?: BuiltinToolOption[]
       option_chips?: OptionChip[]
       request_body?: unknown
       raw_request_body?: unknown
@@ -214,8 +215,15 @@ export type ToolSchemaOption = {
   parameters: JsonSchema
 }
 
+export type BuiltinToolOption = {
+  kind: 'web_search' | 'image_generation' | string
+  type?: string
+  label?: string
+  raw?: Record<string, unknown>
+}
+
 export type ToolFieldValue = string | number | boolean
-export type ComposerMode = 'assistant_message' | 'thinking' | 'tool_call'
+export type ComposerMode = 'assistant_message' | 'thinking' | 'tool_call' | 'builtin_tool'
 export type ReasoningStreamMode = 'summery' | 'reasoning'
 export type VisibleMessage = MessageItem & { draft?: boolean }
 export type VisibleTimelineDraftItem = {
@@ -359,13 +367,16 @@ export type WorkspaceConnectionCountEvent = {
 
 export type WorkspaceCommand = {
   command_id: string
-  kind: 'stream_delta' | 'stream_complete' | 'abort' | string
+  kind: 'stream_delta' | 'stream_complete' | 'abort' | 'builtin_tool' | string
   conversation_id: string
   text?: string
   mode?: string
   tool_name?: string
   tool_call_id?: string
   output?: string
+  builtin_tool_kind?: string
+  builtin_tool_query?: string
+  builtin_tool_result?: string
   reasoning_stream_mode?: string
   error?: string
 }

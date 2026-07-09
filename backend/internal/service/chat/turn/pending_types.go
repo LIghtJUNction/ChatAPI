@@ -14,17 +14,10 @@ type PendingResult struct {
 }
 
 type PendingEvent struct {
-	Type                string
-	DeltaText           string
-	OutputText          string
-	Mode                string
-	ReasoningStreamMode string
-	ToolName            string
-	ToolCallID          string
-	ToolOutput          string
-	ResponseBody        map[string]any
-	ErrorBody           map[string]any
-	StreamEvents        []protocol.StreamEvent
+	Action       OutputAction
+	ResponseBody map[string]any
+	ErrorBody    map[string]any
+	StreamEvents []protocol.StreamEvent
 }
 
 type PendingTurn struct {

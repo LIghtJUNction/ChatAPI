@@ -21,6 +21,7 @@ type TurnRequest struct {
 	UserContent      string
 	InputParts       []InputPart
 	ToolSchemas      []ToolSchema
+	BuiltinTools     []BuiltinTool
 	ToolChoice       ToolChoice
 	ResponseFormat   ResponseFormat
 	Options          TurnOptions
@@ -42,13 +43,6 @@ type ConversationMeta struct {
 	Protocol   Protocol
 	Model      string
 	ResponseID string
-}
-
-type PendingStreamEvent struct {
-	Type      string
-	DeltaText string
-	ErrorBody map[string]any
-	Result    TurnResult
 }
 
 type InputPart struct {
@@ -85,6 +79,13 @@ type ToolSchema struct {
 	Raw         map[string]any `json:"raw,omitempty"`
 }
 
+type BuiltinTool struct {
+	Kind  string         `json:"kind"`
+	Type  string         `json:"type"`
+	Label string         `json:"label,omitempty"`
+	Raw   map[string]any `json:"raw,omitempty"`
+}
+
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
@@ -105,6 +106,7 @@ func ParseRequest(protocolValue string, body map[string]any) TurnRequest {
 		UserContent:      joinInputPartText(inputParts),
 		InputParts:       inputParts,
 		ToolSchemas:      extractToolSchemas(body),
+		BuiltinTools:     extractBuiltinTools(proto, body),
 		ToolChoice:       extractToolChoice(body),
 		ResponseFormat:   extractResponseFormat(body),
 		Options:          extractTurnOptions(proto, body),
@@ -129,59 +131,6 @@ func (p Protocol) String() string {
 
 func (p Protocol) IsAnthropicMessages() bool {
 	return p == ProtocolAnthropicMessages
-}
-
-func (meta ConversationMeta) BuildStreamStart() []StreamEvent {
-	return BuildStreamStart(meta)
-}
-
-func (meta ConversationMeta) BuildStreamDelta(deltaText string) []StreamEvent {
-	return BuildStreamDelta(meta, deltaText)
-}
-
-func (meta ConversationMeta) BuildStreamComplete(result TurnResult) []StreamEvent {
-	return BuildStreamComplete(meta, result)
-}
-
-func (meta ConversationMeta) BuildStreamAbort(body map[string]any) []StreamEvent {
-	return BuildStreamAbort(meta, body)
-}
-
-func (meta ConversationMeta) BuildPendingStreamEvents(event PendingStreamEvent, anthropicBlockStarted bool) ([]StreamEvent, bool) {
-	if meta.Protocol.IsAnthropicMessages() {
-		switch event.Type {
-		case "delta":
-			if !anthropicBlockStarted {
-				return append([]StreamEvent{BuildAnthropicContentBlockStart(event.Result)}, meta.BuildStreamDelta(event.DeltaText)...), true
-			}
-			return meta.BuildStreamDelta(event.DeltaText), true
-		case "complete":
-			streamEvents := make([]StreamEvent, 0, 4)
-			if !anthropicBlockStarted {
-				streamEvents = append(streamEvents, BuildAnthropicContentBlockStart(event.Result))
-			}
-			streamEvents = append(streamEvents, meta.BuildStreamComplete(event.Result)...)
-			return streamEvents, true
-		case "abort":
-			return meta.BuildStreamAbort(event.ErrorBody), anthropicBlockStarted
-		default:
-			return nil, anthropicBlockStarted
-		}
-	}
-
-	switch event.Type {
-	case "delta":
-		if meta.Protocol == ProtocolResponses && event.Result.Mode == "thinking" {
-			return BuildResponsesReasoningDelta(event.Result, event.DeltaText), anthropicBlockStarted
-		}
-		return meta.BuildStreamDelta(event.DeltaText), anthropicBlockStarted
-	case "complete":
-		return meta.BuildStreamComplete(event.Result), anthropicBlockStarted
-	case "abort":
-		return meta.BuildStreamAbort(event.ErrorBody), anthropicBlockStarted
-	default:
-		return nil, anthropicBlockStarted
-	}
 }
 
 func extractRequestInputParts(proto Protocol, body map[string]any) []InputPart {

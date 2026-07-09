@@ -78,6 +78,45 @@ func TestRuntimeBuildsResponsesToolCallLifecycle(t *testing.T) {
 	)
 }
 
+func TestRuntimeBuildsResponsesBuiltinToolEvents(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{
+		Protocol:   protocol.ProtocolResponses,
+		Model:      "gpt-test",
+		ResponseID: "resp_test",
+	})
+
+	search := runtime.Apply(Action{
+		Kind:             ActionBuiltin,
+		BuiltinToolKind:  "web_search",
+		BuiltinToolQuery: "latest go release",
+	})
+	requireEventOrder(t, search.StreamEvents,
+		"response.output_item.added",
+		"response.web_search_call.in_progress",
+		"response.web_search_call.searching",
+		"response.web_search_call.completed",
+		"response.output_item.done",
+	)
+
+	image := runtime.Apply(Action{
+		Kind:              ActionBuiltin,
+		BuiltinToolKind:   "image_generation",
+		BuiltinToolResult: "aW1hZ2U=",
+	})
+	requireEventOrder(t, image.StreamEvents,
+		"response.output_item.added",
+		"response.image_generation_call.in_progress",
+		"response.image_generation_call.generating",
+		"response.image_generation_call.completed",
+		"response.output_item.done",
+	)
+	done := image.StreamEvents[len(image.StreamEvents)-1].Data.(map[string]any)
+	item := done["item"].(map[string]any)
+	if item["type"] != "image_generation_call" || item["result"] != "aW1hZ2U=" {
+		t.Fatalf("unexpected image generation output item: %#v", item)
+	}
+}
+
 func TestRuntimeBuildsChatCompletionToolCallChunks(t *testing.T) {
 	runtime := New(protocol.ConversationMeta{
 		Protocol: protocol.ProtocolChatCompletions,

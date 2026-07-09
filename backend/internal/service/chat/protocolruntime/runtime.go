@@ -14,6 +14,7 @@ const (
 	ActionDelta    ActionKind = "delta"
 	ActionComplete ActionKind = "complete"
 	ActionAbort    ActionKind = "abort"
+	ActionBuiltin  ActionKind = "builtin_tool"
 )
 
 type Action struct {
@@ -25,6 +26,9 @@ type Action struct {
 	ToolName            string
 	ToolCallID          string
 	ToolOutput          string
+	BuiltinToolKind     string
+	BuiltinToolQuery    string
+	BuiltinToolResult   string
 	ErrorBody           map[string]any
 }
 
@@ -138,8 +142,24 @@ func (r *Runtime) Apply(action Action) Result {
 		return Result{StreamEvents: r.complete(action)}
 	case ActionAbort:
 		return Result{StreamEvents: r.abort(action)}
+	case ActionBuiltin:
+		return Result{StreamEvents: r.builtinTool(action)}
 	default:
 		return Result{}
+	}
+}
+
+func (r *Runtime) builtinTool(action Action) []protocol.StreamEvent {
+	if r.meta.Protocol != protocol.ProtocolResponses {
+		return nil
+	}
+	switch strings.TrimSpace(action.BuiltinToolKind) {
+	case "web_search":
+		return r.responsesWebSearch(action)
+	case "image_generation":
+		return r.responsesImageGeneration(action)
+	default:
+		return nil
 	}
 }
 
@@ -423,6 +443,126 @@ func (r *Runtime) responsesToolCall(action Action) []protocol.StreamEvent {
 					"name":      action.ToolName,
 					"call_id":   callID,
 					"arguments": arguments,
+				},
+			},
+		},
+	)
+	r.responsesOutputIndex++
+	return events
+}
+
+func (r *Runtime) responsesWebSearch(action Action) []protocol.StreamEvent {
+	events := make([]protocol.StreamEvent, 0, 5)
+	events = append(events, r.closeResponsesReasoning()...)
+	events = append(events, r.closeResponsesTextPart()...)
+	itemID := "ws_" + uuid.NewString()
+	events = append(events,
+		protocol.StreamEvent{
+			Event: "response.output_item.added",
+			Data: map[string]any{
+				"type":         "response.output_item.added",
+				"output_index": r.responsesOutputIndex,
+				"item": map[string]any{
+					"id":     itemID,
+					"type":   "web_search_call",
+					"status": "in_progress",
+				},
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.web_search_call.in_progress",
+			Data: map[string]any{
+				"type":         "response.web_search_call.in_progress",
+				"item_id":      itemID,
+				"output_index": r.responsesOutputIndex,
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.web_search_call.searching",
+			Data: map[string]any{
+				"type":         "response.web_search_call.searching",
+				"item_id":      itemID,
+				"output_index": r.responsesOutputIndex,
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.web_search_call.completed",
+			Data: map[string]any{
+				"type":         "response.web_search_call.completed",
+				"item_id":      itemID,
+				"output_index": r.responsesOutputIndex,
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.output_item.done",
+			Data: map[string]any{
+				"type":         "response.output_item.done",
+				"output_index": r.responsesOutputIndex,
+				"item": map[string]any{
+					"id":     itemID,
+					"type":   "web_search_call",
+					"status": "completed",
+				},
+			},
+		},
+	)
+	r.responsesOutputIndex++
+	return events
+}
+
+func (r *Runtime) responsesImageGeneration(action Action) []protocol.StreamEvent {
+	events := make([]protocol.StreamEvent, 0, 5)
+	events = append(events, r.closeResponsesReasoning()...)
+	events = append(events, r.closeResponsesTextPart()...)
+	itemID := "ig_" + uuid.NewString()
+	result := strings.TrimSpace(action.BuiltinToolResult)
+	events = append(events,
+		protocol.StreamEvent{
+			Event: "response.output_item.added",
+			Data: map[string]any{
+				"type":         "response.output_item.added",
+				"output_index": r.responsesOutputIndex,
+				"item": map[string]any{
+					"id":     itemID,
+					"type":   "image_generation_call",
+					"status": "in_progress",
+				},
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.image_generation_call.in_progress",
+			Data: map[string]any{
+				"type":         "response.image_generation_call.in_progress",
+				"item_id":      itemID,
+				"output_index": r.responsesOutputIndex,
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.image_generation_call.generating",
+			Data: map[string]any{
+				"type":         "response.image_generation_call.generating",
+				"item_id":      itemID,
+				"output_index": r.responsesOutputIndex,
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.image_generation_call.completed",
+			Data: map[string]any{
+				"type":         "response.image_generation_call.completed",
+				"item_id":      itemID,
+				"output_index": r.responsesOutputIndex,
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.output_item.done",
+			Data: map[string]any{
+				"type":         "response.output_item.done",
+				"output_index": r.responsesOutputIndex,
+				"item": map[string]any{
+					"id":     itemID,
+					"type":   "image_generation_call",
+					"status": "completed",
+					"result": result,
 				},
 			},
 		},

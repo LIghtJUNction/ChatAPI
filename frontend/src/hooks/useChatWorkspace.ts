@@ -4,6 +4,7 @@ import { requestJson } from '../lib/api'
 import { appMessage } from '../lib/antdApp'
 import {
   buildInitialToolFormValues,
+  getLastBuiltinTools,
   getLastToolSchemas,
 } from '../lib/chat-format'
 import { buildVisibleTimeline } from '../lib/visibleTimeline'
@@ -43,6 +44,9 @@ export function useChatWorkspace(isMobile: boolean) {
   const [toolName, setToolName] = useState('')
   const [toolCallId, setToolCallId] = useState('')
   const [toolFormValues, setToolFormValues] = useState<Record<string, ToolFieldValue>>({})
+  const [builtinToolKind, setBuiltinToolKind] = useState('')
+  const [builtinToolQuery, setBuiltinToolQuery] = useState('')
+  const [builtinToolResult, setBuiltinToolResult] = useState('')
   const [draftBuffers, setDraftBuffers] = useState<Record<string, string>>({})
   const [sending, setSending] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -102,6 +106,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const selectedRequestFormat = selectedConversation?.request_format || ''
   const isResponsesConversation = selectedRequestFormat === 'responses'
   const availableToolSchemas = getLastToolSchemas(messages)
+  const availableBuiltinTools = getLastBuiltinTools(messages)
   const selectedToolSchema =
     availableToolSchemas.find((item) => item.name === toolName) ?? null
   const visibleMessages = buildVisibleTimeline(timeline, draftBuffer)
@@ -120,6 +125,9 @@ export function useChatWorkspace(isMobile: boolean) {
       setToolName('')
       setToolCallId('')
       setToolFormValues({})
+      setBuiltinToolKind('')
+      setBuiltinToolQuery('')
+      setBuiltinToolResult('')
       setComposerMode('assistant_message')
     }
     selectedRealtimeStatusRef.current = {
@@ -185,6 +193,14 @@ export function useChatWorkspace(isMobile: boolean) {
   }, [availableToolSchemas, composerMode, selectedToolSchema, toolName])
 
   useEffect(() => {
+    if (composerMode !== 'builtin_tool') return
+    if (builtinToolKind && availableBuiltinTools.some((item) => item.kind === builtinToolKind)) return
+    if (availableBuiltinTools[0]?.kind) {
+      setBuiltinToolKind(availableBuiltinTools[0].kind)
+    }
+  }, [availableBuiltinTools, builtinToolKind, composerMode])
+
+  useEffect(() => {
     setToolFormValues(buildInitialToolFormValues(selectedToolSchema?.parameters))
   }, [selectedToolSchema?.name])
 
@@ -223,6 +239,9 @@ export function useChatWorkspace(isMobile: boolean) {
       setToolName('')
       setToolCallId('')
       setToolFormValues({})
+      setBuiltinToolKind('')
+      setBuiltinToolQuery('')
+      setBuiltinToolResult('')
       setDraftBuffers({})
       automation.resetAutomationRuleUi()
       automation.setAutomationRules([])
@@ -339,6 +358,34 @@ export function useChatWorkspace(isMobile: boolean) {
       await handleSend({ resetMode: true, successMessage: '已输出 Tool Call' })
       return
     }
+    if (composerMode === 'builtin_tool') {
+      const kind = builtinToolKind.trim()
+      if (!kind) return
+      const result = builtinToolResult.trim().replace(/^data:image\/[^;,]+;base64,/i, '')
+      if (kind === 'web_search' && !builtinToolQuery.trim()) {
+        appMessage.warning('请输入搜索词')
+        return
+      }
+      if (kind === 'image_generation' && !result) {
+        appMessage.warning('请输入图片 base64')
+        return
+      }
+      try {
+        sendWorkspaceCommand({
+          kind: 'builtin_tool',
+          conversation_id: selectedConversationId,
+          builtin_tool_kind: kind,
+          builtin_tool_query: kind === 'web_search' ? builtinToolQuery.trim() : undefined,
+          builtin_tool_result: kind === 'image_generation' ? result : undefined,
+        })
+        setBuiltinToolQuery('')
+        setBuiltinToolResult('')
+        appMessage.success(kind === 'web_search' ? '已输出搜索事件' : '已输出生图事件')
+      } catch (error) {
+        appMessage.error(error instanceof Error ? error.message : '输出内置工具失败')
+      }
+      return
+    }
     const isThinkingMode = composerMode === 'thinking'
     const rawChunk = isThinkingMode
       ? thinkingText.trim()
@@ -395,6 +442,10 @@ export function useChatWorkspace(isMobile: boolean) {
     }
 
     if (composerMode === 'tool_call' && !finalText) {
+      return
+    }
+    if (composerMode === 'builtin_tool') {
+      await handleDraft()
       return
     }
 
@@ -473,10 +524,14 @@ export function useChatWorkspace(isMobile: boolean) {
     abortingConversationId,
     auth,
     availableToolSchemas,
+    availableBuiltinTools,
     booting,
     chatScrollRef,
     composer,
     composerMode,
+    builtinToolKind,
+    builtinToolQuery,
+    builtinToolResult,
     thinkingText,
     conversations,
     deletingConversationId,
@@ -519,6 +574,9 @@ export function useChatWorkspace(isMobile: boolean) {
     setAbortReason,
     setComposer,
     setComposerMode,
+    setBuiltinToolKind,
+    setBuiltinToolQuery,
+    setBuiltinToolResult,
     setThinkingText,
     setReasoningStreamMode,
     setDrawerOpen,

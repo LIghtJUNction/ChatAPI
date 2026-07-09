@@ -434,6 +434,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 			"request_options":  input.RequestOptions,
 			"option_chips":     input.OptionChips,
 			"tool_schemas":     input.ToolSchemas,
+			"builtin_tools":    input.BuiltinTools,
 			"tool_choice":      input.ToolChoice,
 			"response_format":  input.ResponseFormat,
 		},

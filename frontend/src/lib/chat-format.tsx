@@ -2,6 +2,7 @@ import type {
   JsonSchema,
   MessageItem,
   TimelineMessageContentPart,
+  BuiltinToolOption,
   ToolFieldValue,
   ToolSchemaOption,
 } from '../types/chat'
@@ -128,6 +129,32 @@ export function getLastToolSchemas(items: MessageItem[]): ToolSchemaOption[] {
       .filter((item): item is ToolSchemaOption => item !== null)
   }
   return []
+}
+
+export function getLastBuiltinTools(items: MessageItem[]): BuiltinToolOption[] {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const requestDebug = items[index]?.metadata?.request_debug
+    if (!requestDebug) continue
+    const candidate = requestDebug.builtin_tools
+    if (!Array.isArray(candidate) || candidate.length === 0) return []
+    return candidate
+      .map((item) => normalizeBuiltinTool(item))
+      .filter((item): item is BuiltinToolOption => item !== null)
+  }
+  return []
+}
+
+function normalizeBuiltinTool(item: unknown): BuiltinToolOption | null {
+  if (!item || typeof item !== 'object') return null
+  const record = item as Record<string, unknown>
+  const kind = typeof record.kind === 'string' ? record.kind.trim() : ''
+  if (!kind) return null
+  return {
+    kind,
+    type: typeof record.type === 'string' ? record.type : undefined,
+    label: typeof record.label === 'string' ? record.label : undefined,
+    raw: record.raw && typeof record.raw === 'object' ? record.raw as Record<string, unknown> : undefined,
+  }
 }
 
 export function buildInitialToolFormValues(schema?: JsonSchema) {

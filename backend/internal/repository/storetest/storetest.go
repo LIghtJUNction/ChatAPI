@@ -1473,6 +1473,9 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		ToolSchemas: []any{
 			map[string]any{"name": "tool_a"},
 		},
+		BuiltinTools: []any{
+			map[string]any{"kind": "web_search", "type": "web_search"},
+		},
 		ToolChoice: common.RequestToolChoice{
 			Type: "function",
 			Name: "tool_a",
@@ -1540,6 +1543,9 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	}
 	if len(firstRequest.ToolSchemas) != 1 {
 		t.Fatalf("unexpected tool schemas: %#v", firstRequest.ToolSchemas)
+	}
+	if len(firstRequest.BuiltinTools) != 1 {
+		t.Fatalf("unexpected builtin tools: %#v", firstRequest.BuiltinTools)
 	}
 	if firstRequest.SystemText != "system rule" || firstRequest.DeveloperText != "developer hint" || firstRequest.AssistantText != "previous assistant answer" {
 		t.Fatalf("unexpected request context fields: %#v", firstRequest)

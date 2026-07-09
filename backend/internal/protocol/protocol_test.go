@@ -16,7 +16,6 @@ type responseFixture struct {
 	meta       ConversationMeta
 	result     TurnResult
 	assertBody func(t *testing.T, body map[string]any)
-	assertSSE  func(t *testing.T, events []StreamEvent)
 }
 
 func TestParseRequestReturnsTypedProtocol(t *testing.T) {
@@ -355,112 +354,35 @@ func TestRawToolSchemasRetainsOriginalDefinitions(t *testing.T) {
 	}
 }
 
-func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
-	meta := ConversationMeta{
-		Protocol:   ProtocolAnthropicMessages,
-		Model:      "claude-test",
-		ResponseID: "resp_1",
-	}
-	events, started := meta.BuildPendingStreamEvents(PendingStreamEvent{
-		Type:      "delta",
-		DeltaText: "partial",
-		Result: TurnResult{
-			ResponseID: "resp_1",
-			OutputText: "partial",
-			Mode:       "assistant_message",
+func TestParseRequestSeparatesResponsesBuiltinTools(t *testing.T) {
+	request := ParseRequest("responses", map[string]any{
+		"model": "gpt-test",
+		"input": "hello",
+		"tools": []any{
+			map[string]any{"type": "web_search"},
+			map[string]any{"type": "image_generation", "model": "gpt-image-2"},
+			map[string]any{
+				"type": "function",
+				"name": "lookup_weather",
+				"parameters": map[string]any{
+					"type": "object",
+				},
+			},
 		},
-	}, false)
-	if !started {
-		t.Fatal("expected anthropic block to start")
+	})
+	if len(request.BuiltinTools) != 2 {
+		t.Fatalf("unexpected builtin tools: %#v", request.BuiltinTools)
 	}
-	if len(events) != 2 || events[0].Event != "content_block_start" || events[1].Event != "content_block_delta" {
-		t.Fatalf("unexpected anthropic stream events: %#v", events)
+	if request.BuiltinTools[0].Kind != "web_search" || request.BuiltinTools[1].Kind != "image_generation" {
+		t.Fatalf("unexpected builtin tool kinds: %#v", request.BuiltinTools)
 	}
-}
-
-func TestConversationMetaBuildPendingStreamEventsForResponsesThinking(t *testing.T) {
-	meta := ConversationMeta{
-		Protocol:   ProtocolResponses,
-		Model:      "responses-test",
-		ResponseID: "resp_reasoning",
+	if len(request.ToolSchemas) != 1 || request.ToolSchemas[0].Name != "lookup_weather" {
+		t.Fatalf("builtin tools leaked into function schemas: %#v", request.ToolSchemas)
 	}
-	events, started := meta.BuildPendingStreamEvents(PendingStreamEvent{
-		Type:      "delta",
-		DeltaText: "thinking step",
-		Result: TurnResult{
-			ResponseID:          "resp_reasoning",
-			Mode:                "thinking",
-			ReasoningStreamMode: "reasoning",
-		},
-	}, false)
-	if started {
-		t.Fatal("responses stream should not use anthropic block state")
-	}
-	if len(events) == 0 {
-		t.Fatal("expected reasoning events")
-	}
-	for _, event := range events {
-		if event.Event == "response.output_text.delta" {
-			t.Fatalf("thinking delta should not be emitted as output text: %#v", events)
-		}
-	}
-	if events[0].Event != "response.output_item.added" {
-		t.Fatalf("unexpected first reasoning event: %#v", events[0])
-	}
-	foundReasoningDelta := false
-	for _, event := range events {
-		if event.Event == "response.reasoning_text.delta" {
-			foundReasoningDelta = true
-		}
-	}
-	if !foundReasoningDelta {
-		t.Fatalf("expected reasoning text delta: %#v", events)
-	}
-}
-
-func TestBuildStreamAbortForResponsesEmitsFailedResponse(t *testing.T) {
-	events := BuildStreamAbort(ConversationMeta{
-		Protocol:   ProtocolResponses,
-		Model:      "responses-test",
-		ResponseID: "resp_failed",
-	}, BuildErrorBody(string(ProtocolResponses), InvalidRequest("bad input", "input")))
-	if len(events) != 1 || events[0].Event != "response.failed" {
-		t.Fatalf("unexpected responses abort events: %#v", events)
-	}
-	data := events[0].Data.(map[string]any)
-	response := data["response"].(map[string]any)
-	if response["status"] != "failed" || response["id"] != "resp_failed" {
-		t.Fatalf("unexpected failed response: %#v", response)
-	}
-	if _, ok := response["error"].(map[string]any); !ok {
-		t.Fatalf("missing failed response error: %#v", response)
-	}
-}
-
-func TestBuildStreamAbortForChatCompletionsClosesWithoutSyntheticEvent(t *testing.T) {
-	events := BuildStreamAbort(ConversationMeta{
-		Protocol: ProtocolChatCompletions,
-		Model:    "chat-test",
-	}, BuildErrorBody(string(ProtocolChatCompletions), InvalidRequest("bad input", "input")))
-	if len(events) != 0 {
-		t.Fatalf("chat completions abort should not emit synthetic stream events: %#v", events)
-	}
-}
-
-func TestBuildStreamAbortForAnthropicMessagesEmitsOfficialErrorEvent(t *testing.T) {
-	events := BuildStreamAbort(ConversationMeta{
-		Protocol: ProtocolAnthropicMessages,
-		Model:    "claude-test",
-	}, BuildErrorBody(string(ProtocolAnthropicMessages), InvalidRequest("bad input", "input")))
-	if len(events) != 1 || events[0].Event != "error" {
-		t.Fatalf("unexpected anthropic abort events: %#v", events)
-	}
-	data := events[0].Data.(map[string]any)
-	if data["type"] != "error" {
-		t.Fatalf("anthropic error event must keep official type=error shape: %#v", data)
-	}
-	if _, ok := data["error"].(map[string]any); !ok {
-		t.Fatalf("missing anthropic error payload: %#v", data)
+	body := BuildRequestBody(request)
+	tools, ok := body["tools"].([]any)
+	if !ok || len(tools) != 3 {
+		t.Fatalf("rebuilt responses tools lost builtin tools: %#v", body["tools"])
 	}
 }
 
@@ -547,42 +469,6 @@ func TestBuildResponseIncludesUsageAcrossProtocols(t *testing.T) {
 				t.Fatalf("unexpected usage %s=%#v payload=%#v", tc.usageKey, usage[tc.usageKey], usage)
 			}
 		})
-	}
-}
-
-func TestBuildStreamCompleteIncludesUsageForResponsesAndAnthropic(t *testing.T) {
-	responsesEvents := BuildStreamComplete(ConversationMeta{
-		Protocol:   ProtocolResponses,
-		Model:      "test-model",
-		ResponseID: "resp_stream_usage",
-	}, TurnResult{
-		ResponseID: "resp_stream_usage",
-		OutputText: "done",
-		Usage:      Usage{InputTokens: 1, OutputTokens: 2},
-	})
-	responseData := responsesEvents[0].Data.(map[string]any)
-	responsePayload := responseData["response"].(map[string]any)
-	responseUsage := responsePayload["usage"].(map[string]any)
-	if responseUsage["total_tokens"] != 3 {
-		t.Fatalf("unexpected responses stream usage: %#v", responseUsage)
-	}
-
-	anthropicEvents := BuildStreamComplete(ConversationMeta{
-		Protocol:   ProtocolAnthropicMessages,
-		Model:      "claude-test",
-		ResponseID: "msg_stream_usage",
-	}, TurnResult{
-		ResponseID: "msg_stream_usage",
-		OutputText: "done",
-		Usage:      Usage{InputTokens: 2, OutputTokens: 4},
-	})
-	if len(anthropicEvents) < 2 {
-		t.Fatalf("unexpected anthropic stream events: %#v", anthropicEvents)
-	}
-	messageDelta := anthropicEvents[1].Data.(map[string]any)
-	usage := messageDelta["usage"].(map[string]any)
-	if usage["output_tokens"] != 4 {
-		t.Fatalf("unexpected anthropic stream usage: %#v", usage)
 	}
 }
 
@@ -741,43 +627,6 @@ func TestNormalizeRequestSupportsAnthropicSDKJSON(t *testing.T) {
 	}
 }
 
-func TestBuildStreamCompleteUsesSharedToolPayloads(t *testing.T) {
-	result := TurnResult{
-		ResponseID: "resp_tool_payload",
-		OutputText: "{\"city\":\"tokyo\"}",
-		Mode:       "tool_call",
-		ToolName:   "lookup_weather",
-		ToolCallID: "call_tool_payload",
-	}
-
-	responsesEvents := BuildStreamComplete(ConversationMeta{
-		Protocol:   ProtocolResponses,
-		Model:      "demo",
-		ResponseID: result.ResponseID,
-	}, result)
-	responsePayload := responsesEvents[0].Data.(map[string]any)["response"].(map[string]any)
-	output := responsePayload["output"].([]map[string]any)
-	if output[0]["call_id"] != "call_tool_payload" || output[0]["name"] != "lookup_weather" {
-		t.Fatalf("unexpected responses tool output payload: %#v", output[0])
-	}
-
-	chatEvents := BuildStreamComplete(ConversationMeta{
-		Protocol: ProtocolChatCompletions,
-		Model:    "demo",
-	}, result)
-	choices := chatEvents[0].Data.(map[string]any)["choices"].([]map[string]any)
-	toolCalls := choices[0]["delta"].(map[string]any)["tool_calls"].([]map[string]any)
-	if nestedPathString(toolCalls[0], "function", "name") != "lookup_weather" || toolCalls[0]["id"] != "call_tool_payload" {
-		t.Fatalf("unexpected chat completions tool call payload: %#v", toolCalls[0])
-	}
-
-	anthropicBlock := BuildAnthropicContentBlockStart(result)
-	contentBlock := anthropicBlock.Data.(map[string]any)["content_block"].(map[string]any)
-	if contentBlock["id"] != "call_tool_payload" || contentBlock["name"] != "lookup_weather" {
-		t.Fatalf("unexpected anthropic tool use payload: %#v", contentBlock)
-	}
-}
-
 func TestProtocolResponseFixtures(t *testing.T) {
 	fixtures := []responseFixture{
 		{
@@ -801,16 +650,6 @@ func TestProtocolResponseFixtures(t *testing.T) {
 				usage := body["usage"].(map[string]any)
 				if usage["total_tokens"] != 7 {
 					t.Fatalf("unexpected responses usage: %#v", usage)
-				}
-			},
-			assertSSE: func(t *testing.T, events []StreamEvent) {
-				t.Helper()
-				if len(events) != 1 || events[0].Event != "response.completed" {
-					t.Fatalf("unexpected responses events: %#v", events)
-				}
-				payload := events[0].Data.(map[string]any)["response"].(map[string]any)
-				if payload["output_text"] != "hello world" {
-					t.Fatalf("unexpected responses stream payload: %#v", payload)
 				}
 			},
 		},
@@ -837,16 +676,6 @@ func TestProtocolResponseFixtures(t *testing.T) {
 					t.Fatalf("unexpected chat completion tool call body: %#v", toolCalls[0])
 				}
 			},
-			assertSSE: func(t *testing.T, events []StreamEvent) {
-				t.Helper()
-				if len(events) != 2 || events[1].Data != "[DONE]" {
-					t.Fatalf("unexpected chat completion events: %#v", events)
-				}
-				choices := events[0].Data.(map[string]any)["choices"].([]map[string]any)
-				if choices[0]["finish_reason"] != "tool_calls" {
-					t.Fatalf("unexpected chat completion finish reason: %#v", choices[0])
-				}
-			},
 		},
 		{
 			name: "anthropic_tool_call",
@@ -869,16 +698,6 @@ func TestProtocolResponseFixtures(t *testing.T) {
 					t.Fatalf("unexpected anthropic content: %#v", content[0])
 				}
 			},
-			assertSSE: func(t *testing.T, events []StreamEvent) {
-				t.Helper()
-				if len(events) != 3 || events[0].Event != "content_block_stop" || events[2].Event != "message_stop" {
-					t.Fatalf("unexpected anthropic events: %#v", events)
-				}
-				delta := events[1].Data.(map[string]any)
-				if nestedPathString(delta, "delta", "stop_reason") != "tool_use" {
-					t.Fatalf("unexpected anthropic stop reason: %#v", delta)
-				}
-			},
 		},
 	}
 
@@ -886,8 +705,6 @@ func TestProtocolResponseFixtures(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			body := BuildResponseForMeta(fixture.meta, fixture.result)
 			fixture.assertBody(t, body)
-			events := BuildStreamComplete(fixture.meta, fixture.result)
-			fixture.assertSSE(t, events)
 		})
 	}
 }

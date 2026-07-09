@@ -98,36 +98,20 @@ const (
 	TurnControlStreamDelta    TurnControlKind = "stream_delta"
 	TurnControlStreamComplete TurnControlKind = "stream_complete"
 	TurnControlAbort          TurnControlKind = "abort"
+	TurnControlBuiltinTool    TurnControlKind = "builtin_tool"
 )
 
 type TurnControlCommand struct {
-	Kind                TurnControlKind
-	ConversationID      string
-	ResponseID          string
-	OutputText          string
-	Mode                string
-	ToolName            string
-	ToolCallID          string
-	ToolOutput          string
-	ReasoningStreamMode string
-	AbortReason         string
+	ConversationID string
+	ResponseID     string
+	Action         OutputAction
 }
 
 func (c TurnControlCommand) Validate() error {
 	if c.ConversationID == "" {
 		return errors.New("conversation_id is required")
 	}
-	switch c.Kind {
-	case TurnControlRespond, TurnControlStreamComplete, TurnControlStreamDelta:
-		return nil
-	case TurnControlAbort:
-		if c.AbortReason == "" {
-			return errors.New("error is required")
-		}
-		return nil
-	default:
-		return errors.New("unsupported turn control kind: " + string(c.Kind))
-	}
+	return c.Action.Validate()
 }
 
 func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) (map[string]any, error) {
@@ -244,21 +228,85 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		s.Pending.RevertFinalize(conversationID, previousState)
 		return nil, err
 	}
+	action := OutputAction{
+		Kind:                TurnControlStreamDelta,
+		OutputText:          chunk,
+		Mode:                mode,
+		ReasoningStreamMode: reasoningStreamMode,
+	}.Normalized()
 	_ = s.Pending.Publish(conversationID, PendingEvent{
-		Type:                "delta",
-		DeltaText:           chunk,
-		Mode:                strings.TrimSpace(mode),
-		ReasoningStreamMode: strings.TrimSpace(reasoningStreamMode),
-		StreamEvents: s.applyRuntimeAction(conversationID, protocolruntime.Action{
-			Kind:                protocolruntime.ActionDelta,
-			DeltaText:           chunk,
-			Mode:                strings.TrimSpace(mode),
-			ReasoningStreamMode: strings.TrimSpace(reasoningStreamMode),
-		}).StreamEvents,
+		Action:       action,
+		StreamEvents: s.applyRuntimeAction(conversationID, action.RuntimeAction()).StreamEvents,
 	})
 	s.publishConversationUpserted(ctx, s.eventRouteForContext(ctx, updated), updated)
 	s.notifyText(ctx, s.ownerID(ctx), updated.Title, chunk)
 	return map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}, nil
+}
+
+func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlCommand) (map[string]any, error) {
+	action := command.Action.Normalized()
+	turn, ok := s.Pending.GetByConversationID(command.ConversationID)
+	if !ok || turn == nil {
+		return nil, ErrPendingNotFound
+	}
+	identity, err := s.resolveActiveTurnIdentity(ctx, command.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	conversation, err := s.Store.GetConversation(ctx, command.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	kind := action.BuiltinToolKind
+	spec, ok := protocolruntime.LookupBuiltinToolSpec(kind)
+	if !ok {
+		return nil, errors.New("unsupported builtin tool kind: " + kind)
+	}
+	title := spec.Title
+	detail := ""
+	level := "info"
+	metadata := map[string]any{
+		"builtin_tool_kind": kind,
+		"request_id":        identity.RequestID,
+	}
+	if spec.RequiresQuery {
+		detail = action.BuiltinToolQuery
+		metadata["query"] = detail
+	}
+	if spec.RequiresResult {
+		detail = "Image generated"
+		metadata["result_bytes"] = len([]byte(action.BuiltinToolResult))
+	}
+	if !pendingRequestHasBuiltinTool(turn, kind) {
+		return nil, errors.New("builtin tool is not enabled for this request: " + kind)
+	}
+	event, err := s.Store.AppendConversationEvent(ctx, common.AppendConversationEventInput{
+		ConversationID: command.ConversationID,
+		OwnerID:        identity.OwnerID,
+		Type:           "builtin_tool",
+		Level:          level,
+		Title:          title,
+		Detail:         detail,
+		RequestID:      identity.RequestID,
+		Metadata:       metadata,
+	})
+	if err != nil {
+		return nil, err
+	}
+	route := eventRouteFromIdentity(command.ConversationID, identity)
+	s.publishConversationEventAppended(ctx, route, conversation, event)
+	_ = s.Pending.Publish(command.ConversationID, PendingEvent{
+		Action:       action,
+		StreamEvents: s.applyRuntimeAction(command.ConversationID, action.RuntimeAction()).StreamEvents,
+	})
+	return map[string]any{"ok": true, "event": event}, nil
+}
+
+func pendingRequestHasBuiltinTool(turn *PendingTurn, kind string) bool {
+	if turn == nil {
+		return false
+	}
+	return protocolruntime.RequestSupportsBuiltinTool(turn.NormalizedRequest, kind)
 }
 
 func draftChunkForMode(chunk string, mode string) string {
@@ -281,24 +329,19 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	route := s.eventRouteForContext(ctx, conversation)
 	s.publishConversationUpserted(ctx, route, conversation)
 	responseBody := s.egress().CompleteBody(conversation, input, message)
-	_ = s.Pending.Publish(input.ConversationID, PendingEvent{
-		Type:                "complete",
+	action := OutputAction{
+		Kind:                TurnControlStreamComplete,
 		OutputText:          message.Content,
 		Mode:                input.Mode,
 		ReasoningStreamMode: input.ReasoningStreamMode,
 		ToolName:            input.ToolName,
 		ToolCallID:          input.ToolCallID,
 		ToolOutput:          stringValue(input.ToolOutput, message.Content),
-		ResponseBody:        responseBody,
-		StreamEvents: s.applyRuntimeAction(input.ConversationID, protocolruntime.Action{
-			Kind:                protocolruntime.ActionComplete,
-			OutputText:          message.Content,
-			Mode:                input.Mode,
-			ReasoningStreamMode: input.ReasoningStreamMode,
-			ToolName:            input.ToolName,
-			ToolCallID:          input.ToolCallID,
-			ToolOutput:          stringValue(input.ToolOutput, message.Content),
-		}).StreamEvents,
+	}.Normalized()
+	_ = s.Pending.Publish(input.ConversationID, PendingEvent{
+		Action:       action,
+		ResponseBody: responseBody,
+		StreamEvents: s.applyRuntimeAction(input.ConversationID, action.RuntimeAction()).StreamEvents,
 	})
 	if err := s.Pending.Resolve(input.ConversationID, PendingResult{ResponseBody: responseBody}); err != nil {
 		return nil, err
@@ -345,13 +388,13 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 	s.publishConversationUpserted(ctx, route, conversation)
 	s.publishConversationEventAppended(ctx, route, conversation, result.Event)
 	body := s.egress().AbortBody(conversation, reason)
+	action := OutputAction{Kind: TurnControlAbort, AbortReason: reason}.Normalized()
+	runtimeAction := action.RuntimeAction()
+	runtimeAction.ErrorBody = body
 	_ = s.Pending.Publish(conversationID, PendingEvent{
-		Type:      "abort",
-		ErrorBody: body,
-		StreamEvents: s.applyRuntimeAction(conversationID, protocolruntime.Action{
-			Kind:      protocolruntime.ActionAbort,
-			ErrorBody: body,
-		}).StreamEvents,
+		Action:       action,
+		ErrorBody:    body,
+		StreamEvents: s.applyRuntimeAction(conversationID, runtimeAction).StreamEvents,
 	})
 	s.notifyText(ctx, identity.OwnerID, conversation.Title, reason)
 	logging.BindContext(s.Logger, ctx,
@@ -384,36 +427,40 @@ func (s *Service) ExecuteTurnControl(ctx context.Context, command TurnControlCom
 	if err := command.Validate(); err != nil {
 		logging.BindContext(s.Logger, ctx,
 			zap.String("conversation.id", command.ConversationID),
-			zap.String("turn.control.kind", string(command.Kind)),
+			zap.String("turn.control.kind", string(command.Action.Kind)),
 		).Warn("turn control validation failed", zap.Error(err))
 		return nil, err
 	}
+	action := command.Action.Normalized()
 	logging.BindContext(s.Logger, ctx,
 		zap.String("conversation.id", command.ConversationID),
-		zap.String("turn.control.kind", string(command.Kind)),
+		zap.String("turn.control.kind", string(action.Kind)),
 		zap.String("response.id", command.ResponseID),
 	).Debug("turn control dispatch")
-	switch command.Kind {
+	switch action.Kind {
 	case TurnControlRespond, TurnControlStreamComplete:
 		return s.CompleteConversation(ctx, common.CompletePendingInput{
 			ConversationID:      command.ConversationID,
 			ResponseID:          command.ResponseID,
-			OutputText:          command.OutputText,
-			Mode:                command.Mode,
-			ToolName:            command.ToolName,
-			ToolCallID:          command.ToolCallID,
-			ToolOutput:          command.ToolOutput,
-			ReasoningStreamMode: command.ReasoningStreamMode,
+			OutputText:          action.OutputText,
+			Mode:                action.Mode,
+			ToolName:            action.ToolName,
+			ToolCallID:          action.ToolCallID,
+			ToolOutput:          action.ToolOutput,
+			ReasoningStreamMode: action.ReasoningStreamMode,
 		})
 	case TurnControlStreamDelta:
-		return s.UpdateDraft(ctx, command.ConversationID, command.OutputText, command.Mode, command.ReasoningStreamMode)
+		return s.UpdateDraft(ctx, command.ConversationID, action.OutputText, action.Mode, action.ReasoningStreamMode)
+	case TurnControlBuiltinTool:
+		command.Action = action
+		return s.EmitBuiltinTool(ctx, command)
 	case TurnControlAbort:
-		if err := s.AbortConversation(ctx, command.ConversationID, command.AbortReason); err != nil {
+		if err := s.AbortConversation(ctx, command.ConversationID, action.AbortReason); err != nil {
 			return nil, err
 		}
 		return map[string]any{"ok": true}, nil
 	default:
-		return nil, errors.New("unsupported turn control kind: " + string(command.Kind))
+		return nil, errors.New("unsupported turn control kind: " + string(action.Kind))
 	}
 }
 
@@ -603,13 +650,13 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 			"code":    eventType,
 		},
 	}
+	action := OutputAction{Kind: TurnControlAbort, AbortReason: reason}.Normalized()
+	runtimeAction := action.RuntimeAction()
+	runtimeAction.ErrorBody = body
 	_ = s.Pending.Publish(conversationID, PendingEvent{
-		Type:      "abort",
-		ErrorBody: body,
-		StreamEvents: s.applyRuntimeAction(conversationID, protocolruntime.Action{
-			Kind:      protocolruntime.ActionAbort,
-			ErrorBody: body,
-		}).StreamEvents,
+		Action:       action,
+		ErrorBody:    body,
+		StreamEvents: s.applyRuntimeAction(conversationID, runtimeAction).StreamEvents,
 	})
 	_ = s.Pending.Abort(conversationID, body)
 	logging.BindContext(s.Logger, context.Background(),

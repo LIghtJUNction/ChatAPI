@@ -46,7 +46,7 @@ type fakeTurn struct {
 func (f *fakeTurn) Execute(_ context.Context, cmd controlsvc.Command) (controlsvc.Result, error) {
 	f.lastOwnerID = cmd.OwnerID
 	f.lastConversationID = cmd.ConversationID
-	f.lastReason = cmd.AbortReason
+	f.lastReason = cmd.Action.AbortReason
 	_ = turnsvc.TurnControlAbort
 	if f.err != nil {
 		return controlsvc.Result{}, f.err

@@ -20,22 +20,26 @@ func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]co
 
 func (s *Service) AbortConversation(ctx context.Context, conversationID string, reason string) (map[string]any, error) {
 	result, err := s.control.Execute(ctx, controlsvc.Command{
-		Kind:           turnsvc.TurnControlAbort,
 		ConversationID: strings.TrimSpace(conversationID),
-		AbortReason:    strings.TrimSpace(reason),
+		Action: turnsvc.OutputAction{
+			Kind:        turnsvc.TurnControlAbort,
+			AbortReason: strings.TrimSpace(reason),
+		},
 	})
 	return result.Body, err
 }
 
 func (s *Service) CompleteConversation(ctx context.Context, conversationID string, text string, mode string, toolName string, toolCallID string, toolOutput string) (map[string]any, error) {
 	result, err := s.control.Execute(ctx, controlsvc.Command{
-		Kind:           turnsvc.TurnControlStreamComplete,
 		ConversationID: strings.TrimSpace(conversationID),
-		OutputText:     text,
-		Mode:           mode,
-		ToolName:       toolName,
-		ToolCallID:     toolCallID,
-		ToolOutput:     toolOutput,
+		Action: turnsvc.OutputAction{
+			Kind:       turnsvc.TurnControlStreamComplete,
+			OutputText: text,
+			Mode:       mode,
+			ToolName:   toolName,
+			ToolCallID: toolCallID,
+			ToolOutput: toolOutput,
+		},
 	})
 	return result.Body, err
 }

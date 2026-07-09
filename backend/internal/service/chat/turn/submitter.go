@@ -71,11 +71,13 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		RequestQuery:       input.RequestMeta.RequestQuery,
 		RequestHeaders:     input.RequestMeta.RequestHeaders,
 		RequestBody:        input.RequestBody,
-		RawRequestBody:     input.Request.RawBody,
-		RequestOptions:     protocol.RequestOptionsDebug(input.Request),
-		OptionChips:        optionChipsAsAny(debugProjection.OptionChips),
-		ToolSchemas:        protocol.RawToolSchemas(input.Request.ToolSchemas),
-		ToolChoice:         common.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
+		// Store the source fact, a normalized snapshot, and a UI cache separately.
+		RawRequestBody: input.Request.RawBody,
+		RequestOptions: protocol.RequestOptionsDebug(input.Request),
+		OptionChips:    optionChipsAsAny(debugProjection.OptionChips),
+		ToolSchemas:    protocol.RawToolSchemas(input.Request.ToolSchemas),
+		BuiltinTools:   builtinToolsAsAny(debugProjection.BuiltinTools),
+		ToolChoice:     common.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
 		ResponseFormat: common.RequestResponseFormat{
 			Type:   input.Request.ResponseFormat.Type,
 			Name:   input.Request.ResponseFormat.Name,
@@ -121,6 +123,17 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 }
 
 func optionChipsAsAny(items []debugview.OptionChip) []any {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, item)
+	}
+	return out
+}
+
+func builtinToolsAsAny(items []protocol.BuiltinTool) []any {
 	if len(items) == 0 {
 		return nil
 	}

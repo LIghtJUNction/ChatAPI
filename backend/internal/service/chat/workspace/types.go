@@ -59,6 +59,9 @@ type Command struct {
 	ToolName            string `json:"tool_name,omitempty"`
 	ToolCallID          string `json:"tool_call_id,omitempty"`
 	Output              string `json:"output,omitempty"`
+	BuiltinToolKind     string `json:"builtin_tool_kind,omitempty"`
+	BuiltinToolQuery    string `json:"builtin_tool_query,omitempty"`
+	BuiltinToolResult   string `json:"builtin_tool_result,omitempty"`
 	ReasoningStreamMode string `json:"reasoning_stream_mode,omitempty"`
 	Error               string `json:"error,omitempty"`
 }

@@ -298,6 +298,7 @@ export function ChatMessageList({
             debugSections.length ||
             optionChips.length ||
             requestDebug?.tool_schemas?.length ||
+            requestDebug?.builtin_tools?.length ||
             requestDebug?.request_body != null ||
             requestDebug?.request_options != null ||
             requestDebug?.raw_request_body != null
@@ -382,6 +383,7 @@ export function ChatMessageList({
                     </div>
                   ))}
                   {(requestDebug?.tool_schemas?.length ||
+                    requestDebug?.builtin_tools?.length ||
                     requestDebug?.request_body != null ||
                     requestDebug?.request_options != null ||
                     requestDebug?.raw_request_body != null) && (
@@ -396,6 +398,12 @@ export function ChatMessageList({
                         <div className="message-debug-block">
                           <div className="message-debug-label">Tool Schemas</div>
                           <pre>{formatJson(requestDebug.tool_schemas)}</pre>
+                        </div>
+                      ) : null}
+                      {requestDebug?.builtin_tools?.length ? (
+                        <div className="message-debug-block">
+                          <div className="message-debug-label">Built-in Tools</div>
+                          <pre>{formatJson(requestDebug.builtin_tools)}</pre>
                         </div>
                       ) : null}
                       {requestDebug?.request_body != null ? (

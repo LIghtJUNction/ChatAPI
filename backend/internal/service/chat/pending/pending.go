@@ -8,7 +8,6 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
-	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	"go.uber.org/zap"
 )
@@ -193,15 +192,15 @@ func (r *PendingRegistry) ExpireOlderThan(cutoff time.Time, body map[string]any)
 
 	for _, turn := range expired {
 		r.loggerForTurn(turn).Warn("pending turn expired")
+		action := turnsvc.OutputAction{Kind: turnsvc.TurnControlAbort, AbortReason: "pending turn expired"}.Normalized()
+		runtimeAction := action.RuntimeAction()
+		runtimeAction.ErrorBody = body
 		streamEvents := []protocol.StreamEvent(nil)
 		if turn.Runtime != nil {
-			streamEvents = turn.Runtime.Apply(protocolruntime.Action{
-				Kind:      protocolruntime.ActionAbort,
-				ErrorBody: body,
-			}).StreamEvents
+			streamEvents = turn.Runtime.Apply(runtimeAction).StreamEvents
 		}
 		_ = publishPendingEvent(turn, PendingEvent{
-			Type:         "abort",
+			Action:       action,
 			ErrorBody:    body,
 			StreamEvents: streamEvents,
 		})
@@ -241,7 +240,7 @@ func (r *PendingRegistry) Publish(conversationID string, event PendingEvent) err
 	if !ok {
 		return ErrPendingNotFound
 	}
-	r.loggerForTurn(turn).Debug("pending event published", zap.String("event.type", event.Type))
+	r.loggerForTurn(turn).Debug("pending event published", zap.String("event.type", string(event.Action.Kind)))
 	return publishPendingEvent(turn, event)
 }
 

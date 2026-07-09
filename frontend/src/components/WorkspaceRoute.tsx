@@ -171,7 +171,11 @@ export function WorkspaceRoute() {
         </Header>
         <Content className="content-shell">
           <ChatPane
+            availableBuiltinTools={workspace.availableBuiltinTools}
             availableToolSchemas={workspace.availableToolSchemas}
+            builtinToolKind={workspace.builtinToolKind}
+            builtinToolQuery={workspace.builtinToolQuery}
+            builtinToolResult={workspace.builtinToolResult}
             chatScrollRef={workspace.chatScrollRef}
             composer={workspace.composer}
             composerMode={workspace.composerMode}
@@ -191,6 +195,9 @@ export function WorkspaceRoute() {
             sending={workspace.sending}
             setComposer={workspace.setComposer}
             setComposerMode={workspace.setComposerMode}
+            setBuiltinToolKind={workspace.setBuiltinToolKind}
+            setBuiltinToolQuery={workspace.setBuiltinToolQuery}
+            setBuiltinToolResult={workspace.setBuiltinToolResult}
             setThinkingText={workspace.setThinkingText}
             setReasoningStreamMode={workspace.setReasoningStreamMode}
             setToolCallId={workspace.setToolCallId}

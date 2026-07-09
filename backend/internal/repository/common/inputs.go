@@ -146,13 +146,17 @@ type CreatePendingInput struct {
 	RequestQuery       map[string][]string
 	RequestHeaders     map[string][]string
 	RequestBody        map[string]any
-	RawRequestBody     map[string]any
-	RequestOptions     map[string]any
-	OptionChips        []any
-	ToolSchemas        []any
-	ToolChoice         RequestToolChoice
-	ResponseFormat     RequestResponseFormat
-	PreparedImages     []CreatePendingImageAssetInput
+	// RawRequestBody is the immutable protocol fact captured at ingress.
+	RawRequestBody map[string]any
+	// RequestOptions is the normalized protocol snapshot derived from RawRequestBody.
+	RequestOptions map[string]any
+	// OptionChips is a UI projection cache. Do not treat it as protocol authority.
+	OptionChips    []any
+	ToolSchemas    []any
+	BuiltinTools   []any
+	ToolChoice     RequestToolChoice
+	ResponseFormat RequestResponseFormat
+	PreparedImages []CreatePendingImageAssetInput
 }
 
 type CreatePendingImageAssetInput struct {

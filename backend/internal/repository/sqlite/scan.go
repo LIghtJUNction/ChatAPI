@@ -97,6 +97,7 @@ func scanRequestRow(scanner requestScanner) (common.Request, error) {
 	item.RawRequestBody, _ = requestDebug["raw_request_body"].(map[string]any)
 	item.RequestOptions, _ = requestDebug["request_options"].(map[string]any)
 	item.ToolSchemas, _ = requestDebug["tool_schemas"].([]any)
+	item.BuiltinTools, _ = requestDebug["builtin_tools"].([]any)
 	item.ToolChoice = parseRequestToolChoice(requestDebug["tool_choice"])
 	item.ResponseFormat = parseRequestResponseFormat(requestDebug["response_format"])
 	item.SystemText = metadataString(requestDebug, "system_text", "")

@@ -11,7 +11,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/config"
 	"github.com/zyf2007/ChatAPI/internal/http/httpx"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
-	"github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 	"go.uber.org/zap"
@@ -20,7 +20,7 @@ import (
 type LabHandler struct {
 	Config  config.Config
 	Query   *turnquery.Service
-	Turn    *turn.Service
+	Turn    *turnsvc.Service
 	Control *controlsvc.Service
 	Logger  *zap.Logger
 }
@@ -93,18 +93,18 @@ func (h LabHandler) CopyRequestCurl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h LabHandler) RequestDelta(w http.ResponseWriter, r *http.Request) {
-	h.executeRequestTurnControl(w, r, turn.TurnControlStreamDelta)
+	h.executeRequestTurnControl(w, r, turnsvc.TurnControlStreamDelta)
 }
 
 func (h LabHandler) RequestComplete(w http.ResponseWriter, r *http.Request) {
-	h.executeRequestTurnControl(w, r, turn.TurnControlStreamComplete)
+	h.executeRequestTurnControl(w, r, turnsvc.TurnControlStreamComplete)
 }
 
 func (h LabHandler) RequestAbort(w http.ResponseWriter, r *http.Request) {
-	h.executeRequestTurnControl(w, r, turn.TurnControlAbort)
+	h.executeRequestTurnControl(w, r, turnsvc.TurnControlAbort)
 }
 
-func (h LabHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.Request, kind turn.TurnControlKind) {
+func (h LabHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.Request, kind turnsvc.TurnControlKind) {
 	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
 	if requestID == "" {
 		http.Error(w, "request_id is required", http.StatusBadRequest)
@@ -121,17 +121,19 @@ func (h LabHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.Req
 	}
 	body := decodeBodyOrEmpty(r)
 	result, err := h.control().Execute(r.Context(), controlsvc.Command{
-		OwnerID:             actor.OwnerIDFromContext(r.Context()),
-		Kind:                kind,
-		ConversationID:      strings.TrimSpace(item.ConversationID),
-		ResponseID:          stringValue(body["response_id"], ""),
-		OutputText:          stringValue(body["text"], ""),
-		Mode:                stringValue(body["mode"], ""),
-		ToolName:            stringValue(body["tool_name"], ""),
-		ToolCallID:          stringValue(body["tool_call_id"], ""),
-		ToolOutput:          stringValue(body["output"], ""),
-		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
-		AbortReason:         stringValue(body["error"], ""),
+		OwnerID:        actor.OwnerIDFromContext(r.Context()),
+		ConversationID: strings.TrimSpace(item.ConversationID),
+		ResponseID:     stringValue(body["response_id"], ""),
+		Action: turnsvc.OutputAction{
+			Kind:                kind,
+			OutputText:          stringValue(body["text"], ""),
+			Mode:                stringValue(body["mode"], ""),
+			ToolName:            stringValue(body["tool_name"], ""),
+			ToolCallID:          stringValue(body["tool_call_id"], ""),
+			ToolOutput:          stringValue(body["output"], ""),
+			ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
+			AbortReason:         stringValue(body["error"], ""),
+		},
 	})
 	if err != nil {
 		if writeControlError(w, err) {

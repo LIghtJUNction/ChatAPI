@@ -223,16 +223,21 @@ func buildTurnControlCommand(kind turnsvc.TurnControlKind, body map[string]any) 
 		return controlsvc.Command{}, err
 	}
 	return controlsvc.Command{
-		Kind:                kind,
-		ConversationID:      conversationID,
-		ResponseID:          stringValue(body["response_id"], ""),
-		OutputText:          stringValue(body["text"], ""),
-		Mode:                stringValue(body["mode"], ""),
-		ToolName:            stringValue(body["tool_name"], ""),
-		ToolCallID:          stringValue(body["tool_call_id"], ""),
-		ToolOutput:          stringValue(body["output"], ""),
-		ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
-		AbortReason:         stringValue(body["error"], ""),
+		ConversationID: conversationID,
+		ResponseID:     stringValue(body["response_id"], ""),
+		Action: turnsvc.OutputAction{
+			Kind:                kind,
+			OutputText:          stringValue(body["text"], ""),
+			Mode:                stringValue(body["mode"], ""),
+			ToolName:            stringValue(body["tool_name"], ""),
+			ToolCallID:          stringValue(body["tool_call_id"], ""),
+			ToolOutput:          stringValue(body["output"], ""),
+			BuiltinToolKind:     stringValue(body["builtin_tool_kind"], ""),
+			BuiltinToolQuery:    stringValue(body["builtin_tool_query"], ""),
+			BuiltinToolResult:   stringValue(body["builtin_tool_result"], ""),
+			ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
+			AbortReason:         stringValue(body["error"], ""),
+		},
 	}, nil
 }
 

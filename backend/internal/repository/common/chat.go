@@ -50,27 +50,30 @@ type PendingTurnMutationResult struct {
 }
 
 type Request struct {
-	RequestID      string                `json:"request_id"`
-	OwnerID        string                `json:"owner_id,omitempty"`
-	ConversationID string                `json:"conversation_id"`
-	ResponseID     string                `json:"response_id,omitempty"`
-	RequestFormat  string                `json:"request_format,omitempty"`
-	Model          string                `json:"model,omitempty"`
-	SystemText     string                `json:"system_text,omitempty"`
-	DeveloperText  string                `json:"developer_text,omitempty"`
-	AssistantText  string                `json:"assistant_text,omitempty"`
-	InputText      string                `json:"input_text,omitempty"`
-	Status         string                `json:"status,omitempty"`
-	CreatedAt      time.Time             `json:"created_at"`
-	UpdatedAt      time.Time             `json:"updated_at"`
-	RequestMethod  string                `json:"request_method,omitempty"`
-	RequestPath    string                `json:"request_path,omitempty"`
-	RequestQuery   map[string][]string   `json:"request_query,omitempty"`
-	RequestHeaders map[string][]string   `json:"request_headers,omitempty"`
-	RequestBody    map[string]any        `json:"request_body,omitempty"`
-	RawRequestBody map[string]any        `json:"raw_request_body,omitempty"`
+	RequestID      string              `json:"request_id"`
+	OwnerID        string              `json:"owner_id,omitempty"`
+	ConversationID string              `json:"conversation_id"`
+	ResponseID     string              `json:"response_id,omitempty"`
+	RequestFormat  string              `json:"request_format,omitempty"`
+	Model          string              `json:"model,omitempty"`
+	SystemText     string              `json:"system_text,omitempty"`
+	DeveloperText  string              `json:"developer_text,omitempty"`
+	AssistantText  string              `json:"assistant_text,omitempty"`
+	InputText      string              `json:"input_text,omitempty"`
+	Status         string              `json:"status,omitempty"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+	RequestMethod  string              `json:"request_method,omitempty"`
+	RequestPath    string              `json:"request_path,omitempty"`
+	RequestQuery   map[string][]string `json:"request_query,omitempty"`
+	RequestHeaders map[string][]string `json:"request_headers,omitempty"`
+	RequestBody    map[string]any      `json:"request_body,omitempty"`
+	// RawRequestBody is the captured request fact; projections below may be regenerated.
+	RawRequestBody map[string]any `json:"raw_request_body,omitempty"`
+	// RequestOptions is a normalized snapshot for debugging and filtering.
 	RequestOptions map[string]any        `json:"request_options,omitempty"`
 	ToolSchemas    []any                 `json:"tool_schemas,omitempty"`
+	BuiltinTools   []any                 `json:"builtin_tools,omitempty"`
 	ToolChoice     RequestToolChoice     `json:"tool_choice,omitempty"`
 	ResponseFormat RequestResponseFormat `json:"response_format,omitempty"`
 	Metadata       map[string]any        `json:"metadata,omitempty"`

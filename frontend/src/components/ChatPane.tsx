@@ -27,6 +27,7 @@ import { ToolField } from './ToolField'
 import { ChatMessageList } from './ChatMessageList'
 import type {
   ComposerMode,
+  BuiltinToolOption,
   ReasoningStreamMode,
   ToolFieldValue,
   ToolSchemaOption,
@@ -36,7 +37,11 @@ import type {
 const { TextArea } = Input
 
 type ChatPaneProps = {
+  availableBuiltinTools: BuiltinToolOption[]
   availableToolSchemas: ToolSchemaOption[]
+  builtinToolKind: string
+  builtinToolQuery: string
+  builtinToolResult: string
   chatScrollRef: RefObject<HTMLDivElement | null>
   composer: string
   composerMode: ComposerMode
@@ -56,6 +61,9 @@ type ChatPaneProps = {
   sending: boolean
   setComposer: (value: string) => void
   setComposerMode: (value: ComposerMode) => void
+  setBuiltinToolKind: (value: string) => void
+  setBuiltinToolQuery: (value: string) => void
+  setBuiltinToolResult: (value: string) => void
   setThinkingText: (value: string) => void
   setReasoningStreamMode: (value: ReasoningStreamMode) => void
   setToolCallId: (value: string) => void
@@ -71,7 +79,11 @@ type ChatPaneProps = {
 
 export function ChatPane(props: ChatPaneProps) {
   const {
+    availableBuiltinTools,
     availableToolSchemas,
+    builtinToolKind,
+    builtinToolQuery,
+    builtinToolResult,
     chatScrollRef,
     composer,
     composerMode,
@@ -91,6 +103,9 @@ export function ChatPane(props: ChatPaneProps) {
     sending,
     setComposer,
     setComposerMode,
+    setBuiltinToolKind,
+    setBuiltinToolQuery,
+    setBuiltinToolResult,
     setThinkingText,
     setReasoningStreamMode,
     setToolCallId,
@@ -176,6 +191,12 @@ export function ChatPane(props: ChatPaneProps) {
 
   const toolFields = Object.entries(selectedToolSchema?.parameters.properties ?? {})
   const isResponsesConversation = selectedRequestFormat === 'responses'
+  const composerModeOptions = [
+    { label: 'Assistant Message', value: 'assistant_message' },
+    { label: '添加思考内容', value: 'thinking' },
+    { label: 'Tool Call', value: 'tool_call' },
+    ...(availableBuiltinTools.length ? [{ label: '内置工具', value: 'builtin_tool' }] : []),
+  ]
   const reasoningModeOptions = [
     { label: 'summery 模式', value: 'summery' },
     { label: 'reasoning 模式', value: 'reasoning' },
@@ -241,9 +262,7 @@ export function ChatPane(props: ChatPaneProps) {
                     setComposerMode(nextMode)
                   }}
                   options={[
-                    { label: 'Assistant Message', value: 'assistant_message' },
-                    { label: '添加思考内容', value: 'thinking' },
-                    { label: 'Tool Call', value: 'tool_call' },
+                    ...composerModeOptions,
                   ]}
                   disabled={sending || !isWaitingForUser}
                 />
@@ -323,6 +342,45 @@ export function ChatPane(props: ChatPaneProps) {
                 )}
               </div>
             )}
+            {composerMode === 'builtin_tool' && (
+              <div className="tool-call-panel">
+                <div className="tool-call-fields">
+                  <Select
+                    value={builtinToolKind || undefined}
+                    onChange={(value) => setBuiltinToolKind(value)}
+                    placeholder="选择内置工具"
+                    options={availableBuiltinTools.map((tool) => ({
+                      label: tool.label || tool.kind,
+                      value: tool.kind,
+                    }))}
+                    disabled={sending || !isWaitingForUser || availableBuiltinTools.length === 0}
+                  />
+                </div>
+                {builtinToolKind === 'web_search' ? (
+                  <TextArea
+                    value={builtinToolQuery}
+                    onChange={(event) => setBuiltinToolQuery(event.target.value)}
+                    placeholder="搜索词，会发送 Responses web_search_call 事件"
+                    autoSize={{ minRows: 3, maxRows: 6 }}
+                    className="composer-textarea"
+                    disabled={sending || !isWaitingForUser}
+                  />
+                ) : null}
+                {builtinToolKind === 'image_generation' ? (
+                  <TextArea
+                    value={builtinToolResult}
+                    onChange={(event) => setBuiltinToolResult(event.target.value)}
+                    placeholder="图片 base64 或 data:image/...;base64,...，会作为 image_generation_call.result 输出"
+                    autoSize={{ minRows: 4, maxRows: 8 }}
+                    className="composer-textarea"
+                    disabled={sending || !isWaitingForUser}
+                  />
+                ) : null}
+                {!builtinToolKind ? (
+                  <div className="tool-form-empty">当前请求没有可用内置工具。</div>
+                ) : null}
+              </div>
+            )}
             {composerMode === 'thinking' && (
               <div className="thinking-panel">
                 <div className="thinking-panel-header">
@@ -376,6 +434,8 @@ export function ChatPane(props: ChatPaneProps) {
                           ? 'reasoning'
                           : 'summery'
                       } 追加到当前回复草稿，不会结束这一轮。`
+                    : composerMode === 'builtin_tool'
+                      ? '内置工具会输出 Responses 官方内置工具事件，不会结束这一轮。'
                     : 'Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item。'
                 : '没有新的 user 请求时不能输出回复。'}
             </Typography.Text>
@@ -391,6 +451,10 @@ export function ChatPane(props: ChatPaneProps) {
                     ? !composer.trim()
                     : composerMode === 'thinking'
                       ? !thinkingText.trim()
+                      : composerMode === 'builtin_tool'
+                        ? !builtinToolKind.trim() ||
+                          (builtinToolKind === 'web_search' && !builtinToolQuery.trim()) ||
+                          (builtinToolKind === 'image_generation' && !builtinToolResult.trim())
                       : !toolName.trim())
                 }
               >
@@ -398,6 +462,8 @@ export function ChatPane(props: ChatPaneProps) {
                   ? '流式输出'
                   : composerMode === 'thinking'
                     ? '输出思考'
+                    : composerMode === 'builtin_tool'
+                      ? '输出内置工具'
                     : '输出 Tool Call'}
               </Button>
               <Button

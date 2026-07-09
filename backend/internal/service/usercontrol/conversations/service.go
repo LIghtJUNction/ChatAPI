@@ -76,9 +76,11 @@ func (s *Service) ListConversationMessages(ctx context.Context, ownerID string, 
 func (s *Service) AbortConversation(ctx context.Context, ownerID string, conversationID string, abortReason string) (map[string]any, error) {
 	result, err := s.turn.Execute(ctx, controlsvc.Command{
 		OwnerID:        strings.TrimSpace(ownerID),
-		Kind:           turnsvc.TurnControlAbort,
 		ConversationID: strings.TrimSpace(conversationID),
-		AbortReason:    strings.TrimSpace(abortReason),
+		Action: turnsvc.OutputAction{
+			Kind:        turnsvc.TurnControlAbort,
+			AbortReason: strings.TrimSpace(abortReason),
+		},
 	})
 	if err == nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Info("usercontrol conversations aborted conversation")

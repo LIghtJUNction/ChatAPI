@@ -28,17 +28,10 @@ type Service struct {
 }
 
 type Command struct {
-	OwnerID             string
-	Kind                turnsvc.TurnControlKind
-	ConversationID      string
-	ResponseID          string
-	OutputText          string
-	Mode                string
-	ToolName            string
-	ToolCallID          string
-	ToolOutput          string
-	ReasoningStreamMode string
-	AbortReason         string
+	OwnerID        string
+	ConversationID string
+	ResponseID     string
+	Action         turnsvc.OutputAction
 }
 
 type Result struct {
@@ -114,7 +107,7 @@ func (s *Service) Execute(ctx context.Context, command Command) (Result, error) 
 	logging.BindContext(s.Logger, ctx,
 		zap.String("owner.id", ownerID),
 		zap.String("conversation.id", turnCommand.ConversationID),
-		zap.String("turn.control.kind", string(turnCommand.Kind)),
+		zap.String("turn.control.kind", string(turnCommand.Action.Kind)),
 	).Info("turn control executed")
 	return Result{Body: body}, nil
 }
@@ -133,7 +126,7 @@ func (s *Service) mapExecutionError(ctx context.Context, command turnsvc.TurnCon
 func (s *Service) controlError(ctx context.Context, command turnsvc.TurnControlCommand, err error, kind ErrorKind, code string) error {
 	level := logging.BindContext(s.Logger, ctx,
 		zap.String("conversation.id", command.ConversationID),
-		zap.String("turn.control.kind", string(command.Kind)),
+		zap.String("turn.control.kind", string(command.Action.Kind)),
 		zap.String("error.kind", string(kind)),
 		zap.String("error.code", code),
 	)
@@ -150,24 +143,9 @@ func (s *Service) controlError(ctx context.Context, command turnsvc.TurnControlC
 }
 
 func (c Command) TurnCommand() turnsvc.TurnControlCommand {
-	mode := strings.TrimSpace(c.Mode)
-	if mode == "" {
-		mode = "assistant_message"
-	}
-	output := strings.TrimSpace(c.ToolOutput)
-	if output == "" {
-		output = strings.TrimSpace(c.OutputText)
-	}
 	return turnsvc.TurnControlCommand{
-		Kind:                c.Kind,
-		ConversationID:      strings.TrimSpace(c.ConversationID),
-		ResponseID:          strings.TrimSpace(c.ResponseID),
-		OutputText:          strings.TrimSpace(c.OutputText),
-		Mode:                mode,
-		ToolName:            strings.TrimSpace(c.ToolName),
-		ToolCallID:          strings.TrimSpace(c.ToolCallID),
-		ToolOutput:          output,
-		ReasoningStreamMode: strings.TrimSpace(c.ReasoningStreamMode),
-		AbortReason:         strings.TrimSpace(c.AbortReason),
+		ConversationID: strings.TrimSpace(c.ConversationID),
+		ResponseID:     strings.TrimSpace(c.ResponseID),
+		Action:         c.Action.Normalized(),
 	}
 }

@@ -23,9 +23,11 @@ func (s *Service) AbortByRequest(ctx context.Context, requestID string, reason s
 		return nil, err
 	}
 	result, err := s.control.Execute(ctx, controlsvc.Command{
-		Kind:           turnsvc.TurnControlAbort,
 		ConversationID: strings.TrimSpace(request.ConversationID),
-		AbortReason:    strings.TrimSpace(reason),
+		Action: turnsvc.OutputAction{
+			Kind:        turnsvc.TurnControlAbort,
+			AbortReason: strings.TrimSpace(reason),
+		},
 	})
 	return result.Body, err
 }
@@ -36,13 +38,15 @@ func (s *Service) CompleteByRequest(ctx context.Context, requestID string, text 
 		return nil, err
 	}
 	result, err := s.control.Execute(ctx, controlsvc.Command{
-		Kind:           turnsvc.TurnControlStreamComplete,
 		ConversationID: strings.TrimSpace(request.ConversationID),
-		OutputText:     text,
-		Mode:           mode,
-		ToolName:       toolName,
-		ToolCallID:     toolCallID,
-		ToolOutput:     toolOutput,
+		Action: turnsvc.OutputAction{
+			Kind:       turnsvc.TurnControlStreamComplete,
+			OutputText: text,
+			Mode:       mode,
+			ToolName:   toolName,
+			ToolCallID: toolCallID,
+			ToolOutput: toolOutput,
+		},
 	})
 	return result.Body, err
 }

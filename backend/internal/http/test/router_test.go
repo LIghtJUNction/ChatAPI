@@ -21,17 +21,13 @@ import (
 	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
-	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
 
-type noopRealtime struct{}
-
-func (noopRealtime) PublishConversationUpsert(common.Conversation)                           {}
-func (noopRealtime) PublishTimelineItemAppend(string, common.Conversation, timelinesvc.Item) {}
-func (noopRealtime) PublishConversationDelete(string, string)                                {}
+var noopEvents = chatevents.NoopPublisher{}
 
 func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	st, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
@@ -73,14 +69,14 @@ func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	pending.Logger = logFactory.Layer(logging.LayerPending)
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pending,
-			Realtime: noopRealtime{},
+			Store:   st,
+			Pending: pending,
 		},
 		Pending:            pending,
 		Store:              st,
 		OwnerIDFromContext: actor.OwnerIDFromContext,
 		ActorFromContext:   actor.FromContext,
+		Events:             noopEvents,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}

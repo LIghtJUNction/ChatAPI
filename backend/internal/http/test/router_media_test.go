@@ -24,13 +24,13 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
 	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
 	"github.com/zyf2007/ChatAPI/internal/service/account"
+	adminops "github.com/zyf2007/ChatAPI/internal/service/admincontrol/ops"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/identity"
 	localauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/local"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/verification"
+	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
-	adminops "github.com/zyf2007/ChatAPI/internal/service/admincontrol/ops"
-	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
@@ -51,12 +51,12 @@ func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
 	}
 	st.Logger = logFactory.Layer(logging.LayerRepository)
 	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
-		ID:       "user_media",
-		Username: "media",
-		Email:    "media@example.com",
+		ID:           "user_media",
+		Username:     "media",
+		Email:        "media@example.com",
 		PasswordHash: mustPasswordHash(t, "media-pass"),
-		Role:     "user",
-		IsActive: true,
+		Role:         "user",
+		IsActive:     true,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -86,14 +86,14 @@ func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
 	pendingRegistry := pending.NewPendingRegistry()
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pendingRegistry,
-			Realtime: noopRealtime{},
+			Store:   st,
+			Pending: pendingRegistry,
 		},
 		Pending:            pendingRegistry,
 		Store:              st,
 		OwnerIDFromContext: actor.OwnerIDFromContext,
 		ActorFromContext:   actor.FromContext,
+		Events:             noopEvents,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
@@ -217,12 +217,12 @@ func TestResponsesMessageContentDataURLTranscodesToAVIF(t *testing.T) {
 	}
 	st.Logger = logFactory.Layer(logging.LayerRepository)
 	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
-		ID:       "user_media_resp",
-		Username: "mediaresp",
-		Email:    "mediaresp@example.com",
+		ID:           "user_media_resp",
+		Username:     "mediaresp",
+		Email:        "mediaresp@example.com",
 		PasswordHash: mustPasswordHash(t, "mediaresp-pass"),
-		Role:     "user",
-		IsActive: true,
+		Role:         "user",
+		IsActive:     true,
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -233,14 +233,14 @@ func TestResponsesMessageContentDataURLTranscodesToAVIF(t *testing.T) {
 	pendingRegistry := pending.NewPendingRegistry()
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pendingRegistry,
-			Realtime: noopRealtime{},
+			Store:   st,
+			Pending: pendingRegistry,
 		},
 		Pending:            pendingRegistry,
 		Store:              st,
 		OwnerIDFromContext: actor.OwnerIDFromContext,
 		ActorFromContext:   actor.FromContext,
+		Events:             noopEvents,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
@@ -343,14 +343,14 @@ func TestJPEGDataURLWithWhitespaceTranscodesToAVIF(t *testing.T) {
 	pendingRegistry := pending.NewPendingRegistry()
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pendingRegistry,
-			Realtime: noopRealtime{},
+			Store:   st,
+			Pending: pendingRegistry,
 		},
 		Pending:            pendingRegistry,
 		Store:              st,
 		OwnerIDFromContext: actor.OwnerIDFromContext,
 		ActorFromContext:   actor.FromContext,
+		Events:             noopEvents,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}

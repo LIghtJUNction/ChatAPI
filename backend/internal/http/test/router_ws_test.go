@@ -27,6 +27,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
@@ -202,9 +203,8 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pending,
-			Realtime: workspacesvc.NewRealtimePublisher(workspaceHub),
+			Store:   st,
+			Pending: pending,
 		},
 		Pending:            pending,
 		Store:              st,
@@ -215,7 +215,7 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 	controlService := controlsvc.New(queryService, turnService, logFactory.Layer(logging.LayerTurnQuery))
 	workspaceService = workspacesvc.New(queryService, timelineService, controlService)
 	workspaceHub = workspacesvc.NewHub(workspaceService)
-	turnService.Submitter.Realtime = workspacesvc.NewRealtimePublisher(workspaceHub)
+	turnService.Events = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(workspaceHub))
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 
@@ -389,9 +389,8 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pending,
-			Realtime: workspacesvc.NewRealtimePublisher(workspaceHub),
+			Store:   st,
+			Pending: pending,
 		},
 		Pending:            pending,
 		Store:              st,
@@ -402,7 +401,7 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 	controlService := controlsvc.New(queryService, turnService, logFactory.Layer(logging.LayerTurnQuery))
 	workspaceService = workspacesvc.New(queryService, timelineService, controlService)
 	workspaceHub = workspacesvc.NewHub(workspaceService)
-	turnService.Submitter.Realtime = workspacesvc.NewRealtimePublisher(workspaceHub)
+	turnService.Events = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(workspaceHub))
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 
@@ -534,9 +533,8 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pending,
-			Realtime: workspacesvc.NewRealtimePublisher(workspaceHub),
+			Store:   st,
+			Pending: pending,
 		},
 		Pending:            pending,
 		Store:              st,
@@ -547,7 +545,7 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 	controlService := controlsvc.New(queryService, turnService, logFactory.Layer(logging.LayerTurnQuery))
 	workspaceService = workspacesvc.New(queryService, timelineService, controlService)
 	workspaceHub = workspacesvc.NewHub(workspaceService)
-	turnService.Submitter.Realtime = workspacesvc.NewRealtimePublisher(workspaceHub)
+	turnService.Events = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(workspaceHub))
 	modelKeyService := modelkey.NewService(st, "test-master-key")
 	appKeyService := appkey.NewService(st)
 

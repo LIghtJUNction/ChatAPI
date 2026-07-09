@@ -6,6 +6,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
 
@@ -40,5 +41,9 @@ func (s *Service) CompleteConversation(ctx context.Context, conversationID strin
 }
 
 func (s *Service) DeleteConversation(ctx context.Context, conversationID string) (common.DeleteConversationsResult, error) {
-	return s.chatStore.DeleteConversations(ctx, []string{strings.TrimSpace(conversationID)})
+	result, err := s.chatStore.DeleteConversations(ctx, []string{strings.TrimSpace(conversationID)})
+	if err == nil {
+		chatevents.PublishDeletedConversations(ctx, s.events, result)
+	}
+	return result, err
 }

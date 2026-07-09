@@ -8,6 +8,7 @@ import (
 	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
 	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 )
@@ -22,6 +23,7 @@ type Deps struct {
 	KeyStore       auth.KeyStore
 	AuthSettings   *authsettings.Service
 	AccessSettings *authaccess.SettingsService
+	Events         chatevents.Publisher
 }
 
 type Service struct {
@@ -33,6 +35,7 @@ type Service struct {
 	keyStore       auth.KeyStore
 	authSettings   *authsettings.Service
 	accessSettings *authaccess.SettingsService
+	events         chatevents.Publisher
 }
 
 type CreateUserInput struct {
@@ -58,5 +61,6 @@ func New(deps Deps) *Service {
 		keyStore:       deps.KeyStore,
 		authSettings:   deps.AuthSettings,
 		accessSettings: deps.AccessSettings,
+		events:         deps.Events,
 	}
 }

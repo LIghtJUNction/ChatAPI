@@ -179,6 +179,26 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var result common.DeleteConversationsResult
+	rows, err := tx.Query(ctx, `
+		SELECT id, COALESCE(metadata_json->>'owner_id', '')
+		FROM conversations
+		WHERE id = ANY($1)
+	`, conversationIDs)
+	if err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	for rows.Next() {
+		var item common.DeletedConversation
+		if err := rows.Scan(&item.ID, &item.OwnerID); err != nil {
+			rows.Close()
+			return common.DeleteConversationsResult{}, err
+		}
+		result.DeletedConversationItems = append(result.DeletedConversationItems, item)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE conversation_id = ANY($1)`, conversationIDs).Scan(&result.DeletedMessages); err != nil {
 		return common.DeleteConversationsResult{}, err
 	}

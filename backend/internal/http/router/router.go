@@ -1,7 +1,6 @@
 package router
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +42,7 @@ import (
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
 	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
@@ -70,6 +70,7 @@ type Deps struct {
 	Streaming      *streamingsvc.Service
 	Egress         *egresssvc.Service
 	Timeline       *timelinesvc.Service
+	ChatEvents     *chatevents.Dispatcher
 	AppAPIKeys     *appkey.Service
 	Lab            *labauth.Service
 	LocalAuth      *localauth.Service
@@ -137,6 +138,9 @@ func New(deps Deps) http.Handler {
 	if deps.WorkspaceHub == nil {
 		deps.WorkspaceHub = workspacesvc.NewHub(deps.Workspace)
 	}
+	if deps.ChatEvents == nil {
+		deps.ChatEvents = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(deps.WorkspaceHub))
+	}
 	if deps.UserControl == nil {
 		deps.UserControl = usercontrol.New(usercontrol.Deps{
 			Identity:     deps.Identity,
@@ -154,9 +158,7 @@ func New(deps Deps) http.Handler {
 			ModelKeys:    deps.ModelAPIKeys,
 			Accounts:     deps.Accounts,
 			Logger:       deps.logger(logging.LayerUserControl),
-			OnDeleteConversation: func(ctx context.Context, ownerID string, conversationID string) {
-				deps.WorkspaceHub.PublishConversationDelete(ownerID, conversationID)
-			},
+			Events:       deps.ChatEvents,
 		})
 	}
 	if deps.AdminControl == nil {
@@ -169,6 +171,7 @@ func New(deps Deps) http.Handler {
 			KeyStore:       deps.AuthRepo,
 			AuthSettings:   deps.AuthSettings,
 			AccessSettings: deps.AccessSettings,
+			Events:         deps.ChatEvents,
 		})
 	}
 	if deps.Turn != nil {
@@ -188,8 +191,8 @@ func New(deps Deps) http.Handler {
 				}
 			}
 		}
-		if deps.Turn.Submitter != nil && deps.Turn.Submitter.Realtime == nil && deps.WorkspaceHub != nil {
-			deps.Turn.Submitter.Realtime = workspacesvc.NewRealtimePublisher(deps.WorkspaceHub)
+		if deps.Turn.Events == nil {
+			deps.Turn.Events = deps.ChatEvents
 		}
 	}
 

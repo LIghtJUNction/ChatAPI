@@ -13,7 +13,7 @@ import (
 	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
 	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
-	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	"go.uber.org/zap"
 )
 
@@ -34,6 +34,41 @@ type TurnIdentity struct {
 	RequestID string
 }
 
+type eventRoute struct {
+	OwnerID        string
+	RequestID      string
+	ConversationID string
+}
+
+func eventRouteFromTurn(turn *PendingTurn) eventRoute {
+	if turn == nil {
+		return eventRoute{}
+	}
+	return eventRoute{
+		OwnerID:        strings.TrimSpace(turn.OwnerID),
+		RequestID:      strings.TrimSpace(turn.RequestID),
+		ConversationID: strings.TrimSpace(turn.ConversationID),
+	}
+}
+
+func eventRouteFromIdentity(conversationID string, identity TurnIdentity) eventRoute {
+	return eventRoute{
+		OwnerID:        strings.TrimSpace(identity.OwnerID),
+		RequestID:      strings.TrimSpace(identity.RequestID),
+		ConversationID: strings.TrimSpace(conversationID),
+	}
+}
+
+func (r eventRoute) withConversation(conversation common.Conversation) eventRoute {
+	if r.OwnerID == "" {
+		r.OwnerID = conversationstate.OwnerID(conversation)
+	}
+	if r.ConversationID == "" {
+		r.ConversationID = strings.TrimSpace(conversation.ID)
+	}
+	return r
+}
+
 type SubmitPrincipal struct {
 	OwnerID string
 	Actor   actor.Actor
@@ -44,6 +79,7 @@ type Service struct {
 	Pending                     pendingRegistryLike
 	Store                       chat.Store
 	Resolver                    *conversationresolve.Service
+	Events                      chatevents.Publisher
 	ResolveMutationError        MutationErrorResolver
 	NotifyText                  TextNotifier
 	EnsureMessageAdmission      AdmissionHook
@@ -105,11 +141,14 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 	} else {
 		input.Target = target
 	}
-	turn, _, _, err := s.Submitter.Submit(ctx, input)
+	turn, conversation, message, err := s.Submitter.Submit(ctx, input)
 	if err != nil {
 		logging.BindContext(s.Logger, ctx, zap.String("owner.id", principal.OwnerID)).Error("create pending response submit failed", zap.Error(err))
 		return nil, err
 	}
+	route := eventRouteFromTurn(turn)
+	s.publishConversationUpserted(ctx, route, conversation)
+	s.publishMessageAppended(ctx, route, conversation, message)
 	logging.BindContext(s.Logger, ctx,
 		zap.String("owner.id", principal.OwnerID),
 		zap.String("conversation.id", turn.ConversationID),
@@ -143,11 +182,14 @@ func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*
 	} else {
 		input.Target = target
 	}
-	turn, conversation, _, err := s.Submitter.Submit(ctx, input)
+	turn, conversation, message, err := s.Submitter.Submit(ctx, input)
 	if err != nil {
 		logging.BindContext(s.Logger, ctx, zap.String("owner.id", principal.OwnerID)).Error("create pending stream submit failed", zap.Error(err))
 		return nil, common.Conversation{}, err
 	}
+	route := eventRouteFromTurn(turn)
+	s.publishConversationUpserted(ctx, route, conversation)
+	s.publishMessageAppended(ctx, route, conversation, message)
 	logging.BindContext(s.Logger, ctx,
 		zap.String("owner.id", principal.OwnerID),
 		zap.String("conversation.id", conversation.ID),
@@ -201,7 +243,7 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		return nil, err
 	}
 	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "delta", DeltaText: chunk})
-	s.Submitter.Realtime.PublishConversationUpsert(updated)
+	s.publishConversationUpserted(ctx, s.eventRouteForContext(ctx, updated), updated)
 	s.notifyText(ctx, s.ownerID(ctx), updated.Title, chunk)
 	return map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}, nil
 }
@@ -216,7 +258,8 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 		s.Pending.RevertFinalize(input.ConversationID, previousState)
 		return nil, err
 	}
-	s.Submitter.Realtime.PublishConversationUpsert(conversation)
+	route := s.eventRouteForContext(ctx, conversation)
+	s.publishConversationUpserted(ctx, route, conversation)
 	responseBody := s.egress().CompleteBody(conversation, input, message)
 	_ = s.Pending.Publish(input.ConversationID, PendingEvent{
 		Type:         "complete",
@@ -230,7 +273,7 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	if err := s.Pending.Resolve(input.ConversationID, PendingResult{ResponseBody: responseBody}); err != nil {
 		return nil, err
 	}
-	s.publishMessageTimelineItem(conversation, message)
+	s.publishMessageAppended(ctx, route, conversation, message)
 	s.notifyText(ctx, s.ownerID(ctx), conversation.Title, message.Content)
 	return map[string]any{"conversation": conversation, "output_text": message.Content}, nil
 }
@@ -268,8 +311,9 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 		return err
 	}
 	conversation := result.Conversation
-	s.publishConversationState(ctx, conversationID)
-	s.publishTimelineEvent(conversation, result.Event)
+	route := eventRouteFromIdentity(conversationID, identity)
+	s.publishConversationUpserted(ctx, route, conversation)
+	s.publishConversationEventAppended(ctx, route, conversation, result.Event)
 	body := s.egress().AbortBody(conversation, reason)
 	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "abort", ErrorBody: body})
 	s.notifyText(ctx, identity.OwnerID, conversation.Title, reason)
@@ -494,8 +538,9 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 		return err
 	}
 	conversation := result.Conversation
-	s.publishConversationState(ctx, conversationID)
-	s.publishTimelineEvent(conversation, result.Event)
+	route := eventRouteFromIdentity(conversationID, resolved)
+	s.publishConversationUpserted(ctx, route, conversation)
+	s.publishConversationEventAppended(ctx, route, conversation, result.Event)
 	_ = s.Pending.Abort(conversationID, map[string]any{
 		"error": map[string]any{
 			"message": reason,
@@ -510,47 +555,63 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 	return nil
 }
 
-func (s *Service) publishConversationState(ctx context.Context, conversationID string) {
-	if s == nil || s.Submitter == nil || s.Submitter.Realtime == nil {
+func (s *Service) publishConversationUpserted(ctx context.Context, route eventRoute, conversation common.Conversation) {
+	if s == nil || s.Events == nil {
 		return
 	}
-	conversation, err := s.Store.GetConversation(ctx, conversationID)
-	if err != nil {
+	route = route.withConversation(conversation)
+	if route.OwnerID == "" {
 		return
 	}
-	s.Submitter.Realtime.PublishConversationUpsert(conversation)
-}
-
-func (s *Service) publishTimelineEvent(conversation common.Conversation, event common.ConversationEvent) {
-	if s == nil || s.Submitter == nil || s.Submitter.Realtime == nil {
-		return
-	}
-	ownerID := conversationstate.OwnerID(conversation)
-	if ownerID == "" {
-		return
-	}
-	s.Submitter.Realtime.PublishTimelineItemAppend(ownerID, conversation, timelinesvc.Item{
-		ID:        "evt:" + event.ID,
-		Kind:      "system_event",
-		CreatedAt: event.CreatedAt,
-		Event:     &event,
+	s.Events.Publish(ctx, chatevents.Event{
+		Type:           chatevents.TypeConversationUpserted,
+		OwnerID:        route.OwnerID,
+		ConversationID: route.ConversationID,
+		Conversation:   conversation,
 	})
 }
 
-func (s *Service) publishMessageTimelineItem(conversation common.Conversation, message common.Message) {
-	if s == nil || s.Submitter == nil || s.Submitter.Realtime == nil {
+func (s *Service) publishMessageAppended(ctx context.Context, route eventRoute, conversation common.Conversation, message common.Message) {
+	if s == nil || s.Events == nil {
 		return
 	}
-	ownerID := conversationstate.OwnerID(conversation)
-	if ownerID == "" {
+	route = route.withConversation(conversation)
+	if route.OwnerID == "" {
 		return
 	}
-	s.Submitter.Realtime.PublishTimelineItemAppend(ownerID, conversation, timelinesvc.Item{
-		ID:        "msg:" + message.ID,
-		Kind:      "message",
-		CreatedAt: message.CreatedAt,
-		Message:   &message,
+	msg := message
+	s.Events.Publish(ctx, chatevents.Event{
+		Type:           chatevents.TypeMessageAppended,
+		OwnerID:        route.OwnerID,
+		ConversationID: route.ConversationID,
+		Conversation:   conversation,
+		Message:        &msg,
 	})
+}
+
+func (s *Service) publishConversationEventAppended(ctx context.Context, route eventRoute, conversation common.Conversation, event common.ConversationEvent) {
+	if s == nil || s.Events == nil {
+		return
+	}
+	route = route.withConversation(conversation)
+	if route.OwnerID == "" {
+		return
+	}
+	evt := event
+	s.Events.Publish(ctx, chatevents.Event{
+		Type:              chatevents.TypeConversationEventAppended,
+		OwnerID:           route.OwnerID,
+		ConversationID:    route.ConversationID,
+		Conversation:      conversation,
+		ConversationEvent: &evt,
+	})
+}
+
+func (s *Service) eventRouteForContext(ctx context.Context, conversation common.Conversation) eventRoute {
+	return eventRoute{
+		OwnerID:        strings.TrimSpace(s.ownerID(ctx)),
+		ConversationID: strings.TrimSpace(conversation.ID),
+	}.withConversation(conversation)
 }
 
 func (s *Service) resolveActiveTurnIdentity(ctx context.Context, conversationID string) (TurnIdentity, error) {

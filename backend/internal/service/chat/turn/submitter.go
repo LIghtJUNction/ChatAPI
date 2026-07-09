@@ -11,7 +11,6 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
-	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 )
 
 type Store interface {
@@ -23,11 +22,6 @@ type PendingRegistrar interface {
 	GetByConversationID(conversationID string) (*PendingTurn, bool)
 }
 
-type RealtimePublisher interface {
-	PublishConversationUpsert(common.Conversation)
-	PublishTimelineItemAppend(string, common.Conversation, timelinesvc.Item)
-}
-
 type SubmitHooks struct {
 	AfterCreate   func(ctx context.Context, request protocol.TurnRequest, conversationID string, responseID string)
 	NotifyWaiting func(ctx context.Context, ownerID string, title string, userText string)
@@ -36,7 +30,6 @@ type SubmitHooks struct {
 type Submitter struct {
 	Store        Store
 	Pending      PendingRegistrar
-	Realtime     RealtimePublisher
 	Hooks        SubmitHooks
 	Materializer *RequestMaterializer
 }
@@ -105,13 +98,6 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		Done:              make(chan PendingResult, 1),
 	}
 	s.Pending.Add(turn)
-	s.Realtime.PublishConversationUpsert(conversation)
-	s.Realtime.PublishTimelineItemAppend(input.OwnerID, conversation, timelinesvc.Item{
-		ID:        "msg:" + message.ID,
-		Kind:      "message",
-		CreatedAt: message.CreatedAt,
-		Message:   &message,
-	})
 	if s.Hooks.AfterCreate != nil {
 		s.Hooks.AfterCreate(ctx, input.Request, conversationID, responseID)
 	}

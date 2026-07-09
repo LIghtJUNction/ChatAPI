@@ -17,6 +17,7 @@ import (
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	userconfig "github.com/zyf2007/ChatAPI/internal/service/usercontrol/config"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversations"
@@ -35,35 +36,35 @@ type Service struct {
 }
 
 type Deps struct {
-	Identity             *identitysvc.Service
-	LocalAuth            *localauth.Service
-	Settings             *authsettings.Service
-	TOTP                 *totpsvc.Service
-	Policy               *policy.Service
-	Query                *turnquerysvc.Service
-	Turn                 *controlsvc.Service
-	Configs              configrepo.Store
-	Storage              storage.Store
-	Chat                 chat.Store
-	AppKeysStore         auth.KeyStore
-	AppKeys              *appkey.Service
-	ModelKeys            *modelkey.Service
-	Accounts             *account.Service
-	Logger               *zap.Logger
-	OnDeleteConversation func(context.Context, string, string)
+	Identity     *identitysvc.Service
+	LocalAuth    *localauth.Service
+	Settings     *authsettings.Service
+	TOTP         *totpsvc.Service
+	Policy       *policy.Service
+	Query        *turnquerysvc.Service
+	Turn         *controlsvc.Service
+	Configs      configrepo.Store
+	Storage      storage.Store
+	Chat         chat.Store
+	AppKeysStore auth.KeyStore
+	AppKeys      *appkey.Service
+	ModelKeys    *modelkey.Service
+	Accounts     *account.Service
+	Logger       *zap.Logger
+	Events       chatevents.Publisher
 }
 
 func New(deps Deps) *Service {
 	return &Service{
 		Profile:  profile.New(profile.Deps{Identity: deps.Identity, LocalAuth: deps.LocalAuth, Settings: deps.Settings, TOTP: deps.TOTP, Policy: deps.Policy, Logger: deps.Logger}),
 		Keys:     keys.New(keys.Deps{Keys: deps.AppKeysStore, AppKeys: deps.AppKeys, ModelKeys: deps.ModelKeys, Logger: deps.Logger}),
-		Config:   userconfig.New(userconfig.Deps{Configs: deps.Configs, Chat: deps.Chat, Logger: deps.Logger}),
+		Config:   userconfig.New(userconfig.Deps{Configs: deps.Configs, Chat: deps.Chat, Events: deps.Events, Logger: deps.Logger}),
 		Identity: identity.New(identity.Deps{Accounts: deps.Accounts, Logger: deps.Logger}),
 		Conversations: conversations.New(conversations.Deps{
-			Query:    deps.Query,
-			Turn:     deps.Turn,
-			Logger:   deps.Logger,
-			OnDelete: deps.OnDeleteConversation,
+			Query:  deps.Query,
+			Turn:   deps.Turn,
+			Logger: deps.Logger,
+			Events: deps.Events,
 			DeleteOne: func(ctx context.Context, conversationID string) (common.DeleteConversationsResult, error) {
 				return deps.Chat.DeleteConversations(ctx, []string{conversationID})
 			},

@@ -129,27 +129,27 @@ type UpsertStorageFileDeletionFailureInput struct {
 }
 
 type CreatePendingInput struct {
-	ConversationID    string
-	RequestID         string
-	ResponseID        string
-	OwnerID           string
-	ReuseConversation bool
-	RequestFormat     string
-	Model             string
-	SystemContent     string
-	DeveloperContent  string
-	AssistantContent  string
-	UserContent       string
+	ConversationID     string
+	RequestID          string
+	ResponseID         string
+	OwnerID            string
+	ReuseConversation  bool
+	RequestFormat      string
+	Model              string
+	SystemContent      string
+	DeveloperContent   string
+	AssistantContent   string
+	UserContent        string
 	UserMessageContent string
-	RequestMethod     string
-	RequestPath       string
-	RequestQuery      map[string][]string
-	RequestHeaders    map[string][]string
-	RequestBody       map[string]any
-	ToolSchemas       []any
-	ToolChoice        RequestToolChoice
-	ResponseFormat    RequestResponseFormat
-	PreparedImages    []CreatePendingImageAssetInput
+	RequestMethod      string
+	RequestPath        string
+	RequestQuery       map[string][]string
+	RequestHeaders     map[string][]string
+	RequestBody        map[string]any
+	ToolSchemas        []any
+	ToolChoice         RequestToolChoice
+	ResponseFormat     RequestResponseFormat
+	PreparedImages     []CreatePendingImageAssetInput
 }
 
 type CreatePendingImageAssetInput struct {
@@ -219,9 +219,15 @@ type AppendConversationEventInput struct {
 }
 
 type DeleteConversationsResult struct {
-	DeletedConversations int `json:"deleted_conversations"`
-	DeletedMessages      int `json:"deleted_messages"`
-	DeletedAssetRefs     int `json:"deleted_asset_refs"`
+	DeletedConversations     int                   `json:"deleted_conversations"`
+	DeletedMessages          int                   `json:"deleted_messages"`
+	DeletedAssetRefs         int                   `json:"deleted_asset_refs"`
+	DeletedConversationItems []DeletedConversation `json:"deleted_conversation_items,omitempty"`
+}
+
+type DeletedConversation struct {
+	ID      string `json:"id"`
+	OwnerID string `json:"owner_id,omitempty"`
 }
 
 type DeleteUploadedImagesResult struct {

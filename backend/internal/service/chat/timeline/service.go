@@ -41,21 +41,11 @@ func (s *Service) ListTimeline(ctx context.Context, conversationID string) ([]It
 	items := make([]Item, 0, len(messages)+len(events))
 	for i := range messages {
 		message := messages[i]
-		items = append(items, Item{
-			ID:        "msg:" + message.ID,
-			Kind:      "message",
-			CreatedAt: message.CreatedAt,
-			Message:   &message,
-		})
+		items = append(items, ItemFromMessage(message))
 	}
 	for i := range events {
 		event := events[i]
-		items = append(items, Item{
-			ID:        "evt:" + event.ID,
-			Kind:      "system_event",
-			CreatedAt: event.CreatedAt,
-			Event:     &event,
-		})
+		items = append(items, ItemFromConversationEvent(event))
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		left := items[i]
@@ -66,4 +56,22 @@ func (s *Service) ListTimeline(ctx context.Context, conversationID string) ([]It
 		return left.CreatedAt.Before(right.CreatedAt)
 	})
 	return items, nil
+}
+
+func ItemFromMessage(message common.Message) Item {
+	return Item{
+		ID:        "msg:" + message.ID,
+		Kind:      "message",
+		CreatedAt: message.CreatedAt,
+		Message:   &message,
+	}
+}
+
+func ItemFromConversationEvent(event common.ConversationEvent) Item {
+	return Item{
+		ID:        "evt:" + event.ID,
+		Kind:      "system_event",
+		CreatedAt: event.CreatedAt,
+		Event:     &event,
+	}
 }

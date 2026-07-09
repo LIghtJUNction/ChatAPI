@@ -98,14 +98,14 @@ func TestRouterAdminFlow(t *testing.T) {
 	pending := pendingsvc.NewPendingRegistry()
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pending,
-			Realtime: noopRealtime{},
+			Store:   st,
+			Pending: pending,
 		},
 		Pending:            pending,
 		Store:              st,
 		OwnerIDFromContext: actor.OwnerIDFromContext,
 		ActorFromContext:   actor.FromContext,
+		Events:             noopEvents,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}

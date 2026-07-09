@@ -10,7 +10,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
-	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
@@ -154,29 +154,58 @@ func NewRealtimePublisher(hub *Hub) *RealtimePublisher {
 	return &RealtimePublisher{hub: hub}
 }
 
-func (p *RealtimePublisher) PublishConversationUpsert(conversation common.Conversation) {
+func (p *RealtimePublisher) HandleChatEvent(ctx context.Context, event chatevents.Event) {
 	if p == nil || p.hub == nil {
 		return
 	}
-	ownerID := conversationstate.OwnerID(conversation)
+	switch event.Type {
+	case chatevents.TypeConversationUpserted:
+		p.publishConversationUpsert(event.OwnerID, event.Conversation)
+	case chatevents.TypeConversationDeleted:
+		p.publishConversationDelete(event.OwnerID, event.ConversationID)
+	case chatevents.TypeMessageAppended, chatevents.TypeConversationEventAppended:
+		item, ok := timelineItemFromChatEvent(event)
+		if !ok {
+			return
+		}
+		p.publishTimelineItemAppend(event.OwnerID, event.Conversation, item)
+	}
+	_ = ctx
+}
+
+func (p *RealtimePublisher) publishConversationUpsert(ownerID string, conversation common.Conversation) {
+	if p == nil || p.hub == nil {
+		return
+	}
 	if ownerID == "" {
 		return
 	}
-	p.hub.PublishConversationUpsert(ownerID, conversation)
+	p.hub.publishConversationUpsert(ownerID, conversation)
 }
 
-func (p *RealtimePublisher) PublishConversationDelete(ownerID string, conversationID string) {
+func (p *RealtimePublisher) publishConversationDelete(ownerID string, conversationID string) {
 	if p == nil || p.hub == nil {
 		return
 	}
-	p.hub.PublishConversationDelete(strings.TrimSpace(ownerID), strings.TrimSpace(conversationID))
+	p.hub.publishConversationDelete(strings.TrimSpace(ownerID), strings.TrimSpace(conversationID))
 }
 
-func (p *RealtimePublisher) PublishTimelineItemAppend(ownerID string, conversation common.Conversation, item timelinesvc.Item) {
+func (p *RealtimePublisher) publishTimelineItemAppend(ownerID string, conversation common.Conversation, item timelinesvc.Item) {
 	if p == nil || p.hub == nil {
 		return
 	}
-	p.hub.PublishTimelineItemAppend(strings.TrimSpace(ownerID), conversation, item)
+	p.hub.publishTimelineItemAppend(strings.TrimSpace(ownerID), conversation, item)
+}
+
+func timelineItemFromChatEvent(event chatevents.Event) (timelinesvc.Item, bool) {
+	switch {
+	case event.Message != nil:
+		return timelinesvc.ItemFromMessage(*event.Message), true
+	case event.ConversationEvent != nil:
+		return timelinesvc.ItemFromConversationEvent(*event.ConversationEvent), true
+	default:
+		return timelinesvc.Item{}, false
+	}
 }
 
 type Hub struct {
@@ -307,21 +336,21 @@ func (h *Hub) ConnectionCount(ownerID string) int {
 	return len(h.connections[ownerID])
 }
 
-func (h *Hub) PublishConversationUpsert(ownerID string, conversation common.Conversation) {
+func (h *Hub) publishConversationUpsert(ownerID string, conversation common.Conversation) {
 	h.broadcast(ownerID, ConversationUpsert{
 		Type:         "conversation.upsert",
 		Conversation: SummaryFromConversation(conversation),
 	}, nil)
 }
 
-func (h *Hub) PublishConversationDelete(ownerID string, conversationID string) {
+func (h *Hub) publishConversationDelete(ownerID string, conversationID string) {
 	h.broadcast(ownerID, ConversationDelete{
 		Type:           "conversation.remove",
 		ConversationID: conversationID,
 	}, nil)
 }
 
-func (h *Hub) PublishTimelineItemAppend(ownerID string, conversation common.Conversation, item timelinesvc.Item) {
+func (h *Hub) publishTimelineItemAppend(ownerID string, conversation common.Conversation, item timelinesvc.Item) {
 	h.broadcast(ownerID, TimelineItemAppend{
 		Type:           "timeline.append",
 		ConversationID: conversation.ID,

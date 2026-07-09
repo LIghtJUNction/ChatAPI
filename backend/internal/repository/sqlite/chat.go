@@ -276,6 +276,29 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 	defer func() { _ = tx.Rollback() }()
 
 	var result common.DeleteConversationsResult
+	listDeletedQuery := fmt.Sprintf(`
+		SELECT id, COALESCE(json_extract(metadata_json, '$.owner_id'), '')
+		FROM conversations
+		WHERE id IN (%s)
+	`, placeholders)
+	rows, err := tx.QueryContext(ctx, listDeletedQuery, args...)
+	if err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	for rows.Next() {
+		var item common.DeletedConversation
+		if err := rows.Scan(&item.ID, &item.OwnerID); err != nil {
+			_ = rows.Close()
+			return common.DeleteConversationsResult{}, err
+		}
+		result.DeletedConversationItems = append(result.DeletedConversationItems, item)
+	}
+	if err := rows.Close(); err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
 	countMessagesQuery := fmt.Sprintf(`SELECT COUNT(*) FROM messages WHERE conversation_id IN (%s)`, placeholders)
 	if err := tx.QueryRowContext(ctx, countMessagesQuery, args...).Scan(&result.DeletedMessages); err != nil {
 		return common.DeleteConversationsResult{}, err

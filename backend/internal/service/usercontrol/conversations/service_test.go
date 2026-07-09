@@ -10,6 +10,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
+	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	userconv "github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversations"
 )
@@ -53,8 +54,17 @@ func (f *fakeTurn) Execute(_ context.Context, cmd controlsvc.Command) (controlsv
 	return controlsvc.Result{Body: map[string]any{"ok": true}}, nil
 }
 
+type eventSpy struct {
+	events []chatevents.Event
+}
+
+func (s *eventSpy) Publish(_ context.Context, event chatevents.Event) {
+	s.events = append(s.events, event)
+}
+
 func TestConversationsDeleteConversationBranches(t *testing.T) {
 	deleteCalled := 0
+	events := &eventSpy{}
 	svc := userconv.New(userconv.Deps{
 		Query: &fakeQuery{
 			conversations: map[string][]common.Conversation{
@@ -67,11 +77,18 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 		Turn: &fakeTurn{},
 		DeleteOne: func(_ context.Context, id string) (common.DeleteConversationsResult, error) {
 			deleteCalled++
-			return common.DeleteConversationsResult{DeletedConversations: 1}, nil
+			return common.DeleteConversationsResult{
+				DeletedConversations: 1,
+				DeletedConversationItems: []common.DeletedConversation{{
+					ID:      "conv_result",
+					OwnerID: "user_result",
+				}},
+			}, nil
 		},
 		DeleteMany: func(context.Context, []string) (common.DeleteConversationsResult, error) {
 			return common.DeleteConversationsResult{}, nil
 		},
+		Events: events,
 	})
 
 	if _, err := svc.DeleteConversation(context.Background(), "user_a", "conv_wait"); !errors.Is(err, userconv.ErrWaitingConversationDelete) {
@@ -83,6 +100,13 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 	result, err := svc.DeleteConversation(context.Background(), "user_a", "conv_ok")
 	if err != nil || result.DeletedConversations != 1 || deleteCalled != 1 {
 		t.Fatalf("unexpected delete success result=%#v err=%v calls=%d", result, err, deleteCalled)
+	}
+	if len(events.events) != 1 {
+		t.Fatalf("expected one delete event, got %#v", events.events)
+	}
+	event := events.events[0]
+	if event.Type != chatevents.TypeConversationDeleted || event.OwnerID != "user_result" || event.ConversationID != "conv_result" {
+		t.Fatalf("delete event should use mutation result identity, got %#v", event)
 	}
 }
 
@@ -104,6 +128,7 @@ func TestConversationsPruneRandomized(t *testing.T) {
 	}
 
 	var deleted []string
+	events := &eventSpy{}
 	svc := userconv.New(userconv.Deps{
 		Query: &fakeQuery{conversations: map[string][]common.Conversation{"user_a": items}},
 		Turn:  &fakeTurn{},
@@ -112,8 +137,16 @@ func TestConversationsPruneRandomized(t *testing.T) {
 		},
 		DeleteMany: func(_ context.Context, ids []string) (common.DeleteConversationsResult, error) {
 			deleted = append([]string(nil), ids...)
-			return common.DeleteConversationsResult{DeletedConversations: len(ids)}, nil
+			deletedItems := make([]common.DeletedConversation, 0, len(ids))
+			for _, id := range ids {
+				deletedItems = append(deletedItems, common.DeletedConversation{ID: id + "_result", OwnerID: "owner_from_result"})
+			}
+			return common.DeleteConversationsResult{
+				DeletedConversations:     len(ids),
+				DeletedConversationItems: deletedItems,
+			}, nil
 		},
+		Events: events,
 	})
 
 	result, skipped, err := svc.PruneConversations(context.Background(), "user_a", 5)
@@ -125,6 +158,14 @@ func TestConversationsPruneRandomized(t *testing.T) {
 	}
 	if skipped < 0 || skipped > waitingCount {
 		t.Fatalf("unexpected skipped count: %d waiting=%d", skipped, waitingCount)
+	}
+	if len(events.events) != len(deleted) {
+		t.Fatalf("expected delete events to match mutation result count, events=%d deleted=%d", len(events.events), len(deleted))
+	}
+	for i, event := range events.events {
+		if event.Type != chatevents.TypeConversationDeleted || event.OwnerID != "owner_from_result" || event.ConversationID != deleted[i]+"_result" {
+			t.Fatalf("delete event %d should use mutation result identity, got %#v", i, event)
+		}
 	}
 }
 

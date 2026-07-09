@@ -105,14 +105,14 @@ func TestRouterUserFlow(t *testing.T) {
 	pending.Logger = logFactory.Layer(logging.LayerPending)
 	turnService := &turnsvc.Service{
 		Submitter: &turnsvc.Submitter{
-			Store:    st,
-			Pending:  pending,
-			Realtime: noopRealtime{},
+			Store:   st,
+			Pending: pending,
 		},
 		Pending:            pending,
 		Store:              st,
 		OwnerIDFromContext: actor.OwnerIDFromContext,
 		ActorFromContext:   actor.FromContext,
+		Events:             noopEvents,
 		Logger:             logFactory.Layer(logging.LayerTurn),
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}

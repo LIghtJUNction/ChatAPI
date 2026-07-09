@@ -10,7 +10,9 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"github.com/zyf2007/ChatAPI/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/protocol/debugview"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 )
 
 type Store interface {
@@ -42,6 +44,7 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	input.Request = materialized.Request
 	input.PreparedImages = materialized.PreparedImages
 	input.RequestBody = materialized.RequestBody
+	debugProjection := debugview.ProjectRequest(input.Request)
 
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
@@ -68,6 +71,9 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		RequestQuery:       input.RequestMeta.RequestQuery,
 		RequestHeaders:     input.RequestMeta.RequestHeaders,
 		RequestBody:        input.RequestBody,
+		RawRequestBody:     input.Request.RawBody,
+		RequestOptions:     protocol.RequestOptionsDebug(input.Request),
+		OptionChips:        optionChipsAsAny(debugProjection.OptionChips),
 		ToolSchemas:        protocol.RawToolSchemas(input.Request.ToolSchemas),
 		ToolChoice:         common.RequestToolChoice{Type: input.Request.ToolChoice.Type, Name: input.Request.ToolChoice.Name},
 		ResponseFormat: common.RequestResponseFormat{
@@ -93,9 +99,14 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		Model:             input.Request.Model,
 		NormalizedRequest: input.Request,
 		RequestMeta:       input.RequestMeta,
-		CreatedAt:         time.Now().UTC(),
-		Events:            make(chan PendingEvent, 32),
-		Done:              make(chan PendingResult, 1),
+		Runtime: protocolruntime.New(protocol.ConversationMeta{
+			Protocol:   input.Request.Protocol,
+			Model:      input.Request.Model,
+			ResponseID: responseID,
+		}),
+		CreatedAt: time.Now().UTC(),
+		Events:    make(chan PendingEvent, 32),
+		Done:      make(chan PendingResult, 1),
 	}
 	s.Pending.Add(turn)
 	if s.Hooks.AfterCreate != nil {
@@ -107,6 +118,17 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		}
 	}
 	return turn, conversation, message, nil
+}
+
+func optionChipsAsAny(items []debugview.OptionChip) []any {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, item)
+	}
+	return out
 }
 
 func (s *Submitter) materializeRequest(ctx context.Context, ownerID string, request protocol.TurnRequest) (MaterializedRequest, error) {

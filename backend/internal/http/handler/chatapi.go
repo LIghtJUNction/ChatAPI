@@ -142,7 +142,7 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	turn, conversation, err := h.Ingress.SubmitStream(ctx, parsed)
+	turn, _, err := h.Ingress.SubmitStream(ctx, parsed)
 	if err != nil {
 		logging.BindContext(h.Logger, ctx,
 			zap.String("protocol", parsed.Request.Protocol.String()),
@@ -161,7 +161,7 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-	_ = h.Streaming.StreamPendingTurn(ctx, w, conversation, turn.Events)
+	_ = h.Streaming.StreamPendingTurn(ctx, w, turn)
 }
 
 func (h ChatAPIHandler) egress() *egresssvc.Service {

@@ -14,6 +14,7 @@ import (
 	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
+	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 	"go.uber.org/zap"
 )
 
@@ -222,7 +223,7 @@ func (s *Service) DisconnectRecoveredPending(ctx context.Context, reason string)
 	return result, nil
 }
 
-func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk string) (map[string]any, error) {
+func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk string, mode string, reasoningStreamMode string) (map[string]any, error) {
 	previousState, err := s.Pending.StartDelta(conversationID)
 	if err != nil {
 		return nil, s.resolveMutationError(ctx, conversationID, err)
@@ -233,7 +234,8 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		return nil, err
 	}
 	existing := conversationstate.FromConversation(conversation).DraftText
-	nextDraft := existing + chunk
+	storedChunk := draftChunkForMode(chunk, mode)
+	nextDraft := existing + storedChunk
 	updated, err := s.Store.UpdateDraft(ctx, common.UpdateDraftInput{
 		ConversationID: conversationID,
 		DraftText:      nextDraft,
@@ -242,10 +244,28 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		s.Pending.RevertFinalize(conversationID, previousState)
 		return nil, err
 	}
-	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "delta", DeltaText: chunk})
+	_ = s.Pending.Publish(conversationID, PendingEvent{
+		Type:                "delta",
+		DeltaText:           chunk,
+		Mode:                strings.TrimSpace(mode),
+		ReasoningStreamMode: strings.TrimSpace(reasoningStreamMode),
+		StreamEvents: s.applyRuntimeAction(conversationID, protocolruntime.Action{
+			Kind:                protocolruntime.ActionDelta,
+			DeltaText:           chunk,
+			Mode:                strings.TrimSpace(mode),
+			ReasoningStreamMode: strings.TrimSpace(reasoningStreamMode),
+		}).StreamEvents,
+	})
 	s.publishConversationUpserted(ctx, s.eventRouteForContext(ctx, updated), updated)
 	s.notifyText(ctx, s.ownerID(ctx), updated.Title, chunk)
 	return map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}, nil
+}
+
+func draftChunkForMode(chunk string, mode string) string {
+	if strings.TrimSpace(mode) != "thinking" || strings.TrimSpace(chunk) == "" {
+		return chunk
+	}
+	return "<think>" + chunk + "</think>"
 }
 
 func (s *Service) CompleteConversation(ctx context.Context, input common.CompletePendingInput) (map[string]any, error) {
@@ -262,13 +282,23 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	s.publishConversationUpserted(ctx, route, conversation)
 	responseBody := s.egress().CompleteBody(conversation, input, message)
 	_ = s.Pending.Publish(input.ConversationID, PendingEvent{
-		Type:         "complete",
-		OutputText:   message.Content,
-		Mode:         input.Mode,
-		ToolName:     input.ToolName,
-		ToolCallID:   input.ToolCallID,
-		ToolOutput:   stringValue(input.ToolOutput, message.Content),
-		ResponseBody: responseBody,
+		Type:                "complete",
+		OutputText:          message.Content,
+		Mode:                input.Mode,
+		ReasoningStreamMode: input.ReasoningStreamMode,
+		ToolName:            input.ToolName,
+		ToolCallID:          input.ToolCallID,
+		ToolOutput:          stringValue(input.ToolOutput, message.Content),
+		ResponseBody:        responseBody,
+		StreamEvents: s.applyRuntimeAction(input.ConversationID, protocolruntime.Action{
+			Kind:                protocolruntime.ActionComplete,
+			OutputText:          message.Content,
+			Mode:                input.Mode,
+			ReasoningStreamMode: input.ReasoningStreamMode,
+			ToolName:            input.ToolName,
+			ToolCallID:          input.ToolCallID,
+			ToolOutput:          stringValue(input.ToolOutput, message.Content),
+		}).StreamEvents,
 	})
 	if err := s.Pending.Resolve(input.ConversationID, PendingResult{ResponseBody: responseBody}); err != nil {
 		return nil, err
@@ -315,7 +345,14 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 	s.publishConversationUpserted(ctx, route, conversation)
 	s.publishConversationEventAppended(ctx, route, conversation, result.Event)
 	body := s.egress().AbortBody(conversation, reason)
-	_ = s.Pending.Publish(conversationID, PendingEvent{Type: "abort", ErrorBody: body})
+	_ = s.Pending.Publish(conversationID, PendingEvent{
+		Type:      "abort",
+		ErrorBody: body,
+		StreamEvents: s.applyRuntimeAction(conversationID, protocolruntime.Action{
+			Kind:      protocolruntime.ActionAbort,
+			ErrorBody: body,
+		}).StreamEvents,
+	})
 	s.notifyText(ctx, identity.OwnerID, conversation.Title, reason)
 	logging.BindContext(s.Logger, ctx,
 		zap.String("owner.id", identity.OwnerID),
@@ -369,7 +406,7 @@ func (s *Service) ExecuteTurnControl(ctx context.Context, command TurnControlCom
 			ReasoningStreamMode: command.ReasoningStreamMode,
 		})
 	case TurnControlStreamDelta:
-		return s.UpdateDraft(ctx, command.ConversationID, command.OutputText)
+		return s.UpdateDraft(ctx, command.ConversationID, command.OutputText, command.Mode, command.ReasoningStreamMode)
 	case TurnControlAbort:
 		if err := s.AbortConversation(ctx, command.ConversationID, command.AbortReason); err != nil {
 			return nil, err
@@ -446,6 +483,17 @@ func (s *Service) egress() *egresssvc.Service {
 		return s.Egress
 	}
 	return egresssvc.New()
+}
+
+func (s *Service) applyRuntimeAction(conversationID string, action protocolruntime.Action) protocolruntime.Result {
+	if s == nil || s.Pending == nil {
+		return protocolruntime.Result{}
+	}
+	turn, ok := s.Pending.GetByConversationID(conversationID)
+	if !ok || turn == nil || turn.Runtime == nil {
+		return protocolruntime.Result{}
+	}
+	return turn.Runtime.Apply(action)
 }
 
 func pendingExpiredBody(ttl time.Duration) map[string]any {
@@ -529,7 +577,14 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 		EventLevel:     "warn",
 		EventTitle:     title,
 		EventDetail:    reason,
-		EventMetadata:  map[string]any{"reason": reason},
+		EventMetadata: map[string]any{
+			"reason":          reason,
+			"event_type":      eventType,
+			"conversation_id": conversationID,
+			"request_id":      resolved.RequestID,
+			"owner_id":        resolved.OwnerID,
+			"disconnected_at": time.Now().UTC().Format(time.RFC3339Nano),
+		},
 	})
 	if err != nil {
 		if errors.Is(err, common.ErrPendingDisconnected) {
@@ -541,13 +596,22 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 	route := eventRouteFromIdentity(conversationID, resolved)
 	s.publishConversationUpserted(ctx, route, conversation)
 	s.publishConversationEventAppended(ctx, route, conversation, result.Event)
-	_ = s.Pending.Abort(conversationID, map[string]any{
+	body := map[string]any{
 		"error": map[string]any{
 			"message": reason,
 			"type":    eventType,
 			"code":    eventType,
 		},
+	}
+	_ = s.Pending.Publish(conversationID, PendingEvent{
+		Type:      "abort",
+		ErrorBody: body,
+		StreamEvents: s.applyRuntimeAction(conversationID, protocolruntime.Action{
+			Kind:      protocolruntime.ActionAbort,
+			ErrorBody: body,
+		}).StreamEvents,
 	})
+	_ = s.Pending.Abort(conversationID, body)
 	logging.BindContext(s.Logger, context.Background(),
 		zap.String("conversation.id", conversationID),
 		zap.String("request.id", resolved.RequestID),

@@ -7,6 +7,8 @@
 # Logs
 logs/
 *.log
+tests/.sse-probe-logs/
+tests/.protocol-stream-probe-results.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -60,3 +62,5 @@ backup.sh
 install_systemd_user.sh
 uninstall_systemd_user.sh
 certs/
+
+backend/docs/*.txt

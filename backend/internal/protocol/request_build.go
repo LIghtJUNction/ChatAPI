@@ -12,9 +12,64 @@ func BuildRequestBody(request TurnRequest) map[string]any {
 }
 
 func buildResponsesRequestBody(request TurnRequest) map[string]any {
-	body := map[string]any{
-		"model": request.Model,
-		"input": buildResponsesInput(request.InputParts),
+	body := cloneAnyMap(request.Options.ProviderExtras)
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["model"] = request.Model
+	body["input"] = buildResponsesInput(request.InputParts)
+	if request.Options.Instructions != "" {
+		body["instructions"] = request.Options.Instructions
+	}
+	if request.Options.PreviousResponseID != "" {
+		body["previous_response_id"] = request.Options.PreviousResponseID
+	}
+	if request.Options.Store != nil {
+		body["store"] = *request.Options.Store
+	}
+	if len(request.Options.Metadata) > 0 {
+		body["metadata"] = cloneAnyMap(request.Options.Metadata)
+	}
+	if len(request.Options.Include) > 0 {
+		body["include"] = append([]string(nil), request.Options.Include...)
+	}
+	if request.Options.MaxOutputTokens != nil {
+		body["max_output_tokens"] = *request.Options.MaxOutputTokens
+	}
+	if request.Options.ParallelToolCalls != nil {
+		body["parallel_tool_calls"] = *request.Options.ParallelToolCalls
+	}
+	if len(request.Options.Reasoning) > 0 {
+		body["reasoning"] = cloneAnyMap(request.Options.Reasoning)
+	}
+	if request.Options.ServiceTier != "" {
+		body["service_tier"] = request.Options.ServiceTier
+	}
+	if len(request.Options.StreamOptions) > 0 {
+		body["stream_options"] = cloneAnyMap(request.Options.StreamOptions)
+	}
+	if request.Options.Temperature != nil {
+		body["temperature"] = *request.Options.Temperature
+	}
+	if request.Options.TopP != nil {
+		body["top_p"] = *request.Options.TopP
+	}
+	if len(request.Options.Text) > 0 {
+		body["text"] = cloneAnyMap(request.Options.Text)
+	}
+	if request.Options.Truncation != "" {
+		body["truncation"] = request.Options.Truncation
+	}
+	if request.Options.User != "" {
+		body["user"] = request.Options.User
+	}
+	if responseFormat := buildResponsesTextFormatBody(request.ResponseFormat); responseFormat != nil {
+		text, _ := body["text"].(map[string]any)
+		if text == nil {
+			text = map[string]any{}
+		}
+		text["format"] = responseFormat
+		body["text"] = text
 	}
 	if request.Stream {
 		body["stream"] = true
@@ -28,16 +83,49 @@ func buildResponsesRequestBody(request TurnRequest) map[string]any {
 	if toolChoice := buildToolChoiceBody(request.ToolChoice); toolChoice != nil {
 		body["tool_choice"] = toolChoice
 	}
-	if responseFormat := buildResponseFormatBody(request.ResponseFormat); responseFormat != nil {
-		body["response_format"] = responseFormat
-	}
 	return body
 }
 
 func buildChatCompletionsRequestBody(request TurnRequest) map[string]any {
-	body := map[string]any{
-		"model":    request.Model,
-		"messages": buildChatCompletionsMessages(request),
+	body := cloneAnyMap(request.Options.ProviderExtras)
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["model"] = request.Model
+	body["messages"] = buildChatCompletionsMessages(request)
+	applyOpenAICommonOptions(body, request.Options)
+	if request.Options.MaxTokens != nil {
+		body["max_tokens"] = *request.Options.MaxTokens
+	}
+	if request.Options.MaxCompletionTokens != nil {
+		body["max_completion_tokens"] = *request.Options.MaxCompletionTokens
+	}
+	if len(request.Options.Stop) > 0 {
+		body["stop"] = append([]string(nil), request.Options.Stop...)
+	}
+	if request.Options.N != nil {
+		body["n"] = *request.Options.N
+	}
+	if request.Options.PresencePenalty != nil {
+		body["presence_penalty"] = *request.Options.PresencePenalty
+	}
+	if request.Options.FrequencyPenalty != nil {
+		body["frequency_penalty"] = *request.Options.FrequencyPenalty
+	}
+	if request.Options.Seed != nil {
+		body["seed"] = *request.Options.Seed
+	}
+	if request.Options.ReasoningEffort != "" {
+		body["reasoning_effort"] = request.Options.ReasoningEffort
+	}
+	if len(request.Options.Modalities) > 0 {
+		body["modalities"] = append([]string(nil), request.Options.Modalities...)
+	}
+	if len(request.Options.Audio) > 0 {
+		body["audio"] = cloneAnyMap(request.Options.Audio)
+	}
+	if len(request.Options.Prediction) > 0 {
+		body["prediction"] = cloneAnyMap(request.Options.Prediction)
 	}
 	if request.Stream {
 		body["stream"] = true
@@ -58,9 +146,41 @@ func buildChatCompletionsRequestBody(request TurnRequest) map[string]any {
 }
 
 func buildAnthropicRequestBody(request TurnRequest) map[string]any {
-	body := map[string]any{
-		"model":    request.Model,
-		"messages": buildAnthropicMessages(request),
+	body := cloneAnyMap(request.Options.ProviderExtras)
+	if body == nil {
+		body = map[string]any{}
+	}
+	body["model"] = request.Model
+	body["messages"] = buildAnthropicMessages(request)
+	if request.Options.MaxTokens != nil {
+		body["max_tokens"] = *request.Options.MaxTokens
+	}
+	if request.Options.Temperature != nil {
+		body["temperature"] = *request.Options.Temperature
+	}
+	if request.Options.TopP != nil {
+		body["top_p"] = *request.Options.TopP
+	}
+	if request.Options.TopK != nil {
+		body["top_k"] = *request.Options.TopK
+	}
+	if len(request.Options.Stop) > 0 {
+		body["stop_sequences"] = append([]string(nil), request.Options.Stop...)
+	}
+	if len(request.Options.Metadata) > 0 {
+		body["metadata"] = cloneAnyMap(request.Options.Metadata)
+	}
+	if len(request.Options.Thinking) > 0 {
+		body["thinking"] = cloneAnyMap(request.Options.Thinking)
+	}
+	if request.Options.ServiceTier != "" {
+		body["service_tier"] = request.Options.ServiceTier
+	}
+	if len(request.Options.MCPServers) > 0 {
+		body["mcp_servers"] = cloneMapList(request.Options.MCPServers)
+	}
+	if len(request.Options.ContextManagement) > 0 {
+		body["context_management"] = cloneAnyMap(request.Options.ContextManagement)
 	}
 	if request.Stream {
 		body["stream"] = true
@@ -75,6 +195,30 @@ func buildAnthropicRequestBody(request TurnRequest) map[string]any {
 		body["tools"] = buildAnthropicTools(request.ToolSchemas)
 	}
 	return body
+}
+
+func applyOpenAICommonOptions(body map[string]any, options TurnOptions) {
+	if len(options.Metadata) > 0 {
+		body["metadata"] = cloneAnyMap(options.Metadata)
+	}
+	if options.Temperature != nil {
+		body["temperature"] = *options.Temperature
+	}
+	if options.TopP != nil {
+		body["top_p"] = *options.TopP
+	}
+	if options.User != "" {
+		body["user"] = options.User
+	}
+	if len(options.StreamOptions) > 0 {
+		body["stream_options"] = cloneAnyMap(options.StreamOptions)
+	}
+	if options.ParallelToolCalls != nil {
+		body["parallel_tool_calls"] = *options.ParallelToolCalls
+	}
+	if options.ServiceTier != "" {
+		body["service_tier"] = options.ServiceTier
+	}
 }
 
 func buildResponsesInput(parts []InputPart) []any {
@@ -200,6 +344,20 @@ func buildResponseFormatBody(format ResponseFormat) map[string]any {
 		}
 	}
 	return body
+}
+
+func buildResponsesTextFormatBody(format ResponseFormat) map[string]any {
+	if format.Type == "" {
+		return nil
+	}
+	if format.Type != "json_schema" {
+		return map[string]any{"type": format.Type}
+	}
+	return map[string]any{
+		"type":   "json_schema",
+		"name":   format.Name,
+		"schema": cloneMap(format.Schema),
+	}
 }
 
 func buildAnthropicTools(items []ToolSchema) []any {

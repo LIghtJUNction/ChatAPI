@@ -23,6 +23,10 @@ import type {
   MessageItem,
 } from '../types/chat'
 
+function isResponseOpenStatus(status: string | undefined) {
+  return status === 'waiting' || status === 'streaming'
+}
+
 export function useChatWorkspace(isMobile: boolean) {
   const [booting, setBooting] = useState(true)
   const [auth, setAuth] = useState<AuthSession>(DEFAULT_AUTH_SESSION)
@@ -94,7 +98,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const draftBuffer = hasLocalDraftBuffer
     ? draftBuffers[selectedConversationId] ?? ''
     : selectedConversation?.draft_text ?? ''
-  const isWaitingForUser = selectedConversation?.status === 'waiting'
+  const isWaitingForUser = isResponseOpenStatus(selectedConversation?.status)
   const selectedRequestFormat = selectedConversation?.request_format || ''
   const isResponsesConversation = selectedRequestFormat === 'responses'
   const availableToolSchemas = getLastToolSchemas(messages)
@@ -108,7 +112,7 @@ export function useChatWorkspace(isMobile: boolean) {
     if (
       selectedConversationId
       && previous.conversationId === selectedConversationId
-      && previous.status === 'waiting'
+      && isResponseOpenStatus(previous.status)
       && currentStatus === 'aborted'
     ) {
       setComposer('')
@@ -252,7 +256,7 @@ export function useChatWorkspace(isMobile: boolean) {
 
   async function handleDeleteConversation(conversationId: string) {
     const targetConversation = conversations.find((item) => item.id === conversationId)
-    if (targetConversation?.status === 'waiting') {
+    if (isResponseOpenStatus(targetConversation?.status)) {
       appMessage.warning('等待中的会话不允许删除')
       return
     }
@@ -368,9 +372,8 @@ export function useChatWorkspace(isMobile: boolean) {
   }) {
     if (!isWaitingForUser) return
     const finalText =
-      composerMode === 'assistant_message'
-        ? ''
-        : (() => {
+      composerMode === 'tool_call'
+        ? (() => {
             try {
               return buildToolCallPayload({
                 selectedToolSchema,
@@ -382,6 +385,9 @@ export function useChatWorkspace(isMobile: boolean) {
               return ''
             }
           })()
+        : composerMode === 'thinking'
+          ? thinkingText.trim()
+          : ''
     const pendingChunk = composerMode === 'assistant_message' ? composer.trim() : ''
 
     if (composerMode === 'assistant_message' && !draftBuffer.trim() && !pendingChunk) {
@@ -408,7 +414,7 @@ export function useChatWorkspace(isMobile: boolean) {
       sendWorkspaceCommand({
         kind: 'stream_complete',
         conversation_id: selectedConversationId,
-        text: composerMode === 'tool_call' ? finalText : undefined,
+        text: composerMode === 'tool_call' || composerMode === 'thinking' ? finalText : undefined,
         mode: composerMode,
         tool_name: composerMode === 'tool_call' ? toolName.trim() || undefined : undefined,
         tool_call_id: composerMode === 'tool_call' ? toolCallId.trim() || undefined : undefined,
@@ -416,6 +422,7 @@ export function useChatWorkspace(isMobile: boolean) {
           composerMode === 'thinking' && isResponsesConversation ? reasoningStreamMode : undefined,
       })
       setComposer('')
+      clearThinkingInput()
       if (options?.resetMode !== false) {
         setComposerMode('assistant_message')
       }

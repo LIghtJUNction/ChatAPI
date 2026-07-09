@@ -6,6 +6,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 )
 
 type PendingResult struct {
@@ -13,15 +14,17 @@ type PendingResult struct {
 }
 
 type PendingEvent struct {
-	Type         string
-	DeltaText    string
-	OutputText   string
-	Mode         string
-	ToolName     string
-	ToolCallID   string
-	ToolOutput   string
-	ResponseBody map[string]any
-	ErrorBody    map[string]any
+	Type                string
+	DeltaText           string
+	OutputText          string
+	Mode                string
+	ReasoningStreamMode string
+	ToolName            string
+	ToolCallID          string
+	ToolOutput          string
+	ResponseBody        map[string]any
+	ErrorBody           map[string]any
+	StreamEvents        []protocol.StreamEvent
 }
 
 type PendingTurn struct {
@@ -35,6 +38,7 @@ type PendingTurn struct {
 	Model             string
 	NormalizedRequest protocol.TurnRequest
 	RequestMeta       common.Request
+	Runtime           *protocolruntime.Runtime
 	CreatedAt         time.Time
 	State             string
 	Events            chan PendingEvent

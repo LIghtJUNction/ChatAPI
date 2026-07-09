@@ -8,6 +8,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	"go.uber.org/zap"
 )
@@ -192,9 +193,17 @@ func (r *PendingRegistry) ExpireOlderThan(cutoff time.Time, body map[string]any)
 
 	for _, turn := range expired {
 		r.loggerForTurn(turn).Warn("pending turn expired")
+		streamEvents := []protocol.StreamEvent(nil)
+		if turn.Runtime != nil {
+			streamEvents = turn.Runtime.Apply(protocolruntime.Action{
+				Kind:      protocolruntime.ActionAbort,
+				ErrorBody: body,
+			}).StreamEvents
+		}
 		_ = publishPendingEvent(turn, PendingEvent{
-			Type:      "abort",
-			ErrorBody: body,
+			Type:         "abort",
+			ErrorBody:    body,
+			StreamEvents: streamEvents,
 		})
 		close(turn.Events)
 		turn.Done <- PendingResult{ResponseBody: body}
@@ -370,6 +379,8 @@ func cloneTurnRequest(input protocol.TurnRequest) protocol.TurnRequest {
 		Name:   input.ResponseFormat.Name,
 		Schema: pendingCloneAnyMap(input.ResponseFormat.Schema),
 	}
+	cloned.Options = protocol.CloneTurnOptions(input.Options)
+	cloned.RawBody = pendingCloneAnyMap(input.RawBody)
 	return cloned
 }
 
@@ -378,6 +389,8 @@ func cloneRequestMeta(input common.Request) common.Request {
 	cloned.RequestQuery = pendingCloneStringSliceMap(input.RequestQuery)
 	cloned.RequestHeaders = pendingCloneStringSliceMap(input.RequestHeaders)
 	cloned.RequestBody = pendingCloneAnyMap(input.RequestBody)
+	cloned.RawRequestBody = pendingCloneAnyMap(input.RawRequestBody)
+	cloned.RequestOptions = pendingCloneAnyMap(input.RequestOptions)
 	if len(input.ToolSchemas) > 0 {
 		cloned.ToolSchemas = pendingCloneAnySlice(input.ToolSchemas)
 	}

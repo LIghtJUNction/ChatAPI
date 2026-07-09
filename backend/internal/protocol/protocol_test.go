@@ -378,6 +378,92 @@ func TestConversationMetaBuildPendingStreamEventsForAnthropic(t *testing.T) {
 	}
 }
 
+func TestConversationMetaBuildPendingStreamEventsForResponsesThinking(t *testing.T) {
+	meta := ConversationMeta{
+		Protocol:   ProtocolResponses,
+		Model:      "responses-test",
+		ResponseID: "resp_reasoning",
+	}
+	events, started := meta.BuildPendingStreamEvents(PendingStreamEvent{
+		Type:      "delta",
+		DeltaText: "thinking step",
+		Result: TurnResult{
+			ResponseID:          "resp_reasoning",
+			Mode:                "thinking",
+			ReasoningStreamMode: "reasoning",
+		},
+	}, false)
+	if started {
+		t.Fatal("responses stream should not use anthropic block state")
+	}
+	if len(events) == 0 {
+		t.Fatal("expected reasoning events")
+	}
+	for _, event := range events {
+		if event.Event == "response.output_text.delta" {
+			t.Fatalf("thinking delta should not be emitted as output text: %#v", events)
+		}
+	}
+	if events[0].Event != "response.output_item.added" {
+		t.Fatalf("unexpected first reasoning event: %#v", events[0])
+	}
+	foundReasoningDelta := false
+	for _, event := range events {
+		if event.Event == "response.reasoning_text.delta" {
+			foundReasoningDelta = true
+		}
+	}
+	if !foundReasoningDelta {
+		t.Fatalf("expected reasoning text delta: %#v", events)
+	}
+}
+
+func TestBuildStreamAbortForResponsesEmitsFailedResponse(t *testing.T) {
+	events := BuildStreamAbort(ConversationMeta{
+		Protocol:   ProtocolResponses,
+		Model:      "responses-test",
+		ResponseID: "resp_failed",
+	}, BuildErrorBody(string(ProtocolResponses), InvalidRequest("bad input", "input")))
+	if len(events) != 1 || events[0].Event != "response.failed" {
+		t.Fatalf("unexpected responses abort events: %#v", events)
+	}
+	data := events[0].Data.(map[string]any)
+	response := data["response"].(map[string]any)
+	if response["status"] != "failed" || response["id"] != "resp_failed" {
+		t.Fatalf("unexpected failed response: %#v", response)
+	}
+	if _, ok := response["error"].(map[string]any); !ok {
+		t.Fatalf("missing failed response error: %#v", response)
+	}
+}
+
+func TestBuildStreamAbortForChatCompletionsClosesWithoutSyntheticEvent(t *testing.T) {
+	events := BuildStreamAbort(ConversationMeta{
+		Protocol: ProtocolChatCompletions,
+		Model:    "chat-test",
+	}, BuildErrorBody(string(ProtocolChatCompletions), InvalidRequest("bad input", "input")))
+	if len(events) != 0 {
+		t.Fatalf("chat completions abort should not emit synthetic stream events: %#v", events)
+	}
+}
+
+func TestBuildStreamAbortForAnthropicMessagesEmitsOfficialErrorEvent(t *testing.T) {
+	events := BuildStreamAbort(ConversationMeta{
+		Protocol: ProtocolAnthropicMessages,
+		Model:    "claude-test",
+	}, BuildErrorBody(string(ProtocolAnthropicMessages), InvalidRequest("bad input", "input")))
+	if len(events) != 1 || events[0].Event != "error" {
+		t.Fatalf("unexpected anthropic abort events: %#v", events)
+	}
+	data := events[0].Data.(map[string]any)
+	if data["type"] != "error" {
+		t.Fatalf("anthropic error event must keep official type=error shape: %#v", data)
+	}
+	if _, ok := data["error"].(map[string]any); !ok {
+		t.Fatalf("missing anthropic error payload: %#v", data)
+	}
+}
+
 func TestBuildResponseToolResultResponses(t *testing.T) {
 	body := BuildResponseForMeta(ConversationMeta{
 		Protocol:   ProtocolResponses,
@@ -1028,6 +1114,154 @@ func TestValidateRequestAcceptsJSONSchemaResponseFormat(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected valid response format, got %v", err)
+	}
+}
+
+func TestParseRequestCapturesResponsesOptionsAndRawBody(t *testing.T) {
+	store := false
+	_ = store
+	request := ParseRequest("responses", map[string]any{
+		"model":                "gpt-responses",
+		"input":                "hello",
+		"stream":               true,
+		"instructions":         "be terse",
+		"previous_response_id": "resp_prev",
+		"store":                false,
+		"metadata":             map[string]any{"case": "responses"},
+		"include":              []any{"reasoning.encrypted_content"},
+		"max_output_tokens":    float64(128),
+		"parallel_tool_calls":  true,
+		"reasoning":            map[string]any{"effort": "low"},
+		"service_tier":         "flex",
+		"stream_options":       map[string]any{"include_usage": true},
+		"temperature":          0.4,
+		"top_p":                0.9,
+		"text":                 map[string]any{"format": map[string]any{"type": "json_schema", "name": "answer", "schema": map[string]any{"type": "object"}}},
+		"truncation":           "auto",
+		"user":                 "end-user-1",
+		"unknown_vendor_field": map[string]any{"kept": true},
+	})
+	if request.Options.Instructions != "be terse" || request.Options.PreviousResponseID != "resp_prev" {
+		t.Fatalf("missing responses options: %#v", request.Options)
+	}
+	if request.Options.Store == nil || *request.Options.Store {
+		t.Fatalf("unexpected store option: %#v", request.Options.Store)
+	}
+	if request.Options.MaxOutputTokens == nil || *request.Options.MaxOutputTokens != 128 {
+		t.Fatalf("unexpected max output option: %#v", request.Options.MaxOutputTokens)
+	}
+	if request.ResponseFormat.Type != "json_schema" || request.ResponseFormat.Name != "answer" {
+		t.Fatalf("unexpected responses text format: %#v", request.ResponseFormat)
+	}
+	if request.RawBody["unknown_vendor_field"] == nil || request.Options.ProviderExtras["unknown_vendor_field"] == nil {
+		t.Fatalf("expected raw body and provider extras to retain unknown field: raw=%#v extras=%#v", request.RawBody, request.Options.ProviderExtras)
+	}
+
+	body := BuildRequestBody(request)
+	if body["response_format"] != nil {
+		t.Fatalf("responses rebuild should not use response_format: %#v", body)
+	}
+	if nestedPathString(body, "text", "format", "name") != "answer" {
+		t.Fatalf("responses rebuild lost text.format: %#v", body["text"])
+	}
+	if body["unknown_vendor_field"] == nil {
+		t.Fatalf("responses rebuild lost provider extra: %#v", body)
+	}
+}
+
+func TestParseRequestCapturesChatCompletionsOptions(t *testing.T) {
+	request := ParseRequest("chat_completions", map[string]any{
+		"model":                 "gpt-chat",
+		"messages":              []any{map[string]any{"role": "user", "content": "hello"}},
+		"stream":                true,
+		"max_tokens":            float64(40),
+		"max_completion_tokens": float64(30),
+		"temperature":           0.2,
+		"top_p":                 0.8,
+		"stop":                  []any{"END"},
+		"n":                     float64(1),
+		"presence_penalty":      0.1,
+		"frequency_penalty":     0.2,
+		"seed":                  float64(123),
+		"user":                  "end-user-2",
+		"stream_options":        map[string]any{"include_usage": true},
+		"parallel_tool_calls":   false,
+		"reasoning_effort":      "medium",
+		"modalities":            []any{"text"},
+		"audio":                 map[string]any{"voice": "alloy"},
+		"prediction":            map[string]any{"type": "content", "content": "prefill"},
+		"metadata":              map[string]any{"case": "chat"},
+		"service_tier":          "default",
+		"response_format": map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "chat_answer",
+				"schema": map[string]any{"type": "object"},
+			},
+		},
+		"vendor_only": "kept",
+	})
+	if request.Options.MaxTokens == nil || *request.Options.MaxTokens != 40 {
+		t.Fatalf("unexpected max_tokens: %#v", request.Options.MaxTokens)
+	}
+	if request.Options.MaxCompletionTokens == nil || *request.Options.MaxCompletionTokens != 30 {
+		t.Fatalf("unexpected max_completion_tokens: %#v", request.Options.MaxCompletionTokens)
+	}
+	if len(request.Options.Stop) != 1 || request.Options.Stop[0] != "END" {
+		t.Fatalf("unexpected stop: %#v", request.Options.Stop)
+	}
+	if request.Options.Seed == nil || *request.Options.Seed != 123 {
+		t.Fatalf("unexpected seed: %#v", request.Options.Seed)
+	}
+	if request.ResponseFormat.Name != "chat_answer" {
+		t.Fatalf("unexpected response format: %#v", request.ResponseFormat)
+	}
+
+	body := BuildRequestBody(request)
+	if nestedPathString(body, "response_format", "json_schema", "name") != "chat_answer" {
+		t.Fatalf("chat rebuild lost response_format: %#v", body["response_format"])
+	}
+	if body["vendor_only"] != "kept" {
+		t.Fatalf("chat rebuild lost provider extra: %#v", body)
+	}
+}
+
+func TestParseRequestCapturesAnthropicOptions(t *testing.T) {
+	request := ParseRequest("anthropic_messages", map[string]any{
+		"model":              "claude-test",
+		"messages":           []any{map[string]any{"role": "user", "content": "hello"}},
+		"stream":             true,
+		"max_tokens":         float64(64),
+		"temperature":        0.3,
+		"top_p":              0.7,
+		"top_k":              float64(40),
+		"stop_sequences":     []any{"STOP"},
+		"metadata":           map[string]any{"user_id": "u1"},
+		"thinking":           map[string]any{"type": "enabled", "budget_tokens": 1024},
+		"service_tier":       "standard_only",
+		"mcp_servers":        []any{map[string]any{"type": "url", "url": "https://mcp.example"}},
+		"context_management": map[string]any{"edits": []any{}},
+		"anthropic_extra":    "kept",
+	})
+	if request.Options.MaxTokens == nil || *request.Options.MaxTokens != 64 {
+		t.Fatalf("unexpected max tokens: %#v", request.Options.MaxTokens)
+	}
+	if request.Options.TopK == nil || *request.Options.TopK != 40 {
+		t.Fatalf("unexpected top_k: %#v", request.Options.TopK)
+	}
+	if len(request.Options.Stop) != 1 || request.Options.Stop[0] != "STOP" {
+		t.Fatalf("unexpected stop sequences: %#v", request.Options.Stop)
+	}
+	if len(request.Options.Thinking) == 0 || len(request.Options.MCPServers) != 1 || len(request.Options.ContextManagement) == 0 {
+		t.Fatalf("missing anthropic provider options: %#v", request.Options)
+	}
+
+	body := BuildRequestBody(request)
+	if body["anthropic_extra"] != "kept" {
+		t.Fatalf("anthropic rebuild lost provider extra: %#v", body)
+	}
+	if body["stop_sequences"] == nil || body["thinking"] == nil || body["mcp_servers"] == nil {
+		t.Fatalf("anthropic rebuild lost options: %#v", body)
 	}
 }
 

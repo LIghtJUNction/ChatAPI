@@ -303,23 +303,26 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 		"request_format": strings.TrimSpace(input.RequestFormat),
 		"model":          strings.TrimSpace(input.Model),
 		"request_debug": map[string]any{
-			"request_id":      strings.TrimSpace(input.RequestID),
-			"response_id":     strings.TrimSpace(input.ResponseID),
-			"model":           strings.TrimSpace(input.Model),
-			"request_format":  strings.TrimSpace(input.RequestFormat),
-			"request_keys":    keysOf(input.RequestBody),
-			"request_method":  strings.TrimSpace(input.RequestMethod),
-			"request_path":    strings.TrimSpace(input.RequestPath),
-			"request_query":   input.RequestQuery,
-			"request_headers": input.RequestHeaders,
-			"system_text":     strings.TrimSpace(input.SystemContent),
-			"developer_text":  strings.TrimSpace(input.DeveloperContent),
-			"assistant_text":  strings.TrimSpace(input.AssistantContent),
-			"input_text":      input.UserContent,
-			"request_body":    input.RequestBody,
-			"tool_schemas":    input.ToolSchemas,
-			"tool_choice":     input.ToolChoice,
-			"response_format": input.ResponseFormat,
+			"request_id":       strings.TrimSpace(input.RequestID),
+			"response_id":      strings.TrimSpace(input.ResponseID),
+			"model":            strings.TrimSpace(input.Model),
+			"request_format":   strings.TrimSpace(input.RequestFormat),
+			"request_keys":     keysOf(input.RequestBody),
+			"request_method":   strings.TrimSpace(input.RequestMethod),
+			"request_path":     strings.TrimSpace(input.RequestPath),
+			"request_query":    input.RequestQuery,
+			"request_headers":  input.RequestHeaders,
+			"system_text":      strings.TrimSpace(input.SystemContent),
+			"developer_text":   strings.TrimSpace(input.DeveloperContent),
+			"assistant_text":   strings.TrimSpace(input.AssistantContent),
+			"input_text":       input.UserContent,
+			"request_body":     input.RequestBody,
+			"raw_request_body": input.RawRequestBody,
+			"request_options":  input.RequestOptions,
+			"option_chips":     input.OptionChips,
+			"tool_schemas":     input.ToolSchemas,
+			"tool_choice":      input.ToolChoice,
+			"response_format":  input.ResponseFormat,
 		},
 	}
 	conversation := common.Conversation{
@@ -809,6 +812,8 @@ func scanRequestRow(scanner rowScanner) (common.Request, error) {
 	item.Status = metadataString(conversationMetadata, "realtime_status", "")
 	item.Metadata = messageMetadata
 	item.RequestBody, _ = requestDebug["request_body"].(map[string]any)
+	item.RawRequestBody, _ = requestDebug["raw_request_body"].(map[string]any)
+	item.RequestOptions, _ = requestDebug["request_options"].(map[string]any)
 	item.ToolSchemas, _ = requestDebug["tool_schemas"].([]any)
 	item.ToolChoice = parseRequestToolChoice(requestDebug["tool_choice"])
 	item.ResponseFormat = parseRequestResponseFormat(requestDebug["response_format"])

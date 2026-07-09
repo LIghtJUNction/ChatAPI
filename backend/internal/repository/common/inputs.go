@@ -146,6 +146,9 @@ type CreatePendingInput struct {
 	RequestQuery       map[string][]string
 	RequestHeaders     map[string][]string
 	RequestBody        map[string]any
+	RawRequestBody     map[string]any
+	RequestOptions     map[string]any
+	OptionChips        []any
 	ToolSchemas        []any
 	ToolChoice         RequestToolChoice
 	ResponseFormat     RequestResponseFormat

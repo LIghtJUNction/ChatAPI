@@ -23,16 +23,19 @@ type TurnRequest struct {
 	ToolSchemas      []ToolSchema
 	ToolChoice       ToolChoice
 	ResponseFormat   ResponseFormat
+	Options          TurnOptions
+	RawBody          map[string]any
 }
 
 type TurnResult struct {
-	ResponseID string
-	OutputText string
-	Mode       string
-	ToolName   string
-	ToolCallID string
-	ToolOutput string
-	Usage      Usage
+	ResponseID          string
+	OutputText          string
+	Mode                string
+	ReasoningStreamMode string
+	ToolName            string
+	ToolCallID          string
+	ToolOutput          string
+	Usage               Usage
 }
 
 type ConversationMeta struct {
@@ -49,10 +52,10 @@ type PendingStreamEvent struct {
 }
 
 type InputPart struct {
-	Type      string
-	Text      string
-	MediaType string
-	URL       string
+	Type       string
+	Text       string
+	MediaType  string
+	URL        string
 	ToolCallID string
 }
 
@@ -104,6 +107,8 @@ func ParseRequest(protocolValue string, body map[string]any) TurnRequest {
 		ToolSchemas:      extractToolSchemas(body),
 		ToolChoice:       extractToolChoice(body),
 		ResponseFormat:   extractResponseFormat(body),
+		Options:          extractTurnOptions(proto, body),
+		RawBody:          cloneAnyMap(body),
 	}
 }
 
@@ -166,6 +171,9 @@ func (meta ConversationMeta) BuildPendingStreamEvents(event PendingStreamEvent, 
 
 	switch event.Type {
 	case "delta":
+		if meta.Protocol == ProtocolResponses && event.Result.Mode == "thinking" {
+			return BuildResponsesReasoningDelta(event.Result, event.DeltaText), anthropicBlockStarted
+		}
 		return meta.BuildStreamDelta(event.DeltaText), anthropicBlockStarted
 	case "complete":
 		return meta.BuildStreamComplete(event.Result), anthropicBlockStarted

@@ -94,6 +94,8 @@ func scanRequestRow(scanner requestScanner) (common.Request, error) {
 	item.UpdatedAt = parseTime(updatedAt)
 	item.Metadata = messageMetadata
 	item.RequestBody, _ = requestDebug["request_body"].(map[string]any)
+	item.RawRequestBody, _ = requestDebug["raw_request_body"].(map[string]any)
+	item.RequestOptions, _ = requestDebug["request_options"].(map[string]any)
 	item.ToolSchemas, _ = requestDebug["tool_schemas"].([]any)
 	item.ToolChoice = parseRequestToolChoice(requestDebug["tool_choice"])
 	item.ResponseFormat = parseRequestResponseFormat(requestDebug["response_format"])

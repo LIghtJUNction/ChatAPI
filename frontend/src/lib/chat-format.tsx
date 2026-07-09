@@ -84,17 +84,34 @@ function toToolSchemaOption(schema: unknown): ToolSchemaOption | null {
 
   const description =
     typeof functionRecord.description === 'string' ? functionRecord.description : ''
-  const parameters =
-    functionRecord.parameters &&
-    typeof functionRecord.parameters === 'object'
-      ? (functionRecord.parameters as JsonSchema)
-      : { type: 'object', properties: {} }
+  const rawParameters =
+    functionRecord.parameters && typeof functionRecord.parameters === 'object'
+      ? functionRecord.parameters
+      : functionRecord.input_schema && typeof functionRecord.input_schema === 'object'
+        ? functionRecord.input_schema
+        : record.parameters && typeof record.parameters === 'object'
+          ? record.parameters
+          : record.input_schema && typeof record.input_schema === 'object'
+            ? record.input_schema
+        : null
+  const parameters = normalizeToolParameters(rawParameters)
 
   return {
     name: name.trim(),
     description,
     parameters,
   }
+}
+
+function normalizeToolParameters(parameters: unknown): JsonSchema {
+  if (!parameters || typeof parameters !== 'object') {
+    return { type: 'object', properties: {} }
+  }
+  const schema = parameters as JsonSchema
+  if (!schema.type && schema.properties) {
+    return { ...schema, type: 'object' }
+  }
+  return schema
 }
 
 export function getSchemaType(schema?: JsonSchema): string {

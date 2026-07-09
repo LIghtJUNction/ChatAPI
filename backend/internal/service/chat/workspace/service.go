@@ -301,11 +301,11 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 		OwnerID:             strings.TrimSpace(ownerID),
 		Kind:                kind,
 		ConversationID:      strings.TrimSpace(command.ConversationID),
-		OutputText:          strings.TrimSpace(command.Text),
+		OutputText:          command.Text,
 		Mode:                strings.TrimSpace(command.Mode),
 		ToolName:            strings.TrimSpace(command.ToolName),
 		ToolCallID:          strings.TrimSpace(command.ToolCallID),
-		ToolOutput:          strings.TrimSpace(command.Output),
+		ToolOutput:          command.Output,
 		ReasoningStreamMode: strings.TrimSpace(command.ReasoningStreamMode),
 		AbortReason:         strings.TrimSpace(command.Error),
 	})

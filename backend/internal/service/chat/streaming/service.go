@@ -3,11 +3,10 @@ package streaming
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/zyf2007/ChatAPI/internal/protocol"
-	"github.com/zyf2007/ChatAPI/internal/repository/common"
-	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
 
@@ -17,14 +16,16 @@ func New() *Service {
 	return &Service{}
 }
 
-func (s *Service) StreamPendingTurn(ctx context.Context, w http.ResponseWriter, conversation common.Conversation, events <-chan turnsvc.PendingEvent) error {
+func (s *Service) StreamPendingTurn(ctx context.Context, w http.ResponseWriter, turn *turnsvc.PendingTurn) error {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return http.ErrNotSupported
 	}
+	if turn == nil {
+		return errors.New("nil pending turn")
+	}
 
-	anthropicBlockStarted := false
-	for _, event := range s.buildStartEvents(conversation) {
+	for _, event := range startEvents(turn) {
 		if err := writeSSEEvent(w, event); err != nil {
 			return err
 		}
@@ -35,13 +36,11 @@ func (s *Service) StreamPendingTurn(ctx context.Context, w http.ResponseWriter, 
 		select {
 		case <-ctx.Done():
 			return nil
-		case event, ok := <-events:
+		case event, ok := <-turn.Events:
 			if !ok {
 				return nil
 			}
-			streamEvents, nextAnthropicBlockStarted := s.buildPendingEvents(conversation, event, anthropicBlockStarted)
-			anthropicBlockStarted = nextAnthropicBlockStarted
-			for _, streamEvent := range streamEvents {
+			for _, streamEvent := range event.StreamEvents {
 				if err := writeSSEEvent(w, streamEvent); err != nil {
 					return err
 				}
@@ -51,26 +50,11 @@ func (s *Service) StreamPendingTurn(ctx context.Context, w http.ResponseWriter, 
 	}
 }
 
-func (s *Service) buildStartEvents(conversation common.Conversation) []protocol.StreamEvent {
-	meta := conversationMeta(conversation, "")
-	return meta.BuildStreamStart()
-}
-
-func (s *Service) buildPendingEvents(conversation common.Conversation, event turnsvc.PendingEvent, anthropicBlockStarted bool) ([]protocol.StreamEvent, bool) {
-	meta := conversationMeta(conversation, "")
-	return meta.BuildPendingStreamEvents(protocol.PendingStreamEvent{
-		Type:      event.Type,
-		DeltaText: event.DeltaText,
-		ErrorBody: event.ErrorBody,
-		Result: protocol.TurnResult{
-			ResponseID: stringValue(conversation.ResponseID, ""),
-			OutputText: event.OutputText,
-			Mode:       event.Mode,
-			ToolName:   event.ToolName,
-			ToolCallID: event.ToolCallID,
-			ToolOutput: event.ToolOutput,
-		},
-	}, anthropicBlockStarted)
+func startEvents(turn *turnsvc.PendingTurn) []protocol.StreamEvent {
+	if turn == nil || turn.Runtime == nil {
+		return nil
+	}
+	return turn.Runtime.Start()
 }
 
 func writeSSEEvent(w http.ResponseWriter, event protocol.StreamEvent) error {
@@ -91,22 +75,4 @@ func writeSSEEvent(w http.ResponseWriter, event protocol.StreamEvent) error {
 		_, err = w.Write([]byte("data: " + string(raw) + "\n\n"))
 		return err
 	}
-}
-
-func conversationMeta(conversation common.Conversation, fallbackModel string) protocol.ConversationMeta {
-	if fallbackModel == "" {
-		fallbackModel = "chatapi-lab"
-	}
-	return protocol.ConversationMeta{
-		Protocol:   protocol.ParseProtocol(conversationstate.RequestFormat(conversation)),
-		Model:      conversationstate.Model(conversation, fallbackModel),
-		ResponseID: stringValue(conversation.ResponseID, ""),
-	}
-}
-
-func stringValue(value any, fallback string) string {
-	if raw, ok := value.(string); ok && raw != "" {
-		return raw
-	}
-	return fallback
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
-import { CopyOutlined, UserOutlined } from '@ant-design/icons'
+import { CopyOutlined, WarningOutlined, UserOutlined } from '@ant-design/icons'
 import { App, Avatar, Button, Empty, Spin } from 'antd'
 
 import {
@@ -10,6 +10,7 @@ import {
   renderMessageContent,
 } from '../lib/chat-format'
 import type {
+  ConversationEventItem,
   MessageItem,
   TimelineItem,
   VisibleTimelineDraftItem,
@@ -32,10 +33,11 @@ function AnimatedDisclosure({
 }: {
   children: ReactNode
   className?: string
-  title: string
+  title: ReactNode
 }) {
   const [expanded, setExpanded] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [closing, setClosing] = useState(false)
   const openFrameRef = useRef<number | null>(null)
   const closeTimerRef = useRef<number | null>(null)
 
@@ -52,6 +54,7 @@ function AnimatedDisclosure({
 
   const handleToggle = () => {
     if (expanded) {
+      setClosing(true)
       setExpanded(false)
       if (openFrameRef.current !== null) {
         window.cancelAnimationFrame(openFrameRef.current)
@@ -62,11 +65,13 @@ function AnimatedDisclosure({
       }
       closeTimerRef.current = window.setTimeout(() => {
         closeTimerRef.current = null
+        setClosing(false)
         setMounted(false)
       }, DISCLOSURE_ANIMATION_MS)
       return
     }
 
+    setClosing(false)
     setMounted(true)
     if (closeTimerRef.current !== null) {
       window.clearTimeout(closeTimerRef.current)
@@ -82,7 +87,11 @@ function AnimatedDisclosure({
   }
 
   return (
-    <div className={`message-debug-card ${className} ${expanded ? 'is-open' : 'is-closed'}`}>
+    <div
+      className={`message-debug-card ${className} ${expanded ? 'is-open' : 'is-closed'} ${
+        mounted ? 'is-mounted' : 'is-unmounted'
+      } ${closing ? 'is-closing' : ''}`}
+    >
       <button
         aria-expanded={expanded}
         className="message-debug-summary"
@@ -116,6 +125,79 @@ function isDraftItem(item: VisibleTimelineItem): item is VisibleTimelineDraftIte
 
 function isMessageTimelineItem(item: VisibleTimelineItem): item is TimelineItem & { message: MessageItem } {
   return item.kind === 'message' && !!item.message
+}
+
+function eventLevelLabel(level?: string) {
+  switch ((level || '').toLowerCase()) {
+    case 'warn':
+    case 'warning':
+      return 'Warning'
+    case 'error':
+      return 'Error'
+    default:
+      return 'Info'
+  }
+}
+
+function stringifyMetadataValue(value: unknown) {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return formatJson(value)
+}
+
+function SystemTimelineEvent({
+  createdAt,
+  event,
+}: {
+  createdAt: string
+  event: ConversationEventItem
+}) {
+  const metadataEntries = Object.entries(event.metadata ?? {}).filter(([, value]) => value != null && value !== '')
+  const detailRows = [
+    { label: '类型', value: event.type },
+    { label: '级别', value: eventLevelLabel(event.level) },
+    { label: '请求 ID', value: event.request_id || '' },
+    { label: '时间', value: formatTime(createdAt) },
+    { label: '详情', value: event.detail || '' },
+  ].filter((row) => row.value)
+
+  return (
+    <div className="timeline-event-row">
+      <AnimatedDisclosure
+        className={`timeline-event-chip level-${event.level || 'info'}`}
+        title={
+          <span className="timeline-event-chip-title">
+            <WarningOutlined />
+            <span>{event.title}</span>
+            <span className="timeline-event-chip-time">{formatTime(createdAt)}</span>
+          </span>
+        }
+      >
+        <div className="timeline-event-detail-grid">
+          {detailRows.map((row) => (
+            <div className="timeline-event-detail-row" key={row.label}>
+              <span className="message-debug-label">{row.label}</span>
+              <span className="message-debug-value">{row.value}</span>
+            </div>
+          ))}
+        </div>
+        {metadataEntries.length > 0 ? (
+          <div className="timeline-event-metadata">
+            <div className="message-debug-label">附加信息</div>
+            <div className="timeline-event-detail-grid">
+              {metadataEntries.map(([key, value]) => (
+                <div className="timeline-event-detail-row" key={key}>
+                  <span className="message-debug-label">{key}</span>
+                  <span className="message-debug-value">{stringifyMetadataValue(value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </AnimatedDisclosure>
+    </div>
+  )
 }
 
 export function ChatMessageList({
@@ -176,17 +258,7 @@ export function ChatMessageList({
     <>
       {visibleMessages.map((item) => {
         if (item.kind === 'system_event' && item.event) {
-          return (
-            <div key={item.id} className="timeline-event-row">
-              <div className={`timeline-event-badge level-${item.event.level || 'info'}`}>
-                <div className="timeline-event-title">{item.event.title}</div>
-                {item.event.detail ? (
-                  <div className="timeline-event-detail">{item.event.detail}</div>
-                ) : null}
-                <div className="timeline-event-time">{formatTime(item.created_at)}</div>
-              </div>
-            </div>
-          )
+          return <SystemTimelineEvent key={item.id} createdAt={item.created_at} event={item.event} />
         }
 
         const message = isDraftItem(item)
@@ -204,6 +276,7 @@ export function ChatMessageList({
         const isToolCall = message.metadata?.response_mode === 'tool_call'
         const isToolResult = message.metadata?.response_mode === 'tool_result'
         const requestDebug = message.metadata?.request_debug
+        const optionChips = requestDebug?.option_chips ?? []
         const userRenderableContent = message.content
         const debugSections = [
           {
@@ -223,8 +296,11 @@ export function ChatMessageList({
           !isDraft &&
           !!(
             debugSections.length ||
+            optionChips.length ||
             requestDebug?.tool_schemas?.length ||
-            requestDebug?.request_body != null
+            requestDebug?.request_body != null ||
+            requestDebug?.request_options != null ||
+            requestDebug?.raw_request_body != null
           )
 
         return (
@@ -285,6 +361,20 @@ export function ChatMessageList({
               )}
               {hasDebugCard && (
                 <AnimatedDisclosure title="请求详情">
+                  {optionChips.length > 0 ? (
+                    <div className="message-option-chip-row">
+                      {optionChips.map((chip, index) => (
+                        <span
+                          key={`${chip.key}-${index}`}
+                          className={`message-option-chip ${chip.category} ${chip.support_level}`}
+                          title={`${chip.key} · ${chip.support_level}`}
+                        >
+                          <span>{chip.label}</span>
+                          {chip.value ? <span>{chip.value}</span> : null}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   {debugSections.map((section) => (
                     <div key={section.label} className="message-debug-row">
                       <span className="message-debug-label">{section.label}</span>
@@ -292,8 +382,16 @@ export function ChatMessageList({
                     </div>
                   ))}
                   {(requestDebug?.tool_schemas?.length ||
-                    requestDebug?.request_body != null) && (
+                    requestDebug?.request_body != null ||
+                    requestDebug?.request_options != null ||
+                    requestDebug?.raw_request_body != null) && (
                     <AnimatedDisclosure className="message-debug-subcard" title="Debug信息">
+                      {requestDebug?.request_options != null ? (
+                        <div className="message-debug-block">
+                          <div className="message-debug-label">Request Options</div>
+                          <pre>{formatJson(requestDebug.request_options)}</pre>
+                        </div>
+                      ) : null}
                       {requestDebug?.tool_schemas?.length ? (
                         <div className="message-debug-block">
                           <div className="message-debug-label">Tool Schemas</div>
@@ -335,6 +433,12 @@ export function ChatMessageList({
                             </Button>
                           </div>
                           <pre>{formatJson(requestDebug.request_body)}</pre>
+                        </div>
+                      ) : null}
+                      {requestDebug?.raw_request_body != null ? (
+                        <div className="message-debug-block">
+                          <div className="message-debug-label">Raw Request Body</div>
+                          <pre>{formatJson(requestDebug.raw_request_body)}</pre>
                         </div>
                       ) : null}
                     </AnimatedDisclosure>

@@ -90,6 +90,146 @@ func BuildStreamDelta(meta ConversationMeta, deltaText string) []StreamEvent {
 	}
 }
 
+func BuildResponsesReasoningDelta(result TurnResult, deltaText string) []StreamEvent {
+	itemID := "rs_" + uuid.NewString()
+	itemIndex := 0
+	item := map[string]any{
+		"id":     itemID,
+		"type":   "reasoning",
+		"status": "completed",
+		"summary": []map[string]any{{
+			"type": "summary_text",
+			"text": deltaText,
+		}},
+		"content": []map[string]any{{
+			"type": "reasoning_text",
+			"text": deltaText,
+		}},
+	}
+	events := []StreamEvent{{
+		Event: "response.output_item.added",
+		Data: map[string]any{
+			"type": "response.output_item.added",
+			"item": map[string]any{
+				"id":      itemID,
+				"type":    "reasoning",
+				"status":  "in_progress",
+				"summary": []any{},
+				"content": []any{},
+			},
+			"output_index": itemIndex,
+		},
+	}}
+	if result.ReasoningStreamMode == "reasoning" || result.ReasoningStreamMode == "reasoning_text" {
+		events = append(events,
+			StreamEvent{
+				Event: "response.content_part.added",
+				Data: map[string]any{
+					"type":          "response.content_part.added",
+					"content_index": 0,
+					"item_id":       itemID,
+					"output_index":  itemIndex,
+					"part": map[string]any{
+						"type": "reasoning_text",
+						"text": "",
+					},
+				},
+			},
+			StreamEvent{
+				Event: "response.reasoning_text.delta",
+				Data: map[string]any{
+					"type":          "response.reasoning_text.delta",
+					"content_index": 0,
+					"delta":         deltaText,
+					"item_id":       itemID,
+					"output_index":  itemIndex,
+				},
+			},
+			StreamEvent{
+				Event: "response.reasoning_text.done",
+				Data: map[string]any{
+					"type":          "response.reasoning_text.done",
+					"content_index": 0,
+					"item_id":       itemID,
+					"output_index":  itemIndex,
+					"text":          deltaText,
+				},
+			},
+			StreamEvent{
+				Event: "response.content_part.done",
+				Data: map[string]any{
+					"type":          "response.content_part.done",
+					"content_index": 0,
+					"item_id":       itemID,
+					"output_index":  itemIndex,
+					"part": map[string]any{
+						"type": "reasoning_text",
+						"text": deltaText,
+					},
+				},
+			},
+		)
+	} else {
+		events = append(events,
+			StreamEvent{
+				Event: "response.reasoning_summary_part.added",
+				Data: map[string]any{
+					"type":          "response.reasoning_summary_part.added",
+					"item_id":       itemID,
+					"output_index":  itemIndex,
+					"summary_index": 0,
+					"part": map[string]any{
+						"type": "summary_text",
+						"text": "",
+					},
+				},
+			},
+			StreamEvent{
+				Event: "response.reasoning_summary_text.delta",
+				Data: map[string]any{
+					"type":          "response.reasoning_summary_text.delta",
+					"delta":         deltaText,
+					"item_id":       itemID,
+					"output_index":  itemIndex,
+					"summary_index": 0,
+				},
+			},
+			StreamEvent{
+				Event: "response.reasoning_summary_text.done",
+				Data: map[string]any{
+					"type":          "response.reasoning_summary_text.done",
+					"item_id":       itemID,
+					"output_index":  itemIndex,
+					"summary_index": 0,
+					"text":          deltaText,
+				},
+			},
+			StreamEvent{
+				Event: "response.reasoning_summary_part.done",
+				Data: map[string]any{
+					"type":          "response.reasoning_summary_part.done",
+					"item_id":       itemID,
+					"output_index":  itemIndex,
+					"summary_index": 0,
+					"part": map[string]any{
+						"type": "summary_text",
+						"text": deltaText,
+					},
+				},
+			},
+		)
+	}
+	events = append(events, StreamEvent{
+		Event: "response.output_item.done",
+		Data: map[string]any{
+			"type":         "response.output_item.done",
+			"output_index": itemIndex,
+			"item":         item,
+		},
+	})
+	return events
+}
+
 func BuildStreamComplete(meta ConversationMeta, result TurnResult) []StreamEvent {
 	usage := normalizeUsage(result.Usage)
 	switch meta.Protocol {
@@ -190,16 +330,28 @@ func BuildAnthropicContentBlockStart(result TurnResult) StreamEvent {
 func BuildStreamAbort(meta ConversationMeta, body map[string]any) []StreamEvent {
 	switch meta.Protocol {
 	case ProtocolChatCompletions:
-		return []StreamEvent{{Data: body}, {Data: "[DONE]", Done: true}}
+		return nil
 	case ProtocolAnthropicMessages:
 		return []StreamEvent{{
 			Event: "error",
 			Data:  body,
 		}}
 	default:
+		errorPayload, _ := body["error"].(map[string]any)
 		return []StreamEvent{{
-			Event: "response.error",
-			Data:  body,
+			Event: "response.failed",
+			Data: map[string]any{
+				"type": "response.failed",
+				"response": map[string]any{
+					"id":          stringValue(meta.ResponseID, "resp_"+uuid.NewString()),
+					"object":      "response",
+					"status":      "failed",
+					"model":       meta.Model,
+					"output":      []any{},
+					"output_text": "",
+					"error":       errorPayload,
+				},
+			},
 		}}
 	}
 }

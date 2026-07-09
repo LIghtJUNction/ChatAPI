@@ -136,7 +136,10 @@ export type MessageItem = {
       request_keys?: string[]
       input_text?: string
       tool_schemas?: unknown[]
+      option_chips?: OptionChip[]
       request_body?: unknown
+      raw_request_body?: unknown
+      request_options?: Record<string, unknown>
       request_headers?: {
         user_agent?: string
         content_type?: string
@@ -146,6 +149,23 @@ export type MessageItem = {
     }
     [key: string]: unknown
   }
+}
+
+export type OptionChip = {
+  key: string
+  label: string
+  value?: string
+  protocol?: string
+  category: 'request' | 'applied' | 'provider_specific' | 'unsupported' | string
+  support_level:
+    | 'applied'
+    | 'normalized'
+    | 'stored_only'
+    | 'provider_specific'
+    | 'unsupported'
+    | 'partially_applied'
+    | string
+  detail?: unknown
 }
 
 export type ConversationEventItem = {

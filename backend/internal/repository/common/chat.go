@@ -68,6 +68,8 @@ type Request struct {
 	RequestQuery   map[string][]string   `json:"request_query,omitempty"`
 	RequestHeaders map[string][]string   `json:"request_headers,omitempty"`
 	RequestBody    map[string]any        `json:"request_body,omitempty"`
+	RawRequestBody map[string]any        `json:"raw_request_body,omitempty"`
+	RequestOptions map[string]any        `json:"request_options,omitempty"`
 	ToolSchemas    []any                 `json:"tool_schemas,omitempty"`
 	ToolChoice     RequestToolChoice     `json:"tool_choice,omitempty"`
 	ResponseFormat RequestResponseFormat `json:"response_format,omitempty"`

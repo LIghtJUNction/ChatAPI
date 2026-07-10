@@ -69,7 +69,7 @@ export function useChatWorkspace(isMobile: boolean) {
   })
   const keyboardOffset = useKeyboardOffset()
   const automation = useAutomationRules()
-  const { loadAutomationRules } = automation
+  const { loadAutomationRules, openRecordedDraft } = automation
 
   const handleConnectionCountChange = useCallback((value: number) => {
     setAuth((current) =>
@@ -82,7 +82,13 @@ export function useChatWorkspace(isMobile: boolean) {
     )
   }, [])
 
-  const { applySelectedConversation, sendWorkspaceCommand } = useWorkspaceRealtime({
+  const {
+    applySelectedConversation,
+    automationExecutions,
+    automationRecording,
+    sendAutomationRecordCommand,
+    sendWorkspaceCommand,
+  } = useWorkspaceRealtime({
     authenticated: auth.authenticated,
     conversations,
     onConnectionCountChange: handleConnectionCountChange,
@@ -93,9 +99,12 @@ export function useChatWorkspace(isMobile: boolean) {
     setSelectedConversationId,
   })
 
-  const selectedConversation = conversations.find(
-    (item) => item.id === selectedConversationId,
-  )
+	const selectedConversation = conversations.find(
+		(item) => item.id === selectedConversationId,
+	)
+	const selectedRequestId = selectedConversation?.request_id || ''
+	const selectedExecution = automationExecutions[selectedConversationId]
+	const automationExecution = selectedExecution?.request_id === selectedRequestId ? selectedExecution : null
   const timeline = timelineByConversation[selectedConversationId] ?? []
   const messages = timeline
     .filter((item): item is TimelineItem & { message: MessageItem } => item.kind === 'message' && !!item.message)
@@ -113,6 +122,14 @@ export function useChatWorkspace(isMobile: boolean) {
   const selectedToolSchema =
     availableToolSchemas.find((item) => item.name === toolName) ?? null
   const visibleMessages = buildVisibleTimeline(timeline, draftBuffer)
+  const openedRecordedRuleRef = useRef('')
+
+  useEffect(() => {
+    const draft = automationRecording.draft_rule
+    if (!draft || draft.id === openedRecordedRuleRef.current) return
+    openedRecordedRuleRef.current = draft.id
+    openRecordedDraft(draft)
+  }, [automationRecording.draft_rule, openRecordedDraft])
 
   useEffect(() => {
     const currentStatus = String(selectedConversation?.status || '')
@@ -342,6 +359,7 @@ export function useChatWorkspace(isMobile: boolean) {
       await sendWorkspaceCommand({
         kind: 'abort',
         conversation_id: conversationId,
+        request_id: conversations.find((item) => item.id === conversationId)?.request_id || '',
         error: reason,
       })
       setAbortPopoverConversationId('')
@@ -351,6 +369,19 @@ export function useChatWorkspace(isMobile: boolean) {
       appMessage.error(error instanceof Error ? error.message : 'Abort 失败')
     } finally {
       setAbortingConversationId('')
+    }
+  }
+
+  async function handleAutomationRecording(action: 'start' | 'stop' | 'cancel') {
+    if (!selectedConversationId) return
+    try {
+      const result = await sendAutomationRecordCommand(action, selectedConversationId)
+      if (result.state.draft_rule) openRecordedDraft(result.state.draft_rule)
+      appMessage.success(
+        action === 'start' ? '已开始录制操作' : action === 'stop' ? '录制已生成规则草稿' : '已取消录制',
+      )
+    } catch (error) {
+      appMessage.error(error instanceof Error ? error.message : '录制操作失败')
     }
   }
 
@@ -375,7 +406,8 @@ export function useChatWorkspace(isMobile: boolean) {
         setSending(true)
         await sendWorkspaceCommand({
           kind: 'builtin_tool',
-          conversation_id: selectedConversationId,
+            conversation_id: selectedConversationId,
+            request_id: selectedRequestId,
           builtin_tool_kind: kind,
           builtin_tool_query: kind === 'web_search' ? builtinToolQuery.trim() : undefined,
           builtin_tool_asset_id: kind === 'image_generation' ? builtinToolAsset?.asset_id : undefined,
@@ -401,6 +433,7 @@ export function useChatWorkspace(isMobile: boolean) {
       const ack = await sendWorkspaceCommand({
         kind: 'stream_delta',
         conversation_id: selectedConversationId,
+        request_id: selectedRequestId,
         text: chunk,
         mode: isThinkingMode ? 'thinking' : 'answer',
         reasoning_stream_mode:
@@ -494,7 +527,8 @@ export function useChatWorkspace(isMobile: boolean) {
         const outputChunk = withDraftSeparator(pendingChunk)
         const deltaAck = await sendWorkspaceCommand({
           kind: 'stream_delta',
-          conversation_id: selectedConversationId,
+            conversation_id: selectedConversationId,
+            request_id: selectedRequestId,
           text: outputChunk,
           mode: 'answer',
         })
@@ -507,7 +541,8 @@ export function useChatWorkspace(isMobile: boolean) {
         const outputChunk = withDraftSeparator(finalText)
         const deltaAck = await sendWorkspaceCommand({
           kind: 'stream_delta',
-          conversation_id: selectedConversationId,
+            conversation_id: selectedConversationId,
+            request_id: selectedRequestId,
           text: outputChunk,
           mode: 'thinking',
           reasoning_stream_mode: isResponsesConversation ? reasoningStreamMode : undefined,
@@ -522,6 +557,7 @@ export function useChatWorkspace(isMobile: boolean) {
       await sendWorkspaceCommand({
         kind: 'stream_complete',
         conversation_id: selectedConversationId,
+        request_id: selectedRequestId,
         text: composerMode === 'tool_call' ? finalText : undefined,
         mode: composerMode,
         tool_name: composerMode === 'tool_call' ? toolName.trim() || undefined : undefined,
@@ -596,6 +632,7 @@ export function useChatWorkspace(isMobile: boolean) {
     draftBuffer,
     drawerOpen,
     handleAbortConversation,
+    handleAutomationRecording,
     handleComposerKeyDown,
     handleCreateAutomationRule: automation.handleCreateAutomationRule,
     handleDeleteAutomationRule: automation.handleDeleteAutomationRule,
@@ -620,6 +657,8 @@ export function useChatWorkspace(isMobile: boolean) {
     pruneModalOpen,
     pruningConversations,
     automationRuleEditorOpen: automation.automationRuleEditorOpen,
+    automationExecution,
+    automationRecording,
     automationRules: automation.automationRules,
     automationRulesModalOpen: automation.automationRulesModalOpen,
     selectedConversation,

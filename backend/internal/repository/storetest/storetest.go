@@ -76,7 +76,7 @@ func RunAuditRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 func RunAutomationRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Helper()
 	t.Run("automation_rules", func(t *testing.T) {
-		testAutomationRuleRepositoryReplacesByScope(t, newStore)
+		testAutomationRuleRepositoryCRUD(t, newStore)
 	})
 }
 
@@ -253,11 +253,12 @@ func testUserRepositoryPreviewsAndDeletesUserAccount(t *testing.T, newStore NewS
 	}); err != nil {
 		t.Fatalf("set ready config: %v", err)
 	}
-	if _, err := st.ReplaceAutomationRulesForUser(ctx, "user_delete_ready", nil, []common.UpsertAutomationRuleInput{{
+	if _, err := st.UpsertAutomationRule(ctx, common.UpsertAutomationRuleInput{
 		ID:      "rule_delete_ready",
+		UserID:  "user_delete_ready",
 		Enabled: true,
 		Payload: map[string]any{"match": "x"},
-	}}); err != nil {
+	}); err != nil {
 		t.Fatalf("set ready automation rule: %v", err)
 	}
 	if _, err := st.CreateAppAPIKey(ctx, common.CreateAppAPIKeyInput{
@@ -697,11 +698,11 @@ func testAuditRepositoryCreatesFiltersAndLimitsLogs(t *testing.T, newStore NewSt
 	}
 }
 
-func testAutomationRuleRepositoryReplacesByScope(t *testing.T, newStore NewStoreFunc) {
+func testAutomationRuleRepositoryCRUD(t *testing.T, newStore NewStoreFunc) {
 	t.Helper()
 	ctx := context.Background()
 	st := newStore(t)
-	initial, err := st.ReplaceAutomationRulesForUser(ctx, "user_rules", nil, []common.UpsertAutomationRuleInput{
+	for _, input := range []common.UpsertAutomationRuleInput{
 		{
 			ID:      "rule_a",
 			UserID:  "user_rules",
@@ -722,29 +723,34 @@ func testAutomationRuleRepositoryReplacesByScope(t *testing.T, newStore NewStore
 				"name":    "Rule B",
 			},
 		},
-	})
+	} {
+		if _, err := st.UpsertAutomationRule(ctx, input); err != nil {
+			t.Fatalf("upsert initial automation rule: %v", err)
+		}
+	}
+	initial, err := st.ListAutomationRulesByUser(ctx, "user_rules")
 	if err != nil {
-		t.Fatalf("replace initial automation rules: %v", err)
+		t.Fatalf("list initial automation rules: %v", err)
 	}
 	if len(initial) != 2 {
 		t.Fatalf("expected two initial rules, got %#v", initial)
 	}
 
-	replaceIDs := map[string]struct{}{"rule_a": {}}
-	scoped, err := st.ReplaceAutomationRulesForUser(ctx, "user_rules", replaceIDs, []common.UpsertAutomationRuleInput{
-		{
-			ID:      "rule_a",
-			UserID:  "user_rules",
-			Enabled: false,
-			Payload: map[string]any{
-				"id":      "rule_a",
-				"enabled": false,
-				"name":    "Rule A2",
-			},
+	if _, err := st.UpsertAutomationRule(ctx, common.UpsertAutomationRuleInput{
+		ID:      "rule_a",
+		UserID:  "user_rules",
+		Enabled: false,
+		Payload: map[string]any{
+			"id":      "rule_a",
+			"enabled": false,
+			"name":    "Rule A2",
 		},
-	})
+	}); err != nil {
+		t.Fatalf("update automation rule: %v", err)
+	}
+	scoped, err := st.ListAutomationRulesByUser(ctx, "user_rules")
 	if err != nil {
-		t.Fatalf("replace scoped automation rule: %v", err)
+		t.Fatalf("list updated automation rules: %v", err)
 	}
 	if len(scoped) != 2 {
 		t.Fatalf("expected scoped replace to keep other rules, got %#v", scoped)
@@ -766,6 +772,13 @@ func testAutomationRuleRepositoryReplacesByScope(t *testing.T, newStore NewStore
 	}
 	if len(otherUser) != 0 {
 		t.Fatalf("expected other user rules to remain isolated: %#v", otherUser)
+	}
+	if err := st.DeleteAutomationRule(ctx, "user_rules", "rule_a"); err != nil {
+		t.Fatalf("delete automation rule: %v", err)
+	}
+	afterDelete, err := st.ListAutomationRulesByUser(ctx, "user_rules")
+	if err != nil || len(afterDelete) != 1 || afterDelete[0].ID != "rule_b" {
+		t.Fatalf("unexpected rules after delete: %#v err=%v", afterDelete, err)
 	}
 }
 

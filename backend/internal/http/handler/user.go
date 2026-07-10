@@ -13,6 +13,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	automationsvc "github.com/zyf2007/ChatAPI/internal/service/automation"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
@@ -111,13 +112,18 @@ func (h UserHandler) AbortConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
 	var body struct {
-		Error string `json:"error"`
+		RequestID string `json:"request_id"`
+		Error     string `json:"error"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	result, err := h.UserControl.Conversations.AbortConversation(r.Context(), pr.UserID, conversationID, body.Error)
+	if strings.TrimSpace(body.RequestID) == "" {
+		http.Error(w, "request_id is required", http.StatusBadRequest)
+		return
+	}
+	result, err := h.UserControl.Conversations.AbortConversation(r.Context(), pr.UserID, conversationID, body.RequestID, body.Error)
 	if err != nil {
 		status := statusForStoreError(err)
 		if errors.Is(err, usercontrolconversations.ErrForbidden) {
@@ -347,47 +353,51 @@ func (h UserHandler) ListAutomationRules(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "session unauthorized", http.StatusUnauthorized)
 		return
 	}
-	items, err := h.UserControl.Config.ListAutomationRules(r.Context(), pr.UserID)
+	items, err := h.UserControl.Automation.ListRules(r.Context(), pr.UserID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	rules := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		rule := cloneMap(item.Payload)
-		rule["id"] = item.ID
-		rule["enabled"] = item.Enabled
-		rules = append(rules, rule)
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": rules})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": items})
 }
 
-func (h UserHandler) ReplaceAutomationRules(w http.ResponseWriter, r *http.Request) {
+func (h UserHandler) SaveAutomationRule(w http.ResponseWriter, r *http.Request) {
 	pr, ok := session.PrincipalFromContext(r.Context())
 	if !ok {
 		http.Error(w, "session unauthorized", http.StatusUnauthorized)
 		return
 	}
-	var body struct {
-		Rules []map[string]any `json:"rules"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	var rule automationsvc.Rule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	items, err := h.UserControl.Config.ReplaceAutomationRules(r.Context(), pr.UserID, body.Rules)
+	if pathID := strings.TrimSpace(chi.URLParam(r, "ruleID")); pathID != "" {
+		rule.ID = pathID
+	}
+	item, err := h.UserControl.Automation.SaveRule(r.Context(), pr.UserID, rule)
 	if err != nil {
+		if errors.Is(err, automationsvc.ErrInvalidRule) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}
-	rules := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		rule := cloneMap(item.Payload)
-		rule["id"] = item.ID
-		rule["enabled"] = item.Enabled
-		rules = append(rules, rule)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "rule": item})
+}
+
+func (h UserHandler) DeleteAutomationRule(w http.ResponseWriter, r *http.Request) {
+	pr, ok := session.PrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "rules": rules})
+	if err := h.UserControl.Automation.DeleteRule(r.Context(), pr.UserID, chi.URLParam(r, "ruleID")); err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {

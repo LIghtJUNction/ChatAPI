@@ -73,10 +73,12 @@ func (s *Service) ListConversationMessages(ctx context.Context, ownerID string, 
 	return items, err
 }
 
-func (s *Service) AbortConversation(ctx context.Context, ownerID string, conversationID string, abortReason string) (map[string]any, error) {
+func (s *Service) AbortConversation(ctx context.Context, ownerID string, conversationID string, requestID string, abortReason string) (map[string]any, error) {
 	result, err := s.turn.Execute(ctx, controlsvc.Command{
+		Source:         controlsvc.SourceAPI,
 		OwnerID:        strings.TrimSpace(ownerID),
 		ConversationID: strings.TrimSpace(conversationID),
+		RequestID:      strings.TrimSpace(requestID),
 		Action: turnsvc.OutputAction{
 			Kind:        turnsvc.TurnControlAbort,
 			AbortReason: strings.TrimSpace(abortReason),

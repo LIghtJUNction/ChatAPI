@@ -195,6 +195,7 @@ func TestRouterUserFlow(t *testing.T) {
 
 	postJSONWithCookie(t, server.URL+"/api/chat/output/complete", map[string]any{
 		"conversation_id": firstRequest.ConversationID,
+		"request_id":      firstRequest.RequestID,
 		"text":            "done from session",
 		"mode":            "assistant_message",
 	}, userCookie, http.StatusOK)
@@ -227,7 +228,8 @@ func TestRouterUserFlow(t *testing.T) {
 		t.Fatalf("unexpected delete waiting conversation result: status=%d body=%q", deleteStatus, deleteBody)
 	}
 	postJSONWithCookie(t, server.URL+"/api/conversations/"+secondRequest.ConversationID+"/abort", map[string]any{
-		"error": "stopped",
+		"request_id": secondRequest.RequestID,
+		"error":      "stopped",
 	}, userCookie, http.StatusOK)
 	secondFinal := <-secondResultCh
 	if _, ok := secondFinal["error"]; !ok {
@@ -276,19 +278,45 @@ func TestRouterUserFlow(t *testing.T) {
 		t.Fatalf("unexpected saved user config: %#v", configResp)
 	}
 
-	rulesResp := getJSONWithCookie(t, server.URL+"/api/config/automation-rules", userCookie, http.StatusOK)
+	rulesResp := getJSONWithCookie(t, server.URL+"/api/automation/rules", userCookie, http.StatusOK)
 	if len(rulesResp["rules"].([]any)) != 0 {
 		t.Fatalf("unexpected initial automation rules: %#v", rulesResp)
 	}
-	rulesResp = postJSONWithCookie(t, server.URL+"/api/config/automation-rules", map[string]any{
-		"rules": []map[string]any{{
-			"enabled": true,
-			"name":    "rule-1",
-			"match":   "hello",
+	rulesResp = postJSONWithCookie(t, server.URL+"/api/automation/rules", map[string]any{
+		"schema_version": 2,
+		"enabled":        true,
+		"name":           "rule-1",
+		"match":          map[string]any{"target": "last_user_text", "pattern": "hello"},
+		"playback":       map[string]any{"mode": "fixed", "fixed_interval_ms": 200},
+		"steps": []map[string]any{{
+			"id": "step-1", "delay_before_ms": 0,
+			"action": map[string]any{"kind": "stream_complete", "mode": "assistant_message", "text": "hello"},
 		}},
 	}, userCookie, http.StatusOK)
-	if len(rulesResp["rules"].([]any)) != 1 {
+	if rulesResp["rule"].(map[string]any)["name"] != "rule-1" {
 		t.Fatalf("unexpected saved automation rules: %#v", rulesResp)
+	}
+	ruleID := rulesResp["rule"].(map[string]any)["id"].(string)
+	putJSONWithCookie(t, server.URL+"/api/automation/rules/"+ruleID, map[string]any{
+		"schema_version": 2,
+		"enabled":        false,
+		"name":           "rule-1-updated",
+		"match":          map[string]any{"target": "last_user_text", "pattern": "hello"},
+		"playback":       map[string]any{"mode": "recorded"},
+		"steps": []map[string]any{{
+			"id": "step-1", "delay_before_ms": 25,
+			"action": map[string]any{"kind": "stream_complete", "mode": "assistant_message", "text": "hello"},
+		}},
+	}, userCookie, http.StatusOK)
+	rulesResp = getJSONWithCookie(t, server.URL+"/api/automation/rules", userCookie, http.StatusOK)
+	listedRule := rulesResp["rules"].([]any)[0].(map[string]any)
+	if listedRule["name"] != "rule-1-updated" || listedRule["enabled"] != false {
+		t.Fatalf("unexpected updated automation rule: %#v", listedRule)
+	}
+	deleteJSONWithCookie(t, server.URL+"/api/automation/rules/"+ruleID, userCookie, http.StatusOK)
+	rulesResp = getJSONWithCookie(t, server.URL+"/api/automation/rules", userCookie, http.StatusOK)
+	if len(rulesResp["rules"].([]any)) != 0 {
+		t.Fatalf("automation rule was not deleted: %#v", rulesResp)
 	}
 
 	postJSONWithCookie(t, server.URL+"/api/user/password", map[string]any{

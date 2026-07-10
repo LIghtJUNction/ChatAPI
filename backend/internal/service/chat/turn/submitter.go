@@ -71,7 +71,7 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 		SystemContent:      input.Request.SystemContent,
 		DeveloperContent:   input.Request.DeveloperContent,
 		AssistantContent:   input.Request.AssistantContent,
-		UserContent:        input.Request.UserContent,
+		UserContent:        input.Request.LastUserContent,
 		UserMessageContent: buildUserMessageContent(input.Request),
 		RequestMethod:      input.RequestMeta.RequestMethod,
 		RequestPath:        input.RequestMeta.RequestPath,

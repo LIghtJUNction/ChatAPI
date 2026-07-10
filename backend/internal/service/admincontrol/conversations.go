@@ -20,6 +20,7 @@ func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]co
 
 func (s *Service) AbortConversation(ctx context.Context, conversationID string, reason string) (map[string]any, error) {
 	result, err := s.control.Execute(ctx, controlsvc.Command{
+		Source:         controlsvc.SourceAdmin,
 		ConversationID: strings.TrimSpace(conversationID),
 		Action: turnsvc.OutputAction{
 			Kind:        turnsvc.TurnControlAbort,
@@ -31,6 +32,7 @@ func (s *Service) AbortConversation(ctx context.Context, conversationID string, 
 
 func (s *Service) CompleteConversation(ctx context.Context, conversationID string, text string, mode string, toolName string, toolCallID string, toolOutput string) (map[string]any, error) {
 	result, err := s.control.Execute(ctx, controlsvc.Command{
+		Source:         controlsvc.SourceAdmin,
 		ConversationID: strings.TrimSpace(conversationID),
 		Action: turnsvc.OutputAction{
 			Kind:       turnsvc.TurnControlStreamComplete,

@@ -16,6 +16,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
 	"github.com/zyf2007/ChatAPI/internal/repository/audit"
 	"github.com/zyf2007/ChatAPI/internal/repository/auth"
+	automationrepo "github.com/zyf2007/ChatAPI/internal/repository/automation"
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	configrepo "github.com/zyf2007/ChatAPI/internal/repository/config"
 	"github.com/zyf2007/ChatAPI/internal/repository/platform"
@@ -38,6 +39,7 @@ import (
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	automationsvc "github.com/zyf2007/ChatAPI/internal/service/automation"
 	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
@@ -55,44 +57,47 @@ import (
 )
 
 type Deps struct {
-	Config         config.Config
-	ChatRepo       chat.Store
-	AuthRepo       auth.Store
-	ConfigRepo     configrepo.Store
-	StorageRepo    storage.Store
-	AuditRepo      audit.Store
-	PlatformRepo   platform.MaintenanceStore
-	Turn           *turn.Service
-	Query          *turnquery.Service
-	ModelAPIKeys   *modelkey.Service
-	Catalog        *catalogsvc.Service
-	Control        *controlsvc.Service
-	Ingress        *ingresssvc.Service
-	Streaming      *streamingsvc.Service
-	Egress         *egresssvc.Service
-	Timeline       *timelinesvc.Service
-	ChatEvents     *chatevents.Dispatcher
-	AppAPIKeys     *appkey.Service
-	Lab            *labauth.Service
-	LocalAuth      *localauth.Service
-	Verification   *verification.Service
-	Policy         *policy.Service
-	Access         *authaccess.Service
-	AccessSettings *authaccess.SettingsService
-	AuthSettings   *authsettings.Service
-	GeeTest        *geetest.Service
-	TOTP           *totpsvc.Service
-	OIDC           *oidcsvc.Service
-	LoginLimiter   *ratelimit.Service
-	AdminControl   *admincontrol.Service
-	Audit          *auditsvc.Service
-	Accounts       *account.Service
-	Identity       *identity.Service
-	UserControl    *usercontrol.Service
-	UserSessions   *session.Service
-	LoggerFactory  *logging.Factory
-	Workspace      *workspacesvc.Service
-	WorkspaceHub   *workspacesvc.Hub
+	Config           config.Config
+	ChatRepo         chat.Store
+	AuthRepo         auth.Store
+	ConfigRepo       configrepo.Store
+	AutomationRepo   automationrepo.Store
+	StorageRepo      storage.Store
+	AuditRepo        audit.Store
+	PlatformRepo     platform.MaintenanceStore
+	Turn             *turn.Service
+	Query            *turnquery.Service
+	ModelAPIKeys     *modelkey.Service
+	Catalog          *catalogsvc.Service
+	Control          *controlsvc.Service
+	Ingress          *ingresssvc.Service
+	Streaming        *streamingsvc.Service
+	Egress           *egresssvc.Service
+	Timeline         *timelinesvc.Service
+	ChatEvents       *chatevents.Dispatcher
+	AppAPIKeys       *appkey.Service
+	Lab              *labauth.Service
+	LocalAuth        *localauth.Service
+	Verification     *verification.Service
+	Policy           *policy.Service
+	Access           *authaccess.Service
+	AccessSettings   *authaccess.SettingsService
+	AuthSettings     *authsettings.Service
+	GeeTest          *geetest.Service
+	TOTP             *totpsvc.Service
+	OIDC             *oidcsvc.Service
+	LoginLimiter     *ratelimit.Service
+	AdminControl     *admincontrol.Service
+	Audit            *auditsvc.Service
+	Accounts         *account.Service
+	Identity         *identity.Service
+	UserControl      *usercontrol.Service
+	UserSessions     *session.Service
+	LoggerFactory    *logging.Factory
+	Workspace        *workspacesvc.Service
+	WorkspaceHub     *workspacesvc.Hub
+	Automation       *automationsvc.Service
+	AutomationEvents *automationsvc.Dispatcher
 }
 
 func New(deps Deps) http.Handler {
@@ -149,6 +154,25 @@ func New(deps Deps) http.Handler {
 	if deps.ChatEvents == nil {
 		deps.ChatEvents = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(deps.WorkspaceHub))
 	}
+	if deps.Automation == nil {
+		if deps.AutomationRepo == nil {
+			deps.AutomationRepo, _ = deps.ConfigRepo.(automationrepo.Store)
+		}
+		if deps.AutomationRepo != nil && deps.Turn != nil && deps.Turn.Pending != nil {
+			if deps.AutomationEvents == nil {
+				deps.AutomationEvents = automationsvc.NewDispatcher(workspacesvc.NewAutomationRealtimePublisher(deps.WorkspaceHub))
+			}
+			deps.Automation = automationsvc.New(automationsvc.Deps{
+				Rules: deps.AutomationRepo, Control: deps.Control, Pending: deps.Turn.Pending,
+				Events: deps.AutomationEvents, Logger: deps.logger(logging.LayerTurn),
+			})
+		}
+	}
+	deps.Workspace.SetAutomation(deps.Automation)
+	if deps.Control != nil {
+		deps.Control.Subscribe(deps.Automation)
+	}
+	deps.ChatEvents.Subscribe(deps.Automation)
 	if deps.UserControl == nil {
 		deps.UserControl = usercontrol.New(usercontrol.Deps{
 			Identity:     deps.Identity,
@@ -167,6 +191,7 @@ func New(deps Deps) http.Handler {
 			Accounts:     deps.Accounts,
 			Logger:       deps.logger(logging.LayerUserControl),
 			Events:       deps.ChatEvents,
+			Automation:   deps.Automation,
 		})
 	}
 	if deps.AdminControl == nil {
@@ -340,8 +365,10 @@ func New(deps Deps) http.Handler {
 	router.With(userAuth, userPrincipalAccess).Get("/api/user/config", userHandler.GetConfig)
 	router.With(userAuth, userPrincipalAccess).Post("/api/user/config", userHandler.SetConfig)
 	router.With(userAuth, userPrincipalAccess).Post("/api/user/password", userHandler.ChangePassword)
-	router.With(userAuth, userPrincipalAccess).Get("/api/config/automation-rules", userHandler.ListAutomationRules)
-	router.With(userAuth, userPrincipalAccess).Post("/api/config/automation-rules", userHandler.ReplaceAutomationRules)
+	router.With(userAuth, userPrincipalAccess).Get("/api/automation/rules", userHandler.ListAutomationRules)
+	router.With(userAuth, userPrincipalAccess).Post("/api/automation/rules", userHandler.SaveAutomationRule)
+	router.With(userAuth, userPrincipalAccess).Put("/api/automation/rules/{ruleID}", userHandler.SaveAutomationRule)
+	router.With(userAuth, userPrincipalAccess).Delete("/api/automation/rules/{ruleID}", userHandler.DeleteAutomationRule)
 
 	router.With(userAuth, userPrincipalAccess).Get("/api/user/api-keys", userHandler.ListAppKeys)
 	router.With(userAuth, userPrincipalAccess).Post("/api/user/api-keys", userHandler.CreateAppKey)

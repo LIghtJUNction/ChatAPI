@@ -90,6 +90,22 @@ func TestUpdateDraftAutomaticallyCompletesOnCrossChunkStop(t *testing.T) {
 	}
 }
 
+func TestExecuteTurnControlRejectsReplacedRequestIdentity(t *testing.T) {
+	registry := pending.NewPendingRegistry()
+	registry.Add(&turn.PendingTurn{
+		ConversationID: "conv", RequestID: "req_new", ResponseID: "resp_new", OwnerID: "owner",
+		Events: make(chan turn.PendingEvent, 1), Done: make(chan turn.PendingResult, 1),
+	})
+	service := &turn.Service{Pending: registry}
+	_, err := service.ExecuteTurnControl(context.Background(), turn.TurnControlCommand{
+		ConversationID: "conv", RequestID: "req_old",
+		Action: turn.OutputAction{Kind: turn.TurnControlStreamDelta, OutputText: "must not apply"},
+	})
+	if err != turn.ErrPendingConflict {
+		t.Fatalf("expected request identity conflict, got %v", err)
+	}
+}
+
 func TestConcurrentDeltasKeepGuardAndPersistedDraftInSync(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.sqlite3"))

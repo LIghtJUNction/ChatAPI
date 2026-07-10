@@ -15,6 +15,4 @@ type Store interface {
 	SetUserConfig(context.Context, common.SetUserConfigInput) (common.UserConfig, error)
 	DeleteUserConfig(context.Context, string, string) error
 	ListUserConfigs(context.Context, string) ([]common.UserConfig, error)
-	ListAutomationRulesByUser(context.Context, string) ([]common.AutomationRule, error)
-	ReplaceAutomationRulesForUser(context.Context, string, map[string]struct{}, []common.UpsertAutomationRuleInput) ([]common.AutomationRule, error)
 }

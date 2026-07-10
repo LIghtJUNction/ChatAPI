@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	automationsvc "github.com/zyf2007/ChatAPI/internal/service/automation"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
@@ -57,6 +58,7 @@ type ConnectionCount struct {
 
 type ClientMessage struct {
 	Type           string   `json:"type"`
+	CommandID      string   `json:"command_id,omitempty"`
 	ConversationID string   `json:"conversation_id,omitempty"`
 	Command        *Command `json:"command,omitempty"`
 }
@@ -67,15 +69,31 @@ type Service struct {
 	conversations ConversationQuery
 	timeline      TimelineQuery
 	turn          TurnExecutor
+	automation    AutomationRecorder
 }
 
 type TurnExecutor interface {
 	Execute(context.Context, controlsvc.Command) (controlsvc.Result, error)
 }
 
-func New(conversations ConversationQuery, timeline TimelineQuery, turn TurnExecutor) *Service {
-	return &Service{conversations: conversations, timeline: timeline, turn: turn}
+type AutomationRecorder interface {
+	StartRecording(context.Context, string, string) (automationsvc.RecordingState, error)
+	StopRecording(context.Context, string) (automationsvc.RecordingState, error)
+	CancelRecording(context.Context, string) (automationsvc.RecordingState, error)
+	RecordingState(string) automationsvc.RecordingState
+	ExecutionStates(string) []automationsvc.ExecutionState
+	StateSnapshot(string) automationsvc.StateSnapshot
 }
+
+func New(conversations ConversationQuery, timeline TimelineQuery, turn TurnExecutor, automation ...AutomationRecorder) *Service {
+	service := &Service{conversations: conversations, timeline: timeline, turn: turn}
+	if len(automation) > 0 {
+		service.automation = automation[0]
+	}
+	return service
+}
+
+func (s *Service) SetAutomation(automation AutomationRecorder) { s.automation = automation }
 
 func (s *Service) Snapshot(ctx context.Context, ownerID string) (Snapshot, error) {
 	items, err := s.conversations.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
@@ -111,6 +129,7 @@ func (s *Service) TimelineReset(ctx context.Context, ownerID string, conversatio
 func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 	msg := ClientMessage{
 		Type:           stringValue(payload["type"], ""),
+		CommandID:      strings.TrimSpace(stringValue(payload["command_id"], "")),
 		ConversationID: strings.TrimSpace(stringValue(payload["conversation_id"], "")),
 	}
 	switch msg.Type {
@@ -121,12 +140,23 @@ func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 			return ClientMessage{}, ErrInvalidClientMessage
 		}
 		return msg, nil
+	case "automation.record.start":
+		if msg.CommandID == "" || msg.ConversationID == "" {
+			return ClientMessage{}, ErrInvalidClientMessage
+		}
+		return msg, nil
+	case "automation.record.stop", "automation.record.cancel", "automation.record.get":
+		if msg.CommandID == "" {
+			return ClientMessage{}, ErrInvalidClientMessage
+		}
+		return msg, nil
 	case "workspace.command":
 		commandRaw, _ := payload["command"].(map[string]any)
 		command := &Command{
 			ID:                  stringValue(commandRaw["command_id"], ""),
 			Kind:                stringValue(commandRaw["kind"], ""),
 			ConversationID:      strings.TrimSpace(stringValue(commandRaw["conversation_id"], msg.ConversationID)),
+			RequestID:           strings.TrimSpace(stringValue(commandRaw["request_id"], "")),
 			Text:                stringValue(commandRaw["text"], ""),
 			Mode:                stringValue(commandRaw["mode"], ""),
 			ToolName:            stringValue(commandRaw["tool_name"], ""),
@@ -138,7 +168,7 @@ func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 			ReasoningStreamMode: stringValue(commandRaw["reasoning_stream_mode"], ""),
 			Error:               stringValue(commandRaw["error"], ""),
 		}
-		if command.ID == "" || command.Kind == "" || command.ConversationID == "" {
+		if command.ID == "" || command.Kind == "" || command.ConversationID == "" || command.RequestID == "" {
 			return ClientMessage{}, ErrInvalidClientMessage
 		}
 		msg.Command = command
@@ -151,6 +181,24 @@ func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 
 type RealtimePublisher struct {
 	hub *Hub
+}
+
+type AutomationRealtimePublisher struct{ hub *Hub }
+
+func NewAutomationRealtimePublisher(hub *Hub) *AutomationRealtimePublisher {
+	return &AutomationRealtimePublisher{hub: hub}
+}
+
+func (p *AutomationRealtimePublisher) HandleAutomationState(_ context.Context, event automationsvc.StateEvent) {
+	if p == nil || p.hub == nil || strings.TrimSpace(event.OwnerID) == "" {
+		return
+	}
+	if event.Recording != nil {
+		p.hub.broadcast(event.OwnerID, map[string]any{"type": "automation.record.state", "state": event.Recording}, nil)
+	}
+	if event.Execution != nil {
+		p.hub.broadcast(event.OwnerID, map[string]any{"type": "automation.execution.state", "execution": event.Execution}, nil)
+	}
 }
 
 func NewRealtimePublisher(hub *Hub) *RealtimePublisher {
@@ -283,12 +331,42 @@ func (h *Hub) HandleClientMessage(ctx context.Context, ownerID string, conn *Con
 				Type:           "workspace.command_error",
 				CommandID:      msg.Command.ID,
 				ConversationID: msg.Command.ConversationID,
+				RequestID:      msg.Command.RequestID,
 				Code:           code,
 				Message:        message,
 			})
 			return nil
 		}
 		conn.Send(ack)
+		return nil
+	case "automation.record.start", "automation.record.stop", "automation.record.cancel", "automation.record.get":
+		if h.workspace == nil || h.workspace.automation == nil {
+			conn.Send(map[string]any{"type": "automation.record.error", "command_id": msg.CommandID, "code": "automation_unavailable", "message": "automation recorder unavailable"})
+			return nil
+		}
+		var state automationsvc.RecordingState
+		var err error
+		switch msg.Type {
+		case "automation.record.start":
+			state, err = h.workspace.automation.StartRecording(ctx, ownerID, msg.ConversationID)
+		case "automation.record.stop":
+			state, err = h.workspace.automation.StopRecording(ctx, ownerID)
+		case "automation.record.cancel":
+			state, err = h.workspace.automation.CancelRecording(ctx, ownerID)
+		default:
+		}
+		if err != nil {
+			conn.Send(map[string]any{"type": "automation.record.error", "command_id": msg.CommandID, "code": "automation_record_failed", "message": err.Error()})
+			return nil
+		}
+		snapshot := h.workspace.automation.StateSnapshot(ownerID)
+		if msg.Type == "automation.record.get" {
+			state = snapshot.Recording
+		}
+		conn.Send(map[string]any{
+			"type": "automation.record.ack", "command_id": msg.CommandID, "state": state,
+			"revision": snapshot.Revision, "executions": snapshot.Executions,
+		})
 		return nil
 	default:
 		return ErrInvalidClientMessage
@@ -303,6 +381,8 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 	result, err := s.turn.Execute(ctx, controlsvc.Command{
 		OwnerID:        strings.TrimSpace(ownerID),
 		ConversationID: strings.TrimSpace(command.ConversationID),
+		RequestID:      strings.TrimSpace(command.RequestID),
+		Source:         controlsvc.SourceWorkspace,
 		Action: turnsvc.OutputAction{
 			Kind:                kind,
 			OutputText:          command.Text,
@@ -324,6 +404,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 		Type:           "workspace.command_ack",
 		CommandID:      command.ID,
 		ConversationID: strings.TrimSpace(command.ConversationID),
+		RequestID:      strings.TrimSpace(command.RequestID),
 		AutoCompleted:  boolValue(result.Body["auto_completed"]),
 	}, nil
 }

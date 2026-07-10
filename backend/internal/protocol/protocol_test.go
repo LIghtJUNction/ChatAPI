@@ -386,6 +386,50 @@ func TestParseRequestSeparatesResponsesBuiltinTools(t *testing.T) {
 	}
 }
 
+func TestParseRequestLastUserContentIsProtocolIndependent(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		body     map[string]any
+	}{
+		{
+			name: "chat tool follow-up", protocol: "chat_completions",
+			body: map[string]any{"messages": []any{
+				map[string]any{"role": "user", "content": "human question"},
+				map[string]any{"role": "assistant", "content": ""},
+				map[string]any{"role": "tool", "tool_call_id": "call", "content": "tool output"},
+			}},
+		},
+		{
+			name: "anthropic tool result", protocol: "anthropic_messages",
+			body: map[string]any{"messages": []any{
+				map[string]any{"role": "user", "content": "human question"},
+				map[string]any{"role": "assistant", "content": ""},
+				map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "content": "tool output"}}},
+			}},
+		},
+		{
+			name: "responses history", protocol: "responses",
+			body: map[string]any{"input": []any{
+				map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "old"}}},
+				map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "human question"}}},
+			}},
+		},
+		{
+			name: "responses direct input text", protocol: "responses",
+			body: map[string]any{"input": []any{map[string]any{"type": "input_text", "text": "human question"}}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			request := ParseRequest(tc.protocol, tc.body)
+			if request.LastUserContent != "human question" {
+				t.Fatalf("unexpected last user content: %q", request.LastUserContent)
+			}
+		})
+	}
+}
+
 func TestBuildResponseToolResultResponses(t *testing.T) {
 	body := BuildResponseForMeta(ConversationMeta{
 		Protocol:   ProtocolResponses,

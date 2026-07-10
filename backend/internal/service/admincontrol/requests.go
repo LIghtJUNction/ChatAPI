@@ -23,7 +23,9 @@ func (s *Service) AbortByRequest(ctx context.Context, requestID string, reason s
 		return nil, err
 	}
 	result, err := s.control.Execute(ctx, controlsvc.Command{
+		Source:         controlsvc.SourceAdmin,
 		ConversationID: strings.TrimSpace(request.ConversationID),
+		RequestID:      strings.TrimSpace(request.RequestID),
 		Action: turnsvc.OutputAction{
 			Kind:        turnsvc.TurnControlAbort,
 			AbortReason: strings.TrimSpace(reason),
@@ -38,7 +40,9 @@ func (s *Service) CompleteByRequest(ctx context.Context, requestID string, text 
 		return nil, err
 	}
 	result, err := s.control.Execute(ctx, controlsvc.Command{
+		Source:         controlsvc.SourceAdmin,
 		ConversationID: strings.TrimSpace(request.ConversationID),
+		RequestID:      strings.TrimSpace(request.RequestID),
 		Action: turnsvc.OutputAction{
 			Kind:       turnsvc.TurnControlStreamComplete,
 			OutputText: text,

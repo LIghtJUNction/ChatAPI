@@ -15,15 +15,29 @@ const (
 	TypeConversationDeleted       Type = "conversation.deleted"
 	TypeMessageAppended           Type = "message.appended"
 	TypeConversationEventAppended Type = "conversation_event.appended"
+	TypeTurnWaiting               Type = "turn.waiting"
 )
+
+type WaitingTurn struct {
+	OwnerID        string `json:"owner_id"`
+	RequestID      string `json:"request_id"`
+	ResponseID     string `json:"response_id"`
+	ConversationID string `json:"conversation_id"`
+	Protocol       string `json:"protocol"`
+	Model          string `json:"model"`
+	LastUserText   string `json:"last_user_text"`
+}
 
 type Event struct {
 	Type              Type
 	OwnerID           string
 	ConversationID    string
+	RequestID         string
+	ControlManaged    bool
 	Conversation      common.Conversation
 	Message           *common.Message
 	ConversationEvent *common.ConversationEvent
+	WaitingTurn       *WaitingTurn
 }
 
 type Publisher interface {

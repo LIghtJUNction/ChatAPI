@@ -27,6 +27,9 @@ import {
   SaveOutlined,
   SendOutlined,
   UploadOutlined,
+  VideoCameraOutlined,
+  StopOutlined,
+  CloseOutlined,
 } from '@ant-design/icons'
 
 import { GithubButton } from './GithubButton'
@@ -41,11 +44,15 @@ import type {
   ToolSchemaOption,
   VisibleTimelineItem,
   OutputImageAsset,
+  AutomationExecutionState,
+  AutomationRecordingState,
 } from '../types/chat'
 
 const { TextArea } = Input
 
 type ChatPaneProps = {
+  automationExecution: AutomationExecutionState | null
+  automationRecording: AutomationRecordingState
   availableBuiltinTools: BuiltinToolOption[]
   availableToolSchemas: ToolSchemaOption[]
   builtinToolKind: string
@@ -62,11 +69,13 @@ type ChatPaneProps = {
   keyboardOffset: number
   messagesLoading: boolean
   onDraft: () => void | Promise<void>
+  onAutomationRecording: (action: 'start' | 'stop' | 'cancel') => void | Promise<void>
   onOutputImageUpload: (file: File) => Promise<OutputImageAsset>
   onLogout: () => void | Promise<void>
   onOpenDrawer: () => void
   onSend: () => void | Promise<void>
   selectedConversationTitle: string
+  selectedConversationId: string
   selectedRequestFormat: string
   selectedToolSchema: ToolSchemaOption | null
   sending: boolean
@@ -91,6 +100,8 @@ type ChatPaneProps = {
 export function ChatPane(props: ChatPaneProps) {
   const {
     availableBuiltinTools,
+    automationExecution,
+    automationRecording,
     availableToolSchemas,
     builtinToolKind,
     builtinToolQuery,
@@ -106,11 +117,13 @@ export function ChatPane(props: ChatPaneProps) {
     keyboardOffset,
     messagesLoading,
     onDraft,
+    onAutomationRecording,
     onOutputImageUpload,
     onLogout,
     onOpenDrawer,
     onSend,
     selectedConversationTitle,
+    selectedConversationId,
     selectedRequestFormat,
     selectedToolSchema,
     sending,
@@ -297,6 +310,48 @@ export function ChatPane(props: ChatPaneProps) {
                 </Button>
               </div>
             )}
+            <div className="automation-record-bar">
+              <Space size={8} wrap>
+                {!automationRecording.active ? (
+                  <Button
+                    icon={<VideoCameraOutlined />}
+                    disabled={!isWaitingForUser || sending}
+                    onClick={() => void onAutomationRecording('start')}
+                  >
+                    录制自动化
+                  </Button>
+                ) : (
+                  <>
+                    <span className="automation-record-indicator">
+                      <span className="automation-record-dot" />
+                      {automationRecording.conversation_id === selectedConversationId ? '正在录制' : '正在录制另一会话'} · {automationRecording.steps.length} 步
+                    </span>
+                    <Button type="primary" icon={<StopOutlined />} onClick={() => void onAutomationRecording('stop')}>
+                      停止并编辑
+                    </Button>
+                    <Button icon={<CloseOutlined />} onClick={() => void onAutomationRecording('cancel')}>
+                      取消
+                    </Button>
+                  </>
+                )}
+                {automationExecution?.status === 'running' ? (
+                  <Typography.Text type="secondary">
+          自动播放第 {automationExecution.cycle || 1} 轮 · {automationExecution.step_index}/{automationExecution.step_count}
+                  </Typography.Text>
+                ) : null}
+                {automationExecution?.status === 'failed' || automationExecution?.status === 'cancelled' ? (
+                  <Typography.Text type="danger">
+                    自动播放{automationExecution.status === 'failed' ? '失败' : '已取消'}{automationExecution.reason ? `：${automationExecution.reason}` : ''}
+                  </Typography.Text>
+                ) : null}
+                {automationExecution?.status === 'completed' ? (
+                  <Typography.Text type="secondary">自动播放已完成</Typography.Text>
+                ) : null}
+                {automationRecording.warning ? (
+                  <Typography.Text type="danger">{automationRecording.warning}</Typography.Text>
+                ) : null}
+              </Space>
+            </div>
             <div className="composer-mode-row">
               <Space wrap align="center" size={10}>
                 <Segmented

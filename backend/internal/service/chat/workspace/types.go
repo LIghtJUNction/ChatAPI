@@ -56,6 +56,7 @@ type Command struct {
 	ID                  string `json:"command_id"`
 	Kind                string `json:"kind"`
 	ConversationID      string `json:"conversation_id"`
+	RequestID           string `json:"request_id"`
 	Text                string `json:"text,omitempty"`
 	Mode                string `json:"mode,omitempty"`
 	ToolName            string `json:"tool_name,omitempty"`
@@ -72,6 +73,7 @@ type CommandAck struct {
 	Type           string `json:"type"`
 	CommandID      string `json:"command_id"`
 	ConversationID string `json:"conversation_id"`
+	RequestID      string `json:"request_id"`
 	AutoCompleted  bool   `json:"auto_completed,omitempty"`
 }
 
@@ -79,6 +81,7 @@ type CommandError struct {
 	Type           string `json:"type"`
 	CommandID      string `json:"command_id"`
 	ConversationID string `json:"conversation_id,omitempty"`
+	RequestID      string `json:"request_id,omitempty"`
 	Code           string `json:"code"`
 	Message        string `json:"message"`
 }

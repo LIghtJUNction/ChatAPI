@@ -373,7 +373,6 @@ export function ConversationSidebar({
         onTotpRefresh={onTotpRefresh}
       />
       <AutomationRuleEditorModal
-        conversations={conversations}
         editingAutomationRule={editingAutomationRule}
         open={automationRuleEditorOpen}
         saving={savingAutomationRules}

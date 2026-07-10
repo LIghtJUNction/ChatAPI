@@ -21,6 +21,7 @@ import (
 	platformemail "github.com/zyf2007/ChatAPI/internal/platform/email"
 	auditrepo "github.com/zyf2007/ChatAPI/internal/repository/audit"
 	authrepo "github.com/zyf2007/ChatAPI/internal/repository/auth"
+	automationrepo "github.com/zyf2007/ChatAPI/internal/repository/automation"
 	chatrepo "github.com/zyf2007/ChatAPI/internal/repository/chat"
 	configrepo "github.com/zyf2007/ChatAPI/internal/repository/config"
 	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
@@ -54,6 +55,7 @@ type runtimeStore interface {
 	authrepo.Store
 	chatrepo.Store
 	configrepo.Store
+	automationrepo.Store
 	storagerepo.Store
 	auditrepo.Store
 	platformrepo.MaintenanceStore
@@ -165,6 +167,7 @@ func run() error {
 		ChatRepo:       store,
 		AuthRepo:       store,
 		ConfigRepo:     store,
+		AutomationRepo: store,
 		StorageRepo:    store,
 		AuditRepo:      store,
 		PlatformRepo:   store,

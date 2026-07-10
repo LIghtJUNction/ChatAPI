@@ -39,6 +39,7 @@ func (f *fakeQuery) ListMessagesForOwner(_ context.Context, conversationID strin
 type fakeTurn struct {
 	lastOwnerID        string
 	lastConversationID string
+	lastRequestID      string
 	lastReason         string
 	err                error
 }
@@ -46,6 +47,7 @@ type fakeTurn struct {
 func (f *fakeTurn) Execute(_ context.Context, cmd controlsvc.Command) (controlsvc.Result, error) {
 	f.lastOwnerID = cmd.OwnerID
 	f.lastConversationID = cmd.ConversationID
+	f.lastRequestID = cmd.RequestID
 	f.lastReason = cmd.Action.AbortReason
 	_ = turnsvc.TurnControlAbort
 	if f.err != nil {
@@ -186,19 +188,19 @@ func TestConversationsAbortConversationChecksOwnershipAndForwardsReason(t *testi
 		},
 	})
 
-	if _, err := svc.AbortConversation(context.Background(), "user_a", "missing", "  stop now  "); err != nil {
+	if _, err := svc.AbortConversation(context.Background(), "user_a", "missing", "req_missing", "  stop now  "); err != nil {
 		t.Fatalf("expected missing conversation ownership check to pass for empty message list, got %v", err)
 	}
 
-	result, err := svc.AbortConversation(context.Background(), "user_a", "conv_ok", "  stop now  ")
+	result, err := svc.AbortConversation(context.Background(), "user_a", "conv_ok", "req_ok", "  stop now  ")
 	if err != nil {
 		t.Fatalf("abort conversation: %v", err)
 	}
 	if result["ok"] != true {
 		t.Fatalf("unexpected abort result: %#v", result)
 	}
-	if turn.lastOwnerID != "user_a" || turn.lastConversationID != "conv_ok" || turn.lastReason != "stop now" {
-		t.Fatalf("unexpected turn command forwarding: owner=%q conversation=%q reason=%q", turn.lastOwnerID, turn.lastConversationID, turn.lastReason)
+	if turn.lastOwnerID != "user_a" || turn.lastConversationID != "conv_ok" || turn.lastRequestID != "req_ok" || turn.lastReason != "stop now" {
+		t.Fatalf("unexpected turn command forwarding: owner=%q conversation=%q request=%q reason=%q", turn.lastOwnerID, turn.lastConversationID, turn.lastRequestID, turn.lastReason)
 	}
 }
 
@@ -214,7 +216,7 @@ func TestConversationsAbortConversationRejectsForbidden(t *testing.T) {
 		},
 	})
 
-	if _, err := svc.AbortConversation(context.Background(), "user_a", "conv_x", "stop"); !errors.Is(err, userconv.ErrForbidden) {
+	if _, err := svc.AbortConversation(context.Background(), "user_a", "conv_x", "req_x", "stop"); !errors.Is(err, userconv.ErrForbidden) {
 		t.Fatalf("expected forbidden error, got %v", err)
 	}
 }

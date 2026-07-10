@@ -9,6 +9,8 @@
 
 这份文档不讨论 UI，也不讨论“以后也许可以怎么做”，而是基于当前代码现状给出可执行的模块边界方案。
 
+自动化模块已经按录制式工作流重新落地；本文涉及旧 automation executor 的文件清单和规则形状仅作历史参考，当前边界以 [recorded-automation-design.md](./recorded-automation-design.md) 为准。
+
 ## 1. 系统的相对独立模块
 
 按当前业务和代码分布，这个后端天然可以拆成下面几组模块。

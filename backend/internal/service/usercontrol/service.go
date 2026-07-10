@@ -16,6 +16,7 @@ import (
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
+	automationsvc "github.com/zyf2007/ChatAPI/internal/service/automation"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
@@ -33,6 +34,7 @@ type Service struct {
 	Config        *userconfig.Service
 	Identity      *identity.Service
 	Conversations *conversations.Service
+	Automation    *automationsvc.Service
 }
 
 type Deps struct {
@@ -52,6 +54,7 @@ type Deps struct {
 	Accounts     *account.Service
 	Logger       *zap.Logger
 	Events       chatevents.Publisher
+	Automation   *automationsvc.Service
 }
 
 func New(deps Deps) *Service {
@@ -70,5 +73,6 @@ func New(deps Deps) *Service {
 			},
 			DeleteMany: deps.Chat.DeleteConversations,
 		}),
+		Automation: deps.Automation,
 	}
 }

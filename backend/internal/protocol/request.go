@@ -19,6 +19,7 @@ type TurnRequest struct {
 	DeveloperContent string
 	AssistantContent string
 	UserContent      string
+	LastUserContent  string
 	InputParts       []InputPart
 	ToolSchemas      []ToolSchema
 	BuiltinTools     []BuiltinTool
@@ -106,6 +107,7 @@ func ParseRequest(protocolValue string, body map[string]any) TurnRequest {
 		DeveloperContent: extractRequestRoleContent(proto, body, "developer"),
 		AssistantContent: extractRequestRoleContent(proto, body, "assistant"),
 		UserContent:      joinInputPartText(inputParts),
+		LastUserContent:  extractLastUserContent(proto, body),
 		InputParts:       inputParts,
 		ToolSchemas:      extractToolSchemas(body),
 		BuiltinTools:     extractBuiltinTools(proto, body),

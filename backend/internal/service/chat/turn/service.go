@@ -115,6 +115,7 @@ const (
 type TurnControlCommand struct {
 	ConversationID string
 	ResponseID     string
+	RequestID      string
 	Action         OutputAction
 }
 
@@ -145,6 +146,7 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 	route := eventRouteFromTurn(turn)
 	s.publishConversationUpserted(ctx, route, conversation)
 	s.publishMessageAppended(ctx, route, conversation, message)
+	s.publishTurnWaiting(ctx, turn, input.Request.LastUserContent)
 	logging.BindContext(s.Logger, ctx,
 		zap.String("owner.id", principal.OwnerID),
 		zap.String("conversation.id", turn.ConversationID),
@@ -186,6 +188,7 @@ func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*
 	route := eventRouteFromTurn(turn)
 	s.publishConversationUpserted(ctx, route, conversation)
 	s.publishMessageAppended(ctx, route, conversation, message)
+	s.publishTurnWaiting(ctx, turn, input.Request.LastUserContent)
 	logging.BindContext(s.Logger, ctx,
 		zap.String("owner.id", principal.OwnerID),
 		zap.String("conversation.id", conversation.ID),
@@ -221,6 +224,9 @@ func (s *Service) DisconnectRecoveredPending(ctx context.Context, reason string)
 func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk string, mode string, reasoningStreamMode string) (map[string]any, error) {
 	unlock := s.lockTurnMutation(conversationID)
 	defer unlock()
+	if err := s.ensureExpectedRequest(ctx, conversationID); err != nil {
+		return nil, err
+	}
 	previousState, err := s.Pending.StartDelta(conversationID)
 	if err != nil {
 		return nil, s.resolveMutationError(ctx, conversationID, err)
@@ -299,6 +305,9 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlCommand) (map[string]any, error) {
 	unlock := s.lockTurnMutation(command.ConversationID)
 	defer unlock()
+	if err := s.ensureExpectedRequest(withExpectedRequest(ctx, command.RequestID), command.ConversationID); err != nil {
+		return nil, err
+	}
 	action := command.Action.Normalized()
 	turn, ok := s.Pending.GetByConversationID(command.ConversationID)
 	if !ok || turn == nil {
@@ -408,6 +417,9 @@ func draftChunkForMode(chunk string, mode string) string {
 func (s *Service) CompleteConversation(ctx context.Context, input common.CompletePendingInput) (map[string]any, error) {
 	unlock := s.lockTurnMutation(input.ConversationID)
 	defer unlock()
+	if err := s.ensureExpectedRequest(ctx, input.ConversationID); err != nil {
+		return nil, err
+	}
 	guard := s.outputGuard(input.ConversationID)
 	var conversation common.Conversation
 	var message common.Message
@@ -495,6 +507,9 @@ func (s *Service) finishCompletedTurn(
 func (s *Service) AbortConversation(ctx context.Context, conversationID string, reason string) error {
 	unlock := s.lockTurnMutation(conversationID)
 	defer unlock()
+	if err := s.ensureExpectedRequest(ctx, conversationID); err != nil {
+		return err
+	}
 	previousState, err := s.Pending.StartAbort(conversationID)
 	if err != nil {
 		logging.BindContext(s.Logger, ctx,
@@ -574,6 +589,7 @@ func (s *Service) ExecuteTurnControl(ctx context.Context, command TurnControlCom
 		).Warn("turn control validation failed", zap.Error(err))
 		return nil, err
 	}
+	ctx = withExpectedRequest(ctx, command.RequestID)
 	action := command.Action.Normalized()
 	logging.BindContext(s.Logger, ctx,
 		zap.String("conversation.id", command.ConversationID),
@@ -613,7 +629,19 @@ func (s *Service) ExecuteTurnControlByRequestID(ctx context.Context, requestID s
 		return nil, err
 	}
 	command.ConversationID = request.ConversationID
+	command.RequestID = request.RequestID
 	return s.ExecuteTurnControl(ctx, command)
+}
+
+func (s *Service) ActiveRequestID(conversationID string) (string, bool) {
+	if s == nil || s.Pending == nil {
+		return "", false
+	}
+	turn, ok := s.Pending.GetByConversationID(strings.TrimSpace(conversationID))
+	if !ok || turn == nil || strings.TrimSpace(turn.RequestID) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(turn.RequestID), true
 }
 
 func (s *Service) ensureAdmissions(ctx context.Context, ownerID string) error {
@@ -712,6 +740,39 @@ func (s *Service) lockTurnMutation(conversationID string) func() {
 	}
 	turn.MutationMu.Lock()
 	return turn.MutationMu.Unlock
+}
+
+type expectedRequestContextKey struct{}
+
+func withExpectedRequest(ctx context.Context, requestID string) context.Context {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, expectedRequestContextKey{}, requestID)
+}
+
+func expectedRequestID(ctx context.Context) string {
+	value, _ := ctx.Value(expectedRequestContextKey{}).(string)
+	return strings.TrimSpace(value)
+}
+
+func (s *Service) ensureExpectedRequest(ctx context.Context, conversationID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	expected := expectedRequestID(ctx)
+	if expected == "" {
+		return nil
+	}
+	actual, ok := s.ActiveRequestID(conversationID)
+	if !ok {
+		return ErrPendingNotFound
+	}
+	if actual != expected {
+		return ErrPendingConflict
+	}
+	return nil
 }
 
 func responseIDForConversation(pending pendingRegistryLike, conversationID string) string {
@@ -862,7 +923,25 @@ func (s *Service) publishConversationUpserted(ctx context.Context, route eventRo
 		Type:           chatevents.TypeConversationUpserted,
 		OwnerID:        route.OwnerID,
 		ConversationID: route.ConversationID,
+		RequestID:      route.RequestID,
+		ControlManaged: expectedRequestID(ctx) != "",
 		Conversation:   conversation,
+	})
+}
+
+func (s *Service) publishTurnWaiting(ctx context.Context, turn *PendingTurn, lastUserText string) {
+	if s == nil || s.Events == nil || turn == nil || strings.TrimSpace(turn.OwnerID) == "" {
+		return
+	}
+	waiting := chatevents.WaitingTurn{
+		OwnerID: strings.TrimSpace(turn.OwnerID), RequestID: strings.TrimSpace(turn.RequestID),
+		ResponseID: strings.TrimSpace(turn.ResponseID), ConversationID: strings.TrimSpace(turn.ConversationID),
+		Protocol: strings.TrimSpace(turn.RequestFormat), Model: strings.TrimSpace(turn.Model),
+		LastUserText: lastUserText,
+	}
+	s.Events.Publish(ctx, chatevents.Event{
+		Type: chatevents.TypeTurnWaiting, OwnerID: waiting.OwnerID,
+		ConversationID: waiting.ConversationID, WaitingTurn: &waiting,
 	})
 }
 
@@ -879,6 +958,7 @@ func (s *Service) publishMessageAppended(ctx context.Context, route eventRoute, 
 		Type:           chatevents.TypeMessageAppended,
 		OwnerID:        route.OwnerID,
 		ConversationID: route.ConversationID,
+		RequestID:      route.RequestID,
 		Conversation:   conversation,
 		Message:        &msg,
 	})
@@ -897,6 +977,7 @@ func (s *Service) publishConversationEventAppended(ctx context.Context, route ev
 		Type:              chatevents.TypeConversationEventAppended,
 		OwnerID:           route.OwnerID,
 		ConversationID:    route.ConversationID,
+		RequestID:         route.RequestID,
 		Conversation:      conversation,
 		ConversationEvent: &evt,
 	})

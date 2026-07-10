@@ -146,6 +146,60 @@ func joinInputPartText(parts []InputPart) string {
 	return strings.Join(texts, "\n")
 }
 
+func joinHumanText(parts []InputPart) string {
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Type == "text" && strings.TrimSpace(part.Text) != "" {
+			texts = append(texts, strings.TrimSpace(part.Text))
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
+func extractLastUserContent(proto Protocol, body map[string]any) string {
+	if proto == ProtocolChatCompletions || proto == ProtocolAnthropicMessages {
+		messages, _ := body["messages"].([]any)
+		for index := len(messages) - 1; index >= 0; index-- {
+			record, ok := messages[index].(map[string]any)
+			if ok && stringValue(record["role"], "") == "user" {
+				text := joinHumanText(extractPartsFromMessageContent(record["content"]))
+				if text != "" {
+					return text
+				}
+			}
+		}
+		return ""
+	}
+	if inputText, ok := body["input"].(string); ok {
+		return strings.TrimSpace(inputText)
+	}
+	input, _ := body["input"].([]any)
+	for index := len(input) - 1; index >= 0; index-- {
+		record, ok := input[index].(map[string]any)
+		if !ok {
+			continue
+		}
+		role := stringValue(record["role"], "")
+		if role == "user" {
+			text := joinHumanText(extractPartsFromMessageContent(record["content"]))
+			if text != "" {
+				return text
+			}
+		}
+		if role == "" {
+			if part := extractInputPart(record); part.Type == "text" {
+				return strings.TrimSpace(part.Text)
+			}
+			if _, hasContent := record["content"]; hasContent {
+				if text := joinHumanText(extractPartsFromMessageContent(record["content"])); text != "" {
+					return text
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func extractToolResultParts(content any) []InputPart {
 	text := flattenToolResultContent(content)
 	if text == "" {

@@ -171,12 +171,14 @@ export function WorkspaceRoute() {
         </Header>
         <Content className="content-shell">
           <ChatPane
+            automationExecution={workspace.automationExecution}
+            automationRecording={workspace.automationRecording}
             availableBuiltinTools={workspace.availableBuiltinTools}
             availableToolSchemas={workspace.availableToolSchemas}
             builtinToolKind={workspace.builtinToolKind}
             builtinToolQuery={workspace.builtinToolQuery}
             builtinToolAsset={workspace.builtinToolAsset}
-			uploadingOutputImage={workspace.uploadingOutputImage}
+            uploadingOutputImage={workspace.uploadingOutputImage}
             chatScrollRef={workspace.chatScrollRef}
             composer={workspace.composer}
             composerMode={workspace.composerMode}
@@ -187,11 +189,13 @@ export function WorkspaceRoute() {
             keyboardOffset={workspace.keyboardOffset}
             messagesLoading={workspace.messagesLoading}
             onDraft={workspace.handleDraft}
-			onOutputImageUpload={workspace.handleOutputImageUpload}
+            onAutomationRecording={workspace.handleAutomationRecording}
+            onOutputImageUpload={workspace.handleOutputImageUpload}
             onLogout={workspace.handleLogout}
             onOpenDrawer={() => workspace.setDrawerOpen(true)}
             onSend={workspace.handleSend}
             selectedConversationTitle={workspace.selectedConversation?.title || ''}
+            selectedConversationId={workspace.selectedConversationId}
             selectedRequestFormat={workspace.selectedRequestFormat}
             selectedToolSchema={workspace.selectedToolSchema}
             sending={workspace.sending}

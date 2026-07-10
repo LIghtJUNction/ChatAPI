@@ -2,6 +2,10 @@
 
 本文档用于规划 `refactor/migrate-to-go` 分支的后端迁移。目标不是简单把 Flask 代码翻译成 Go，而是把后端重构成可工程化协作、可运营部署、可开源发布、可长期维护的 Go 服务，同时保持现有前端和 OpenAI/Anthropic 兼容接口尽量无感迁移。
 
+> 自动化说明：本文中描述的旧单动作规则、`conditions.contains/excludes`、整组替换接口和
+> `/api/config/automation-rules` 已被破坏性升级移除。当前权威设计与契约见
+> [recorded-automation-design.md](./recorded-automation-design.md)。旧段落只保留迁移历史，不代表当前实现。
+
 ## 1. 迁移目标
 
 ### 1.0 当前落地状态

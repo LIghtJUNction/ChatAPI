@@ -168,6 +168,7 @@ func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 
 	completeResp := postJSONWithHeaders(t, server.URL+"/api/chat/output/complete", map[string]any{
 		"conversation_id": request.ConversationID,
+		"request_id":      request.RequestID,
 		"text":            "done",
 		"mode":            "assistant_message",
 	}, map[string]string{
@@ -199,6 +200,7 @@ func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 
 	status, body = postTextWithHeaders(t, server.URL+"/api/chat/output/complete", map[string]any{
 		"conversation_id": request.ConversationID,
+		"request_id":      request.RequestID,
 		"text":            "intrude",
 		"mode":            "assistant_message",
 	}, map[string]string{

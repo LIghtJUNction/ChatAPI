@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
 import { resolveWebSocketUrl } from '../lib/api'
 import type {
+  AutomationExecutionState,
+  AutomationExecutionStateEvent,
+  AutomationRecordAckEvent,
+  AutomationRecordErrorEvent,
+  AutomationRecordingState,
+  AutomationRecordStateEvent,
   Conversation,
   TimelineItem,
   WorkspaceCommand,
@@ -47,10 +53,16 @@ export function useWorkspaceRealtime({
   const socketRef = useRef<WebSocket | null>(null)
   const subscribedConversationIdRef = useRef('')
   const commandSeqRef = useRef(0)
+  const automationSnapshotRevisionRef = useRef(0)
+  const automationRecordingRevisionRef = useRef(0)
+  const automationExecutionRevisionsRef = useRef<Record<string, number>>({})
+  const [automationRecording, setAutomationRecording] = useState<AutomationRecordingState>({ revision: 0, active: false, steps: [] })
+  const [automationExecutions, setAutomationExecutions] = useState<Record<string, AutomationExecutionState>>({})
   const pendingCommandsRef = useRef(new Map<string, {
     reject: (error: Error) => void
-    resolve: (ack: WorkspaceCommandAckEvent) => void
+    resolve: (ack: unknown) => void
     timeout: number
+  expectedRequestId?: string
   }>())
 
   const resolvePreferredConversationId = useCallback((items: Conversation[]) => {
@@ -85,7 +97,12 @@ export function useWorkspaceRealtime({
         pendingCommandsRef.current.delete(commandId)
         reject(new Error('等待服务端确认超时'))
       }, 15_000)
-      pendingCommandsRef.current.set(commandId, { reject, resolve, timeout })
+    pendingCommandsRef.current.set(commandId, {
+      reject,
+      resolve: (ack) => resolve(ack as WorkspaceCommandAckEvent),
+      timeout,
+      expectedRequestId: command.request_id,
+    })
       try {
         socket.send(JSON.stringify({
           type: 'workspace.command',
@@ -98,6 +115,39 @@ export function useWorkspaceRealtime({
         window.clearTimeout(timeout)
         pendingCommandsRef.current.delete(commandId)
         reject(error instanceof Error ? error : new Error('发送实时命令失败'))
+      }
+    })
+  }, [])
+
+  const sendAutomationRecordCommand = useCallback((
+    action: 'start' | 'stop' | 'cancel' | 'get',
+    conversationId: string,
+  ) => {
+    const commandId = `automation_${Date.now()}_${(commandSeqRef.current += 1)}`
+    const socket = socketRef.current
+    if (socket?.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('实时连接尚未就绪'))
+    }
+    return new Promise<AutomationRecordAckEvent>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        pendingCommandsRef.current.delete(commandId)
+        reject(new Error('等待服务端确认超时'))
+      }, 15_000)
+      pendingCommandsRef.current.set(commandId, {
+        reject,
+        resolve: (ack) => resolve(ack as AutomationRecordAckEvent),
+        timeout,
+      })
+      try {
+        socket.send(JSON.stringify({
+          type: `automation.record.${action}`,
+          command_id: commandId,
+          conversation_id: conversationId,
+        }))
+      } catch (error) {
+        window.clearTimeout(timeout)
+        pendingCommandsRef.current.delete(commandId)
+        reject(error instanceof Error ? error : new Error('发送录制命令失败'))
       }
     })
   }, [])
@@ -149,6 +199,7 @@ export function useWorkspaceRealtime({
 
       socket.addEventListener('open', () => {
         sendJSON({ type: 'workspace.ping' })
+        void sendAutomationRecordCommand('get', selectedConversationIdRef.current).catch(() => undefined)
       })
 
       socket.addEventListener('message', (event) => {
@@ -162,6 +213,10 @@ export function useWorkspaceRealtime({
           | WorkspaceTimelineItemAppendEvent
           | WorkspaceCommandAckEvent
           | WorkspaceCommandErrorEvent
+          | AutomationRecordAckEvent
+          | AutomationRecordErrorEvent
+          | AutomationRecordStateEvent
+          | AutomationExecutionStateEvent
           | { type: 'disconnect'; reason?: string }
           | { type: 'workspace.ping' }
         try {
@@ -174,6 +229,10 @@ export function useWorkspaceRealtime({
             | WorkspaceTimelineItemAppendEvent
             | WorkspaceCommandAckEvent
             | WorkspaceCommandErrorEvent
+            | AutomationRecordAckEvent
+            | AutomationRecordErrorEvent
+            | AutomationRecordStateEvent
+            | AutomationExecutionStateEvent
             | { type: 'disconnect'; reason?: string }
             | { type: 'workspace.ping' }
         } catch {
@@ -204,6 +263,10 @@ export function useWorkspaceRealtime({
           if (pending) {
             window.clearTimeout(pending.timeout)
             pendingCommandsRef.current.delete(payload.command_id)
+      if (pending.expectedRequestId && pending.expectedRequestId !== payload.request_id) {
+        pending.reject(new Error('服务端确认的请求已发生变化'))
+        return
+      }
             pending.resolve(payload)
           }
           return
@@ -216,6 +279,81 @@ export function useWorkspaceRealtime({
             pendingCommandsRef.current.delete(payload.command_id)
             pending.reject(new Error(payload.message || payload.code))
           }
+          return
+        }
+
+        if (payload.type === 'automation.record.ack') {
+          if (payload.revision >= automationSnapshotRevisionRef.current) {
+            automationSnapshotRevisionRef.current = payload.revision
+            if (payload.state.revision >= automationRecordingRevisionRef.current) {
+              automationRecordingRevisionRef.current = payload.state.revision
+              setAutomationRecording(payload.state)
+            }
+            if (payload.executions) {
+              setAutomationExecutions((current) => {
+        const next = Object.fromEntries(
+          payload.executions!
+            .filter((item) => item.revision >= (automationExecutionRevisionsRef.current[item.conversation_id] ?? 0))
+            .map((item) => [item.conversation_id, item]),
+        )
+                for (const [conversationId, item] of Object.entries(current)) {
+                  const snapshotItem = next[conversationId]
+                  if (item.revision > payload.revision || (snapshotItem && item.revision > snapshotItem.revision)) {
+                    next[conversationId] = item
+                  }
+                }
+        for (const [conversationId, item] of Object.entries(next)) {
+          automationExecutionRevisionsRef.current[conversationId] = Math.max(
+            automationExecutionRevisionsRef.current[conversationId] ?? 0,
+            item.revision,
+          )
+        }
+                return next
+              })
+            }
+          }
+          const pending = pendingCommandsRef.current.get(payload.command_id)
+          if (pending) {
+            window.clearTimeout(pending.timeout)
+            pendingCommandsRef.current.delete(payload.command_id)
+            pending.resolve(payload)
+          }
+          return
+        }
+
+        if (payload.type === 'automation.record.error') {
+          const pending = pendingCommandsRef.current.get(payload.command_id)
+          if (pending) {
+            window.clearTimeout(pending.timeout)
+            pendingCommandsRef.current.delete(payload.command_id)
+            pending.reject(new Error(payload.message || payload.code))
+          }
+          return
+        }
+
+        if (payload.type === 'automation.record.state') {
+      if (payload.state.revision < automationRecordingRevisionRef.current) return
+      automationRecordingRevisionRef.current = payload.state.revision
+          setAutomationRecording(payload.state)
+          return
+        }
+
+        if (payload.type === 'automation.execution.state') {
+          const conversationId = payload.execution.conversation_id
+          if (payload.execution.revision < (automationExecutionRevisionsRef.current[conversationId] ?? 0)) return
+          automationExecutionRevisionsRef.current[conversationId] = payload.execution.revision
+      if (payload.execution.status === 'removed') {
+        setAutomationExecutions((current) => {
+          const next = { ...current }
+          delete next[conversationId]
+          return next
+        })
+        return
+      }
+          setAutomationExecutions((current) => ({
+            ...current,
+        [conversationId]: payload.execution,
+          }))
           return
         }
 
@@ -272,6 +410,11 @@ export function useWorkspaceRealtime({
       socket.addEventListener('close', () => {
         if (!active) return
         rejectPendingCommands('实时连接已断开')
+    automationSnapshotRevisionRef.current = 0
+    automationRecordingRevisionRef.current = 0
+    automationExecutionRevisionsRef.current = {}
+    setAutomationRecording({ revision: 0, active: false, steps: [] })
+        setAutomationExecutions({})
         if (socketRef.current === socket) {
           socketRef.current = null
         }
@@ -304,6 +447,7 @@ export function useWorkspaceRealtime({
     rejectPendingCommands,
     resolvePreferredConversationId,
     sendJSON,
+    sendAutomationRecordCommand,
     setConversations,
     setMessagesLoading,
     setSelectedConversationId,
@@ -312,6 +456,9 @@ export function useWorkspaceRealtime({
 
   return {
     applySelectedConversation,
+    automationExecutions,
+    automationRecording,
+    sendAutomationRecordCommand,
     sendWorkspaceCommand,
   }
 }

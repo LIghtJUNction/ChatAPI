@@ -123,7 +123,9 @@ func (h LabHandler) executeRequestTurnControl(w http.ResponseWriter, r *http.Req
 	result, err := h.control().Execute(r.Context(), controlsvc.Command{
 		OwnerID:        actor.OwnerIDFromContext(r.Context()),
 		ConversationID: strings.TrimSpace(item.ConversationID),
+		RequestID:      strings.TrimSpace(item.RequestID),
 		ResponseID:     stringValue(body["response_id"], ""),
+		Source:         controlsvc.SourceLab,
 		Action: turnsvc.OutputAction{
 			Kind:                kind,
 			OutputText:          stringValue(body["text"], ""),

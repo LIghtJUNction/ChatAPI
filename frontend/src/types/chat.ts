@@ -279,31 +279,69 @@ export type LoginFormValues = {
   geetest_params?: GeetestValidationResult
 }
 
-export type AutomationRuleCondition = {
-  match_type: 'substring' | 'regex'
-  pattern: string
+export type AutomationAction = {
+  kind: 'stream_delta' | 'stream_complete' | 'respond' | 'abort' | 'builtin_tool' | string
+  text?: string
+  mode?: string
+  tool_name?: string
+  tool_call_id?: string
+  output?: string
+  builtin_tool_kind?: string
+  builtin_tool_query?: string
+  builtin_tool_asset_id?: string
+  reasoning_stream_mode?: string
+  error?: string
+}
+
+export type AutomationStep = {
+  id: string
+  delay_before_ms: number
+  action: AutomationAction
 }
 
 export type AutomationRule = {
+  schema_version: number
   id: string
+  name: string
   enabled: boolean
-  conditions: {
-    contains: AutomationRuleCondition[]
-    excludes: AutomationRuleCondition[]
+  priority: number
+  match: {
+    target: 'last_user_text'
+    pattern: string
   }
-  timing: {
-    delay_seconds: number
-    repeat_interval_seconds: number
-    max_output_count: number
+  playback: {
+    mode: 'recorded' | 'fixed'
+    initial_delay_ms: number
+    fixed_interval_ms: number
+    loop: boolean
+    loop_interval_ms: number
   }
-  action: {
-    type: 'output_text' | 'complete' | 'error' | 'tool_call'
-    text: string
-    error_message: string
-    tool_name?: string
-    tool_arguments?: string
-    tool_call_id?: string
-  }
+  steps: AutomationStep[]
+  created_at?: string
+  updated_at?: string
+}
+
+export type AutomationRecordingState = {
+  revision: number
+  active: boolean
+  conversation_id?: string
+  request_id?: string
+  started_at?: string
+  steps: AutomationStep[]
+  draft_rule?: AutomationRule
+  warning?: string
+}
+
+export type AutomationExecutionState = {
+  revision: number
+  rule_id: string
+  conversation_id: string
+  request_id: string
+  status: 'running' | 'completed' | 'cancelled' | 'failed' | 'removed'
+  step_index: number
+  step_count: number
+  cycle: number
+  reason?: string
 }
 
 export type StatisticsSummary = {
@@ -400,7 +438,8 @@ export type WorkspaceConnectionCountEvent = {
 export type WorkspaceCommand = {
   command_id: string
   kind: 'stream_delta' | 'stream_complete' | 'abort' | 'builtin_tool' | string
-  conversation_id: string
+    conversation_id: string
+    request_id: string
   text?: string
   mode?: string
   tool_name?: string
@@ -416,14 +455,41 @@ export type WorkspaceCommand = {
 export type WorkspaceCommandAckEvent = {
   type: 'workspace.command_ack'
   command_id: string
-  conversation_id: string
+    conversation_id: string
+    request_id: string
   auto_completed?: boolean
 }
 
 export type WorkspaceCommandErrorEvent = {
   type: 'workspace.command_error'
   command_id: string
-  conversation_id?: string
+    conversation_id?: string
+    request_id?: string
   code: string
   message: string
+}
+
+export type AutomationRecordAckEvent = {
+  type: 'automation.record.ack'
+  command_id: string
+  revision: number
+  state: AutomationRecordingState
+  executions?: AutomationExecutionState[]
+}
+
+export type AutomationRecordErrorEvent = {
+  type: 'automation.record.error'
+  command_id: string
+  code: string
+  message: string
+}
+
+export type AutomationRecordStateEvent = {
+  type: 'automation.record.state'
+  state: AutomationRecordingState
+}
+
+export type AutomationExecutionStateEvent = {
+  type: 'automation.execution.state'
+  execution: AutomationExecutionState
 }

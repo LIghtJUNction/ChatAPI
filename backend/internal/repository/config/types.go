@@ -28,15 +28,6 @@ type AuthVerificationCode struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-type AutomationRule struct {
-	ID        string         `json:"id"`
-	UserID    string         `json:"user_id"`
-	Enabled   bool           `json:"enabled"`
-	Payload   map[string]any `json:"payload"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-}
-
 type SetSystemConfigInput struct {
 	Key   string
 	Value map[string]any
@@ -55,11 +46,4 @@ type UpsertAuthVerificationCodeInput struct {
 	FailedAttempts int
 	ExpiresAt      time.Time
 	LastSentAt     time.Time
-}
-
-type UpsertAutomationRuleInput struct {
-	ID      string
-	UserID  string
-	Enabled bool
-	Payload map[string]any
 }

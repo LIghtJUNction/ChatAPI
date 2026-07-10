@@ -2,8 +2,6 @@ package config_test
 
 import (
 	"context"
-	"fmt"
-	"math/rand"
 	"path/filepath"
 	"testing"
 
@@ -13,7 +11,7 @@ import (
 	userconfig "github.com/zyf2007/ChatAPI/internal/service/usercontrol/config"
 )
 
-func TestConfigServiceGetUpdateAndReplaceRules(t *testing.T) {
+func TestConfigServiceGetAndUpdate(t *testing.T) {
 	st := openConfigStore(t)
 	ctx := context.Background()
 	svc := userconfig.New(userconfig.Deps{Configs: st, Chat: st})
@@ -39,66 +37,6 @@ func TestConfigServiceGetUpdateAndReplaceRules(t *testing.T) {
 		t.Fatalf("unexpected config value: %#v", got.Value)
 	}
 
-	input := []map[string]any{
-		{"name": "rule-a", "enabled": true},
-		{"id": "rule_fixed", "name": "rule-b", "enabled": false, "kind": "http"},
-	}
-	rules, err := svc.ReplaceAutomationRules(ctx, "user_a", input)
-	if err != nil {
-		t.Fatalf("replace rules: %v", err)
-	}
-	if len(rules) != 2 {
-		t.Fatalf("unexpected rules len: %d", len(rules))
-	}
-	for _, rule := range rules {
-		if rule.ID == "" {
-			t.Fatalf("rule id should not be empty: %#v", rule)
-		}
-		if _, ok := rule.Payload["id"]; ok {
-			t.Fatalf("payload should not contain id: %#v", rule.Payload)
-		}
-		if _, ok := rule.Payload["enabled"]; ok {
-			t.Fatalf("payload should not contain enabled: %#v", rule.Payload)
-		}
-	}
-	if _, ok := input[1]["enabled"]; !ok {
-		t.Fatalf("input rules should not be mutated: %#v", input[1])
-	}
-}
-
-func TestConfigServiceReplaceAutomationRulesRandomized(t *testing.T) {
-	st := openConfigStore(t)
-	ctx := context.Background()
-	svc := userconfig.New(userconfig.Deps{Configs: st, Chat: st})
-
-	rng := rand.New(rand.NewSource(42))
-	inputs := make([]map[string]any, 0, 20)
-	for i := 0; i < 20; i++ {
-		item := map[string]any{
-			"name":    fmt.Sprintf("rule-%02d", i),
-			"enabled": rng.Intn(2) == 0,
-			"weight":  rng.Intn(1000),
-		}
-		if i%3 == 0 {
-			item["id"] = fmt.Sprintf("rule_fixed_%02d", i)
-		}
-		inputs = append(inputs, item)
-	}
-
-	rules, err := svc.ReplaceAutomationRules(ctx, "user_random", inputs)
-	if err != nil {
-		t.Fatalf("replace randomized rules: %v", err)
-	}
-	if len(rules) != len(inputs) {
-		t.Fatalf("unexpected rules len: got=%d want=%d", len(rules), len(inputs))
-	}
-	seen := map[string]struct{}{}
-	for _, rule := range rules {
-		if _, ok := seen[rule.ID]; ok {
-			t.Fatalf("duplicate rule id: %s", rule.ID)
-		}
-		seen[rule.ID] = struct{}{}
-	}
 }
 
 func openConfigStore(t *testing.T) repositorycontract.Store {

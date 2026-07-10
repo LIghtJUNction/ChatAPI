@@ -299,7 +299,8 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 		}
 	}
 	postJSONWithCookie(t, server.URL+"/api/conversations/"+request.ConversationID+"/abort", map[string]any{
-		"error": "manual stop",
+		"request_id": request.RequestID,
+		"error":      "manual stop",
 	}, cookie, http.StatusOK)
 	<-resultCh
 
@@ -448,7 +449,8 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 
 	request := waitForRequestForOwner(t, queryService, "user_a")
 	postJSONWithCookie(t, server.URL+"/api/conversations/"+request.ConversationID+"/abort", map[string]any{
-		"error": "manual stop",
+		"request_id": request.RequestID,
+		"error":      "manual stop",
 	}, cookie, http.StatusOK)
 	<-resultCh
 
@@ -592,6 +594,7 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 	firstRequest := waitForRequestForOwner(t, queryService, "user_a")
 	postJSONWithCookie(t, server.URL+"/api/chat/output/complete", map[string]any{
 		"conversation_id": firstRequest.ConversationID,
+		"request_id":      firstRequest.RequestID,
 		"text":            "done first",
 		"mode":            "assistant_message",
 	}, cookie, http.StatusOK)
@@ -618,7 +621,8 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 		t.Fatalf("failed to resolve second request id from %#v", requests)
 	}
 	postJSONWithCookie(t, server.URL+"/api/conversations/"+firstRequest.ConversationID+"/abort", map[string]any{
-		"error": "manual stop second",
+		"request_id": secondRequestID,
+		"error":      "manual stop second",
 	}, cookie, http.StatusOK)
 	<-secondResultCh
 

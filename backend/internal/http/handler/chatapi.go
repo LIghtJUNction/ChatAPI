@@ -255,9 +255,15 @@ func buildTurnControlCommand(kind turnsvc.TurnControlKind, body map[string]any) 
 	if err != nil {
 		return controlsvc.Command{}, err
 	}
+	requestID := strings.TrimSpace(stringValue(body["request_id"], ""))
+	if requestID == "" {
+		return controlsvc.Command{}, errors.New("request_id is required")
+	}
 	return controlsvc.Command{
+		Source:         controlsvc.SourceAPI,
 		ConversationID: conversationID,
 		ResponseID:     stringValue(body["response_id"], ""),
+		RequestID:      requestID,
 		Action: turnsvc.OutputAction{
 			Kind:                kind,
 			OutputText:          stringValue(body["text"], ""),

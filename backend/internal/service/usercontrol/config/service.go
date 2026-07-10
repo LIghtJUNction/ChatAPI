@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
@@ -51,52 +50,6 @@ func (s *Service) UpdateUserConfig(ctx context.Context, userID string, value map
 	return item, err
 }
 
-func (s *Service) ListAutomationRules(ctx context.Context, userID string) ([]common.AutomationRule, error) {
-	items, err := s.configs.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
-	if err == nil {
-		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.Int("rules.count", len(items))).Debug("usercontrol config listed automation rules")
-	}
-	return items, err
-}
-
-func (s *Service) ReplaceAutomationRules(ctx context.Context, userID string, rules []map[string]any) ([]common.AutomationRule, error) {
-	inputs := make([]common.UpsertAutomationRuleInput, 0, len(rules))
-	for _, item := range rules {
-		payload := cloneMap(item)
-		id := stringValue(payload["id"], "")
-		enabled, _ := payload["enabled"].(bool)
-		delete(payload, "id")
-		delete(payload, "enabled")
-		if strings.TrimSpace(id) == "" {
-			id = "rule_" + uuid.NewString()
-		}
-		inputs = append(inputs, common.UpsertAutomationRuleInput{
-			ID:      id,
-			UserID:  userID,
-			Enabled: enabled,
-			Payload: payload,
-		})
-	}
-	existing, err := s.configs.ListAutomationRulesByUser(ctx, strings.TrimSpace(userID))
-	if err != nil {
-		return nil, err
-	}
-	replaceIDs := make(map[string]struct{}, len(existing))
-	for _, item := range existing {
-		replaceIDs[strings.TrimSpace(item.ID)] = struct{}{}
-	}
-	items, err := s.configs.ReplaceAutomationRulesForUser(ctx, strings.TrimSpace(userID), replaceIDs, inputs)
-	if err == nil {
-		logging.BindContext(s.logger, ctx,
-			zap.String("owner.id", strings.TrimSpace(userID)),
-			zap.Int("rules.input_count", len(rules)),
-			zap.Int("rules.existing_count", len(existing)),
-			zap.Int("rules.output_count", len(items)),
-		).Info("usercontrol config replaced automation rules")
-	}
-	return items, err
-}
-
 func (s *Service) DeleteConversation(ctx context.Context, conversationID string) (common.DeleteConversationsResult, error) {
 	result, err := s.chat.DeleteConversations(ctx, []string{strings.TrimSpace(conversationID)})
 	if err == nil {
@@ -122,11 +75,4 @@ func cloneMap(input map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
-}
-
-func stringValue(value any, fallback string) string {
-	if raw, ok := value.(string); ok && strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw)
-	}
-	return fallback
 }

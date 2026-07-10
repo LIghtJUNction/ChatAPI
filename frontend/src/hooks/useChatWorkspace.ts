@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
-import { requestJson } from '../lib/api'
+import { requestFormJson, requestJson } from '../lib/api'
 import { appMessage } from '../lib/antdMessage'
 import {
   buildInitialToolFormValues,
@@ -22,6 +22,7 @@ import type {
   ReasoningStreamMode,
   ToolFieldValue,
   MessageItem,
+  OutputImageAsset,
 } from '../types/chat'
 
 function isResponseOpenStatus(status: string | undefined) {
@@ -46,7 +47,8 @@ export function useChatWorkspace(isMobile: boolean) {
   const [toolFormValues, setToolFormValues] = useState<Record<string, ToolFieldValue>>({})
   const [builtinToolKind, setBuiltinToolKind] = useState('')
   const [builtinToolQuery, setBuiltinToolQuery] = useState('')
-  const [builtinToolResult, setBuiltinToolResult] = useState('')
+  const [builtinToolAsset, setBuiltinToolAsset] = useState<OutputImageAsset | null>(null)
+  const [uploadingOutputImage, setUploadingOutputImage] = useState(false)
   const [sending, setSending] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [deletingConversationId, setDeletingConversationId] = useState('')
@@ -58,8 +60,11 @@ export function useChatWorkspace(isMobile: boolean) {
   const [abortReason, setAbortReason] = useState('')
   const [totpEnabled, setTotpEnabled] = useState(false)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
-  const selectedRealtimeStatusRef = useRef<{ conversationId: string; status: string }>({
+  const selectedConversationIdRef = useRef('')
+  selectedConversationIdRef.current = selectedConversationId
+  const selectedRealtimeStatusRef = useRef<{ conversationId: string; requestId: string; status: string }>({
     conversationId: '',
+    requestId: '',
     status: '',
   })
   const keyboardOffset = useKeyboardOffset()
@@ -97,6 +102,10 @@ export function useChatWorkspace(isMobile: boolean) {
     .map((item) => item.message)
   const draftBuffer = selectedConversation?.draft_text ?? ''
   const isWaitingForUser = isResponseOpenStatus(selectedConversation?.status)
+  const selectedConversationOpenRef = useRef(false)
+  selectedConversationOpenRef.current = isWaitingForUser
+  const selectedRequestIdRef = useRef('')
+  selectedRequestIdRef.current = selectedConversation?.request_id ?? ''
   const selectedRequestFormat = selectedConversation?.request_format || ''
   const isResponsesConversation = selectedRequestFormat === 'responses'
   const availableToolSchemas = getLastToolSchemas(messages)
@@ -107,12 +116,15 @@ export function useChatWorkspace(isMobile: boolean) {
 
   useEffect(() => {
     const currentStatus = String(selectedConversation?.status || '')
+    const currentRequestId = String(selectedConversation?.request_id || '')
     const previous = selectedRealtimeStatusRef.current
     if (
       selectedConversationId
       && previous.conversationId === selectedConversationId
-      && isResponseOpenStatus(previous.status)
-      && currentStatus === 'aborted'
+      && (
+        (previous.requestId && currentRequestId && previous.requestId !== currentRequestId) ||
+        (isResponseOpenStatus(previous.status) && (currentStatus === 'aborted' || currentStatus === 'closed'))
+      )
     ) {
       setComposer('')
       clearThinkingInput()
@@ -121,14 +133,15 @@ export function useChatWorkspace(isMobile: boolean) {
       setToolFormValues({})
       setBuiltinToolKind('')
       setBuiltinToolQuery('')
-      setBuiltinToolResult('')
+      setBuiltinToolAsset(null)
       setComposerMode('assistant_message')
     }
     selectedRealtimeStatusRef.current = {
       conversationId: selectedConversationId,
+      requestId: currentRequestId,
       status: currentStatus,
     }
-  }, [selectedConversationId, selectedConversation?.status])
+  }, [selectedConversationId, selectedConversation?.request_id, selectedConversation?.status])
 
   function clearThinkingInput() {
     setThinkingText('')
@@ -228,7 +241,7 @@ export function useChatWorkspace(isMobile: boolean) {
       setToolFormValues({})
       setBuiltinToolKind('')
       setBuiltinToolQuery('')
-      setBuiltinToolResult('')
+      setBuiltinToolAsset(null)
       automation.resetAutomationRuleUi()
       automation.setAutomationRules([])
       localStorage.removeItem('chatapi.conversationId')
@@ -257,6 +270,9 @@ export function useChatWorkspace(isMobile: boolean) {
     setToolName('')
     setToolCallId('')
     setToolFormValues({})
+    setBuiltinToolKind('')
+    setBuiltinToolQuery('')
+    setBuiltinToolAsset(null)
   }
 
   async function handleDeleteConversation(conversationId: string) {
@@ -347,12 +363,11 @@ export function useChatWorkspace(isMobile: boolean) {
     if (composerMode === 'builtin_tool') {
       const kind = builtinToolKind.trim()
       if (!kind) return
-      const result = builtinToolResult.trim().replace(/^data:image\/[^;,]+;base64,/i, '')
       if (kind === 'web_search' && !builtinToolQuery.trim()) {
         appMessage.warning('请输入搜索词')
         return
       }
-      if (kind === 'image_generation' && !result) {
+      if (kind === 'image_generation' && !builtinToolAsset) {
         appMessage.warning('请上传图片')
         return
       }
@@ -363,10 +378,10 @@ export function useChatWorkspace(isMobile: boolean) {
           conversation_id: selectedConversationId,
           builtin_tool_kind: kind,
           builtin_tool_query: kind === 'web_search' ? builtinToolQuery.trim() : undefined,
-          builtin_tool_result: kind === 'image_generation' ? result : undefined,
+          builtin_tool_asset_id: kind === 'image_generation' ? builtinToolAsset?.asset_id : undefined,
         })
         setBuiltinToolQuery('')
-        setBuiltinToolResult('')
+        setBuiltinToolAsset(null)
         appMessage.success(kind === 'web_search' ? '已输出搜索事件' : '已输出生图事件')
       } catch (error) {
         appMessage.error(error instanceof Error ? error.message : '输出内置工具失败')
@@ -383,7 +398,7 @@ export function useChatWorkspace(isMobile: boolean) {
     const chunk = withDraftSeparator(rawChunk)
     setSending(true)
     try {
-      await sendWorkspaceCommand({
+      const ack = await sendWorkspaceCommand({
         kind: 'stream_delta',
         conversation_id: selectedConversationId,
         text: chunk,
@@ -396,11 +411,44 @@ export function useChatWorkspace(isMobile: boolean) {
       } else {
         setComposer('')
       }
-      appMessage.success(isThinkingMode ? '已输出思考' : '已输出片段')
+      appMessage.success(
+        ack.auto_completed
+          ? '已达到输出限制并自动结束'
+          : isThinkingMode
+            ? '已输出思考'
+            : '已输出片段',
+      )
     } catch (error) {
       appMessage.error(error instanceof Error ? error.message : '输出片段失败')
     } finally {
       setSending(false)
+    }
+  }
+
+  async function handleOutputImageUpload(file: File) {
+    const conversationId = selectedConversationId
+    const requestId = selectedConversation?.request_id ?? ''
+    setUploadingOutputImage(true)
+    try {
+      const form = new FormData()
+      form.append('image', file)
+      const asset = await requestFormJson<OutputImageAsset>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/output-images`,
+        form,
+      )
+      if (
+        selectedConversationIdRef.current !== conversationId ||
+        selectedRequestIdRef.current !== requestId ||
+        asset.conversation_id !== conversationId ||
+        asset.request_id !== requestId ||
+        !selectedConversationOpenRef.current
+      ) {
+        throw new Error('当前请求已变化，请重新上传图片')
+      }
+      setBuiltinToolAsset(asset)
+      return asset
+    } finally {
+      setUploadingOutputImage(false)
     }
   }
 
@@ -444,16 +492,20 @@ export function useChatWorkspace(isMobile: boolean) {
     try {
       if (composerMode === 'assistant_message' && pendingChunk) {
         const outputChunk = withDraftSeparator(pendingChunk)
-        await sendWorkspaceCommand({
+        const deltaAck = await sendWorkspaceCommand({
           kind: 'stream_delta',
           conversation_id: selectedConversationId,
           text: outputChunk,
           mode: 'answer',
         })
         setComposer('')
+        if (deltaAck.auto_completed) {
+          appMessage.success('已达到输出限制并自动结束')
+          return
+        }
       } else if (composerMode === 'thinking' && finalText) {
         const outputChunk = withDraftSeparator(finalText)
-        await sendWorkspaceCommand({
+        const deltaAck = await sendWorkspaceCommand({
           kind: 'stream_delta',
           conversation_id: selectedConversationId,
           text: outputChunk,
@@ -461,6 +513,10 @@ export function useChatWorkspace(isMobile: boolean) {
           reasoning_stream_mode: isResponsesConversation ? reasoningStreamMode : undefined,
         })
         clearThinkingInput()
+        if (deltaAck.auto_completed) {
+          appMessage.success('已达到输出限制并自动结束')
+          return
+        }
       }
 
       await sendWorkspaceCommand({
@@ -532,7 +588,8 @@ export function useChatWorkspace(isMobile: boolean) {
     composerMode,
     builtinToolKind,
     builtinToolQuery,
-    builtinToolResult,
+    builtinToolAsset,
+    uploadingOutputImage,
     thinkingText,
     conversations,
     deletingConversationId,
@@ -544,6 +601,7 @@ export function useChatWorkspace(isMobile: boolean) {
     handleDeleteAutomationRule: automation.handleDeleteAutomationRule,
     handleDeleteConversation,
     handleDraft,
+    handleOutputImageUpload,
     handleEditAutomationRule: automation.handleEditAutomationRule,
     handleLogin,
     handleLogout,
@@ -577,7 +635,7 @@ export function useChatWorkspace(isMobile: boolean) {
     setComposerMode: selectComposerMode,
     setBuiltinToolKind,
     setBuiltinToolQuery,
-    setBuiltinToolResult,
+    setBuiltinToolAsset,
     setThinkingText,
     setReasoningStreamMode,
     setDrawerOpen,

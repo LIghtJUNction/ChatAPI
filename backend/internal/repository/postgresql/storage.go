@@ -121,6 +121,84 @@ func (s *Store) ListMediaAssets(ctx context.Context) ([]common.MediaAsset, error
 	return items, rows.Err()
 }
 
+func (s *Store) CreateMediaAsset(ctx context.Context, input common.CreateMediaAssetInput) (common.MediaAsset, error) {
+	return s.createMediaAsset(ctx, input, "", "")
+}
+
+func (s *Store) CreateStagedMediaAsset(ctx context.Context, input common.CreateStagedMediaAssetInput) (common.MediaAsset, error) {
+	return s.createMediaAsset(ctx, input.Asset, strings.TrimSpace(input.ConversationID), strings.TrimSpace(input.RequestID))
+}
+
+func (s *Store) createMediaAsset(ctx context.Context, input common.CreateMediaAssetInput, conversationID string, requestID string) (common.MediaAsset, error) {
+	createdAt := input.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	item := common.MediaAsset{
+		ID: input.ID, OwnerID: input.OwnerID, FileID: input.FileID, Path: input.Path,
+		MediaType: input.MediaType, Bytes: input.Bytes, SHA256: input.SHA256,
+		Width: input.Width, Height: input.Height, SourceKind: input.SourceKind,
+		OriginalName: input.OriginalName, OriginalMediaType: input.OriginalMediaType, CreatedAt: createdAt,
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return common.MediaAsset{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO media_assets(
+			id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+	`, item.ID, item.OwnerID, item.FileID, item.Path, item.MediaType, item.Bytes, item.SHA256, item.Width, item.Height, item.SourceKind, item.OriginalName, item.OriginalMediaType, item.CreatedAt)
+	if err != nil {
+		return common.MediaAsset{}, err
+	}
+	if conversationID != "" {
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO media_asset_staging(asset_id, owner_id, conversation_id, request_id, created_at)
+			SELECT $1, $2, $3, $4, $5
+			WHERE EXISTS (
+				SELECT 1 FROM conversations c
+				JOIN messages m ON m.conversation_id = c.id
+				WHERE c.id = $3
+				  AND COALESCE(c.metadata_json->>'owner_id', '') = $2
+				  AND COALESCE(c.metadata_json->>'realtime_status', '') IN ('waiting', 'streaming')
+				  AND COALESCE(c.metadata_json->>'request_id', '') = $4
+				  AND COALESCE(m.metadata_json->'request_debug'->>'request_id', '') = $4
+			)
+		`, item.ID, item.OwnerID, conversationID, requestID, item.CreatedAt)
+		if err != nil {
+			return common.MediaAsset{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return common.MediaAsset{}, common.ErrNotFound
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return common.MediaAsset{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) GetMediaAssetByID(ctx context.Context, assetID string) (common.MediaAsset, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
+		FROM media_assets
+		WHERE id = $1
+	`, strings.TrimSpace(assetID))
+	return scanMediaAsset(row)
+}
+
+func (s *Store) GetStagedMediaAsset(ctx context.Context, assetID string, ownerID string, conversationID string, requestID string) (common.MediaAsset, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT a.id, a.owner_id, a.file_id, a.path, a.media_type, a.bytes, a.sha256, a.width, a.height, a.source_kind, a.original_name, a.original_media_type, a.created_at
+		FROM media_assets a
+		JOIN media_asset_staging st ON st.asset_id = a.id
+		WHERE a.id = $1 AND st.owner_id = $2 AND st.conversation_id = $3 AND st.request_id = $4
+	`, strings.TrimSpace(assetID), strings.TrimSpace(ownerID), strings.TrimSpace(conversationID), strings.TrimSpace(requestID))
+	return scanMediaAsset(row)
+}
+
 func (s *Store) GetMediaAssetByFileID(ctx context.Context, fileID string) (common.MediaAsset, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
@@ -138,8 +216,11 @@ func (s *Store) ListOrphanMediaAssets(ctx context.Context) ([]common.MediaAsset,
 	rows, err := s.pool.Query(ctx, `
 		SELECT a.id, a.owner_id, a.file_id, a.path, a.media_type, a.bytes, a.sha256, a.width, a.height, a.source_kind, a.original_name, a.original_media_type, a.created_at
 		FROM media_assets a
-		LEFT JOIN media_asset_refs r ON r.asset_id = a.id
-		WHERE r.id IS NULL
+			LEFT JOIN media_asset_refs r ON r.asset_id = a.id
+			LEFT JOIN media_asset_event_refs er ON er.asset_id = a.id
+			LEFT JOIN media_asset_staging st ON st.asset_id = a.id
+			WHERE r.id IS NULL AND er.id IS NULL
+			  AND (st.asset_id IS NULL OR st.created_at < NOW() - INTERVAL '24 hours')
 		ORDER BY a.created_at ASC, a.id ASC
 	`)
 	if err != nil {

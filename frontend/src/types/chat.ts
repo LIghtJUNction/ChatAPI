@@ -99,6 +99,7 @@ export type Conversation = {
   message_count: number
   last_message_preview: string
   request_format?: 'responses' | 'chat_completions' | 'anthropic_messages' | string
+  request_id?: string
   status?: 'waiting' | 'streaming' | 'closed' | 'aborted' | 'disconnected' | 'expired' | string
   draft_text?: string
 }
@@ -178,13 +179,13 @@ export type OutputPolicyChip = {
 }
 
 export type OutputPolicy = {
-  stop_hit?: boolean
   stop_sequence?: string
-  max_output_hit?: boolean
-  max_output_chars?: number
-  store_false?: boolean
-  store_applied?: boolean
   applied_chips?: OutputPolicyChip[]
+  finish_reason?: 'length' | 'stop_sequence' | string
+  output_tokens?: number
+  token_limit?: number
+  token_counter?: string
+  token_count_accuracy?: 'exact' | 'estimated' | string
 }
 
 export type ConversationEventItem = {
@@ -206,6 +207,19 @@ export type TimelineItem = {
   created_at: string
   message?: MessageItem
   event?: ConversationEventItem
+  content_parts?: TimelineMessageContentPart[]
+}
+
+export type OutputImageAsset = {
+  asset_id: string
+  file_id: string
+  conversation_id: string
+  request_id: string
+  url: string
+  media_type: string
+  bytes: number
+  width: number
+  height: number
 }
 
 export type ResponsesPayload = {
@@ -394,7 +408,7 @@ export type WorkspaceCommand = {
   output?: string
   builtin_tool_kind?: string
   builtin_tool_query?: string
-  builtin_tool_result?: string
+  builtin_tool_asset_id?: string
   reasoning_stream_mode?: string
   error?: string
 }
@@ -403,6 +417,7 @@ export type WorkspaceCommandAckEvent = {
   type: 'workspace.command_ack'
   command_id: string
   conversation_id: string
+  auto_completed?: boolean
 }
 
 export type WorkspaceCommandErrorEvent = {

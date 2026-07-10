@@ -202,7 +202,11 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE conversation_id = ANY($1)`, conversationIDs).Scan(&result.DeletedMessages); err != nil {
 		return common.DeleteConversationsResult{}, err
 	}
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id = ANY($1)`, conversationIDs).Scan(&result.DeletedAssetRefs); err != nil {
+	if err := tx.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id = ANY($1)) +
+			(SELECT COUNT(*) FROM media_asset_event_refs WHERE conversation_id = ANY($1))
+	`, conversationIDs).Scan(&result.DeletedAssetRefs); err != nil {
 		return common.DeleteConversationsResult{}, err
 	}
 	tag, err := tx.Exec(ctx, `DELETE FROM conversations WHERE id = ANY($1)`, conversationIDs)
@@ -295,6 +299,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 	}
 	metadata["realtime_status"] = "waiting"
 	metadata["realtime_draft_text"] = ""
+	metadata["request_id"] = strings.TrimSpace(input.RequestID)
 	metadata["response_id"] = strings.TrimSpace(input.ResponseID)
 	if strings.TrimSpace(input.Model) != "" {
 		metadata["model"] = strings.TrimSpace(input.Model)
@@ -516,13 +521,9 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 		return common.Conversation{}, common.Message{}, common.ErrTurnConflict
 	}
 	draftText, _ := metadata["realtime_draft_text"].(string)
-	finalText := strings.TrimSpace(input.OutputText)
+	finalText := input.OutputText
 	if finalText == "" {
 		finalText = draftText
-	}
-	messageContent := finalText
-	if input.Mode == "thinking" && finalText != "" {
-		messageContent = "<think>" + finalText + "</think>"
 	}
 	now := time.Now().UTC()
 	metadata["realtime_status"] = "closed"
@@ -553,7 +554,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "assistant",
-		Content:    messageContent,
+		Content:    finalText,
 		CreatedAt:  now,
 		Status:     "completed",
 		ResponseID: &responseID,
@@ -564,7 +565,10 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	conversation.UpdatedAt = now
 	conversation.LastMessageAt = now
 	conversation.MessageCount += 1
-	conversation.LastMessagePreview = finalText
+	conversation.LastMessagePreview = input.OutputPreview
+	if conversation.LastMessagePreview == "" {
+		conversation.LastMessagePreview = finalText
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

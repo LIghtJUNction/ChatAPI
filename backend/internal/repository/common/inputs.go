@@ -173,16 +173,42 @@ type CreatePendingImageAssetInput struct {
 	InputPartIndex    int
 }
 
+type CreateMediaAssetInput struct {
+	ID                string
+	OwnerID           string
+	FileID            string
+	Path              string
+	MediaType         string
+	Bytes             int64
+	SHA256            string
+	Width             int
+	Height            int
+	SourceKind        string
+	OriginalName      string
+	OriginalMediaType string
+	CreatedAt         time.Time
+}
+
+type CreateStagedMediaAssetInput struct {
+	Asset          CreateMediaAssetInput
+	ConversationID string
+	RequestID      string
+}
+
 type CompletePendingInput struct {
 	ConversationID      string
 	ResponseID          string
 	OutputText          string
+	OutputPreview       string
 	Mode                string
 	ToolName            string
 	ToolCallID          string
 	ToolOutput          string
 	ReasoningStreamMode string
 	OutputPolicy        map[string]any
+	OutputTokens        int
+	FinishReason        string
+	StopSequence        string
 }
 
 type UpdateDraftInput struct {
@@ -224,6 +250,13 @@ type AppendConversationEventInput struct {
 	RequestID      string
 	Metadata       map[string]any
 	CreatedAt      time.Time
+}
+
+type AppendConversationEventWithAssetInput struct {
+	Event    AppendConversationEventInput
+	AssetID  string
+	AssetURL string
+	Purpose  string
 }
 
 type DeleteConversationsResult struct {

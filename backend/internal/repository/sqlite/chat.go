@@ -303,8 +303,13 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 	if err := tx.QueryRowContext(ctx, countMessagesQuery, args...).Scan(&result.DeletedMessages); err != nil {
 		return common.DeleteConversationsResult{}, err
 	}
-	countAssetRefsQuery := fmt.Sprintf(`SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id IN (%s)`, placeholders)
-	if err := tx.QueryRowContext(ctx, countAssetRefsQuery, args...).Scan(&result.DeletedAssetRefs); err != nil {
+	countAssetRefsQuery := fmt.Sprintf(`
+		SELECT
+			(SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id IN (%s)) +
+			(SELECT COUNT(*) FROM media_asset_event_refs WHERE conversation_id IN (%s))
+	`, placeholders, placeholders)
+	assetArgs := append(append([]any(nil), args...), args...)
+	if err := tx.QueryRowContext(ctx, countAssetRefsQuery, assetArgs...).Scan(&result.DeletedAssetRefs); err != nil {
 		return common.DeleteConversationsResult{}, err
 	}
 	deleteQuery := fmt.Sprintf(`DELETE FROM conversations WHERE id IN (%s)`, placeholders)
@@ -408,6 +413,7 @@ func (s *Store) CreatePendingTurn(ctx context.Context, input common.CreatePendin
 	}
 	metadata["realtime_status"] = "waiting"
 	metadata["realtime_draft_text"] = ""
+	metadata["request_id"] = input.RequestID
 	metadata["response_id"] = input.ResponseID
 	if strings.TrimSpace(input.Model) != "" {
 		metadata["model"] = input.Model
@@ -615,6 +621,88 @@ func (s *Store) ListMediaAssets(ctx context.Context) ([]common.MediaAsset, error
 	return items, rows.Err()
 }
 
+func (s *Store) CreateMediaAsset(ctx context.Context, input common.CreateMediaAssetInput) (common.MediaAsset, error) {
+	return s.createMediaAsset(ctx, input, "", "")
+}
+
+func (s *Store) CreateStagedMediaAsset(ctx context.Context, input common.CreateStagedMediaAssetInput) (common.MediaAsset, error) {
+	return s.createMediaAsset(ctx, input.Asset, strings.TrimSpace(input.ConversationID), strings.TrimSpace(input.RequestID))
+}
+
+func (s *Store) createMediaAsset(ctx context.Context, input common.CreateMediaAssetInput, conversationID string, requestID string) (common.MediaAsset, error) {
+	createdAt := input.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	item := common.MediaAsset{
+		ID: input.ID, OwnerID: input.OwnerID, FileID: input.FileID, Path: input.Path,
+		MediaType: input.MediaType, Bytes: input.Bytes, SHA256: input.SHA256,
+		Width: input.Width, Height: input.Height, SourceKind: input.SourceKind,
+		OriginalName: input.OriginalName, OriginalMediaType: input.OriginalMediaType, CreatedAt: createdAt,
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return common.MediaAsset{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO media_assets(
+			id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, item.ID, item.OwnerID, item.FileID, item.Path, item.MediaType, item.Bytes, item.SHA256, item.Width, item.Height, item.SourceKind, item.OriginalName, item.OriginalMediaType, formatTime(item.CreatedAt))
+	if err != nil {
+		return common.MediaAsset{}, err
+	}
+	if conversationID != "" {
+		result, err := tx.ExecContext(ctx, `
+			INSERT INTO media_asset_staging(asset_id, owner_id, conversation_id, request_id, created_at)
+			SELECT ?, ?, ?, ?, ?
+			WHERE EXISTS (
+				SELECT 1 FROM conversations c
+				JOIN messages m ON m.conversation_id = c.id
+				WHERE c.id = ?
+				  AND COALESCE(json_extract(c.metadata_json, '$.owner_id'), '') = ?
+				  AND COALESCE(json_extract(c.metadata_json, '$.realtime_status'), '') IN ('waiting', 'streaming')
+				  AND COALESCE(json_extract(c.metadata_json, '$.request_id'), '') = ?
+				  AND COALESCE(json_extract(m.metadata_json, '$.request_debug.request_id'), '') = ?
+			)
+		`, item.ID, item.OwnerID, conversationID, requestID, formatTime(item.CreatedAt), conversationID, item.OwnerID, requestID, requestID)
+		if err != nil {
+			return common.MediaAsset{}, err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return common.MediaAsset{}, err
+		}
+		if rows != 1 {
+			return common.MediaAsset{}, common.ErrNotFound
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return common.MediaAsset{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) GetMediaAssetByID(ctx context.Context, assetID string) (common.MediaAsset, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
+		FROM media_assets
+		WHERE id = ?
+	`, strings.TrimSpace(assetID))
+	return scanMediaAsset(row)
+}
+
+func (s *Store) GetStagedMediaAsset(ctx context.Context, assetID string, ownerID string, conversationID string, requestID string) (common.MediaAsset, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT a.id, a.owner_id, a.file_id, a.path, a.media_type, a.bytes, a.sha256, a.width, a.height, a.source_kind, a.original_name, a.original_media_type, a.created_at
+		FROM media_assets a
+		JOIN media_asset_staging st ON st.asset_id = a.id
+		WHERE a.id = ? AND st.owner_id = ? AND st.conversation_id = ? AND st.request_id = ?
+	`, strings.TrimSpace(assetID), strings.TrimSpace(ownerID), strings.TrimSpace(conversationID), strings.TrimSpace(requestID))
+	return scanMediaAsset(row)
+}
+
 func (s *Store) GetMediaAssetByFileID(ctx context.Context, fileID string) (common.MediaAsset, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, owner_id, file_id, path, media_type, bytes, sha256, width, height, source_kind, original_name, original_media_type, created_at
@@ -629,13 +717,17 @@ func (s *Store) GetMediaAssetByFileID(ctx context.Context, fileID string) (commo
 }
 
 func (s *Store) ListOrphanMediaAssets(ctx context.Context) ([]common.MediaAsset, error) {
+	cutoff := formatTime(time.Now().UTC().Add(-24 * time.Hour))
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT a.id, a.owner_id, a.file_id, a.path, a.media_type, a.bytes, a.sha256, a.width, a.height, a.source_kind, a.original_name, a.original_media_type, a.created_at
 		FROM media_assets a
-		LEFT JOIN media_asset_refs r ON r.asset_id = a.id
-		WHERE r.id IS NULL
-		ORDER BY a.created_at ASC, a.id ASC
-	`)
+			LEFT JOIN media_asset_refs r ON r.asset_id = a.id
+			LEFT JOIN media_asset_event_refs er ON er.asset_id = a.id
+			LEFT JOIN media_asset_staging st ON st.asset_id = a.id
+			WHERE r.id IS NULL AND er.id IS NULL
+			  AND (st.asset_id IS NULL OR st.created_at < ?)
+			ORDER BY a.created_at ASC, a.id ASC
+		`, cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -710,13 +802,9 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 		return common.Conversation{}, common.Message{}, errConflict
 	}
 	draftText, _ := metadata["realtime_draft_text"].(string)
-	finalText := strings.TrimSpace(input.OutputText)
+	finalText := input.OutputText
 	if finalText == "" {
 		finalText = draftText
-	}
-	messageContent := finalText
-	if input.Mode == "thinking" && finalText != "" {
-		messageContent = "<think>" + finalText + "</think>"
 	}
 	now := time.Now().UTC()
 	metadata["realtime_status"] = "closed"
@@ -747,7 +835,7 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),
 		Role:       "assistant",
-		Content:    messageContent,
+		Content:    finalText,
 		CreatedAt:  now,
 		Status:     "completed",
 		ResponseID: &responseID,
@@ -758,7 +846,10 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	conversation.UpdatedAt = now
 	conversation.LastMessageAt = now
 	conversation.MessageCount += 1
-	conversation.LastMessagePreview = finalText
+	conversation.LastMessagePreview = input.OutputPreview
+	if conversation.LastMessagePreview == "" {
+		conversation.LastMessagePreview = finalText
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -41,6 +41,19 @@ type MediaAssetRef struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+type EventMediaAssetRef struct {
+	ID        string `json:"id"`
+	AssetID   string `json:"asset_id"`
+	FileID    string `json:"file_id"`
+	URL       string `json:"url"`
+	MediaType string `json:"media_type"`
+	Bytes     int64  `json:"bytes"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	Purpose   string `json:"purpose"`
+	PartIndex int    `json:"part_index"`
+}
+
 type StorageUserQuota struct {
 	OwnerID    string    `json:"owner_id"`
 	QuotaBytes int64     `json:"quota_bytes"`

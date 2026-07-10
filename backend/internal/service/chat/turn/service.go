@@ -3,17 +3,20 @@ package turn
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
+	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
 	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/outputasset"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/outputpolicy"
 	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 	"go.uber.org/zap"
@@ -21,10 +24,16 @@ import (
 
 var ErrPendingNotFound = errors.New("pending turn not found")
 var ErrPendingConflict = errors.New("pending turn already finalized")
+var ErrOutputImageNotAllowed = errors.New("image generation is not enabled for this request")
 
 type MutationErrorResolver func(context.Context, string, error) error
 type TextNotifier func(context.Context, string, string, string)
 type AdmissionHook func(context.Context, string) error
+
+type OutputAssetService interface {
+	Upload(context.Context, string, string, string, string, string, io.Reader) (outputasset.Uploaded, error)
+	Consume(context.Context, string, string, string, string, func(outputasset.Resolved) error) (outputasset.Resolved, error)
+}
 
 type ExpireResult struct {
 	ExpiredConversations int `json:"expired_conversations"`
@@ -90,6 +99,7 @@ type Service struct {
 	ActorFromContext            func(context.Context) (actor.Actor, bool)
 	Egress                      *egresssvc.Service
 	Logger                      *zap.Logger
+	OutputAssets                OutputAssetService
 }
 
 type TurnControlKind string
@@ -209,38 +219,70 @@ func (s *Service) DisconnectRecoveredPending(ctx context.Context, reason string)
 }
 
 func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk string, mode string, reasoningStreamMode string) (map[string]any, error) {
+	unlock := s.lockTurnMutation(conversationID)
+	defer unlock()
 	previousState, err := s.Pending.StartDelta(conversationID)
 	if err != nil {
 		return nil, s.resolveMutationError(ctx, conversationID, err)
 	}
-	conversation, err := s.Store.GetConversation(ctx, conversationID)
+	guard := s.outputGuard(conversationID)
+	var updated common.Conversation
+	var completedMessage common.Message
+	var completionInput common.CompletePendingInput
+	nextDraft := ""
+	decision, err := guard.Execute(outputpolicy.Input{Text: chunk, Mode: mode}, func(decision outputpolicy.Decision) error {
+		conversation, getErr := s.Store.GetConversation(ctx, conversationID)
+		if getErr != nil {
+			return getErr
+		}
+		existing := conversationstate.FromConversation(conversation).DraftText
+		nextDraft = existing + draftChunkForMode(decision.Text, mode)
+		if decision.Terminal {
+			completePreviousState, startErr := s.Pending.StartComplete(conversationID)
+			if startErr != nil {
+				return startErr
+			}
+			completionInput = common.CompletePendingInput{
+				ConversationID:      conversationID,
+				ResponseID:          responseIDForConversation(s.Pending, conversationID),
+				OutputText:          nextDraft,
+				OutputPreview:       decision.OutputText,
+				Mode:                mode,
+				ReasoningStreamMode: reasoningStreamMode,
+				OutputPolicy:        decision.Metadata(),
+				OutputTokens:        decision.OutputTokens,
+				FinishReason:        decision.FinishReason,
+				StopSequence:        decision.StopSequence,
+			}
+			var completeErr error
+			updated, completedMessage, completeErr = s.Store.CompletePendingTurn(ctx, completionInput)
+			if completeErr != nil {
+				s.Pending.RevertFinalize(conversationID, completePreviousState)
+			}
+			return completeErr
+		}
+		var updateErr error
+		updated, updateErr = s.Store.UpdateDraft(ctx, common.UpdateDraftInput{
+			ConversationID: conversationID,
+			DraftText:      nextDraft,
+		})
+		return updateErr
+	})
 	if err != nil {
 		s.Pending.RevertFinalize(conversationID, previousState)
 		return nil, err
 	}
-	existing := conversationstate.FromConversation(conversation).DraftText
-	policy := s.applyOutputPolicy(conversationID, outputpolicy.Input{
-		ExistingText: policyExistingText(existing, mode),
-		Text:         chunk,
-		Mode:         mode,
-	})
-	chunk = policy.Text
-	storedChunk := draftChunkForMode(chunk, mode)
-	nextDraft := existing + storedChunk
-	updated, err := s.Store.UpdateDraft(ctx, common.UpdateDraftInput{
-		ConversationID: conversationID,
-		DraftText:      nextDraft,
-	})
-	if err != nil {
-		s.Pending.RevertFinalize(conversationID, previousState)
-		return nil, err
-	}
+	chunk = decision.Text
 	action := OutputAction{
 		Kind:                TurnControlStreamDelta,
 		OutputText:          chunk,
 		Mode:                mode,
 		ReasoningStreamMode: reasoningStreamMode,
 	}.Normalized()
+	if decision.Terminal {
+		deltaEvents := s.applyRuntimeAction(conversationID, action.RuntimeAction()).StreamEvents
+		return s.finishCompletedTurn(ctx, completionInput, updated, completedMessage, "", deltaEvents, true)
+	}
 	_ = s.Pending.Publish(conversationID, PendingEvent{
 		Action:       action,
 		StreamEvents: s.applyRuntimeAction(conversationID, action.RuntimeAction()).StreamEvents,
@@ -248,13 +290,15 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 	s.publishConversationUpserted(ctx, s.eventRouteForContext(ctx, updated), updated)
 	s.notifyText(ctx, s.ownerID(ctx), updated.Title, chunk)
 	body := map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}
-	if metadata := policy.Metadata(); len(metadata) > 0 {
+	if metadata := decision.Metadata(); len(metadata) > 0 {
 		body["output_policy"] = metadata
 	}
 	return body, nil
 }
 
 func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlCommand) (map[string]any, error) {
+	unlock := s.lockTurnMutation(command.ConversationID)
+	defer unlock()
 	action := command.Action.Normalized()
 	turn, ok := s.Pending.GetByConversationID(command.ConversationID)
 	if !ok || turn == nil {
@@ -284,14 +328,10 @@ func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlComman
 		detail = action.BuiltinToolQuery
 		metadata["query"] = detail
 	}
-	if spec.RequiresResult {
-		detail = "Image generated"
-		metadata["result_bytes"] = len([]byte(action.BuiltinToolResult))
-	}
 	if !pendingRequestHasBuiltinTool(turn, kind) {
 		return nil, errors.New("builtin tool is not enabled for this request: " + kind)
 	}
-	event, err := s.Store.AppendConversationEvent(ctx, common.AppendConversationEventInput{
+	eventInput := common.AppendConversationEventInput{
 		ConversationID: command.ConversationID,
 		OwnerID:        identity.OwnerID,
 		Type:           "builtin_tool",
@@ -300,7 +340,27 @@ func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlComman
 		Detail:         detail,
 		RequestID:      identity.RequestID,
 		Metadata:       metadata,
-	})
+	}
+	var event common.ConversationEvent
+	if spec.RequiresAsset {
+		if s.OutputAssets == nil {
+			return nil, errors.New("output image assets are unavailable")
+		}
+		resolved, resolveErr := s.OutputAssets.Consume(ctx, identity.OwnerID, command.ConversationID, identity.RequestID, action.BuiltinToolAssetID, func(resolved outputasset.Resolved) error {
+			eventInput.Detail = "Image generated"
+			var appendErr error
+			event, appendErr = s.Store.AppendConversationEventWithAsset(ctx, common.AppendConversationEventWithAssetInput{
+				Event: eventInput, AssetID: resolved.Asset.ID, AssetURL: resolved.URL, Purpose: "image_generation_result",
+			})
+			return appendErr
+		})
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		action.BuiltinToolResult = resolved.Base64
+	} else {
+		event, err = s.Store.AppendConversationEvent(ctx, eventInput)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -311,6 +371,24 @@ func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlComman
 		StreamEvents: s.applyRuntimeAction(command.ConversationID, action.RuntimeAction()).StreamEvents,
 	})
 	return map[string]any{"ok": true, "event": event}, nil
+}
+
+func (s *Service) UploadOutputImage(ctx context.Context, ownerID string, conversationID string, originalName string, mediaType string, reader io.Reader) (outputasset.Uploaded, error) {
+	if s == nil || s.Pending == nil || s.OutputAssets == nil {
+		return outputasset.Uploaded{}, ErrPendingNotFound
+	}
+	turn, ok := s.Pending.GetByConversationID(strings.TrimSpace(conversationID))
+	if !ok || turn == nil || strings.TrimSpace(turn.OwnerID) != strings.TrimSpace(ownerID) {
+		return outputasset.Uploaded{}, ErrPendingNotFound
+	}
+	if !pendingRequestHasBuiltinTool(turn, "image_generation") {
+		return outputasset.Uploaded{}, ErrOutputImageNotAllowed
+	}
+	identity, err := s.resolveActiveTurnIdentity(ctx, conversationID)
+	if err != nil {
+		return outputasset.Uploaded{}, err
+	}
+	return s.OutputAssets.Upload(ctx, identity.OwnerID, conversationID, identity.RequestID, originalName, mediaType, reader)
 }
 
 func pendingRequestHasBuiltinTool(turn *PendingTurn, kind string) bool {
@@ -328,35 +406,55 @@ func draftChunkForMode(chunk string, mode string) string {
 }
 
 func (s *Service) CompleteConversation(ctx context.Context, input common.CompletePendingInput) (map[string]any, error) {
-	completionDelta := input.OutputText
-	previousState, err := s.Pending.StartComplete(input.ConversationID)
+	unlock := s.lockTurnMutation(input.ConversationID)
+	defer unlock()
+	guard := s.outputGuard(input.ConversationID)
+	var conversation common.Conversation
+	var message common.Message
+	completePreviousState := ""
+	decision, err := guard.Execute(outputpolicy.Input{Text: input.OutputText, Mode: input.Mode, Final: true}, func(decision outputpolicy.Decision) error {
+		var startErr error
+		completePreviousState, startErr = s.Pending.StartComplete(input.ConversationID)
+		if startErr != nil {
+			return startErr
+		}
+		conversationBefore, getErr := s.Store.GetConversation(ctx, input.ConversationID)
+		if getErr != nil {
+			s.Pending.RevertFinalize(input.ConversationID, completePreviousState)
+			return getErr
+		}
+		existingDraft := conversationstate.FromConversation(conversationBefore).DraftText
+		input.OutputText = existingDraft + draftChunkForMode(decision.Text, input.Mode)
+		input.OutputPreview = decision.OutputText
+		if input.OutputPreview == "" && decision.Text != "" {
+			input.OutputPreview = decision.Text
+		}
+		input.OutputPolicy = decision.Metadata()
+		input.OutputTokens = decision.OutputTokens
+		input.FinishReason = decision.FinishReason
+		input.StopSequence = decision.StopSequence
+		var completeErr error
+		conversation, message, completeErr = s.Store.CompletePendingTurn(ctx, input)
+		if completeErr != nil {
+			s.Pending.RevertFinalize(input.ConversationID, completePreviousState)
+		}
+		return completeErr
+	})
 	if err != nil {
 		return nil, s.resolveMutationError(ctx, input.ConversationID, err)
 	}
-	conversationBefore, err := s.Store.GetConversation(ctx, input.ConversationID)
-	if err != nil {
-		s.Pending.RevertFinalize(input.ConversationID, previousState)
-		return nil, err
-	}
-	existingDraft := conversationstate.FromConversation(conversationBefore).DraftText
-	policy := s.applyOutputPolicy(input.ConversationID, outputpolicy.Input{
-		Text: firstNonEmpty(input.OutputText, policyExistingText(existingDraft, input.Mode)),
-		Mode: input.Mode,
-	})
-	if input.OutputText != "" || policy.Text != policyExistingText(existingDraft, input.Mode) || (strings.TrimSpace(input.Mode) == "thinking" && strings.TrimSpace(existingDraft) != "") {
-		input.OutputText = policy.Text
-	}
-	if completionDelta != "" {
-		completionDelta = policy.Text
-	}
-	if metadata := policy.Metadata(); len(metadata) > 0 {
-		input.OutputPolicy = metadata
-	}
-	conversation, message, err := s.Store.CompletePendingTurn(ctx, input)
-	if err != nil {
-		s.Pending.RevertFinalize(input.ConversationID, previousState)
-		return nil, err
-	}
+	return s.finishCompletedTurn(ctx, input, conversation, message, decision.Text, nil, false)
+}
+
+func (s *Service) finishCompletedTurn(
+	ctx context.Context,
+	input common.CompletePendingInput,
+	conversation common.Conversation,
+	message common.Message,
+	completionDelta string,
+	prefixEvents []protocol.StreamEvent,
+	autoCompleted bool,
+) (map[string]any, error) {
 	route := s.eventRouteForContext(ctx, conversation)
 	s.publishConversationUpserted(ctx, route, conversation)
 	responseBody := s.egress().CompleteBody(conversation, input, message)
@@ -368,11 +466,16 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 		ToolName:            input.ToolName,
 		ToolCallID:          input.ToolCallID,
 		ToolOutput:          stringValue(input.ToolOutput, message.Content),
+		FinishReason:        input.FinishReason,
+		StopSequence:        input.StopSequence,
+		OutputTokens:        input.OutputTokens,
 	}.Normalized()
+	streamEvents := append([]protocol.StreamEvent(nil), prefixEvents...)
+	streamEvents = append(streamEvents, s.applyRuntimeAction(input.ConversationID, action.RuntimeAction()).StreamEvents...)
 	_ = s.Pending.Publish(input.ConversationID, PendingEvent{
 		Action:       action,
 		ResponseBody: responseBody,
-		StreamEvents: s.applyRuntimeAction(input.ConversationID, action.RuntimeAction()).StreamEvents,
+		StreamEvents: streamEvents,
 	})
 	if err := s.Pending.Resolve(input.ConversationID, PendingResult{ResponseBody: responseBody}); err != nil {
 		return nil, err
@@ -380,6 +483,9 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	s.publishMessageAppended(ctx, route, conversation, message)
 	s.notifyText(ctx, s.ownerID(ctx), conversation.Title, message.Content)
 	body := map[string]any{"conversation": conversation, "output_text": message.Content}
+	if autoCompleted {
+		body["auto_completed"] = true
+	}
 	if len(input.OutputPolicy) > 0 {
 		body["output_policy"] = input.OutputPolicy
 	}
@@ -387,6 +493,8 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 }
 
 func (s *Service) AbortConversation(ctx context.Context, conversationID string, reason string) error {
+	unlock := s.lockTurnMutation(conversationID)
+	defer unlock()
 	previousState, err := s.Pending.StartAbort(conversationID)
 	if err != nil {
 		logging.BindContext(s.Logger, ctx,
@@ -578,16 +686,43 @@ func (s *Service) applyRuntimeAction(conversationID string, action protocolrunti
 	return turn.Runtime.Apply(action)
 }
 
-func (s *Service) applyOutputPolicy(conversationID string, input outputpolicy.Input) outputpolicy.Result {
+func (s *Service) outputGuard(conversationID string) *outputpolicy.Guard {
 	if s == nil || s.Pending == nil {
-		return outputpolicy.Result{Text: input.Text}
+		guard, _ := outputpolicy.NewGuard(protocol.TurnRequest{})
+		return guard
 	}
 	turn, ok := s.Pending.GetByConversationID(conversationID)
 	if !ok || turn == nil {
-		return outputpolicy.Result{Text: input.Text}
+		guard, _ := outputpolicy.NewGuard(protocol.TurnRequest{})
+		return guard
 	}
-	input.Request = turn.NormalizedRequest
-	return outputpolicy.Apply(input)
+	if turn.OutputGuard == nil {
+		turn.OutputGuard, _ = outputpolicy.NewGuard(turn.NormalizedRequest)
+	}
+	return turn.OutputGuard
+}
+
+func (s *Service) lockTurnMutation(conversationID string) func() {
+	if s == nil || s.Pending == nil {
+		return func() {}
+	}
+	turn, ok := s.Pending.GetByConversationID(strings.TrimSpace(conversationID))
+	if !ok || turn == nil || turn.MutationMu == nil {
+		return func() {}
+	}
+	turn.MutationMu.Lock()
+	return turn.MutationMu.Unlock
+}
+
+func responseIDForConversation(pending pendingRegistryLike, conversationID string) string {
+	if pending == nil {
+		return ""
+	}
+	turn, ok := pending.GetByConversationID(conversationID)
+	if !ok || turn == nil {
+		return ""
+	}
+	return strings.TrimSpace(turn.ResponseID)
 }
 
 func pendingExpiredBody(ttl time.Duration) map[string]any {
@@ -605,24 +740,6 @@ func stringValue(value any, fallback string) string {
 		return strings.TrimSpace(raw)
 	}
 	return fallback
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func policyExistingText(draft string, mode string) string {
-	if strings.TrimSpace(mode) != "thinking" {
-		return draft
-	}
-	text := strings.ReplaceAll(draft, "<think>", "")
-	text = strings.ReplaceAll(text, "</think>", "")
-	return text
 }
 
 func (s *Service) resolveTarget(ctx context.Context, input SubmitInput) (SubmitTarget, error) {
@@ -677,6 +794,8 @@ func (s *Service) disconnectOnRequestDone(ctx context.Context, conversationID st
 }
 
 func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID string, identity TurnIdentity, reason string, eventType string, title string) error {
+	unlock := s.lockTurnMutation(conversationID)
+	defer unlock()
 	resolved, err := s.resolveIdentityForMutation(ctx, conversationID, identity)
 	if err != nil {
 		return err

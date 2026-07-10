@@ -44,6 +44,7 @@ import (
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
+	outputassetsvc "github.com/zyf2007/ChatAPI/internal/service/chat/outputasset"
 	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
@@ -101,6 +102,13 @@ func New(deps Deps) http.Handler {
 	authLogger := deps.logger(logging.LayerAuth)
 	if deps.Lab == nil {
 		deps.Lab = labauth.NewService(deps.Config)
+	}
+	mediaStore := localstore.Store{RootDir: deps.Config.MediaDerivedDir}
+	outputImages := outputassetsvc.New(deps.Config, deps.StorageRepo, mediaStore)
+	var outputImageUploader httphandler.OutputImageUploader
+	if deps.Turn != nil {
+		deps.Turn.OutputAssets = outputImages
+		outputImageUploader = deps.Turn
 	}
 	if deps.AccessSettings == nil && deps.AuthRepo != nil {
 		deps.AccessSettings = authaccess.NewSettingsService(deps.AuthRepo, authaccess.Settings{
@@ -185,9 +193,9 @@ func New(deps Deps) http.Handler {
 			if deps.Turn.Submitter.Materializer == nil {
 				deps.Turn.Submitter.Materializer = &turn.RequestMaterializer{
 					Preprocessor:       preprocesssvc.New(deps.Config),
-					AssetPersister:     localstore.Store{RootDir: deps.Config.MediaDerivedDir},
+					AssetPersister:     mediaStore,
 					DeletionFailures:   deps.StorageRepo,
-					PreparedImageClean: localstore.Store{RootDir: deps.Config.MediaDerivedDir},
+					PreparedImageClean: mediaStore,
 				}
 			}
 		}
@@ -250,7 +258,10 @@ func New(deps Deps) http.Handler {
 		Hub:    deps.WorkspaceHub,
 		Logger: deps.logger(logging.LayerHTTP),
 	}
-	uploadHandler := httphandler.UploadHandler{Storage: deps.StorageRepo}
+	uploadHandler := httphandler.UploadHandler{
+		Storage: deps.StorageRepo, OutputImages: outputImageUploader,
+		OutputImageMaxBytes: deps.Config.UploadMaxBytes,
+	}
 	healthHandler := httphandler.HealthHandler{Config: deps.Config, Store: deps.PlatformRepo}
 	readinessHandler := httphandler.ReadinessHandler{Service: readiness.NewService(deps.Config, deps.PlatformRepo)}
 	setupHandler := httphandler.SetupHandler{Service: setup.NewService(deps.AuthRepo, deps.Config)}
@@ -277,6 +288,7 @@ func New(deps Deps) http.Handler {
 	router.Get("/api/ready", readinessHandler.ServeHTTP)
 	router.Get("/api/ws", workspaceHandler.ServeWS)
 	router.With(userAuth, userPrincipalAccess).Get("/api/media/assets/{fileID}", uploadHandler.GetImage)
+	router.With(userAuth, userPrincipalAccess).Post("/api/conversations/{conversationID}/output-images", uploadHandler.UploadOutputImage)
 	router.Get("/api/setup/status", setupHandler.Status)
 	router.Get("/setup", setupHandler.HTML)
 	router.Post("/setup", setupHandler.Create)

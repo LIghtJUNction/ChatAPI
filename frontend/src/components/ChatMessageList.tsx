@@ -13,6 +13,7 @@ import type {
   ConversationEventItem,
   MessageItem,
   TimelineItem,
+  TimelineMessageContentPart,
   VisibleTimelineDraftItem,
   VisibleTimelineItem,
   OutputPolicyChip,
@@ -150,9 +151,13 @@ function stringifyMetadataValue(value: unknown) {
 function SystemTimelineEvent({
   createdAt,
   event,
+  contentParts,
+  onImageClick,
 }: {
   createdAt: string
   event: ConversationEventItem
+  contentParts?: TimelineMessageContentPart[]
+  onImageClick: (src: string, detail?: string, alt?: string) => void
 }) {
   const metadataEntries = Object.entries(event.metadata ?? {}).filter(([, value]) => value != null && value !== '')
   const detailRows = [
@@ -175,6 +180,11 @@ function SystemTimelineEvent({
           </span>
         }
       >
+        {contentParts?.length ? (
+          <div className="message-content timeline-event-content">
+            {renderMessageContent('', { onImageClick }, contentParts)}
+          </div>
+        ) : null}
         <div className="timeline-event-detail-grid">
           {detailRows.map((row) => (
             <div className="timeline-event-detail-row" key={row.label}>
@@ -263,7 +273,17 @@ export function ChatMessageList({
     <>
       {visibleMessages.map((item) => {
         if (item.kind === 'system_event' && item.event) {
-          return <SystemTimelineEvent key={item.id} createdAt={item.created_at} event={item.event} />
+          return (
+            <SystemTimelineEvent
+              key={item.id}
+              createdAt={item.created_at}
+              event={item.event}
+              contentParts={item.content_parts}
+              onImageClick={(src, detail, alt) =>
+                setPreviewImage({ src, detail, alt: alt ?? 'generated image' })
+              }
+            />
+          )
         }
 
         const message = isDraftItem(item)

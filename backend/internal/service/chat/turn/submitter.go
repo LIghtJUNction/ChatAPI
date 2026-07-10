@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/protocol/debugview"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/outputpolicy"
 	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 )
 
@@ -45,6 +47,11 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	input.PreparedImages = materialized.PreparedImages
 	input.RequestBody = materialized.RequestBody
 	debugProjection := debugview.ProjectRequest(input.Request)
+	outputGuard, err := outputpolicy.NewGuard(input.Request)
+	if err != nil {
+		s.cleanupPreparedImages(ctx, input.PreparedImages)
+		return nil, common.Conversation{}, common.Message{}, err
+	}
 
 	requestID := "req_" + uuid.NewString()
 	responseID := "resp_" + uuid.NewString()
@@ -106,9 +113,11 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 			Model:      input.Request.Model,
 			ResponseID: responseID,
 		}),
-		CreatedAt: time.Now().UTC(),
-		Events:    make(chan PendingEvent, 32),
-		Done:      make(chan PendingResult, 1),
+		OutputGuard: outputGuard,
+		MutationMu:  &sync.Mutex{},
+		CreatedAt:   time.Now().UTC(),
+		Events:      make(chan PendingEvent, 32),
+		Done:        make(chan PendingResult, 1),
 	}
 	s.Pending.Add(turn)
 	if s.Hooks.AfterCreate != nil {

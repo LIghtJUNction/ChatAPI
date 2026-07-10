@@ -43,12 +43,15 @@ func (s *Service) CompleteBody(conversation common.Conversation, input common.Co
 		Model:      conversationstate.Model(conversation, "chatapi-lab"),
 		ResponseID: stringValue(conversation.ResponseID, input.ResponseID),
 	}, protocol.TurnResult{
-		ResponseID: stringValue(conversation.ResponseID, input.ResponseID),
-		OutputText: message.Content,
-		Mode:       input.Mode,
-		ToolName:   input.ToolName,
-		ToolCallID: input.ToolCallID,
-		ToolOutput: stringValue(input.ToolOutput, message.Content),
+		ResponseID:   stringValue(conversation.ResponseID, input.ResponseID),
+		OutputText:   message.Content,
+		Mode:         input.Mode,
+		ToolName:     input.ToolName,
+		ToolCallID:   input.ToolCallID,
+		ToolOutput:   stringValue(input.ToolOutput, message.Content),
+		FinishReason: input.FinishReason,
+		StopSequence: input.StopSequence,
+		Usage:        protocol.Usage{OutputTokens: input.OutputTokens},
 	})
 }
 

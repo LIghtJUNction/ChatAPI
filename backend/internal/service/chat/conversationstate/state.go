@@ -21,6 +21,7 @@ const (
 
 type Runtime struct {
 	OwnerID       string
+	RequestID     string
 	RequestFormat string
 	Model         string
 	Status        Status
@@ -37,6 +38,7 @@ type Summary struct {
 	MessageCount       int       `json:"message_count"`
 	LastMessagePreview string    `json:"last_message_preview"`
 	RequestFormat      string    `json:"request_format,omitempty"`
+	RequestID          string    `json:"request_id,omitempty"`
 	Status             Status    `json:"status,omitempty"`
 	DraftText          string    `json:"draft_text,omitempty"`
 }
@@ -44,6 +46,7 @@ type Summary struct {
 func FromConversation(conversation common.Conversation) Runtime {
 	return Runtime{
 		OwnerID:       metadataString(conversation.Metadata, "owner_id"),
+		RequestID:     metadataString(conversation.Metadata, "request_id"),
 		RequestFormat: metadataString(conversation.Metadata, "request_format"),
 		Model:         metadataString(conversation.Metadata, "model"),
 		Status:        Status(metadataString(conversation.Metadata, "realtime_status")),
@@ -63,9 +66,14 @@ func SummaryFromConversation(conversation common.Conversation) Summary {
 		MessageCount:       conversation.MessageCount,
 		LastMessagePreview: conversation.LastMessagePreview,
 		RequestFormat:      runtime.RequestFormat,
+		RequestID:          runtime.RequestID,
 		Status:             runtime.Status,
 		DraftText:          runtime.DraftText,
 	}
+}
+
+func RequestID(conversation common.Conversation) string {
+	return FromConversation(conversation).RequestID
 }
 
 func OwnerID(conversation common.Conversation) string {

@@ -21,7 +21,7 @@ type Store struct {
 var errConflict = common.ErrTurnConflict
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0005_postgresql_conversation_events"
+const LatestVersion = "0006_postgresql_output_media_refs"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS
@@ -104,6 +104,10 @@ func Reset(ctx context.Context, pool *pgxpool.Pool) error {
 		DROP TABLE IF EXISTS uploaded_images;
 		DROP TABLE IF EXISTS storage_user_quotas;
 		DROP TABLE IF EXISTS storage_file_deletion_failures;
+		DROP TABLE IF EXISTS media_asset_event_refs;
+		DROP TABLE IF EXISTS media_asset_staging;
+		DROP TABLE IF EXISTS media_asset_refs;
+		DROP TABLE IF EXISTS media_assets;
 		DROP TABLE IF EXISTS conversation_events;
 		DROP TABLE IF EXISTS messages;
 		DROP TABLE IF EXISTS conversations;

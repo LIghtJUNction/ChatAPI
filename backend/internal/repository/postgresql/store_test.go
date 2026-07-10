@@ -2,12 +2,45 @@ package postgresql
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
 	"github.com/zyf2007/ChatAPI/internal/repository/storetest"
 	"github.com/zyf2007/ChatAPI/internal/testutil/pgtest"
 )
+
+func TestOutputMediaMigrationKeepsURLOnEventRefs(t *testing.T) {
+	var migrationSQL string
+	for _, step := range registeredMigrations {
+		if step.Version == LatestVersion {
+			migrationSQL = step.UpSQL
+			break
+		}
+	}
+	inputRefs := tableDefinition(t, migrationSQL, "media_asset_refs")
+	eventRefs := tableDefinition(t, migrationSQL, "media_asset_event_refs")
+	if strings.Contains(inputRefs, "url TEXT") {
+		t.Fatalf("input media refs unexpectedly require output URL: %s", inputRefs)
+	}
+	if !strings.Contains(eventRefs, "url TEXT NOT NULL") {
+		t.Fatalf("event media refs do not persist output URL: %s", eventRefs)
+	}
+}
+
+func tableDefinition(t *testing.T, migrationSQL string, table string) string {
+	t.Helper()
+	start := strings.Index(migrationSQL, "CREATE TABLE IF NOT EXISTS "+table+" (")
+	if start < 0 {
+		t.Fatalf("missing table %s", table)
+	}
+	rest := migrationSQL[start:]
+	end := strings.Index(rest, ");")
+	if end < 0 {
+		t.Fatalf("unterminated table %s", table)
+	}
+	return rest[:end+2]
+}
 
 func TestPostgreSQLRepositoryContracts(t *testing.T) {
 	pgtest.BaseDSN(t)

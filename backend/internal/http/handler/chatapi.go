@@ -105,11 +105,11 @@ func (h ChatAPIHandler) AbortOutput(w http.ResponseWriter, r *http.Request) {
 
 func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Request, requestFormat string) {
 	rawBody, readErr := io.ReadAll(r.Body)
+	logging.DebugProtocolRequestBody(h.Logger, r.Context(), requestFormat, rawBody)
 	logger := logging.BindContext(h.Logger, r.Context(),
 		zap.String("protocol", requestFormat),
 		zap.Int("request.body.bytes", len(rawBody)),
 	)
-	logger.Debug("protocol request body received", zap.String("request.body.raw", string(rawBody)))
 	if readErr != nil {
 		logger.Warn("read protocol request body failed", zap.Error(readErr))
 		httpx.WriteJSON(w, http.StatusBadRequest, h.egress().InvalidJSONBody(requestFormat))
@@ -267,7 +267,7 @@ func buildTurnControlCommand(kind turnsvc.TurnControlKind, body map[string]any) 
 			ToolOutput:          stringValue(body["output"], ""),
 			BuiltinToolKind:     stringValue(body["builtin_tool_kind"], ""),
 			BuiltinToolQuery:    stringValue(body["builtin_tool_query"], ""),
-			BuiltinToolResult:   stringValue(body["builtin_tool_result"], ""),
+			BuiltinToolAssetID:  stringValue(body["builtin_tool_asset_id"], ""),
 			ReasoningStreamMode: stringValue(body["reasoning_stream_mode"], ""),
 			AbortReason:         stringValue(body["error"], ""),
 		},

@@ -40,6 +40,7 @@ import type {
   ToolFieldValue,
   ToolSchemaOption,
   VisibleTimelineItem,
+  OutputImageAsset,
 } from '../types/chat'
 
 const { TextArea } = Input
@@ -49,7 +50,8 @@ type ChatPaneProps = {
   availableToolSchemas: ToolSchemaOption[]
   builtinToolKind: string
   builtinToolQuery: string
-  builtinToolResult: string
+  builtinToolAsset: OutputImageAsset | null
+  uploadingOutputImage: boolean
   chatScrollRef: RefObject<HTMLDivElement | null>
   composer: string
   composerMode: ComposerMode
@@ -60,6 +62,7 @@ type ChatPaneProps = {
   keyboardOffset: number
   messagesLoading: boolean
   onDraft: () => void | Promise<void>
+  onOutputImageUpload: (file: File) => Promise<OutputImageAsset>
   onLogout: () => void | Promise<void>
   onOpenDrawer: () => void
   onSend: () => void | Promise<void>
@@ -71,7 +74,7 @@ type ChatPaneProps = {
   setComposerMode: (value: ComposerMode) => void
   setBuiltinToolKind: (value: string) => void
   setBuiltinToolQuery: (value: string) => void
-  setBuiltinToolResult: (value: string) => void
+  setBuiltinToolAsset: (value: OutputImageAsset | null) => void
   setThinkingText: (value: string) => void
   setReasoningStreamMode: (value: ReasoningStreamMode) => void
   setToolCallId: (value: string) => void
@@ -91,7 +94,8 @@ export function ChatPane(props: ChatPaneProps) {
     availableToolSchemas,
     builtinToolKind,
     builtinToolQuery,
-    builtinToolResult,
+    builtinToolAsset,
+    uploadingOutputImage,
     chatScrollRef,
     composer,
     composerMode,
@@ -102,6 +106,7 @@ export function ChatPane(props: ChatPaneProps) {
     keyboardOffset,
     messagesLoading,
     onDraft,
+    onOutputImageUpload,
     onLogout,
     onOpenDrawer,
     onSend,
@@ -113,7 +118,7 @@ export function ChatPane(props: ChatPaneProps) {
     setComposerMode,
     setBuiltinToolKind,
     setBuiltinToolQuery,
-    setBuiltinToolResult,
+    setBuiltinToolAsset,
     setThinkingText,
     setReasoningStreamMode,
     setToolCallId,
@@ -130,29 +135,24 @@ export function ChatPane(props: ChatPaneProps) {
   const [imageFileSize, setImageFileSize] = useState(0)
   const [imageFileError, setImageFileError] = useState('')
 
-  function selectImageFile(file: File) {
+  async function selectImageFile(file: File) {
     if (!file.type.startsWith('image/')) {
       setImageFileError('请选择图片文件')
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result !== 'string') {
-        setImageFileError('无法读取图片文件')
-        return
-      }
-      setBuiltinToolResult(reader.result)
+    try {
+      const asset = await onOutputImageUpload(file)
       setImageFileName(file.name)
-      setImageFileSize(file.size)
+      setImageFileSize(asset.bytes)
       setImageFileError('')
+    } catch (error) {
+      setImageFileError(error instanceof Error ? error.message : '图片上传失败')
     }
-    reader.onerror = () => setImageFileError('无法读取图片文件')
-    reader.readAsDataURL(file)
   }
 
   function clearImageFile() {
-    setBuiltinToolResult('')
+    setBuiltinToolAsset(null)
     setImageFileName('')
     setImageFileSize(0)
     setImageFileError('')
@@ -412,9 +412,9 @@ export function ChatPane(props: ChatPaneProps) {
                 ) : null}
                 {builtinToolKind === 'image_generation' ? (
                   <div className="image-result-upload">
-                    {builtinToolResult ? (
+                    {builtinToolAsset ? (
                       <div className="image-result-preview">
-                        <img src={builtinToolResult} alt="待输出的生图结果" />
+                        <img src={builtinToolAsset.url} alt="待输出的生图结果" />
                         <div className="image-result-file">
                           <Typography.Text strong ellipsis={{ tooltip: imageFileName }}>
                             {imageFileName || '已选择图片'}
@@ -428,7 +428,7 @@ export function ChatPane(props: ChatPaneProps) {
                         <Button
                           icon={<DeleteOutlined />}
                           onClick={clearImageFile}
-                          disabled={sending || !isWaitingForUser}
+                          disabled={sending || uploadingOutputImage || !isWaitingForUser}
                         >
                           移除
                         </Button>
@@ -437,18 +437,20 @@ export function ChatPane(props: ChatPaneProps) {
                       <Upload.Dragger
                         accept="image/*"
                         beforeUpload={(file) => {
-                          selectImageFile(file)
+                          void selectImageFile(file)
                           return Upload.LIST_IGNORE
                         }}
-                        disabled={sending || !isWaitingForUser}
+                        disabled={sending || uploadingOutputImage || !isWaitingForUser}
                         maxCount={1}
                         multiple={false}
                         showUploadList={false}
                       >
                         <UploadOutlined className="image-result-upload-icon" />
-                        <Typography.Text strong>点击或拖入图片</Typography.Text>
+                        <Typography.Text strong>
+                          {uploadingOutputImage ? '正在处理图片' : '点击或拖入图片'}
+                        </Typography.Text>
                         <Typography.Text type="secondary">
-                          浏览器会转换为 image_generation_call.result 所需的 Base64
+                          服务端会转为 AVIF，确认输出时再生成协议 Base64
                         </Typography.Text>
                       </Upload.Dragger>
                     )}
@@ -538,7 +540,7 @@ export function ChatPane(props: ChatPaneProps) {
                       : composerMode === 'builtin_tool'
                         ? !builtinToolKind.trim() ||
                           (builtinToolKind === 'web_search' && !builtinToolQuery.trim()) ||
-                          (builtinToolKind === 'image_generation' && !builtinToolResult.trim())
+                          (builtinToolKind === 'image_generation' && !builtinToolAsset)
                       : !toolName.trim())
                 }
               >

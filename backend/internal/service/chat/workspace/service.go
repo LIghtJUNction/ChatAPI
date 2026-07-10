@@ -134,7 +134,7 @@ func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 			Output:              stringValue(commandRaw["output"], ""),
 			BuiltinToolKind:     stringValue(commandRaw["builtin_tool_kind"], ""),
 			BuiltinToolQuery:    stringValue(commandRaw["builtin_tool_query"], ""),
-			BuiltinToolResult:   stringValue(commandRaw["builtin_tool_result"], ""),
+			BuiltinToolAssetID:  stringValue(commandRaw["builtin_tool_asset_id"], ""),
 			ReasoningStreamMode: stringValue(commandRaw["reasoning_stream_mode"], ""),
 			Error:               stringValue(commandRaw["error"], ""),
 		}
@@ -300,7 +300,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 		return CommandAck{}, fmt.Errorf("workspace command executor unavailable")
 	}
 	kind := turnsvc.TurnControlKind(strings.TrimSpace(command.Kind))
-	_, err := s.turn.Execute(ctx, controlsvc.Command{
+	result, err := s.turn.Execute(ctx, controlsvc.Command{
 		OwnerID:        strings.TrimSpace(ownerID),
 		ConversationID: strings.TrimSpace(command.ConversationID),
 		Action: turnsvc.OutputAction{
@@ -312,7 +312,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 			ToolOutput:          command.Output,
 			BuiltinToolKind:     strings.TrimSpace(command.BuiltinToolKind),
 			BuiltinToolQuery:    strings.TrimSpace(command.BuiltinToolQuery),
-			BuiltinToolResult:   strings.TrimSpace(command.BuiltinToolResult),
+			BuiltinToolAssetID:  strings.TrimSpace(command.BuiltinToolAssetID),
 			ReasoningStreamMode: strings.TrimSpace(command.ReasoningStreamMode),
 			AbortReason:         strings.TrimSpace(command.Error),
 		},
@@ -324,7 +324,13 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 		Type:           "workspace.command_ack",
 		CommandID:      command.ID,
 		ConversationID: strings.TrimSpace(command.ConversationID),
+		AutoCompleted:  boolValue(result.Body["auto_completed"]),
 	}, nil
+}
+
+func boolValue(value any) bool {
+	valueBool, _ := value.(bool)
+	return valueBool
 }
 
 func commandErrorPayload(err error) (string, string) {

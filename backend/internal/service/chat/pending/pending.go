@@ -57,6 +57,9 @@ func (r *PendingRegistry) Add(turn *PendingTurn) {
 	if stored.State == "" {
 		stored.State = "pending"
 	}
+	if stored.MutationMu == nil {
+		stored.MutationMu = &sync.Mutex{}
+	}
 	r.byConversationID[stored.ConversationID] = &stored
 	if stored.OwnerID != "" {
 		if _, ok := r.byOwnerID[stored.OwnerID]; !ok {
@@ -174,21 +177,37 @@ func (r *PendingRegistry) Abort(conversationID string, body map[string]any) erro
 }
 
 func (r *PendingRegistry) ExpireOlderThan(cutoff time.Time, body map[string]any) int {
-	r.mu.Lock()
-	expired := make([]*PendingTurn, 0)
-	for conversationID, turn := range r.byConversationID {
+	r.mu.RLock()
+	candidates := make([]*PendingTurn, 0)
+	for _, turn := range r.byConversationID {
 		if turn.CreatedAt.IsZero() || !turn.CreatedAt.Before(cutoff) {
 			continue
 		}
 		switch turn.State {
 		case "pending", "streaming":
+			candidates = append(candidates, turn)
+		}
+	}
+	r.mu.RUnlock()
+
+	expired := make([]*PendingTurn, 0)
+	for _, candidate := range candidates {
+		if candidate.MutationMu != nil {
+			candidate.MutationMu.Lock()
+		}
+		r.mu.Lock()
+		turn, ok := r.byConversationID[candidate.ConversationID]
+		if ok && turn == candidate && !turn.CreatedAt.IsZero() && turn.CreatedAt.Before(cutoff) && (turn.State == "pending" || turn.State == "streaming") {
 			turn.State = "expired"
-			delete(r.byConversationID, conversationID)
+			delete(r.byConversationID, turn.ConversationID)
 			r.removeIndexes(turn)
 			expired = append(expired, turn)
 		}
+		r.mu.Unlock()
+		if candidate.MutationMu != nil {
+			candidate.MutationMu.Unlock()
+		}
 	}
-	r.mu.Unlock()
 
 	for _, turn := range expired {
 		r.loggerForTurn(turn).Warn("pending turn expired")

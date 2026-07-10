@@ -37,6 +37,8 @@ type TurnResult struct {
 	ToolCallID          string
 	ToolOutput          string
 	Usage               Usage
+	FinishReason        string
+	StopSequence        string
 }
 
 type ConversationMeta struct {

@@ -94,6 +94,20 @@ func ParseImageInput(raw string, mediaType string, maxBytes int64) (ParsedImage,
 	}
 }
 
+func ParseImageBytes(data []byte, mediaType string, maxBytes int64) (ParsedImage, error) {
+	if len(data) == 0 {
+		return ParsedImage{}, ErrInvalidImageInput
+	}
+	if maxBytes > 0 && int64(len(data)) > maxBytes {
+		return ParsedImage{}, ErrImageTooLarge
+	}
+	return inspectDecoded("", SourceKind("upload"), strings.TrimSpace(mediaType), data, maxBytes)
+}
+
+func SHA256Hex(data []byte) string {
+	return sha256Hex(data)
+}
+
 func EncodeAVIF(data ParsedImage, opts AVIFOptions) ([]byte, error) {
 	if len(data.Bytes) == 0 {
 		return nil, ErrInvalidImageInput

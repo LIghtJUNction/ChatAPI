@@ -17,6 +17,9 @@ type Reader interface {
 	ListMessages(context.Context, string) ([]common.Message, error)
 	ListConversationEvents(context.Context, string) ([]common.ConversationEvent, error)
 	ListMediaAssets(context.Context) ([]common.MediaAsset, error)
+	CreateMediaAsset(context.Context, common.CreateMediaAssetInput) (common.MediaAsset, error)
+	GetMediaAssetByID(context.Context, string) (common.MediaAsset, error)
+	GetStagedMediaAsset(context.Context, string, string, string, string) (common.MediaAsset, error)
 	GetMediaAssetByFileID(context.Context, string) (common.MediaAsset, error)
 	ListOrphanMediaAssets(context.Context) ([]common.MediaAsset, error)
 }
@@ -34,6 +37,7 @@ type Writer interface {
 	DisconnectPendingTurnWithEvent(context.Context, common.PendingTurnLifecycleMutationInput) (common.PendingTurnMutationResult, error)
 	DisconnectAllPendingTurns(context.Context, string) (common.ExpirePendingTurnsResult, error)
 	AppendConversationEvent(context.Context, common.AppendConversationEventInput) (common.ConversationEvent, error)
+	AppendConversationEventWithAsset(context.Context, common.AppendConversationEventWithAssetInput) (common.ConversationEvent, error)
 }
 
 type Store interface {

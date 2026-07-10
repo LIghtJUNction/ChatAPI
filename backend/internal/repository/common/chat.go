@@ -26,16 +26,17 @@ type Message struct {
 }
 
 type ConversationEvent struct {
-	ID             string         `json:"id"`
-	ConversationID string         `json:"conversation_id"`
-	OwnerID        string         `json:"owner_id"`
-	Type           string         `json:"type"`
-	Level          string         `json:"level"`
-	Title          string         `json:"title"`
-	Detail         string         `json:"detail,omitempty"`
-	RequestID      string         `json:"request_id,omitempty"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID             string               `json:"id"`
+	ConversationID string               `json:"conversation_id"`
+	OwnerID        string               `json:"owner_id"`
+	Type           string               `json:"type"`
+	Level          string               `json:"level"`
+	Title          string               `json:"title"`
+	Detail         string               `json:"detail,omitempty"`
+	RequestID      string               `json:"request_id,omitempty"`
+	Metadata       map[string]any       `json:"metadata,omitempty"`
+	MediaAssets    []EventMediaAssetRef `json:"media_assets,omitempty"`
+	CreatedAt      time.Time            `json:"created_at"`
 }
 
 type TurnIdentity struct {

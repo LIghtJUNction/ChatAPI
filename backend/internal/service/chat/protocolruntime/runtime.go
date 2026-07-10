@@ -29,6 +29,9 @@ type Action struct {
 	BuiltinToolKind     string
 	BuiltinToolQuery    string
 	BuiltinToolResult   string
+	FinishReason        string
+	StopSequence        string
+	OutputTokens        int
 	ErrorBody           map[string]any
 }
 
@@ -366,18 +369,29 @@ func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 	}
 	events = append(events, r.closeResponsesReasoning()...)
 	events = append(events, r.closeResponsesTextPart()...)
+	eventName := "response.completed"
+	status := "completed"
+	response := map[string]any{
+		"id":          r.responseID,
+		"object":      "response",
+		"status":      status,
+		"model":       r.meta.Model,
+		"output_text": r.responsesText.String(),
+		"output":      r.responsesCompletedOutput(action),
+		"usage":       map[string]any{"output_tokens": action.OutputTokens},
+	}
+	outcome := protocol.ResolveCompletionOutcome(action.FinishReason, action.Mode)
+	if outcome.ResponsesIncomplete() {
+		eventName = "response.incomplete"
+		status = "incomplete"
+		response["status"] = status
+		response["incomplete_details"] = map[string]any{"reason": "max_output_tokens"}
+	}
 	events = append(events, protocol.StreamEvent{
-		Event: "response.completed",
+		Event: eventName,
 		Data: map[string]any{
-			"type": "response.completed",
-			"response": map[string]any{
-				"id":          r.responseID,
-				"object":      "response",
-				"status":      "completed",
-				"model":       r.meta.Model,
-				"output_text": r.responsesText.String(),
-				"output":      r.responsesCompletedOutput(action),
-			},
+			"type":     eventName,
+			"response": response,
 		},
 	})
 	return events
@@ -756,6 +770,7 @@ func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
 }
 
 func (r *Runtime) completeChat(action Action) []protocol.StreamEvent {
+	outcome := protocol.ResolveCompletionOutcome(action.FinishReason, action.Mode)
 	if normalizedMode(action.Mode) == "tool_call" {
 		callID := strings.TrimSpace(action.ToolCallID)
 		if callID == "" {
@@ -772,7 +787,7 @@ func (r *Runtime) completeChat(action Action) []protocol.StreamEvent {
 		}
 		return []protocol.StreamEvent{
 			r.chatChunk(map[string]any{"tool_calls": []map[string]any{toolCall}}, nil),
-			r.chatChunk(map[string]any{}, stringPtr("tool_calls")),
+			r.chatChunk(map[string]any{}, stringPtr(outcome.ChatFinishReason())),
 			{Data: "[DONE]", Done: true},
 		}
 	}
@@ -780,7 +795,7 @@ func (r *Runtime) completeChat(action Action) []protocol.StreamEvent {
 	if normalizedMode(action.Mode) != "thinking" && action.OutputText != "" {
 		events = append(events, r.chatChunk(map[string]any{"content": action.OutputText}, nil))
 	}
-	events = append(events, r.chatChunk(map[string]any{}, stringPtr("stop")), protocol.StreamEvent{Data: "[DONE]", Done: true})
+	events = append(events, r.chatChunk(map[string]any{}, stringPtr(outcome.ChatFinishReason())), protocol.StreamEvent{Data: "[DONE]", Done: true})
 	return events
 }
 
@@ -821,16 +836,17 @@ func (r *Runtime) anthropicTextDelta(delta string) []protocol.StreamEvent {
 func (r *Runtime) completeAnthropic(action Action) []protocol.StreamEvent {
 	events := make([]protocol.StreamEvent, 0)
 	mode := normalizedMode(action.Mode)
+	outcome := protocol.ResolveCompletionOutcome(action.FinishReason, action.Mode)
 	if mode == "tool_call" {
 		events = append(events, r.closeAnthropicBlock()...)
 		events = append(events, r.anthropicToolUse(action)...)
-		return append(events, r.anthropicStop("tool_use")...)
+		return append(events, r.anthropicStop(outcome.AnthropicStopReason(), action.StopSequence, action.OutputTokens)...)
 	}
 	if mode != "thinking" && action.OutputText != "" {
 		events = append(events, r.anthropicTextDelta(action.OutputText)...)
 	}
 	events = append(events, r.closeAnthropicBlock()...)
-	return append(events, r.anthropicStop("end_turn")...)
+	return append(events, r.anthropicStop(outcome.AnthropicStopReason(), action.StopSequence, action.OutputTokens)...)
 }
 
 func (r *Runtime) ensureAnthropicBlock(blockType string, block map[string]any) []protocol.StreamEvent {
@@ -906,13 +922,18 @@ func (r *Runtime) anthropicToolUse(action Action) []protocol.StreamEvent {
 	return events
 }
 
-func (r *Runtime) anthropicStop(reason string) []protocol.StreamEvent {
+func (r *Runtime) anthropicStop(reason string, stopSequence string, outputTokens int) []protocol.StreamEvent {
+	var stopValue any
+	if strings.TrimSpace(stopSequence) != "" {
+		stopValue = stopSequence
+	}
 	return []protocol.StreamEvent{
 		{
 			Event: "message_delta",
 			Data: map[string]any{
 				"type":  "message_delta",
-				"delta": map[string]any{"stop_reason": reason, "stop_sequence": nil},
+				"delta": map[string]any{"stop_reason": reason, "stop_sequence": stopValue},
+				"usage": map[string]any{"output_tokens": outputTokens},
 			},
 		},
 		{

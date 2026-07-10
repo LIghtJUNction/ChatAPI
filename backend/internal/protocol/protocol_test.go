@@ -690,7 +690,7 @@ func TestProtocolResponseFixtures(t *testing.T) {
 			},
 			assertBody: func(t *testing.T, body map[string]any) {
 				t.Helper()
-				if body["type"] != "message" || body["stop_reason"] != "end_turn" {
+				if body["type"] != "message" || body["stop_reason"] != "tool_use" {
 					t.Fatalf("unexpected anthropic body: %#v", body)
 				}
 				content := body["content"].([]map[string]any)
@@ -706,6 +706,30 @@ func TestProtocolResponseFixtures(t *testing.T) {
 			body := BuildResponseForMeta(fixture.meta, fixture.result)
 			fixture.assertBody(t, body)
 		})
+	}
+}
+
+func TestBuildResponseForMetaMapsOutputGuardFinishReasons(t *testing.T) {
+	responses := BuildResponseForMeta(ConversationMeta{Protocol: ProtocolResponses, Model: "gpt-test"}, TurnResult{
+		ResponseID: "resp_test", OutputText: "partial", FinishReason: "length", Usage: Usage{OutputTokens: 4},
+	})
+	if responses["status"] != "incomplete" || responses["incomplete_details"].(map[string]any)["reason"] != "max_output_tokens" {
+		t.Fatalf("unexpected responses incomplete body: %#v", responses)
+	}
+
+	chat := BuildResponseForMeta(ConversationMeta{Protocol: ProtocolChatCompletions, Model: "gpt-test"}, TurnResult{
+		ResponseID: "chatcmpl_test", OutputText: "partial", FinishReason: "length", Usage: Usage{OutputTokens: 4},
+	})
+	chatChoices := chat["choices"].([]map[string]any)
+	if chatChoices[0]["finish_reason"] != "length" {
+		t.Fatalf("unexpected chat finish body: %#v", chat)
+	}
+
+	anthropic := BuildResponseForMeta(ConversationMeta{Protocol: ProtocolAnthropicMessages, Model: "claude-test"}, TurnResult{
+		ResponseID: "msg_test", OutputText: "partial", FinishReason: "stop_sequence", StopSequence: "END", Usage: Usage{OutputTokens: 4},
+	})
+	if anthropic["stop_reason"] != "stop_sequence" || anthropic["stop_sequence"] != "END" {
+		t.Fatalf("unexpected anthropic stop body: %#v", anthropic)
 	}
 }
 

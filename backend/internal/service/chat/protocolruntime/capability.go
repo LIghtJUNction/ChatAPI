@@ -7,10 +7,10 @@ import (
 )
 
 type BuiltinToolSpec struct {
-	Kind           string
-	Title          string
-	RequiresQuery  bool
-	RequiresResult bool
+	Kind          string
+	Title         string
+	RequiresQuery bool
+	RequiresAsset bool
 }
 
 func LookupBuiltinToolSpec(kind string) (BuiltinToolSpec, bool) {
@@ -23,9 +23,9 @@ func LookupBuiltinToolSpec(kind string) (BuiltinToolSpec, bool) {
 		}, true
 	case "image_generation":
 		return BuiltinToolSpec{
-			Kind:           "image_generation",
-			Title:          "Image Generation",
-			RequiresResult: true,
+			Kind:          "image_generation",
+			Title:         "Image Generation",
+			RequiresAsset: true,
 		}, true
 	default:
 		return BuiltinToolSpec{}, false

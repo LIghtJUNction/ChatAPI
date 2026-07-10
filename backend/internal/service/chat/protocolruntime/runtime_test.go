@@ -56,6 +56,57 @@ func TestRuntimeCompletionDoesNotRepeatStreamedText(t *testing.T) {
 	}
 }
 
+func TestRuntimeMapsOutputGuardFinishReasons(t *testing.T) {
+	t.Run("responses_length", func(t *testing.T) {
+		runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test", ResponseID: "resp_test"})
+		result := runtime.Apply(Action{Kind: ActionComplete, FinishReason: "length", OutputTokens: 7})
+		last := result.StreamEvents[len(result.StreamEvents)-1]
+		if last.Event != "response.incomplete" {
+			t.Fatalf("unexpected responses terminal event: %#v", last)
+		}
+		response := last.Data.(map[string]any)["response"].(map[string]any)
+		if response["status"] != "incomplete" || response["incomplete_details"].(map[string]any)["reason"] != "max_output_tokens" {
+			t.Fatalf("unexpected incomplete response: %#v", response)
+		}
+	})
+
+	t.Run("chat_length", func(t *testing.T) {
+		runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolChatCompletions, Model: "gpt-test"})
+		result := runtime.Apply(Action{Kind: ActionComplete, FinishReason: "length", OutputTokens: 7})
+		terminal := result.StreamEvents[len(result.StreamEvents)-2].Data.(map[string]any)
+		choices := terminal["choices"].([]map[string]any)
+		if choices[0]["finish_reason"] != "length" {
+			t.Fatalf("unexpected chat finish reason: %#v", terminal)
+		}
+	})
+
+	t.Run("truncated_tool_call_uses_length", func(t *testing.T) {
+		chatRuntime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolChatCompletions, Model: "gpt-test"})
+		chatResult := chatRuntime.Apply(Action{Kind: ActionComplete, Mode: "tool_call", ToolName: "lookup", OutputText: `{`, FinishReason: "length", OutputTokens: 7})
+		chatTerminal := chatResult.StreamEvents[len(chatResult.StreamEvents)-2].Data.(map[string]any)
+		if chatTerminal["choices"].([]map[string]any)[0]["finish_reason"] != "length" {
+			t.Fatalf("truncated chat tool call lost length outcome: %#v", chatTerminal)
+		}
+
+		anthropicRuntime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolAnthropicMessages, Model: "claude-test"})
+		anthropicResult := anthropicRuntime.Apply(Action{Kind: ActionComplete, Mode: "tool_call", ToolName: "lookup", OutputText: `{`, FinishReason: "length", OutputTokens: 7})
+		messageDelta := anthropicResult.StreamEvents[len(anthropicResult.StreamEvents)-2].Data.(map[string]any)
+		if messageDelta["delta"].(map[string]any)["stop_reason"] != "max_tokens" {
+			t.Fatalf("truncated anthropic tool call lost length outcome: %#v", messageDelta)
+		}
+	})
+
+	t.Run("anthropic_stop_sequence", func(t *testing.T) {
+		runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolAnthropicMessages, Model: "claude-test"})
+		result := runtime.Apply(Action{Kind: ActionComplete, FinishReason: "stop_sequence", StopSequence: "END", OutputTokens: 7})
+		messageDelta := result.StreamEvents[len(result.StreamEvents)-2].Data.(map[string]any)
+		delta := messageDelta["delta"].(map[string]any)
+		if delta["stop_reason"] != "stop_sequence" || delta["stop_sequence"] != "END" {
+			t.Fatalf("unexpected anthropic stop delta: %#v", messageDelta)
+		}
+	})
+}
+
 func streamEventText(event protocol.StreamEvent) string {
 	data, ok := event.Data.(map[string]any)
 	if !ok {

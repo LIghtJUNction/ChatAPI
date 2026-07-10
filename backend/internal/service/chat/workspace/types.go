@@ -20,6 +20,7 @@ type ConversationSummary struct {
 	MessageCount       int                      `json:"message_count"`
 	LastMessagePreview string                   `json:"last_message_preview"`
 	RequestFormat      string                   `json:"request_format,omitempty"`
+	RequestID          string                   `json:"request_id,omitempty"`
 	Status             conversationstate.Status `json:"status,omitempty"`
 	DraftText          string                   `json:"draft_text,omitempty"`
 }
@@ -43,11 +44,12 @@ type TimelineMessage struct {
 }
 
 type TimelineItem struct {
-	ID        string                    `json:"id"`
-	Kind      string                    `json:"kind"`
-	CreatedAt time.Time                 `json:"created_at"`
-	Message   *TimelineMessage          `json:"message,omitempty"`
-	Event     *common.ConversationEvent `json:"event,omitempty"`
+	ID           string                       `json:"id"`
+	Kind         string                       `json:"kind"`
+	CreatedAt    time.Time                    `json:"created_at"`
+	Message      *TimelineMessage             `json:"message,omitempty"`
+	Event        *common.ConversationEvent    `json:"event,omitempty"`
+	ContentParts []TimelineMessageContentPart `json:"content_parts,omitempty"`
 }
 
 type Command struct {
@@ -61,7 +63,7 @@ type Command struct {
 	Output              string `json:"output,omitempty"`
 	BuiltinToolKind     string `json:"builtin_tool_kind,omitempty"`
 	BuiltinToolQuery    string `json:"builtin_tool_query,omitempty"`
-	BuiltinToolResult   string `json:"builtin_tool_result,omitempty"`
+	BuiltinToolAssetID  string `json:"builtin_tool_asset_id,omitempty"`
 	ReasoningStreamMode string `json:"reasoning_stream_mode,omitempty"`
 	Error               string `json:"error,omitempty"`
 }
@@ -70,6 +72,7 @@ type CommandAck struct {
 	Type           string `json:"type"`
 	CommandID      string `json:"command_id"`
 	ConversationID string `json:"conversation_id"`
+	AutoCompleted  bool   `json:"auto_completed,omitempty"`
 }
 
 type CommandError struct {
@@ -92,6 +95,7 @@ func SummaryFromConversation(conversation common.Conversation) ConversationSumma
 		MessageCount:       summary.MessageCount,
 		LastMessagePreview: summary.LastMessagePreview,
 		RequestFormat:      summary.RequestFormat,
+		RequestID:          summary.RequestID,
 		Status:             summary.Status,
 		DraftText:          summary.DraftText,
 	}
@@ -103,6 +107,9 @@ func TimelineItemFromRaw(item timelinesvc.Item) TimelineItem {
 		Kind:      item.Kind,
 		CreatedAt: item.CreatedAt,
 		Event:     item.Event,
+	}
+	if item.Event != nil {
+		out.ContentParts = buildEventContentParts(*item.Event)
 	}
 	if item.Message != nil {
 		out.Message = &TimelineMessage{
@@ -117,6 +124,23 @@ func TimelineItemFromRaw(item timelinesvc.Item) TimelineItem {
 		}
 	}
 	return out
+}
+
+func buildEventContentParts(event common.ConversationEvent) []TimelineMessageContentPart {
+	if strings.TrimSpace(event.Type) != "builtin_tool" {
+		return nil
+	}
+	parts := make([]TimelineMessageContentPart, 0, len(event.MediaAssets))
+	for _, asset := range event.MediaAssets {
+		url := strings.TrimSpace(asset.URL)
+		if url == "" {
+			continue
+		}
+		parts = append(parts, TimelineMessageContentPart{
+			Type: "image", Src: url, MediaType: strings.TrimSpace(asset.MediaType),
+		})
+	}
+	return parts
 }
 
 func buildMessageContentParts(message common.Message) []TimelineMessageContentPart {

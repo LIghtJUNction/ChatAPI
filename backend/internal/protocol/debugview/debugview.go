@@ -50,9 +50,9 @@ func ProjectRequest(request protocol.TurnRequest) Projection {
 	chips = appendValueChip(chips, request.Protocol, "seed", "seed", int64Value(options.Seed), SupportNormalized)
 	chips = appendValueChip(chips, request.Protocol, "service_tier", "tier", options.ServiceTier, SupportStoredOnly)
 	chips = appendValueChip(chips, request.Protocol, "user", "user", options.User, SupportStoredOnly)
-	chips = appendValueChip(chips, request.Protocol, "max_output_tokens", "max_out", intValue(options.MaxOutputTokens), SupportNormalized)
-	chips = appendValueChip(chips, request.Protocol, "max_tokens", "max", intValue(options.MaxTokens), SupportNormalized)
-	chips = appendValueChip(chips, request.Protocol, "max_completion_tokens", "max_completion", intValue(options.MaxCompletionTokens), SupportNormalized)
+	chips = appendValueChip(chips, request.Protocol, "max_output_tokens", "max_out", intValue(options.MaxOutputTokens), SupportApplied)
+	chips = appendValueChip(chips, request.Protocol, "max_tokens", "max", intValue(options.MaxTokens), SupportApplied)
+	chips = appendValueChip(chips, request.Protocol, "max_completion_tokens", "max_completion", intValue(options.MaxCompletionTokens), SupportApplied)
 	chips = appendBoolChip(chips, request.Protocol, "store", "store", options.Store, SupportPartiallyApplied)
 	chips = appendBoolChip(chips, request.Protocol, "parallel_tool_calls", "parallel_tools", options.ParallelToolCalls, SupportPartiallyApplied)
 	if len(options.Stop) > 0 {
@@ -62,7 +62,7 @@ func ProjectRequest(request protocol.TurnRequest) Projection {
 			Value:        strings.Join(options.Stop, ", "),
 			Protocol:     request.Protocol.String(),
 			Category:     CategoryRequest,
-			SupportLevel: SupportPartiallyApplied,
+			SupportLevel: SupportApplied,
 			Detail:       append([]string(nil), options.Stop...),
 		})
 	}

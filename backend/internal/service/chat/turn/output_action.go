@@ -17,13 +17,16 @@ type OutputAction struct {
 	BuiltinToolKind     string
 	BuiltinToolQuery    string
 	BuiltinToolResult   string
+	BuiltinToolAssetID  string
 	ReasoningStreamMode string
 	AbortReason         string
+	FinishReason        string
+	StopSequence        string
+	OutputTokens        int
 }
 
 func (a OutputAction) Normalized() OutputAction {
 	a.Kind = TurnControlKind(strings.TrimSpace(string(a.Kind)))
-	a.OutputText = strings.TrimSpace(a.OutputText)
 	a.Mode = strings.TrimSpace(a.Mode)
 	if a.Mode == "" {
 		a.Mode = "assistant_message"
@@ -37,6 +40,7 @@ func (a OutputAction) Normalized() OutputAction {
 	a.BuiltinToolKind = strings.TrimSpace(a.BuiltinToolKind)
 	a.BuiltinToolQuery = strings.TrimSpace(a.BuiltinToolQuery)
 	a.BuiltinToolResult = strings.TrimSpace(a.BuiltinToolResult)
+	a.BuiltinToolAssetID = strings.TrimSpace(a.BuiltinToolAssetID)
 	a.ReasoningStreamMode = strings.TrimSpace(a.ReasoningStreamMode)
 	a.AbortReason = strings.TrimSpace(a.AbortReason)
 	return a
@@ -55,8 +59,8 @@ func (a OutputAction) Validate() error {
 		if spec.RequiresQuery && a.BuiltinToolQuery == "" {
 			return errors.New("builtin_tool_query is required")
 		}
-		if spec.RequiresResult && a.BuiltinToolResult == "" {
-			return errors.New("builtin_tool_result is required")
+		if spec.RequiresAsset && a.BuiltinToolAssetID == "" {
+			return errors.New("builtin_tool_asset_id is required")
 		}
 		return nil
 	case TurnControlAbort:
@@ -96,5 +100,8 @@ func (a OutputAction) RuntimeAction() protocolruntime.Action {
 		BuiltinToolKind:     a.BuiltinToolKind,
 		BuiltinToolQuery:    a.BuiltinToolQuery,
 		BuiltinToolResult:   a.BuiltinToolResult,
+		FinishReason:        a.FinishReason,
+		StopSequence:        a.StopSequence,
+		OutputTokens:        a.OutputTokens,
 	}
 }

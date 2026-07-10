@@ -175,7 +175,8 @@ export function WorkspaceRoute() {
             availableToolSchemas={workspace.availableToolSchemas}
             builtinToolKind={workspace.builtinToolKind}
             builtinToolQuery={workspace.builtinToolQuery}
-            builtinToolResult={workspace.builtinToolResult}
+            builtinToolAsset={workspace.builtinToolAsset}
+			uploadingOutputImage={workspace.uploadingOutputImage}
             chatScrollRef={workspace.chatScrollRef}
             composer={workspace.composer}
             composerMode={workspace.composerMode}
@@ -186,6 +187,7 @@ export function WorkspaceRoute() {
             keyboardOffset={workspace.keyboardOffset}
             messagesLoading={workspace.messagesLoading}
             onDraft={workspace.handleDraft}
+			onOutputImageUpload={workspace.handleOutputImageUpload}
             onLogout={workspace.handleLogout}
             onOpenDrawer={() => workspace.setDrawerOpen(true)}
             onSend={workspace.handleSend}
@@ -197,7 +199,7 @@ export function WorkspaceRoute() {
             setComposerMode={workspace.setComposerMode}
             setBuiltinToolKind={workspace.setBuiltinToolKind}
             setBuiltinToolQuery={workspace.setBuiltinToolQuery}
-            setBuiltinToolResult={workspace.setBuiltinToolResult}
+            setBuiltinToolAsset={workspace.setBuiltinToolAsset}
             setThinkingText={workspace.setThinkingText}
             setReasoningStreamMode={workspace.setReasoningStreamMode}
             setToolCallId={workspace.setToolCallId}

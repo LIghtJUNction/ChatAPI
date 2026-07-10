@@ -1,11 +1,13 @@
 package turn
 
 import (
+	"sync"
 	"time"
 
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/outputpolicy"
 	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 )
 
@@ -32,6 +34,8 @@ type PendingTurn struct {
 	NormalizedRequest protocol.TurnRequest
 	RequestMeta       common.Request
 	Runtime           *protocolruntime.Runtime
+	OutputGuard       *outputpolicy.Guard
+	MutationMu        *sync.Mutex
 	CreatedAt         time.Time
 	State             string
 	Events            chan PendingEvent

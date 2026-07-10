@@ -3,10 +3,12 @@ package localstore
 import (
 	"context"
 	"fmt"
-	"github.com/zyf2007/ChatAPI/internal/platform/media"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zyf2007/ChatAPI/internal/platform/media"
 )
 
 type Store struct {
@@ -54,6 +56,18 @@ func (s Store) DeletePreparedImage(_ context.Context, path string) error {
 		return fmt.Errorf("delete prepared image: %w", err)
 	}
 	return nil
+}
+
+func (s Store) OpenPreparedImage(_ context.Context, path string) (io.ReadCloser, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("prepared image path is required")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open prepared image: %w", err)
+	}
+	return file, nil
 }
 
 func sanitizeSegment(value string) string {

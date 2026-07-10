@@ -76,18 +76,26 @@ func requestLoggingMiddleware(factory *logging.Factory, base *zap.Logger) func(h
 			)
 			ctx := logging.WithRequestID(r.Context(), requestID)
 			ctx = logging.WithLogger(ctx, logger)
-			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(rec, r.WithContext(ctx))
 			entry := logging.HTTPAccessEntry{
 				Timestamp: start,
+				Phase:     "start",
 				RequestID: requestID,
 				Kind:      httpAccessKind(r),
 				Method:    r.Method,
-				Path:      r.URL.Path,
-				Status:    logging.HTTPStatusFromRecorder(rec.status),
-				Duration:  time.Since(start),
+				Path:      r.URL.RequestURI(),
 				Remote:    r.RemoteAddr,
 			}
+			if factory != nil {
+				factory.LogHTTPStart(entry)
+			}
+			logger.Info("http request started")
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rec, r.WithContext(ctx))
+			completedAt := time.Now()
+			entry.Timestamp = completedAt
+			entry.Phase = "complete"
+			entry.Status = logging.HTTPStatusFromRecorder(rec.status)
+			entry.Duration = completedAt.Sub(start)
 			if factory != nil {
 				factory.LogHTTPAccess(entry)
 				return

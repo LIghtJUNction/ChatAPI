@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -68,15 +69,51 @@ func NewFactory(cfg Config) (*Factory, error) {
 	if err := zcfg.Level.UnmarshalText([]byte(normalizeLevel(cfg.Level))); err != nil {
 		return nil, err
 	}
-	logger, err := zcfg.Build(zap.AddCaller(), zap.AddCallerSkip(1))
+	formatter := NewHTTPAccessFormatter(cfg.HTTPSummaryEnabled)
+	logger, err := buildLogger(zcfg, cfg.HTTPSummaryEnabled && formatter.useColor)
 	if err != nil {
 		return nil, err
 	}
 	return &Factory{
 		root:          logger,
 		httpAccess:    logger.Named(LayerHTTP).With(zap.String("layer", LayerHTTP)),
-		httpFormatter: NewHTTPAccessFormatter(cfg.HTTPSummaryEnabled),
+		httpFormatter: formatter,
 	}, nil
+}
+
+func buildLogger(cfg zap.Config, colorRequests bool) (*zap.Logger, error) {
+	if !colorRequests {
+		return cfg.Build(zap.AddCaller(), zap.AddCallerSkip(1))
+	}
+	output, closeOutput, err := zap.Open(cfg.OutputPaths...)
+	if err != nil {
+		return nil, err
+	}
+	errorOutput, closeErrorOutput, err := zap.Open(cfg.ErrorOutputPaths...)
+	if err != nil {
+		closeOutput()
+		return nil, err
+	}
+	encoder := zapcore.NewJSONEncoder(cfg.EncoderConfig)
+	if cfg.Encoding == "console" {
+		encoder = zapcore.NewConsoleEncoder(cfg.EncoderConfig)
+	}
+	core := newRequestColorCore(encoder, zapcore.Lock(output), cfg.Level)
+	if cfg.Sampling != nil {
+		core = zapcore.NewSamplerWithOptions(core, time.Second, cfg.Sampling.Initial, cfg.Sampling.Thereafter)
+	}
+	options := []zap.Option{
+		zap.ErrorOutput(errorOutput),
+		zap.AddCaller(),
+		zap.AddCallerSkip(1),
+	}
+	if cfg.Development {
+		options = append(options, zap.Development())
+	}
+	logger := zap.New(core, options...)
+	_ = closeOutput
+	_ = closeErrorOutput
+	return logger, nil
 }
 
 func (f *Factory) Root() *zap.Logger {
@@ -115,6 +152,14 @@ func (f *Factory) LogHTTPAccess(entry HTTPAccessEntry) {
 		zap.Int("http.status_code", HTTPStatusFromRecorder(entry.Status)),
 		zap.Duration("http.duration", entry.Duration),
 	)
+}
+
+func (f *Factory) LogHTTPStart(entry HTTPAccessEntry) {
+	if f == nil {
+		return
+	}
+	entry.Phase = "start"
+	_ = f.httpFormatter.WriteSummary(entry)
 }
 
 func (f *Factory) ForContext(ctx context.Context, layer string, fields ...zap.Field) *zap.Logger {

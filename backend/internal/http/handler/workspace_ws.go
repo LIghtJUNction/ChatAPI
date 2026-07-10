@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -47,8 +48,12 @@ func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("workspace websocket upgrade failed", zap.Error(err))
 		return
 	}
+	connectedAt := time.Now()
+	disconnectReason := "handler_returned"
 	logger.Info("workspace websocket connected")
 	defer conn.Close()
+	stopShutdownWatch := closeWebSocketOnContext(r.Context(), conn)
+	defer stopShutdownWatch()
 
 	wsConn := workspacesvc.NewConnection(func(payload any) {
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -68,7 +73,11 @@ func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("workspace websocket registered", zap.Int("workspace.connection_count", connectionCount))
 	defer func() {
 		connectionCount := h.Hub.Unregister(ownerID, wsConn)
-		logger.Info("workspace websocket disconnected", zap.Int("workspace.connection_count", connectionCount))
+		logger.Info("workspace websocket disconnected",
+			zap.Int("workspace.connection_count", connectionCount),
+			zap.Duration("connection.duration", time.Since(connectedAt)),
+			zap.String("connection.end_reason", disconnectReason),
+		)
 		h.Hub.PublishConnectionCount(ownerID)
 	}()
 
@@ -78,6 +87,7 @@ func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	} else {
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		if err := conn.WriteJSON(snapshot); err != nil {
+			disconnectReason = "snapshot_write_failed"
 			logger.Warn("workspace websocket snapshot send failed", zap.Error(err))
 			return
 		}
@@ -89,6 +99,11 @@ func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
+			if r.Context().Err() != nil {
+				disconnectReason = "server_shutdown"
+			} else {
+				disconnectReason = "read_stopped"
+			}
 			logger.Debug("workspace websocket read stopped", zap.Error(err))
 			return
 		}
@@ -137,6 +152,23 @@ func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 			zap.String("conversation.id", strings.TrimSpace(msg.ConversationID)),
 		)
 	}
+}
+
+func closeWebSocketOnContext(ctx context.Context, conn *websocket.Conn) func() {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
+				time.Now().Add(time.Second),
+			)
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
 }
 
 func workspacePayloadType(payload any) string {

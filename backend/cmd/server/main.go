@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -193,6 +194,9 @@ func run() error {
 		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(net.Listener) context.Context {
+			return ctx
+		},
 	}
 
 	if cfg.Mode == config.ModeLab && cfg.OpenBrowser {
@@ -215,9 +219,13 @@ func run() error {
 
 	select {
 	case <-ctx.Done():
+		// Restore the default signal behavior so a second Ctrl+C forces exit.
+		stop()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			_ = server.Close()
+		}
 		return nil
 	case serveErr := <-errCh:
 		return serveErr

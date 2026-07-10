@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -101,9 +104,21 @@ func (h ChatAPIHandler) AbortOutput(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Request, requestFormat string) {
+	rawBody, readErr := io.ReadAll(r.Body)
+	logger := logging.BindContext(h.Logger, r.Context(),
+		zap.String("protocol", requestFormat),
+		zap.Int("request.body.bytes", len(rawBody)),
+	)
+	logger.Debug("protocol request body received", zap.String("request.body.raw", string(rawBody)))
+	if readErr != nil {
+		logger.Warn("read protocol request body failed", zap.Error(readErr))
+		httpx.WriteJSON(w, http.StatusBadRequest, h.egress().InvalidJSONBody(requestFormat))
+		return
+	}
+
 	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Warn("invalid protocol request json")
+	if err := json.NewDecoder(bytes.NewReader(rawBody)).Decode(&body); err != nil {
+		logger.Warn("invalid protocol request json", zap.Error(err))
 		httpx.WriteJSON(w, http.StatusBadRequest, h.egress().InvalidJSONBody(requestFormat))
 		return
 	}
@@ -135,6 +150,7 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 
 func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Request, parsed ingresssvc.ParsedRequest) {
 	ctx := logging.WithConnectionID(r.Context(), logging.NewConnectionID("sse"))
+	startedAt := time.Now()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		logging.BindContext(h.Logger, ctx).Error("streaming not supported by response writer")
@@ -161,7 +177,24 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-	_ = h.Streaming.StreamPendingTurn(ctx, w, turn)
+	logger := logging.BindContext(h.Logger, ctx,
+		zap.String("protocol", parsed.Request.Protocol.String()),
+		zap.String("conversation.id", turn.ConversationID),
+		zap.String("request.id", turn.RequestID),
+	)
+	logger.Info("protocol stream started")
+	if err := h.Streaming.StreamPendingTurn(ctx, w, turn); err != nil {
+		logger.Warn("protocol stream ended",
+			zap.Duration("stream.duration", time.Since(startedAt)),
+			zap.String("stream.end_reason", "write_failed"),
+			zap.Error(err),
+		)
+		return
+	}
+	logger.Info("protocol stream ended",
+		zap.Duration("stream.duration", time.Since(startedAt)),
+		zap.String("stream.end_reason", "completed"),
+	)
 }
 
 func (h ChatAPIHandler) egress() *egresssvc.Service {

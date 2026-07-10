@@ -30,11 +30,14 @@ func TestRequestLoggingMiddlewareFallsBackToJSONLogger(t *testing.T) {
 	if got := rec.Header().Get(logging.RequestIDHeader); got == "" {
 		t.Fatal("expected response request id header")
 	}
-	if logs.Len() != 1 {
+	if logs.Len() != 2 {
 		t.Fatalf("unexpected log count: %d", logs.Len())
 	}
 
-	entry := logs.All()[0]
+	if logs.All()[0].Message != "http request started" {
+		t.Fatalf("missing request start log: %#v", logs.All())
+	}
+	entry := logs.All()[1]
 	if entry.Message != logging.HTTPAccessMessage() {
 		t.Fatalf("unexpected message: %q", entry.Message)
 	}
@@ -65,7 +68,7 @@ func TestRequestLoggingMiddlewarePreservesIncomingRequestID(t *testing.T) {
 	if got := rec.Header().Get(logging.RequestIDHeader); got != "req_from_client" {
 		t.Fatalf("unexpected response request id: %q", got)
 	}
-	entry := logs.All()[0]
+	entry := logs.All()[1]
 	if got := entry.ContextMap()["request_id"]; got != "req_from_client" {
 		t.Fatalf("unexpected request_id field: %#v", entry.ContextMap())
 	}

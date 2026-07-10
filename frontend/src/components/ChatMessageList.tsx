@@ -430,7 +430,7 @@ export function ChatMessageList({
                       {requestDebug?.request_body != null ? (
                         <div className="message-debug-block">
                           <div className="message-debug-label-row">
-                            <span className="message-debug-label">Request Body</span>
+                            <span className="message-debug-label">Request Body（后端规范化重建）</span>
                             <Button
                               size="small"
                               type="link"
@@ -466,7 +466,7 @@ export function ChatMessageList({
                       ) : null}
                       {requestDebug?.raw_request_body != null ? (
                         <div className="message-debug-block">
-                          <div className="message-debug-label">Raw Request Body</div>
+                          <div className="message-debug-label">Raw Request Body（Ingress 解析对象）</div>
                           <pre>{formatJson(requestDebug.raw_request_body)}</pre>
                         </div>
                       ) : null}

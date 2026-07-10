@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 
 import { resolveWebSocketUrl } from '../lib/api'
 import type {
@@ -27,7 +27,6 @@ type UseWorkspaceRealtimeParams = {
   onConnectionCountChange: (value: number) => void
   selectedConversationId: string
   setConversations: Dispatch<SetStateAction<Conversation[]>>
-  setDraftBuffers: Dispatch<SetStateAction<Record<string, string>>>
   setTimelineByConversation: Dispatch<SetStateAction<Record<string, TimelineItem[]>>>
   setMessagesLoading: Dispatch<SetStateAction<boolean>>
   setSelectedConversationId: Dispatch<SetStateAction<string>>
@@ -39,7 +38,6 @@ export function useWorkspaceRealtime({
   onConnectionCountChange,
   selectedConversationId,
   setConversations,
-  setDraftBuffers,
   setTimelineByConversation,
   setMessagesLoading,
   setSelectedConversationId,
@@ -49,33 +47,62 @@ export function useWorkspaceRealtime({
   const socketRef = useRef<WebSocket | null>(null)
   const subscribedConversationIdRef = useRef('')
   const commandSeqRef = useRef(0)
+  const pendingCommandsRef = useRef(new Map<string, {
+    reject: (error: Error) => void
+    resolve: (ack: WorkspaceCommandAckEvent) => void
+    timeout: number
+  }>())
 
-  function resolvePreferredConversationId(items: Conversation[]) {
+  const resolvePreferredConversationId = useCallback((items: Conversation[]) => {
     const requested = selectedConversationIdRef.current || localStorage.getItem(STORAGE_KEY) || ''
     if (requested && items.some((item) => item.id === requested)) {
       return requested
     }
     return items[0]?.id ?? ''
-  }
+  }, [])
 
-  function sendJSON(payload: unknown) {
+  const sendJSON = useCallback((payload: unknown) => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return
     socketRef.current.send(JSON.stringify(payload))
-  }
+  }, [])
 
-  function sendWorkspaceCommand(command: Omit<WorkspaceCommand, 'command_id'>) {
+  const rejectPendingCommands = useCallback((message: string) => {
+    for (const pending of pendingCommandsRef.current.values()) {
+      window.clearTimeout(pending.timeout)
+      pending.reject(new Error(message))
+    }
+    pendingCommandsRef.current.clear()
+  }, [])
+
+  const sendWorkspaceCommand = useCallback((command: Omit<WorkspaceCommand, 'command_id'>) => {
     const commandId = `cmd_${Date.now()}_${(commandSeqRef.current += 1)}`
-    sendJSON({
-      type: 'workspace.command',
-      command: {
-        command_id: commandId,
-        ...command,
-      },
+    const socket = socketRef.current
+    if (socket?.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('实时连接尚未就绪'))
+    }
+    return new Promise<WorkspaceCommandAckEvent>((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        pendingCommandsRef.current.delete(commandId)
+        reject(new Error('等待服务端确认超时'))
+      }, 15_000)
+      pendingCommandsRef.current.set(commandId, { reject, resolve, timeout })
+      try {
+        socket.send(JSON.stringify({
+          type: 'workspace.command',
+          command: {
+            command_id: commandId,
+            ...command,
+          },
+        }))
+      } catch (error) {
+        window.clearTimeout(timeout)
+        pendingCommandsRef.current.delete(commandId)
+        reject(error instanceof Error ? error : new Error('发送实时命令失败'))
+      }
     })
-    return commandId
-  }
+  }, [])
 
-  function subscribeConversation(conversationId: string) {
+  const subscribeConversation = useCallback((conversationId: string) => {
     const nextID = conversationId.trim()
     const previousID = subscribedConversationIdRef.current
     if (previousID && previousID !== nextID) {
@@ -88,9 +115,9 @@ export function useWorkspaceRealtime({
       return
     }
     setMessagesLoading(false)
-  }
+  }, [sendJSON, setMessagesLoading])
 
-  function applySelectedConversation(nextConversationId: string) {
+  const applySelectedConversation = useCallback((nextConversationId: string) => {
     selectedConversationIdRef.current = nextConversationId
     setSelectedConversationId((current) => (current === nextConversationId ? current : nextConversationId))
     if (nextConversationId) {
@@ -99,7 +126,7 @@ export function useWorkspaceRealtime({
       localStorage.removeItem(STORAGE_KEY)
     }
     subscribeConversation(nextConversationId)
-  }
+  }, [setSelectedConversationId, subscribeConversation])
 
   useEffect(() => {
     conversationsRef.current = conversations
@@ -108,27 +135,6 @@ export function useWorkspaceRealtime({
   useEffect(() => {
     selectedConversationIdRef.current = selectedConversationId
   }, [selectedConversationId])
-
-  useEffect(() => {
-    setDraftBuffers((prev) => {
-      let changed = false
-      const next = { ...prev }
-      for (const conversation of conversations) {
-        const draftText = conversation.draft_text
-        if (typeof draftText !== 'string') continue
-        if (draftText) {
-          if (next[conversation.id] !== draftText) {
-            next[conversation.id] = draftText
-            changed = true
-          }
-        } else if (next[conversation.id]) {
-          delete next[conversation.id]
-          changed = true
-        }
-      }
-      return changed ? next : prev
-    })
-  }, [conversations, setDraftBuffers])
 
   useEffect(() => {
     if (!authenticated) return
@@ -193,7 +199,23 @@ export function useWorkspaceRealtime({
           return
         }
 
-        if (payload.type === 'workspace.command_ack' || payload.type === 'workspace.command_error') {
+        if (payload.type === 'workspace.command_ack') {
+          const pending = pendingCommandsRef.current.get(payload.command_id)
+          if (pending) {
+            window.clearTimeout(pending.timeout)
+            pendingCommandsRef.current.delete(payload.command_id)
+            pending.resolve(payload)
+          }
+          return
+        }
+
+        if (payload.type === 'workspace.command_error') {
+          const pending = pendingCommandsRef.current.get(payload.command_id)
+          if (pending) {
+            window.clearTimeout(pending.timeout)
+            pendingCommandsRef.current.delete(payload.command_id)
+            pending.reject(new Error(payload.message || payload.code))
+          }
           return
         }
 
@@ -249,6 +271,7 @@ export function useWorkspaceRealtime({
 
       socket.addEventListener('close', () => {
         if (!active) return
+        rejectPendingCommands('实时连接已断开')
         if (socketRef.current === socket) {
           socketRef.current = null
         }
@@ -268,14 +291,19 @@ export function useWorkspaceRealtime({
 
     return () => {
       active = false
+      rejectPendingCommands('实时连接已关闭')
       window.clearTimeout(reconnectTimer)
       socketRef.current?.close()
       socketRef.current = null
       subscribedConversationIdRef.current = ''
     }
   }, [
+    applySelectedConversation,
     authenticated,
     onConnectionCountChange,
+    rejectPendingCommands,
+    resolvePreferredConversationId,
+    sendJSON,
     setConversations,
     setMessagesLoading,
     setSelectedConversationId,

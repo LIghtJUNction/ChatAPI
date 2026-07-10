@@ -127,6 +127,7 @@ export type MessageItem = {
     tool_call_id?: string
     arguments?: string
     output?: string
+    output_policy?: OutputPolicy
     request_debug?: {
       request_id?: string
       response_id?: string
@@ -167,6 +168,23 @@ export type OptionChip = {
     | 'partially_applied'
     | string
   detail?: unknown
+}
+
+export type OutputPolicyChip = {
+  key: string
+  label: string
+  value?: string
+  support_level: 'applied' | 'partially_applied' | string
+}
+
+export type OutputPolicy = {
+  stop_hit?: boolean
+  stop_sequence?: string
+  max_output_hit?: boolean
+  max_output_chars?: number
+  store_false?: boolean
+  store_applied?: boolean
+  applied_chips?: OutputPolicyChip[]
 }
 
 export type ConversationEventItem = {

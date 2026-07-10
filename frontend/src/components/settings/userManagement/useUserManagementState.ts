@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Form } from 'antd'
 
-import { appMessage } from '../../../lib/antdApp'
+import { appMessage } from '../../../lib/antdMessage'
 import { requestJson } from '../../../lib/api'
 import type { AdminUserHistoryMessage, User } from '../../../types/chat'
 

@@ -15,6 +15,7 @@ import type {
   TimelineItem,
   VisibleTimelineDraftItem,
   VisibleTimelineItem,
+  OutputPolicyChip,
 } from '../types/chat'
 
 type ChatMessageListProps = {
@@ -200,6 +201,10 @@ function SystemTimelineEvent({
   )
 }
 
+function outputPolicyChipTitle(chip: OutputPolicyChip) {
+  return `${chip.key} · ${chip.support_level}`
+}
+
 export function ChatMessageList({
   isWaitingForUser,
   messagesLoading,
@@ -277,6 +282,8 @@ export function ChatMessageList({
         const isToolResult = message.metadata?.response_mode === 'tool_result'
         const requestDebug = message.metadata?.request_debug
         const optionChips = requestDebug?.option_chips ?? []
+        const outputPolicy = message.metadata?.output_policy
+        const outputPolicyChips = outputPolicy?.applied_chips ?? []
         const userRenderableContent = message.content
         const debugSections = [
           {
@@ -337,7 +344,7 @@ export function ChatMessageList({
             >
               {isToolCall && <div className="message-kind-badge">Tool Call</div>}
               {isToolResult && <div className="message-kind-badge tool-result">Tool Result</div>}
-                <div className="message-content">
+              <div className="message-content">
                 {renderMessageContent(userRenderableContent, {
                   onImageClick: (src, detail, alt) => {
                     setPreviewImage({
@@ -348,6 +355,20 @@ export function ChatMessageList({
                   },
                 }, message.content_parts)}
               </div>
+              {!isUser && !isToolInput && outputPolicyChips.length > 0 ? (
+                <div className="message-option-chip-row message-output-policy-chip-row">
+                  {outputPolicyChips.map((chip, index) => (
+                    <span
+                      key={`${chip.key}-${index}`}
+                      className={`message-option-chip output-policy ${chip.support_level}`}
+                      title={outputPolicyChipTitle(chip)}
+                    >
+                      <span>{chip.label}</span>
+                      {chip.value ? <span>{chip.value}</span> : null}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               {(isToolCall || isToolResult) && (
                 <div className="message-tool-meta">
                   <div>

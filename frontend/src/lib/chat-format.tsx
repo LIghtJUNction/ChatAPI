@@ -217,7 +217,7 @@ function tryParseStructuredContent(rawContent: string): unknown {
   }
 
   const trimmed = rawContent.trim()
-  if (!trimmed || !/^[\[{]/.test(trimmed)) return null
+  if (!trimmed || (!trimmed.startsWith('[') && !trimmed.startsWith('{'))) return null
 
   let normalized = ''
   let inSingleQuote = false

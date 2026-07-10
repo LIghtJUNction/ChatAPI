@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Button, Card, Input, InputNumber, Modal, Select, Space, Spin, Typography } from 'antd'
 
 import { buildInitialToolFormValues, getLastToolSchemas } from '../lib/chat-format'
@@ -38,35 +38,29 @@ export function AutomationRuleEditorModal({
   const [toolCallToolName, setToolCallToolName] = useState('')
   const [toolCallFormValues, setToolCallFormValues] = useState<Record<string, ToolFieldValue>>({})
   const [toolCallId, setToolCallId] = useState('')
+  const schemaRequestIdRef = useRef(0)
 
-  useEffect(() => {
-    if (!toolCallModalOpen || !toolCallSchemaConversationId) {
-      setToolCallSchemas([])
-      setToolCallToolName('')
-      setToolCallFormValues({})
-      return
-    }
-    let cancelled = false
+  async function selectSchemaConversation(conversationId: string) {
+    const requestId = ++schemaRequestIdRef.current
+    setToolCallSchemaConversationId(conversationId)
+    setToolCallSchemas([])
+    setToolCallToolName('')
+    setToolCallFormValues({})
+    if (!conversationId) return
     setToolCallSchemasLoading(true)
-    requestJson<{ ok: boolean; items?: MessageItem[] }>(
-      `/api/conversations/${toolCallSchemaConversationId}/messages`,
-    )
-      .then((data) => {
-        if (cancelled) return
-        const messages = Array.isArray(data.items) ? data.items : []
-        setToolCallSchemas(getLastToolSchemas(messages))
-      })
-      .catch(() => {
-        if (cancelled) return
-        setToolCallSchemas([])
-      })
-      .finally(() => {
-        if (!cancelled) setToolCallSchemasLoading(false)
-      })
-    return () => {
-      cancelled = true
+    try {
+      const data = await requestJson<{ ok: boolean; items?: MessageItem[] }>(
+        `/api/conversations/${conversationId}/messages`,
+      )
+      if (schemaRequestIdRef.current !== requestId) return
+      const messages = Array.isArray(data.items) ? data.items : []
+      setToolCallSchemas(getLastToolSchemas(messages))
+    } catch {
+      if (schemaRequestIdRef.current === requestId) setToolCallSchemas([])
+    } finally {
+      if (schemaRequestIdRef.current === requestId) setToolCallSchemasLoading(false)
     }
-  }, [toolCallModalOpen, toolCallSchemaConversationId])
+  }
 
   function openToolCallModal() {
     if (!editingAutomationRule) return
@@ -126,7 +120,6 @@ export function AutomationRuleEditorModal({
   function validateRegex(pattern: string): boolean {
     if (!pattern) return true
     try {
-      // eslint-disable-next-line no-new
       new RegExp(pattern)
       return true
     } catch {
@@ -432,7 +425,10 @@ export function AutomationRuleEditorModal({
         title="编辑工具调用"
         width={680}
         open={toolCallModalOpen}
-        onCancel={() => setToolCallModalOpen(false)}
+        onCancel={() => {
+          schemaRequestIdRef.current += 1
+          setToolCallModalOpen(false)
+        }}
         onOk={handleToolCallModalOk}
         okText="确认"
         destroyOnHidden
@@ -442,7 +438,7 @@ export function AutomationRuleEditorModal({
             <Typography.Text className="prune-input-label">选择历史会话（获取 Tool Schema）</Typography.Text>
             <Select
               value={toolCallSchemaConversationId || undefined}
-              onChange={(value) => setToolCallSchemaConversationId(value)}
+              onChange={(value) => void selectSchemaConversation(value)}
               placeholder="选择一个会话以加载其 tool schema"
               style={{ width: '100%' }}
               showSearch

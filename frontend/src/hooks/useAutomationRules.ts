@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import { requestJson } from '../lib/api'
-import { appMessage } from '../lib/antdApp'
+import { appMessage } from '../lib/antdMessage'
 import type { AutomationRule, AutomationRuleCondition } from '../types/chat'
 
 function normalizeRuleConditions(items: AutomationRuleCondition[]): AutomationRuleCondition[] {
@@ -44,12 +44,12 @@ export function useAutomationRules() {
   const [editingAutomationRule, setEditingAutomationRule] = useState<AutomationRule | null>(null)
   const [savingAutomationRules, setSavingAutomationRules] = useState(false)
 
-  async function loadAutomationRules() {
+  const loadAutomationRules = useCallback(async () => {
     const data = await requestJson<{ ok?: boolean; rules?: AutomationRule[] }>(
       '/api/config/automation-rules',
     )
     setAutomationRules(Array.isArray(data.rules) ? data.rules : [])
-  }
+  }, [])
 
   async function persistAutomationRules(nextRules: AutomationRule[], successText = '规则已保存') {
     setSavingAutomationRules(true)

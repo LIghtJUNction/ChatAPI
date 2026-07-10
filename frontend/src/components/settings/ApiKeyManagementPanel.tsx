@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Form, Input, Popconfirm, Table, Tabs, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 
-import { appMessage } from '../../lib/antdApp'
+import { appMessage } from '../../lib/antdMessage'
 import { requestJson } from '../../lib/api'
 import type { ApiKeyInfo, ApiKeyListResponse, ModelKeyInfo } from '../../types/chat'
 

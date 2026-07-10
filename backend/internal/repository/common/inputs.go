@@ -182,6 +182,7 @@ type CompletePendingInput struct {
 	ToolCallID          string
 	ToolOutput          string
 	ReasoningStreamMode string
+	OutputPolicy        map[string]any
 }
 
 type UpdateDraftInput struct {

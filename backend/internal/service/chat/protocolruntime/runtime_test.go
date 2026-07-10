@@ -32,6 +32,47 @@ func TestRuntimeBuildsAnthropicBlockState(t *testing.T) {
 	}
 }
 
+func TestRuntimeCompletionDoesNotRepeatStreamedText(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol protocol.Protocol
+	}{
+		{name: "responses", protocol: protocol.ProtocolResponses},
+		{name: "chat_completions", protocol: protocol.ProtocolChatCompletions},
+		{name: "anthropic", protocol: protocol.ProtocolAnthropicMessages},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := New(protocol.ConversationMeta{Protocol: test.protocol, Model: "test-model"})
+			delta := runtime.Apply(Action{Kind: ActionDelta, DeltaText: "already streamed"})
+			completed := runtime.Apply(Action{Kind: ActionComplete})
+
+			for _, event := range completed.StreamEvents {
+				if streamEventText(event) == "already streamed" {
+					t.Fatalf("completion repeated an earlier delta: %#v; delta events: %#v", completed.StreamEvents, delta.StreamEvents)
+				}
+			}
+		})
+	}
+}
+
+func streamEventText(event protocol.StreamEvent) string {
+	data, ok := event.Data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if delta, ok := data["delta"].(string); ok {
+		return delta
+	}
+	choices, ok := data["choices"].([]map[string]any)
+	if !ok || len(choices) == 0 {
+		return ""
+	}
+	delta, _ := choices[0]["delta"].(map[string]any)
+	text, _ := delta["content"].(string)
+	return text
+}
+
 func TestRuntimeBuildsResponsesAbort(t *testing.T) {
 	runtime := New(protocol.ConversationMeta{
 		Protocol:   protocol.ProtocolResponses,

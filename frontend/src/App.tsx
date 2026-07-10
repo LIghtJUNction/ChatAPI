@@ -13,7 +13,7 @@ import { StatisticsPage } from './components/StatisticsPage'
 import { ThemeToggle } from './components/ThemeToggle'
 import { WorkspaceRoute } from './components/WorkspaceRoute'
 import { useAuthSession } from './hooks/useAuthSession'
-import { appMessage } from './lib/antdApp'
+import { appMessage } from './lib/antdMessage'
 import type { LoginFormValues } from './types/chat'
 
 type LoginError = Error & {

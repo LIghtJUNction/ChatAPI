@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { Button, Input, InputNumber, Select, Switch, Typography } from 'antd'
 
-import { appMessage } from '../../lib/antdApp'
+import { appMessage } from '../../lib/antdMessage'
 import { requestJson } from '../../lib/api'
 import type { SystemConfig } from '../../types/chat'
 import {

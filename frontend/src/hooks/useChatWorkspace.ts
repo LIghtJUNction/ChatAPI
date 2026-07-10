@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import { requestJson } from '../lib/api'
-import { appMessage } from '../lib/antdApp'
+import { appMessage } from '../lib/antdMessage'
 import {
   buildInitialToolFormValues,
   getLastBuiltinTools,
@@ -47,7 +47,6 @@ export function useChatWorkspace(isMobile: boolean) {
   const [builtinToolKind, setBuiltinToolKind] = useState('')
   const [builtinToolQuery, setBuiltinToolQuery] = useState('')
   const [builtinToolResult, setBuiltinToolResult] = useState('')
-  const [draftBuffers, setDraftBuffers] = useState<Record<string, string>>({})
   const [sending, setSending] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [deletingConversationId, setDeletingConversationId] = useState('')
@@ -65,6 +64,7 @@ export function useChatWorkspace(isMobile: boolean) {
   })
   const keyboardOffset = useKeyboardOffset()
   const automation = useAutomationRules()
+  const { loadAutomationRules } = automation
 
   const handleConnectionCountChange = useCallback((value: number) => {
     setAuth((current) =>
@@ -83,7 +83,6 @@ export function useChatWorkspace(isMobile: boolean) {
     onConnectionCountChange: handleConnectionCountChange,
     selectedConversationId,
     setConversations,
-    setDraftBuffers,
     setTimelineByConversation,
     setMessagesLoading,
     setSelectedConversationId,
@@ -96,12 +95,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const messages = timeline
     .filter((item): item is TimelineItem & { message: MessageItem } => item.kind === 'message' && !!item.message)
     .map((item) => item.message)
-  const hasLocalDraftBuffer =
-    !!selectedConversationId &&
-    Object.prototype.hasOwnProperty.call(draftBuffers, selectedConversationId)
-  const draftBuffer = hasLocalDraftBuffer
-    ? draftBuffers[selectedConversationId] ?? ''
-    : selectedConversation?.draft_text ?? ''
+  const draftBuffer = selectedConversation?.draft_text ?? ''
   const isWaitingForUser = isResponseOpenStatus(selectedConversation?.status)
   const selectedRequestFormat = selectedConversation?.request_format || ''
   const isResponsesConversation = selectedRequestFormat === 'responses'
@@ -136,14 +130,6 @@ export function useChatWorkspace(isMobile: boolean) {
     }
   }, [selectedConversationId, selectedConversation?.status])
 
-  function setDraftBufferForConversation(conversationId: string, value: string) {
-    if (!conversationId) return
-    setDraftBuffers((prev) => ({
-      ...prev,
-      [conversationId]: value,
-    }))
-  }
-
   function clearThinkingInput() {
     setThinkingText('')
   }
@@ -164,7 +150,7 @@ export function useChatWorkspace(isMobile: boolean) {
         setAuth(session)
         setTotpEnabled(session.totp_enabled)
         if (session.authenticated) {
-          await automation.loadAutomationRules()
+          await loadAutomationRules()
         }
       } catch (error) {
         if (active) {
@@ -182,27 +168,28 @@ export function useChatWorkspace(isMobile: boolean) {
     return () => {
       active = false
     }
-  }, [])
+  }, [loadAutomationRules])
 
-  useEffect(() => {
-    if (composerMode !== 'tool_call') return
-    if (toolName && selectedToolSchema) return
-    if (availableToolSchemas[0]?.name) {
-      setToolName(availableToolSchemas[0].name)
+  function selectComposerMode(nextMode: ComposerMode) {
+    setComposerMode(nextMode)
+    if (nextMode === 'tool_call' && !selectedToolSchema && availableToolSchemas[0]) {
+      const schema = availableToolSchemas[0]
+      setToolName(schema.name)
+      setToolFormValues(buildInitialToolFormValues(schema.parameters))
     }
-  }, [availableToolSchemas, composerMode, selectedToolSchema, toolName])
-
-  useEffect(() => {
-    if (composerMode !== 'builtin_tool') return
-    if (builtinToolKind && availableBuiltinTools.some((item) => item.kind === builtinToolKind)) return
-    if (availableBuiltinTools[0]?.kind) {
-      setBuiltinToolKind(availableBuiltinTools[0].kind)
+    if (
+      nextMode === 'builtin_tool'
+      && !availableBuiltinTools.some((item) => item.kind === builtinToolKind)
+    ) {
+      setBuiltinToolKind(availableBuiltinTools[0]?.kind ?? '')
     }
-  }, [availableBuiltinTools, builtinToolKind, composerMode])
+  }
 
-  useEffect(() => {
-    setToolFormValues(buildInitialToolFormValues(selectedToolSchema?.parameters))
-  }, [selectedToolSchema?.name])
+  function selectToolName(nextToolName: string) {
+    setToolName(nextToolName)
+    const schema = availableToolSchemas.find((item) => item.name === nextToolName)
+    setToolFormValues(buildInitialToolFormValues(schema?.parameters))
+  }
 
   async function handleLogin(values: { username: string; password: string; totp?: string }) {
     setLoginLoading(true)
@@ -213,7 +200,7 @@ export function useChatWorkspace(isMobile: boolean) {
       })
       const session = await requestJson<AuthSession>('/api/auth/session')
       setAuth(session)
-      await automation.loadAutomationRules()
+      await loadAutomationRules()
       appMessage.success('登录成功')
     } catch (error) {
       appMessage.error(error instanceof Error ? error.message : '登录失败')
@@ -242,7 +229,6 @@ export function useChatWorkspace(isMobile: boolean) {
       setBuiltinToolKind('')
       setBuiltinToolQuery('')
       setBuiltinToolResult('')
-      setDraftBuffers({})
       automation.resetAutomationRuleUi()
       automation.setAutomationRules([])
       localStorage.removeItem('chatapi.conversationId')
@@ -337,7 +323,7 @@ export function useChatWorkspace(isMobile: boolean) {
 
     setAbortingConversationId(conversationId)
     try {
-      sendWorkspaceCommand({
+      await sendWorkspaceCommand({
         kind: 'abort',
         conversation_id: conversationId,
         error: reason,
@@ -367,11 +353,12 @@ export function useChatWorkspace(isMobile: boolean) {
         return
       }
       if (kind === 'image_generation' && !result) {
-        appMessage.warning('请输入图片 base64')
+        appMessage.warning('请上传图片')
         return
       }
       try {
-        sendWorkspaceCommand({
+        setSending(true)
+        await sendWorkspaceCommand({
           kind: 'builtin_tool',
           conversation_id: selectedConversationId,
           builtin_tool_kind: kind,
@@ -383,6 +370,8 @@ export function useChatWorkspace(isMobile: boolean) {
         appMessage.success(kind === 'web_search' ? '已输出搜索事件' : '已输出生图事件')
       } catch (error) {
         appMessage.error(error instanceof Error ? error.message : '输出内置工具失败')
+      } finally {
+        setSending(false)
       }
       return
     }
@@ -392,8 +381,9 @@ export function useChatWorkspace(isMobile: boolean) {
       : composer.trim()
     if (!rawChunk) return
     const chunk = withDraftSeparator(rawChunk)
+    setSending(true)
     try {
-      sendWorkspaceCommand({
+      await sendWorkspaceCommand({
         kind: 'stream_delta',
         conversation_id: selectedConversationId,
         text: chunk,
@@ -401,7 +391,6 @@ export function useChatWorkspace(isMobile: boolean) {
         reasoning_stream_mode:
           isThinkingMode && isResponsesConversation ? reasoningStreamMode : undefined,
       })
-      setDraftBufferForConversation(selectedConversationId, `${draftBuffer}${chunk}`)
       if (isThinkingMode) {
         clearThinkingInput()
       } else {
@@ -410,6 +399,8 @@ export function useChatWorkspace(isMobile: boolean) {
       appMessage.success(isThinkingMode ? '已输出思考' : '已输出片段')
     } catch (error) {
       appMessage.error(error instanceof Error ? error.message : '输出片段失败')
+    } finally {
+      setSending(false)
     }
   }
 
@@ -453,19 +444,29 @@ export function useChatWorkspace(isMobile: boolean) {
     try {
       if (composerMode === 'assistant_message' && pendingChunk) {
         const outputChunk = withDraftSeparator(pendingChunk)
-        sendWorkspaceCommand({
+        await sendWorkspaceCommand({
           kind: 'stream_delta',
           conversation_id: selectedConversationId,
           text: outputChunk,
+          mode: 'answer',
         })
-        setDraftBufferForConversation(selectedConversationId, `${draftBuffer}${outputChunk}`)
+        setComposer('')
+      } else if (composerMode === 'thinking' && finalText) {
+        const outputChunk = withDraftSeparator(finalText)
+        await sendWorkspaceCommand({
+          kind: 'stream_delta',
+          conversation_id: selectedConversationId,
+          text: outputChunk,
+          mode: 'thinking',
+          reasoning_stream_mode: isResponsesConversation ? reasoningStreamMode : undefined,
+        })
+        clearThinkingInput()
       }
 
-      setDraftBufferForConversation(selectedConversationId, '')
-      sendWorkspaceCommand({
+      await sendWorkspaceCommand({
         kind: 'stream_complete',
         conversation_id: selectedConversationId,
-        text: composerMode === 'tool_call' || composerMode === 'thinking' ? finalText : undefined,
+        text: composerMode === 'tool_call' ? finalText : undefined,
         mode: composerMode,
         tool_name: composerMode === 'tool_call' ? toolName.trim() || undefined : undefined,
         tool_call_id: composerMode === 'tool_call' ? toolCallId.trim() || undefined : undefined,
@@ -573,7 +574,7 @@ export function useChatWorkspace(isMobile: boolean) {
     setAbortPopoverConversationId,
     setAbortReason,
     setComposer,
-    setComposerMode,
+    setComposerMode: selectComposerMode,
     setBuiltinToolKind,
     setBuiltinToolQuery,
     setBuiltinToolResult,
@@ -588,7 +589,7 @@ export function useChatWorkspace(isMobile: boolean) {
     setAutomationRulesModalOpen: automation.setAutomationRulesModalOpen,
     setToolCallId,
     setToolFormValues,
-    setToolName,
+    setToolName: selectToolName,
     editingAutomationRule: automation.editingAutomationRule,
     savingAutomationRules: automation.savingAutomationRules,
     totpEnabled,

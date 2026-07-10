@@ -14,6 +14,7 @@ import (
 	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/outputpolicy"
 	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 	"go.uber.org/zap"
 )
@@ -218,6 +219,12 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		return nil, err
 	}
 	existing := conversationstate.FromConversation(conversation).DraftText
+	policy := s.applyOutputPolicy(conversationID, outputpolicy.Input{
+		ExistingText: policyExistingText(existing, mode),
+		Text:         chunk,
+		Mode:         mode,
+	})
+	chunk = policy.Text
 	storedChunk := draftChunkForMode(chunk, mode)
 	nextDraft := existing + storedChunk
 	updated, err := s.Store.UpdateDraft(ctx, common.UpdateDraftInput{
@@ -240,7 +247,11 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 	})
 	s.publishConversationUpserted(ctx, s.eventRouteForContext(ctx, updated), updated)
 	s.notifyText(ctx, s.ownerID(ctx), updated.Title, chunk)
-	return map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}, nil
+	body := map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}
+	if metadata := policy.Metadata(); len(metadata) > 0 {
+		body["output_policy"] = metadata
+	}
+	return body, nil
 }
 
 func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlCommand) (map[string]any, error) {
@@ -317,9 +328,29 @@ func draftChunkForMode(chunk string, mode string) string {
 }
 
 func (s *Service) CompleteConversation(ctx context.Context, input common.CompletePendingInput) (map[string]any, error) {
+	completionDelta := input.OutputText
 	previousState, err := s.Pending.StartComplete(input.ConversationID)
 	if err != nil {
 		return nil, s.resolveMutationError(ctx, input.ConversationID, err)
+	}
+	conversationBefore, err := s.Store.GetConversation(ctx, input.ConversationID)
+	if err != nil {
+		s.Pending.RevertFinalize(input.ConversationID, previousState)
+		return nil, err
+	}
+	existingDraft := conversationstate.FromConversation(conversationBefore).DraftText
+	policy := s.applyOutputPolicy(input.ConversationID, outputpolicy.Input{
+		Text: firstNonEmpty(input.OutputText, policyExistingText(existingDraft, input.Mode)),
+		Mode: input.Mode,
+	})
+	if input.OutputText != "" || policy.Text != policyExistingText(existingDraft, input.Mode) || (strings.TrimSpace(input.Mode) == "thinking" && strings.TrimSpace(existingDraft) != "") {
+		input.OutputText = policy.Text
+	}
+	if completionDelta != "" {
+		completionDelta = policy.Text
+	}
+	if metadata := policy.Metadata(); len(metadata) > 0 {
+		input.OutputPolicy = metadata
 	}
 	conversation, message, err := s.Store.CompletePendingTurn(ctx, input)
 	if err != nil {
@@ -331,7 +362,7 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	responseBody := s.egress().CompleteBody(conversation, input, message)
 	action := OutputAction{
 		Kind:                TurnControlStreamComplete,
-		OutputText:          message.Content,
+		OutputText:          completionDelta,
 		Mode:                input.Mode,
 		ReasoningStreamMode: input.ReasoningStreamMode,
 		ToolName:            input.ToolName,
@@ -348,7 +379,11 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	}
 	s.publishMessageAppended(ctx, route, conversation, message)
 	s.notifyText(ctx, s.ownerID(ctx), conversation.Title, message.Content)
-	return map[string]any{"conversation": conversation, "output_text": message.Content}, nil
+	body := map[string]any{"conversation": conversation, "output_text": message.Content}
+	if len(input.OutputPolicy) > 0 {
+		body["output_policy"] = input.OutputPolicy
+	}
+	return body, nil
 }
 
 func (s *Service) AbortConversation(ctx context.Context, conversationID string, reason string) error {
@@ -543,6 +578,18 @@ func (s *Service) applyRuntimeAction(conversationID string, action protocolrunti
 	return turn.Runtime.Apply(action)
 }
 
+func (s *Service) applyOutputPolicy(conversationID string, input outputpolicy.Input) outputpolicy.Result {
+	if s == nil || s.Pending == nil {
+		return outputpolicy.Result{Text: input.Text}
+	}
+	turn, ok := s.Pending.GetByConversationID(conversationID)
+	if !ok || turn == nil {
+		return outputpolicy.Result{Text: input.Text}
+	}
+	input.Request = turn.NormalizedRequest
+	return outputpolicy.Apply(input)
+}
+
 func pendingExpiredBody(ttl time.Duration) map[string]any {
 	return map[string]any{
 		"error": map[string]any{
@@ -558,6 +605,24 @@ func stringValue(value any, fallback string) string {
 		return strings.TrimSpace(raw)
 	}
 	return fallback
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func policyExistingText(draft string, mode string) string {
+	if strings.TrimSpace(mode) != "thinking" {
+		return draft
+	}
+	text := strings.ReplaceAll(draft, "<think>", "")
+	text = strings.ReplaceAll(text, "</think>", "")
+	return text
 }
 
 func (s *Service) resolveTarget(ctx context.Context, input SubmitInput) (SubmitTarget, error) {

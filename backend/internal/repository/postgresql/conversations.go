@@ -546,6 +546,9 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	if input.ReasoningStreamMode != "" {
 		messageMetadata["reasoning_stream_mode"] = input.ReasoningStreamMode
 	}
+	if len(input.OutputPolicy) > 0 {
+		messageMetadata["output_policy"] = input.OutputPolicy
+	}
 	responseID := strings.TrimSpace(input.ResponseID)
 	message := common.Message{
 		ID:         "msg_" + uuid.NewString(),

@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes } from 'react'
 
-import { useThemeMode } from '../theme/ThemeProvider'
+import { useThemeMode } from '../theme/themeMode'
 
 type ThemeToggleProps = {
   className?: string

@@ -18,8 +18,16 @@ import {
   Segmented,
   Space,
   Typography,
+  Upload,
 } from 'antd'
-import { LogoutOutlined, MenuOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons'
+import {
+  DeleteOutlined,
+  LogoutOutlined,
+  MenuOutlined,
+  SaveOutlined,
+  SendOutlined,
+  UploadOutlined,
+} from '@ant-design/icons'
 
 import { GithubButton } from './GithubButton'
 import { ThemeToggle } from './ThemeToggle'
@@ -118,6 +126,42 @@ export function ChatPane(props: ChatPaneProps) {
     toolName,
     visibleMessages,
   } = props
+  const [imageFileName, setImageFileName] = useState('')
+  const [imageFileSize, setImageFileSize] = useState(0)
+  const [imageFileError, setImageFileError] = useState('')
+
+  function selectImageFile(file: File) {
+    if (!file.type.startsWith('image/')) {
+      setImageFileError('请选择图片文件')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        setImageFileError('无法读取图片文件')
+        return
+      }
+      setBuiltinToolResult(reader.result)
+      setImageFileName(file.name)
+      setImageFileSize(file.size)
+      setImageFileError('')
+    }
+    reader.onerror = () => setImageFileError('无法读取图片文件')
+    reader.readAsDataURL(file)
+  }
+
+  function clearImageFile() {
+    setBuiltinToolResult('')
+    setImageFileName('')
+    setImageFileSize(0)
+    setImageFileError('')
+  }
+
+  function selectBuiltinToolKind(kind: string) {
+    if (kind !== builtinToolKind) clearImageFile()
+    setBuiltinToolKind(kind)
+  }
   const composerCardRef = useRef<HTMLDivElement | null>(null)
   const [composerHeight, setComposerHeight] = useState(0)
   const [visualViewportRect, setVisualViewportRect] = useState(() => ({
@@ -347,7 +391,7 @@ export function ChatPane(props: ChatPaneProps) {
                 <div className="tool-call-fields">
                   <Select
                     value={builtinToolKind || undefined}
-                    onChange={(value) => setBuiltinToolKind(value)}
+                    onChange={selectBuiltinToolKind}
                     placeholder="选择内置工具"
                     options={availableBuiltinTools.map((tool) => ({
                       label: tool.label || tool.kind,
@@ -367,14 +411,51 @@ export function ChatPane(props: ChatPaneProps) {
                   />
                 ) : null}
                 {builtinToolKind === 'image_generation' ? (
-                  <TextArea
-                    value={builtinToolResult}
-                    onChange={(event) => setBuiltinToolResult(event.target.value)}
-                    placeholder="图片 base64 或 data:image/...;base64,...，会作为 image_generation_call.result 输出"
-                    autoSize={{ minRows: 4, maxRows: 8 }}
-                    className="composer-textarea"
-                    disabled={sending || !isWaitingForUser}
-                  />
+                  <div className="image-result-upload">
+                    {builtinToolResult ? (
+                      <div className="image-result-preview">
+                        <img src={builtinToolResult} alt="待输出的生图结果" />
+                        <div className="image-result-file">
+                          <Typography.Text strong ellipsis={{ tooltip: imageFileName }}>
+                            {imageFileName || '已选择图片'}
+                          </Typography.Text>
+                          {imageFileSize > 0 ? (
+                            <Typography.Text type="secondary">
+                              {(imageFileSize / 1024).toFixed(imageFileSize >= 1024 * 1024 ? 0 : 1)} KB
+                            </Typography.Text>
+                          ) : null}
+                        </div>
+                        <Button
+                          icon={<DeleteOutlined />}
+                          onClick={clearImageFile}
+                          disabled={sending || !isWaitingForUser}
+                        >
+                          移除
+                        </Button>
+                      </div>
+                    ) : (
+                      <Upload.Dragger
+                        accept="image/*"
+                        beforeUpload={(file) => {
+                          selectImageFile(file)
+                          return Upload.LIST_IGNORE
+                        }}
+                        disabled={sending || !isWaitingForUser}
+                        maxCount={1}
+                        multiple={false}
+                        showUploadList={false}
+                      >
+                        <UploadOutlined className="image-result-upload-icon" />
+                        <Typography.Text strong>点击或拖入图片</Typography.Text>
+                        <Typography.Text type="secondary">
+                          浏览器会转换为 image_generation_call.result 所需的 Base64
+                        </Typography.Text>
+                      </Upload.Dragger>
+                    )}
+                    {imageFileError ? (
+                      <Typography.Text type="danger">{imageFileError}</Typography.Text>
+                    ) : null}
+                  </div>
                 ) : null}
                 {!builtinToolKind ? (
                   <div className="tool-form-empty">当前请求没有可用内置工具。</div>
@@ -425,7 +506,9 @@ export function ChatPane(props: ChatPaneProps) {
           </Space>
           <Flex justify="space-between" align="center" gap={12} wrap className="composer-actions">
             <Typography.Text className="composer-hint">
-              {isWaitingForUser
+              {sending
+                ? '正在发送并等待服务端同步草稿…'
+                : isWaitingForUser
                 ? composerMode === 'assistant_message'
                   ? '流式输出的片段会保留在本轮回复里，结束输出之后这一轮结束。'
                 : composerMode === 'thinking'
@@ -444,6 +527,7 @@ export function ChatPane(props: ChatPaneProps) {
                 type={composerMode === 'assistant_message' ? 'default' : 'primary'}
                 icon={<SaveOutlined />}
                 onClick={() => void onDraft()}
+                loading={sending}
                 disabled={
                   !isWaitingForUser ||
                   sending ||

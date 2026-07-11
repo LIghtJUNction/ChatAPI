@@ -373,6 +373,23 @@ export type PasswordResetConfig = {
 export type WorkspaceSnapshotEvent = {
   type: 'workspace.snapshot'
   conversations: Conversation[]
+  has_more: boolean
+  next_cursor?: string
+}
+
+export type WorkspaceConversationPageEvent = {
+  type: 'conversation.page'
+  command_id: string
+  conversations: Conversation[]
+  has_more: boolean
+  next_cursor?: string
+}
+
+export type WorkspaceConversationPageErrorEvent = {
+  type: 'conversation.page.error'
+  command_id: string
+  code: string
+  message: string
 }
 
 export type WorkspaceConversationUpsertEvent = {

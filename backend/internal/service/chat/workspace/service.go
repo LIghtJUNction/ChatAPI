@@ -2,11 +2,13 @@ package workspace
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	automationsvc "github.com/zyf2007/ChatAPI/internal/service/automation"
@@ -18,7 +20,7 @@ import (
 )
 
 type ConversationQuery interface {
-	ListConversationsForOwner(context.Context, string) ([]common.Conversation, error)
+	ListConversationsForOwnerPage(context.Context, string, time.Time, string, int) ([]common.Conversation, error)
 }
 
 type TimelineQuery interface {
@@ -28,6 +30,16 @@ type TimelineQuery interface {
 type Snapshot struct {
 	Type          string                `json:"type"`
 	Conversations []ConversationSummary `json:"conversations"`
+	HasMore       bool                  `json:"has_more"`
+	NextCursor    string                `json:"next_cursor,omitempty"`
+}
+
+type ConversationPage struct {
+	Type          string                `json:"type"`
+	CommandID     string                `json:"command_id"`
+	Conversations []ConversationSummary `json:"conversations"`
+	HasMore       bool                  `json:"has_more"`
+	NextCursor    string                `json:"next_cursor,omitempty"`
 }
 
 type ConversationUpsert struct {
@@ -62,6 +74,15 @@ type ClientMessage struct {
 	CommandID      string   `json:"command_id,omitempty"`
 	ConversationID string   `json:"conversation_id,omitempty"`
 	Command        *Command `json:"command,omitempty"`
+	Cursor         string   `json:"cursor,omitempty"`
+}
+
+const conversationPageSize = 30
+
+type conversationCursor struct {
+	OwnerID   string    `json:"owner_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ID        string    `json:"id"`
 }
 
 var ErrInvalidClientMessage = errors.New("invalid workspace client message")
@@ -97,18 +118,64 @@ func New(conversations ConversationQuery, timeline TimelineQuery, turn TurnExecu
 func (s *Service) SetAutomation(automation AutomationRecorder) { s.automation = automation }
 
 func (s *Service) Snapshot(ctx context.Context, ownerID string) (Snapshot, error) {
-	items, err := s.conversations.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
+	page, err := s.conversationPage(ctx, strings.TrimSpace(ownerID), conversationCursor{})
 	if err != nil {
 		return Snapshot{}, err
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].UpdatedAt.After(items[j].UpdatedAt)
-	})
+	return Snapshot{Type: "workspace.snapshot", Conversations: page.Conversations, HasMore: page.HasMore, NextCursor: page.NextCursor}, nil
+}
+
+func (s *Service) ConversationPage(ctx context.Context, ownerID, commandID, rawCursor string) (ConversationPage, error) {
+	cursor, err := decodeConversationCursor(rawCursor, ownerID)
+	if err != nil {
+		return ConversationPage{}, err
+	}
+	page, err := s.conversationPage(ctx, ownerID, cursor)
+	page.CommandID = commandID
+	return page, err
+}
+
+func (s *Service) conversationPage(ctx context.Context, ownerID string, cursor conversationCursor) (ConversationPage, error) {
+	items, err := s.conversations.ListConversationsForOwnerPage(ctx, ownerID, cursor.UpdatedAt, cursor.ID, conversationPageSize+1)
+	if err != nil {
+		return ConversationPage{}, err
+	}
+	hasMore := len(items) > conversationPageSize
+	if hasMore {
+		items = items[:conversationPageSize]
+	}
 	summaries := make([]ConversationSummary, 0, len(items))
 	for _, item := range items {
 		summaries = append(summaries, SummaryFromConversation(item))
 	}
-	return Snapshot{Type: "workspace.snapshot", Conversations: summaries}, nil
+	nextCursor := ""
+	if hasMore && len(items) > 0 {
+		nextCursor, err = encodeConversationCursor(conversationCursor{OwnerID: ownerID, UpdatedAt: items[len(items)-1].UpdatedAt, ID: items[len(items)-1].ID})
+		if err != nil {
+			return ConversationPage{}, err
+		}
+	}
+	return ConversationPage{Type: "conversation.page", Conversations: summaries, HasMore: hasMore, NextCursor: nextCursor}, nil
+}
+
+func encodeConversationCursor(cursor conversationCursor) (string, error) {
+	payload, err := json.Marshal(cursor)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func decodeConversationCursor(raw, ownerID string) (conversationCursor, error) {
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
+	if err != nil {
+		return conversationCursor{}, ErrInvalidClientMessage
+	}
+	var cursor conversationCursor
+	if err := json.Unmarshal(payload, &cursor); err != nil || cursor.OwnerID != strings.TrimSpace(ownerID) || cursor.ID == "" || cursor.UpdatedAt.IsZero() {
+		return conversationCursor{}, ErrInvalidClientMessage
+	}
+	return cursor, nil
 }
 
 func (s *Service) TimelineReset(ctx context.Context, ownerID string, conversationID string) (TimelineReset, error) {
@@ -132,9 +199,15 @@ func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 		Type:           stringValue(payload["type"], ""),
 		CommandID:      strings.TrimSpace(stringValue(payload["command_id"], "")),
 		ConversationID: strings.TrimSpace(stringValue(payload["conversation_id"], "")),
+		Cursor:         strings.TrimSpace(stringValue(payload["cursor"], "")),
 	}
 	switch msg.Type {
 	case "workspace.ping":
+		return msg, nil
+	case "conversation.page.get":
+		if msg.CommandID == "" || msg.Cursor == "" {
+			return ClientMessage{}, ErrInvalidClientMessage
+		}
 		return msg, nil
 	case "timeline.subscribe", "timeline.unsubscribe":
 		if msg.ConversationID == "" {
@@ -358,6 +431,18 @@ func (h *Hub) HandleClientMessage(ctx context.Context, ownerID string, conn *Con
 	case "workspace.ping":
 		conn.Send(map[string]any{"type": "workspace.ping"})
 		return nil
+	case "conversation.page.get":
+		page, err := h.workspace.ConversationPage(ctx, ownerID, msg.CommandID, msg.Cursor)
+		if err != nil {
+			code, message := "page_failed", "conversation page could not be loaded"
+			if errors.Is(err, ErrInvalidClientMessage) {
+				code, message = "invalid_cursor", "conversation page cursor is invalid"
+			}
+			conn.Send(map[string]any{"type": "conversation.page.error", "command_id": msg.CommandID, "code": code, "message": message})
+			return nil
+		}
+		conn.Send(page)
+		return nil
 	case "timeline.subscribe":
 		conn.Lock()
 		defer conn.Unlock()
@@ -543,6 +628,32 @@ type Connection struct {
 	mu            sync.Mutex
 	send          func(any)
 	subscriptions map[string]struct{}
+	initializing  bool
+	pending       []any
+}
+
+func (c *Connection) BeginInitialization() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.initializing = true
+	c.pending = nil
+	c.mu.Unlock()
+}
+
+func (c *Connection) Activate(initial any) {
+	if c == nil || c.send == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.send(initial)
+	for _, payload := range c.pending {
+		c.send(payload)
+	}
+	c.pending = nil
+	c.initializing = false
 }
 
 func NewConnection(send func(any)) *Connection {
@@ -572,6 +683,10 @@ func (c *Connection) Send(payload any) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.initializing {
+		c.pending = append(c.pending, payload)
+		return
+	}
 	c.send(payload)
 }
 

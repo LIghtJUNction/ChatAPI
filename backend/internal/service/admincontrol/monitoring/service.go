@@ -3,6 +3,7 @@ package monitoring
 import (
 	"context"
 	"runtime"
+	"sync"
 	"time"
 
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
@@ -14,13 +15,18 @@ type Presence interface {
 }
 
 type Metrics struct {
-	SampledAt      time.Time `json:"sampled_at"`
-	UptimeSeconds  int64     `json:"uptime_seconds"`
-	CPUCount       int       `json:"cpu_count"`
-	Goroutines     int       `json:"goroutines"`
-	HeapAllocBytes uint64    `json:"heap_alloc_bytes"`
-	HeapInuseBytes uint64    `json:"heap_inuse_bytes"`
-	SysBytes       uint64    `json:"sys_bytes"`
+	SampledAt            time.Time `json:"sampled_at"`
+	UptimeSeconds        int64     `json:"uptime_seconds"`
+	CPUCount             int       `json:"cpu_count"`
+	Goroutines           int       `json:"goroutines"`
+	HeapAllocBytes       uint64    `json:"heap_alloc_bytes"`
+	HeapInuseBytes       uint64    `json:"heap_inuse_bytes"`
+	SysBytes             uint64    `json:"sys_bytes"`
+	CPUUsagePercent      float64   `json:"cpu_usage_percent"`
+	MemoryTotalBytes     uint64    `json:"memory_total_bytes"`
+	MemoryAvailableBytes uint64    `json:"memory_available_bytes"`
+	SwapTotalBytes       uint64    `json:"swap_total_bytes"`
+	SwapUsedBytes        uint64    `json:"swap_used_bytes"`
 }
 
 type Event struct {
@@ -37,10 +43,12 @@ type Service struct {
 	presence  Presence
 	startedAt time.Time
 	interval  time.Duration
+	metricsMu sync.Mutex
+	lastHost  hostSample
 }
 
 func New(presence Presence) *Service {
-	return &Service{presence: presence, startedAt: time.Now(), interval: 2 * time.Second}
+	return &Service{presence: presence, startedAt: time.Now(), interval: 2 * time.Second, lastHost: readHostSample()}
 }
 
 func (s *Service) Stream(ctx context.Context, userIDs []string) <-chan Event {
@@ -101,16 +109,38 @@ func (s *Service) run(ctx context.Context, userIDs []string, out chan<- Event) {
 }
 
 func (s *Service) metrics() *Metrics {
+	s.metricsMu.Lock()
+	host := readHostSample()
+	previous := s.lastHost
+	s.lastHost = host
+	s.metricsMu.Unlock()
+	cpuUsage := 0.0
+	if host.totalCPU >= previous.totalCPU && host.idleCPU >= previous.idleCPU {
+		totalDelta := host.totalCPU - previous.totalCPU
+		idleDelta := host.idleCPU - previous.idleCPU
+		if totalDelta > 0 && totalDelta >= idleDelta {
+			cpuUsage = float64(totalDelta-idleDelta) * 100 / float64(totalDelta)
+		}
+	}
+	swapUsed := uint64(0)
+	if host.swapTotal >= host.swapFree {
+		swapUsed = host.swapTotal - host.swapFree
+	}
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
 	return &Metrics{
-		SampledAt:      time.Now().UTC(),
-		UptimeSeconds:  int64(time.Since(s.startedAt).Seconds()),
-		CPUCount:       runtime.NumCPU(),
-		Goroutines:     runtime.NumGoroutine(),
-		HeapAllocBytes: memory.HeapAlloc,
-		HeapInuseBytes: memory.HeapInuse,
-		SysBytes:       memory.Sys,
+		SampledAt:            time.Now().UTC(),
+		UptimeSeconds:        int64(time.Since(s.startedAt).Seconds()),
+		CPUCount:             runtime.NumCPU(),
+		Goroutines:           runtime.NumGoroutine(),
+		HeapAllocBytes:       memory.HeapAlloc,
+		HeapInuseBytes:       memory.HeapInuse,
+		SysBytes:             memory.Sys,
+		CPUUsagePercent:      cpuUsage,
+		MemoryTotalBytes:     host.memoryTotal,
+		MemoryAvailableBytes: host.memoryAvailable,
+		SwapTotalBytes:       host.swapTotal,
+		SwapUsedBytes:        swapUsed,
 	}
 }
 

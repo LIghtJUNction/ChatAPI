@@ -51,6 +51,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const [builtinToolAsset, setBuiltinToolAsset] = useState<OutputImageAsset | null>(null)
   const [uploadingOutputImage, setUploadingOutputImage] = useState(false)
   const [sending, setSending] = useState(false)
+  const sendingRef = useRef(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [deletingConversationId, setDeletingConversationId] = useState('')
   const [pruneModalOpen, setPruneModalOpen] = useState(false)
@@ -60,6 +61,18 @@ export function useChatWorkspace(isMobile: boolean) {
   const [abortPopoverConversationId, setAbortPopoverConversationId] = useState('')
   const [abortReason, setAbortReason] = useState('')
   const [totpEnabled, setTotpEnabled] = useState(false)
+
+  function beginSending() {
+    if (sendingRef.current) return false
+    sendingRef.current = true
+    setSending(true)
+    return true
+  }
+
+  function finishSending() {
+    sendingRef.current = false
+    setSending(false)
+  }
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const selectedConversationIdRef = useRef('')
   selectedConversationIdRef.current = selectedConversationId
@@ -87,6 +100,10 @@ export function useChatWorkspace(isMobile: boolean) {
     applySelectedConversation,
     automationExecutions,
     automationRecording,
+    conversationPageError,
+    hasMoreConversations,
+    loadingMoreConversations,
+    loadMoreConversations,
     sendAutomationRecordCommand,
     sendWorkspaceCommand,
   } = useWorkspaceRealtime({
@@ -402,8 +419,8 @@ export function useChatWorkspace(isMobile: boolean) {
         appMessage.warning('请上传图片')
         return
       }
+      if (!beginSending()) return
       try {
-        setSending(true)
         await sendWorkspaceCommand({
           kind: 'builtin_tool',
             conversation_id: selectedConversationId,
@@ -418,7 +435,7 @@ export function useChatWorkspace(isMobile: boolean) {
       } catch (error) {
         appMessage.error(error instanceof Error ? error.message : '输出内置工具失败')
       } finally {
-        setSending(false)
+        finishSending()
       }
       return
     }
@@ -426,7 +443,7 @@ export function useChatWorkspace(isMobile: boolean) {
     const rawChunk = textOverride ?? (isThinkingMode ? thinkingText : composer)
     if (!normalizeChatText(rawChunk)) return
     const chunk = normalizedOutputText(rawChunk)
-    setSending(true)
+    if (!beginSending()) return
     try {
       const ack = await sendWorkspaceCommand({
         kind: 'stream_delta',
@@ -452,7 +469,7 @@ export function useChatWorkspace(isMobile: boolean) {
     } catch (error) {
       appMessage.error(error instanceof Error ? error.message : '输出片段失败')
     } finally {
-      setSending(false)
+      finishSending()
     }
   }
 
@@ -519,7 +536,7 @@ export function useChatWorkspace(isMobile: boolean) {
       return
     }
 
-    setSending(true)
+    if (!beginSending()) return
     try {
       if (composerMode === 'assistant_message' && pendingChunk) {
         const outputChunk = normalizedOutputText(pendingChunk)
@@ -575,7 +592,7 @@ export function useChatWorkspace(isMobile: boolean) {
     } catch (error) {
       appMessage.error(error instanceof Error ? error.message : '发送失败')
     } finally {
-      setSending(false)
+      finishSending()
     }
   }
 
@@ -629,6 +646,7 @@ export function useChatWorkspace(isMobile: boolean) {
     uploadingOutputImage,
     thinkingText,
     conversations,
+    conversationPageError,
     deletingConversationId,
     draftBuffer,
     drawerOpen,
@@ -643,6 +661,9 @@ export function useChatWorkspace(isMobile: boolean) {
     handleEditAutomationRule: automation.handleEditAutomationRule,
     handleLogin,
     handleLogout,
+    hasMoreConversations,
+    loadingMoreConversations,
+    loadMoreConversations,
     handlePruneConversations,
     handleSaveAutomationRule: automation.handleSaveAutomationRule,
     handleSelectConversation,

@@ -225,11 +225,15 @@ func New(deps Deps) http.Handler {
 		})
 	}
 	if deps.AdminSettings == nil && deps.AuthSettings != nil && deps.AccessSettings != nil {
+		accessDomain, err := adminsettings.Combine("access", "访问限流", deps.AccessSettings.AdminDomain(), deps.RealtimeSettings, deps.ChatSettings)
+		if err != nil {
+			panic(err)
+		}
 		deps.AdminSettings = adminsettings.New(deps.Config,
 			adminsettings.Domain{Settings: deps.AuthSettings.AdminDomain()},
-			adminsettings.Domain{Settings: deps.AccessSettings.AdminDomain()},
-			adminsettings.Domain{Settings: deps.ChatSettings}, adminsettings.Domain{Settings: deps.MediaSettings},
-			adminsettings.Domain{Settings: deps.AutomationSettings}, adminsettings.Domain{Settings: deps.RealtimeSettings},
+			adminsettings.Domain{Settings: accessDomain},
+			adminsettings.Domain{Settings: deps.MediaSettings},
+			adminsettings.Domain{Settings: deps.AutomationSettings},
 		)
 	}
 	if deps.AdminControl == nil {

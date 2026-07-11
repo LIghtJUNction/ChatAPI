@@ -40,6 +40,7 @@ type ConversationSidebarProps = {
   automationRulesModalOpen: boolean
   collapsed: boolean
   conversations: Conversation[]
+  conversationPageError: string
   deletingConversationId: string
   editingAutomationRule: AutomationRule | null
   onAbortConversation: (conversationId: string) => void | Promise<void>
@@ -48,6 +49,9 @@ type ConversationSidebarProps = {
   onDeleteConversation: (conversationId: string) => void | Promise<void>
   onEditAutomationRule: (ruleId: string) => void | Promise<void>
   onLogout: () => void | Promise<void>
+  hasMoreConversations: boolean
+  loadingMoreConversations: boolean
+  onLoadMoreConversations: () => void
   onPruneConversations: () => void | Promise<void>
   onSaveAutomationRule: (rule: AutomationRule) => void | Promise<void>
   onSelectConversation: (conversationId: string) => void | Promise<void>
@@ -91,6 +95,7 @@ export function ConversationSidebar({
   automationRulesModalOpen,
   collapsed,
   conversations,
+  conversationPageError,
   deletingConversationId,
   editingAutomationRule,
   onAbortConversation,
@@ -99,6 +104,9 @@ export function ConversationSidebar({
   onDeleteConversation,
   onEditAutomationRule,
   onLogout,
+  hasMoreConversations,
+  loadingMoreConversations,
+  onLoadMoreConversations,
   onPruneConversations,
   onSaveAutomationRule,
   onSelectConversation,
@@ -173,11 +181,24 @@ export function ConversationSidebar({
           ) : null}
         </div>
       </div>
-      <List
+      <div
         className="conversation-list"
-        dataSource={conversations}
-        locale={{ emptyText: <Empty description="暂无会话" /> }}
-        renderItem={(item) => {
+        onScroll={(event) => {
+          const target = event.currentTarget
+          if (hasMoreConversations && !loadingMoreConversations && target.scrollHeight - target.scrollTop - target.clientHeight < 120) {
+            onLoadMoreConversations()
+          }
+        }}
+      >
+        <List
+          dataSource={conversations}
+          footer={!collapsed && (loadingMoreConversations || conversationPageError) ? (
+            <div className="conversation-page-loading">
+              {loadingMoreConversations ? '加载更多会话...' : <Button type="link" size="small" onClick={onLoadMoreConversations}>{conversationPageError}</Button>}
+            </div>
+          ) : null}
+          locale={{ emptyText: <Empty description="暂无会话" /> }}
+          renderItem={(item) => {
           const active = item.id === selectedConversationId
           const realtimeStatus = item.status
           const isWaiting = realtimeStatus === 'waiting'
@@ -292,8 +313,9 @@ export function ConversationSidebar({
               </div>
             </List.Item>
           )
-        }}
-      />
+          }}
+        />
+      </div>
       <div className="sidebar-footer">
         {!collapsed ? (
           <>

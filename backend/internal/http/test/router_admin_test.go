@@ -302,11 +302,18 @@ func TestRouterAdminFlow(t *testing.T) {
 	if _, ok := current["global_rate_limit_requests"]; !ok {
 		t.Fatalf("expected current global_rate_limit_requests: %#v", accessSettingsResp)
 	}
+	if _, ok := current["max_connections_per_instance"]; !ok {
+		t.Fatalf("expected realtime connection limits in access settings: %#v", accessSettingsResp)
+	}
+	if _, ok := current["pending_turn_ttl"]; !ok {
+		t.Fatalf("expected pending turn TTL in access settings: %#v", accessSettingsResp)
+	}
 	accessSettingsResp = patchJSONWithCookie(t, server.URL+"/api/admin/settings/access", map[string]any{"values": map[string]any{
-		"user_rate_limit_requests":    10,
-		"user_rate_limit_window":      "1m",
-		"app_key_rate_limit_requests": 20,
-		"app_key_rate_limit_window":   "2m",
+		"user_rate_limit_requests":              10,
+		"user_rate_limit_window":                "1m",
+		"app_key_rate_limit_requests":           20,
+		"app_key_rate_limit_window":             "2m",
+		"max_connections_per_user_per_instance": 6,
 	}}, adminCookie, http.StatusOK)
 	result, ok := accessSettingsResp["result"].(map[string]any)
 	if !ok {
@@ -322,6 +329,9 @@ func TestRouterAdminFlow(t *testing.T) {
 	}
 	if int(current["user_rate_limit_requests"].(float64)) != 10 {
 		t.Fatalf("unexpected saved access settings response: %#v", accessSettingsResp)
+	}
+	if int(current["max_connections_per_user_per_instance"].(float64)) != 6 {
+		t.Fatalf("unexpected saved realtime settings response: %#v", accessSettingsResp)
 	}
 	lastWrite := patchJSONWithCookie(t, server.URL+"/api/admin/settings/access", map[string]any{"values": map[string]any{"user_rate_limit_requests": 11}}, adminCookie, http.StatusOK)
 	lastWriteResult, _ := lastWrite["result"].(map[string]any)

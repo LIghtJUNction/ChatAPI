@@ -21,7 +21,7 @@ type Store struct {
 var errConflict = common.ErrTurnConflict
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0006_postgresql_output_media_refs"
+const LatestVersion = "0007_postgresql_conversation_owner_page"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS

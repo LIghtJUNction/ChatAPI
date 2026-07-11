@@ -6,7 +6,6 @@ import { useNavigate } from 'react-router-dom'
 import type { AutomationRule, AuthUser } from '../../types/chat'
 import { ApiKeyManagementPanel } from './ApiKeyManagementPanel'
 import { AutomationRulesPanel } from './AutomationRulesPanel'
-import { UserManagementPanel } from './UserManagementPanel'
 import { UserSettingsPanel } from './UserSettingsPanel'
 
 type SettingsModalProps = {
@@ -24,7 +23,7 @@ type SettingsModalProps = {
   onTotpRefresh: () => void
 }
 
-type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'users' | 'system'
+type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'system'
 
 export function SettingsModal({
   automationRuleEditorOpen,
@@ -89,11 +88,6 @@ export function SettingsModal({
 	  label: <span style={{ color: '#13c2c2' }}>系统设置</span>,
 	  children: <div className="admin-settings-entry"><ControlOutlined/><Typography.Title level={4}>系统管理设置</Typography.Title><Typography.Paragraph type="secondary">管理认证、访问限制、聊天、媒体、自动化和实时通信策略。</Typography.Paragraph><Button type="primary" onClick={()=>{onClose();navigate('/admin/settings/overview')}}>打开管理控制面</Button></div>,
 	},
-    {
-      key: 'users',
-      label: <span style={{ color: '#13c2c2' }}>用户管理</span>,
-      children: <UserManagementPanel open={open && activeTab === 'users'} />,
-    },
   ]
 
   const tabs = isAdmin ? [...commonTabs, userSettingsTab, ...adminTabs] : [...commonTabs, userSettingsTab]

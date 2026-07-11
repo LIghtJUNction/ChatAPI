@@ -10,7 +10,7 @@ import (
 )
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0007_output_media_refs"
+const LatestVersion = "0008_sqlite_conversation_owner_page"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS

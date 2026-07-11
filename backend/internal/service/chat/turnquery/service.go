@@ -3,6 +3,7 @@ package turnquery
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
@@ -60,6 +61,16 @@ func (s *Service) ListConversationsForOwner(ctx context.Context, ownerID string)
 	}
 	s.logger().Debug("listed conversations for owner", zap.String("owner.id", ownerID), zap.Int("conversations.count", len(filtered)))
 	return filtered, nil
+}
+
+func (s *Service) ListConversationsForOwnerPage(ctx context.Context, ownerID string, before time.Time, beforeID string, limit int) ([]common.Conversation, error) {
+	items, err := s.Store.ListConversationsForOwnerPage(ctx, ownerID, before, beforeID, limit)
+	if err != nil {
+		s.logger().Warn("list conversation page failed", zap.String("owner.id", ownerID), zap.Int("page.limit", limit), zap.Error(err))
+		return nil, err
+	}
+	s.logger().Debug("listed conversation page", zap.String("owner.id", ownerID), zap.Int("conversations.count", len(items)))
+	return items, nil
 }
 
 func (s *Service) ListRequests(ctx context.Context) ([]common.Request, error) {

@@ -41,6 +41,33 @@ func (s *Store) ListConversations(ctx context.Context) ([]common.Conversation, e
 	return items, nil
 }
 
+func (s *Store) ListConversationsForOwnerPage(ctx context.Context, ownerID string, before time.Time, beforeID string, limit int) ([]common.Conversation, error) {
+	if limit <= 0 {
+		return []common.Conversation{}, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(metadata_json->>'response_id', '')
+		FROM conversations
+		WHERE COALESCE(metadata_json->>'owner_id', '') = $1
+			AND ($3 = '' OR (updated_at, id) < ($2, $3))
+		ORDER BY updated_at DESC, id DESC
+		LIMIT $4
+	`, strings.TrimSpace(ownerID), before, strings.TrimSpace(beforeID), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]common.Conversation, 0, limit)
+	for rows.Next() {
+		item, err := scanConversation(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) GetConversation(ctx context.Context, conversationID string) (common.Conversation, error) {
 	return scanConversation(s.pool.QueryRow(ctx, `
 		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(metadata_json->>'response_id', '')

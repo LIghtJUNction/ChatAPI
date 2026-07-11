@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -101,6 +102,43 @@ func RunConversationRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Run("conversation_events", func(t *testing.T) {
 		testConversationRepositoryConversationEvents(t, newStore)
 	})
+	t.Run("owner_conversation_pages", func(t *testing.T) {
+		testConversationRepositoryOwnerPages(t, newStore)
+	})
+}
+
+func testConversationRepositoryOwnerPages(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+	for index, ownerID := range []string{"owner-a", "owner-b", "owner-a", "owner-a"} {
+		_, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
+			ConversationID: "page-conversation-" + strconv.Itoa(index),
+			RequestID:      "page-request-" + strconv.Itoa(index),
+			ResponseID:     "page-response-" + strconv.Itoa(index),
+			OwnerID:        ownerID,
+			RequestFormat:  "responses",
+			UserContent:    "page test",
+		})
+		if err != nil {
+			t.Fatalf("create paged conversation %d: %v", index, err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	first, err := st.ListConversationsForOwnerPage(ctx, "owner-a", time.Time{}, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || !first[0].UpdatedAt.After(first[1].UpdatedAt) {
+		t.Fatalf("unexpected first owner page: %#v", first)
+	}
+	second, err := st.ListConversationsForOwnerPage(ctx, "owner-a", first[1].UpdatedAt, first[1].ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 1 || second[0].ID == first[0].ID || second[0].ID == first[1].ID {
+		t.Fatalf("unexpected second owner page: %#v", second)
+	}
 }
 
 func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewStoreFunc) {

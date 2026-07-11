@@ -15,6 +15,8 @@ import type {
   WorkspaceCommandErrorEvent,
   WorkspaceConnectionCountEvent,
   WorkspaceConversationDeleteEvent,
+  WorkspaceConversationPageErrorEvent,
+  WorkspaceConversationPageEvent,
   WorkspaceConversationUpsertEvent,
   WorkspaceSnapshotEvent,
   WorkspaceTimelineItemAppendEvent,
@@ -24,7 +26,10 @@ import type {
 const STORAGE_KEY = 'chatapi.conversationId'
 
 function sortConversations(items: Conversation[]) {
-  return [...items].sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at))
+  return [...items].sort((left, right) => {
+    const timeOrder = Date.parse(right.updated_at) - Date.parse(left.updated_at)
+    return timeOrder || right.id.localeCompare(left.id)
+  })
 }
 
 type UseWorkspaceRealtimeParams = {
@@ -56,6 +61,13 @@ export function useWorkspaceRealtime({
   const automationSnapshotRevisionRef = useRef(0)
   const automationRecordingRevisionRef = useRef(0)
   const automationExecutionRevisionsRef = useRef<Record<string, number>>({})
+  const conversationCursorRef = useRef('')
+  const conversationPageCommandRef = useRef('')
+  const conversationPageTimeoutRef = useRef(0)
+  const removedConversationIDsRef = useRef(new Set<string>())
+  const [hasMoreConversations, setHasMoreConversations] = useState(false)
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false)
+  const [conversationPageError, setConversationPageError] = useState('')
   const [automationRecording, setAutomationRecording] = useState<AutomationRecordingState>({ revision: 0, active: false, steps: [] })
   const [automationExecutions, setAutomationExecutions] = useState<Record<string, AutomationExecutionState>>({})
   const pendingCommandsRef = useRef(new Map<string, {
@@ -76,6 +88,30 @@ export function useWorkspaceRealtime({
   const sendJSON = useCallback((payload: unknown) => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return
     socketRef.current.send(JSON.stringify(payload))
+  }, [])
+
+  const loadMoreConversations = useCallback(() => {
+    const socket = socketRef.current
+    const cursor = conversationCursorRef.current
+    if (socket?.readyState !== WebSocket.OPEN || !cursor || conversationPageCommandRef.current) return
+    const commandId = `page_${Date.now()}_${(commandSeqRef.current += 1)}`
+    conversationPageCommandRef.current = commandId
+    setLoadingMoreConversations(true)
+    setConversationPageError('')
+    conversationPageTimeoutRef.current = window.setTimeout(() => {
+      if (conversationPageCommandRef.current !== commandId) return
+      conversationPageCommandRef.current = ''
+      setLoadingMoreConversations(false)
+      setConversationPageError('加载超时，请重试')
+    }, 15_000)
+    try {
+      socket.send(JSON.stringify({ type: 'conversation.page.get', command_id: commandId, cursor }))
+    } catch {
+      conversationPageCommandRef.current = ''
+      window.clearTimeout(conversationPageTimeoutRef.current)
+      setLoadingMoreConversations(false)
+      setConversationPageError('发送失败，请重试')
+    }
   }, [])
 
   const rejectPendingCommands = useCallback((message: string) => {
@@ -190,6 +226,7 @@ export function useWorkspaceRealtime({
     if (!authenticated) return
     let active = true
     let reconnectTimer = 0
+    const removedConversationIDs = removedConversationIDsRef.current
 
     function connect() {
       const socket = new WebSocket(resolveWebSocketUrl('/api/ws'))
@@ -209,6 +246,8 @@ export function useWorkspaceRealtime({
           | WorkspaceConnectionCountEvent
           | WorkspaceConversationUpsertEvent
           | WorkspaceConversationDeleteEvent
+          | WorkspaceConversationPageEvent
+          | WorkspaceConversationPageErrorEvent
           | WorkspaceTimelineResetEvent
           | WorkspaceTimelineItemAppendEvent
           | WorkspaceCommandAckEvent
@@ -225,6 +264,8 @@ export function useWorkspaceRealtime({
             | WorkspaceConnectionCountEvent
             | WorkspaceConversationUpsertEvent
             | WorkspaceConversationDeleteEvent
+            | WorkspaceConversationPageEvent
+            | WorkspaceConversationPageErrorEvent
             | WorkspaceTimelineResetEvent
             | WorkspaceTimelineItemAppendEvent
             | WorkspaceCommandAckEvent
@@ -247,9 +288,44 @@ export function useWorkspaceRealtime({
 
         if (payload.type === 'workspace.snapshot') {
           const nextConversations = sortConversations(payload.conversations)
+          conversationCursorRef.current = payload.next_cursor ?? ''
+          conversationPageCommandRef.current = ''
+          removedConversationIDs.clear()
+          window.clearTimeout(conversationPageTimeoutRef.current)
+          setHasMoreConversations(payload.has_more)
+          setLoadingMoreConversations(false)
+          setConversationPageError('')
           conversationsRef.current = nextConversations
           setConversations(nextConversations)
           applySelectedConversation(resolvePreferredConversationId(nextConversations))
+          return
+        }
+
+        if (payload.type === 'conversation.page') {
+          if (payload.command_id !== conversationPageCommandRef.current) return
+          conversationPageCommandRef.current = ''
+          window.clearTimeout(conversationPageTimeoutRef.current)
+          conversationCursorRef.current = payload.next_cursor ?? ''
+          setHasMoreConversations(payload.has_more)
+          setLoadingMoreConversations(false)
+          const byID = new Map(conversationsRef.current.map((item) => [item.id, item]))
+          for (const conversation of payload.conversations) {
+            if (!byID.has(conversation.id) && !removedConversationIDs.has(conversation.id)) {
+              byID.set(conversation.id, conversation)
+            }
+          }
+          const nextConversations = sortConversations([...byID.values()])
+          conversationsRef.current = nextConversations
+          setConversations(nextConversations)
+          return
+        }
+
+        if (payload.type === 'conversation.page.error') {
+          if (payload.command_id !== conversationPageCommandRef.current) return
+          conversationPageCommandRef.current = ''
+          window.clearTimeout(conversationPageTimeoutRef.current)
+          setLoadingMoreConversations(false)
+          setConversationPageError(payload.message || '加载失败，请重试')
           return
         }
 
@@ -358,6 +434,7 @@ export function useWorkspaceRealtime({
         }
 
         if (payload.type === 'conversation.upsert') {
+          removedConversationIDs.delete(payload.conversation.id)
           const remaining = conversationsRef.current.filter((item) => item.id !== payload.conversation.id)
           const nextConversations = sortConversations([payload.conversation, ...remaining])
           conversationsRef.current = nextConversations
@@ -391,6 +468,7 @@ export function useWorkspaceRealtime({
           return
         }
 
+        removedConversationIDs.add(payload.conversation_id)
         const nextConversations = conversationsRef.current.filter((item) => item.id !== payload.conversation_id)
         conversationsRef.current = nextConversations
         setConversations(nextConversations)
@@ -419,6 +497,13 @@ export function useWorkspaceRealtime({
           socketRef.current = null
         }
         subscribedConversationIdRef.current = ''
+        conversationCursorRef.current = ''
+        conversationPageCommandRef.current = ''
+        window.clearTimeout(conversationPageTimeoutRef.current)
+        removedConversationIDs.clear()
+        setHasMoreConversations(false)
+        setLoadingMoreConversations(false)
+        setConversationPageError('')
         setMessagesLoading(true)
         reconnectTimer = window.setTimeout(() => {
           connect()
@@ -439,6 +524,10 @@ export function useWorkspaceRealtime({
       socketRef.current?.close()
       socketRef.current = null
       subscribedConversationIdRef.current = ''
+      conversationCursorRef.current = ''
+      conversationPageCommandRef.current = ''
+      window.clearTimeout(conversationPageTimeoutRef.current)
+      removedConversationIDs.clear()
     }
   }, [
     applySelectedConversation,
@@ -458,6 +547,10 @@ export function useWorkspaceRealtime({
     applySelectedConversation,
     automationExecutions,
     automationRecording,
+    conversationPageError,
+    hasMoreConversations,
+    loadingMoreConversations,
+    loadMoreConversations,
     sendAutomationRecordCommand,
     sendWorkspaceCommand,
   }

@@ -5,6 +5,7 @@ import { ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import { appMessage } from '../../../lib/antdMessage'
 import { getSettings, patchSettings } from '../api/settings'
 import { SettingFieldControl } from '../components/SettingFieldControl'
+import { RateLimitFieldRow } from '../components/RateLimitFieldRow'
 import type { SettingField, SettingsDocument } from '../model/types'
 
 export function DomainSettingsSection({ domain }: { domain: string }) {
@@ -99,6 +100,37 @@ export function DomainSettingsSection({ domain }: { domain: string }) {
       ))}
     </div>
   )
+  const renderAccessRateLimits = () => {
+    const fieldsByKey = new Map(document.fields.map((field) => [field.key, field]))
+    const requestFields = document.fields.filter((field) => field.key.endsWith('_rate_limit_requests'))
+    const otherFields = document.fields.filter((field) => !field.key.includes('_rate_limit_'))
+    return (
+      <>
+      <div className="admin-settings-fields">
+        {requestFields.map((requestsField) => {
+          const prefix = requestsField.key.slice(0, -'_rate_limit_requests'.length)
+          const windowField = fieldsByKey.get(`${prefix}_rate_limit_window`)
+          if (!windowField) return null
+          return (
+            <RateLimitFieldRow
+              key={prefix}
+              requestsField={requestsField}
+              windowField={windowField}
+              requestsSource={document.sources[requestsField.key] ?? 'default'}
+              windowSource={document.sources[windowField.key] ?? 'default'}
+              requestsValue={draft[requestsField.key]}
+              windowValue={draft[windowField.key]}
+              disabled={saving}
+              onRequestsChange={(value) => changeField(requestsField.key, value)}
+              onWindowChange={(value) => changeField(windowField.key, value)}
+            />
+          )
+        })}
+      </div>
+      {otherFields.length ? render(otherFields) : null}
+      </>
+    )
+  }
   const common = document.fields.filter((field) => field.level === 'common')
   const policy = document.fields.filter((field) => field.level === 'policy')
   const advanced = document.fields.filter((field) => field.level === 'advanced')
@@ -124,8 +156,8 @@ export function DomainSettingsSection({ domain }: { domain: string }) {
           description={document.refresh_error || '配置存储暂时不可用；恢复前不能保存更改'}
         />
       ) : null}
-      {render(common)}
-      {policy.length ? (
+      {domain === 'access' ? renderAccessRateLimits() : render(common)}
+      {domain !== 'access' && policy.length ? (
         <>
           <Divider orientation="left">更多策略</Divider>
           {render(policy)}

@@ -109,7 +109,10 @@ export function WorkspaceRoute() {
       automationRulesModalOpen={workspace.automationRulesModalOpen}
       collapsed={!isMobile && sidebarCollapsed}
       conversations={workspace.conversations}
+      conversationPageError={workspace.conversationPageError}
       deletingConversationId={workspace.deletingConversationId}
+      hasMoreConversations={workspace.hasMoreConversations}
+      loadingMoreConversations={workspace.loadingMoreConversations}
       editingAutomationRule={workspace.editingAutomationRule}
       onAbortConversation={workspace.handleAbortConversation}
       onCreateAutomationRule={workspace.handleCreateAutomationRule}
@@ -117,6 +120,7 @@ export function WorkspaceRoute() {
       onDeleteConversation={workspace.handleDeleteConversation}
       onEditAutomationRule={workspace.handleEditAutomationRule}
       onLogout={workspace.handleLogout}
+      onLoadMoreConversations={workspace.loadMoreConversations}
       onPruneConversations={workspace.handlePruneConversations}
       onSaveAutomationRule={workspace.handleSaveAutomationRule}
       onSelectConversation={workspace.handleSelectConversation}

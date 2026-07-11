@@ -62,12 +62,14 @@ func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 				zap.String("message.type", workspacePayloadType(payload)),
 				zap.Error(err),
 			)
+			_ = conn.Close()
 			return
 		}
 		logger.Debug("workspace websocket outbound sent",
 			zap.String("message.type", workspacePayloadType(payload)),
 		)
 	})
+	wsConn.BeginInitialization()
 
 	connectionCount, registerErr := h.Hub.TryRegister(r.Context(), ownerID, wsConn)
 	if registerErr != nil {
@@ -87,16 +89,16 @@ func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		h.Hub.PublishConnectionCount(ownerID)
 	}()
 
-	snapshot, err := h.Hub.Snapshot(r.Context(), ownerID)
+	snapshotCtx, cancelSnapshot := context.WithTimeout(r.Context(), 5*time.Second)
+	snapshot, err := h.Hub.Snapshot(snapshotCtx, ownerID)
+	cancelSnapshot()
 	if err != nil {
-		logger.Debug("workspace websocket snapshot skipped", zap.Error(err))
+		disconnectReason = "snapshot_failed"
+		logger.Warn("workspace websocket snapshot failed", zap.Error(err))
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "workspace snapshot unavailable"), time.Now().Add(time.Second))
+		return
 	} else {
-		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		if err := conn.WriteJSON(snapshot); err != nil {
-			disconnectReason = "snapshot_write_failed"
-			logger.Warn("workspace websocket snapshot send failed", zap.Error(err))
-			return
-		}
+		wsConn.Activate(snapshot)
 		logger.Debug("workspace websocket snapshot sent", zap.Int("conversations.count", len(snapshot.Conversations)))
 	}
 	h.Hub.PublishConnectionCount(ownerID)

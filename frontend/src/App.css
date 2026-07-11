@@ -874,6 +874,13 @@
   padding: 8px;
 }
 
+.conversation-page-loading {
+  padding: 10px 0 14px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .conversation-list::-webkit-scrollbar,
 .chat-scroll::-webkit-scrollbar {
   width: 6px;

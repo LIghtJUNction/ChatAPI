@@ -1,5 +1,6 @@
-import { Button, Form, Input, Select, Statistic, Table, Tag, Typography } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { useState } from 'react'
+import { Button, Form, Input, Select, Table, Typography } from 'antd'
+import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
 
 import { useUserManagementState } from './userManagement/useUserManagementState'
 import { buildUserColumns } from './userManagement/userColumns'
@@ -10,6 +11,7 @@ type UserManagementPanelProps = {
 }
 
 export function UserManagementPanel({ open }: UserManagementPanelProps) {
+  const [createOpen, setCreateOpen] = useState(false)
   const {
     creating,
     deletingId,
@@ -18,7 +20,6 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
     handleDelete,
     handlePasswordChange,
     loading,
-    monitorConnected,
     page,
     pageSize,
     openPasswordModal,
@@ -28,8 +29,6 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
     pwUsername,
     setPwModalOpen,
     users,
-    totalConnections,
-    runtimeMetrics,
     setPage,
     setPageSize,
     totalUsers,
@@ -44,30 +43,28 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
   return (
     <div className="user-management-panel">
       <div className="user-management-header">
-        <Typography.Text className="user-management-subtitle">
-          管理系统中的所有用户账户。
-        </Typography.Text>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => form.submit()}>
-          添加用户
+        <div>
+          <Typography.Title level={2}>用户管理</Typography.Title>
+          <Typography.Text type="secondary">共 {totalUsers} 个账户</Typography.Text>
+        </div>
+        <Button
+          type={createOpen ? 'default' : 'primary'}
+          icon={createOpen ? <CloseOutlined /> : <PlusOutlined />}
+          onClick={() => setCreateOpen((current) => !current)}
+        >
+          {createOpen ? '取消创建' : '创建用户'}
         </Button>
       </div>
 
-      <div className="admin-monitoring-strip">
-        <Statistic title="实例连接" value={totalConnections} />
-        <Statistic title="Goroutine" value={runtimeMetrics?.goroutines ?? 0} />
-        <Statistic title="堆内存" value={formatBytes(runtimeMetrics?.heap_alloc_bytes ?? 0)} />
-        <Statistic title="运行时间" value={formatUptime(runtimeMetrics?.uptime_seconds ?? 0)} />
-        <Tag color={monitorConnected ? 'green' : 'default'}>
-          {monitorConnected ? '实时' : '重连中'}
-        </Tag>
-      </div>
-
-      <Form form={form} layout="inline" onFinish={handleCreate} className="user-management-form">
+      {createOpen ? <Form form={form} layout="inline" onFinish={async (values) => {
+        if (await handleCreate(values)) setCreateOpen(false)
+      }} className="user-management-form">
+        <Typography.Text strong className="user-management-form-title">新账户</Typography.Text>
         <Form.Item
           name="username"
           rules={[{ required: true, message: '请输入用户名' }]}
         >
-          <Input placeholder="用户名" allowClear />
+          <Input placeholder="用户名" autoFocus allowClear />
         </Form.Item>
         <Form.Item
           name="password"
@@ -86,11 +83,15 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
         </Form.Item>
         <Form.Item>
           <Button type="primary" htmlType="submit" icon={<PlusOutlined />} loading={creating}>
-            添加
+            创建
           </Button>
         </Form.Item>
-      </Form>
+      </Form> : null}
 
+      <div className="user-management-list-heading">
+        <Typography.Text strong>账户列表</Typography.Text>
+        <Typography.Text type="secondary">连接状态每 2 秒校准</Typography.Text>
+      </div>
       <Table
         className="user-management-table"
         columns={columns}
@@ -115,6 +116,7 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
           },
         }}
         size="small"
+        scroll={{ x: 840 }}
       />
 
       <UserPasswordModal
@@ -127,15 +129,4 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
       />
     </div>
   )
-}
-
-function formatBytes(value: number) {
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KiB`
-  return `${(value / 1024 / 1024).toFixed(1)} MiB`
-}
-
-function formatUptime(seconds: number) {
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }

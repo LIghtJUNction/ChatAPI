@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
 	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
@@ -8,7 +9,6 @@ import (
 	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
-	"github.com/zyf2007/ChatAPI/internal/repository/chat"
 )
 
 func firstCatalog(current *catalogsvc.Service, modelKeys *modelkey.Service) *catalogsvc.Service {

@@ -46,6 +46,13 @@ type UpdateUserInput struct {
 	LastLoginAt  *time.Time
 }
 
+type UserPage struct {
+	Items    []common.User
+	Page     int
+	PageSize int
+	Total    int
+}
+
 func NewService(dataStore auth.Store) *Service {
 	return &Service{
 		store: dataStore,
@@ -75,6 +82,23 @@ func (s *Service) LookupUserByIdentifier(ctx context.Context, identifier string)
 
 func (s *Service) ListUsers(ctx context.Context) ([]common.User, error) {
 	return s.store.ListUsers(ctx)
+}
+
+func (s *Service) ListUsersPage(ctx context.Context, page int, pageSize int) (UserPage, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	items, total, err := s.store.ListUsersPage(ctx, (page-1)*pageSize, pageSize)
+	if err != nil {
+		return UserPage{}, err
+	}
+	return UserPage{Items: items, Page: page, PageSize: pageSize, Total: total}, nil
 }
 
 func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (common.User, error) {

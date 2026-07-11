@@ -1,4 +1,4 @@
-import { Button, Form, Input, Select, Table, Typography } from 'antd'
+import { Button, Form, Input, Select, Statistic, Table, Tag, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 
 import { useUserManagementState } from './userManagement/useUserManagementState'
@@ -18,6 +18,9 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
     handleDelete,
     handlePasswordChange,
     loading,
+    monitorConnected,
+    page,
+    pageSize,
     openPasswordModal,
     pwForm,
     pwModalOpen,
@@ -25,6 +28,11 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
     pwUsername,
     setPwModalOpen,
     users,
+    totalConnections,
+    runtimeMetrics,
+    setPage,
+    setPageSize,
+    totalUsers,
   } = useUserManagementState(open)
 
   const columns = buildUserColumns({
@@ -42,6 +50,16 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
         <Button type="primary" icon={<PlusOutlined />} onClick={() => form.submit()}>
           添加用户
         </Button>
+      </div>
+
+      <div className="admin-monitoring-strip">
+        <Statistic title="实例连接" value={totalConnections} />
+        <Statistic title="Goroutine" value={runtimeMetrics?.goroutines ?? 0} />
+        <Statistic title="堆内存" value={formatBytes(runtimeMetrics?.heap_alloc_bytes ?? 0)} />
+        <Statistic title="运行时间" value={formatUptime(runtimeMetrics?.uptime_seconds ?? 0)} />
+        <Tag color={monitorConnected ? 'green' : 'default'}>
+          {monitorConnected ? '实时' : '重连中'}
+        </Tag>
       </div>
 
       <Form form={form} layout="inline" onFinish={handleCreate} className="user-management-form">
@@ -80,11 +98,21 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
         rowKey="id"
         loading={loading}
         pagination={{
-          defaultPageSize: 10,
+          current: page,
+          pageSize,
+          total: totalUsers,
           showSizeChanger: true,
           showQuickJumper: true,
           pageSizeOptions: ['5', '10', '20', '50'],
           showTotal: (total) => `共 ${total} 条`,
+          onChange: (nextPage, nextPageSize) => {
+            if (nextPageSize !== pageSize) {
+              setPageSize(nextPageSize)
+              setPage(1)
+              return
+            }
+            setPage(nextPage)
+          },
         }}
         size="small"
       />
@@ -99,4 +127,15 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
       />
     </div>
   )
+}
+
+function formatBytes(value: number) {
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KiB`
+  return `${(value / 1024 / 1024).toFixed(1)} MiB`
+}
+
+function formatUptime(seconds: number) {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }

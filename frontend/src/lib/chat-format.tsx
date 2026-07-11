@@ -16,7 +16,7 @@ type RenderMessageContentOptions = {
   onImageClick?: (src: string, detail?: string, alt?: string) => void
 }
 
-function normalizeDisplayText(value: string): string {
+export function normalizeChatText(value: string): string {
   return value
     .replace(/\r\n/g, '\n')
     .replace(/\\r\\n/g, '\n')
@@ -24,7 +24,7 @@ function normalizeDisplayText(value: string): string {
 }
 
 function splitThinkingBlocks(value: string): RenderableContentPart[] {
-  const normalized = normalizeDisplayText(value)
+  const normalized = normalizeChatText(value)
   const pattern = /<think(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/think>/gi
   const parts: RenderableContentPart[] = []
   let lastIndex = 0

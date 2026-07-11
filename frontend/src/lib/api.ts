@@ -67,3 +67,7 @@ export function resolveWebSocketUrl(url: string): string {
   target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:'
   return target.toString()
 }
+
+export function resolveEventSourceUrl(url: string): string {
+  return new URL(resolveRequestUrl(url), window.location.origin).toString()
+}

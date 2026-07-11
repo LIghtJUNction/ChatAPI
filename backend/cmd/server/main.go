@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"net"
 	"net/http"
 	"os"
@@ -46,9 +47,13 @@ import (
 	modelkeysvc "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	sessionsvc "github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	automationsettings "github.com/zyf2007/ChatAPI/internal/service/automation/settings"
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
+	preprocesssettings "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess/settings"
+	chatsettings "github.com/zyf2007/ChatAPI/internal/service/chat/settings"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
+	workspacesettings "github.com/zyf2007/ChatAPI/internal/service/chat/workspace/settings"
 )
 
 type runtimeStore interface {
@@ -126,7 +131,7 @@ func run() error {
 	accessSettingsSvc := authaccess.NewSettingsService(store, authaccess.Settings{
 		GlobalRateLimitRequests: cfg.AccessRateLimitRequests,
 		GlobalRateLimitWindow:   cfg.AccessRateLimitWindow,
-	})
+	}, cfg.SettingsEnvironment("access"))
 	accessSvc := authaccess.NewService(cfg, labSvc, accessSettingsSvc)
 	identitySvc := identity.NewService(accountSvc)
 	appKeySvc := appkeysvc.NewService(store)
@@ -161,36 +166,45 @@ func run() error {
 	if _, err := turnService.DisconnectRecoveredPending(ctx, "server restarted"); err != nil {
 		return fmt.Errorf("disconnect recovered pending turns: %w", err)
 	}
+	chatSettingsSvc := chatsettings.New(store, cfg)
+	mediaSettingsSvc := preprocesssettings.New(store, cfg)
+	realtimeSettingsSvc := workspacesettings.New(store, cfg)
+	automationSettingsSvc := automationsettings.New(store)
+	go expirePendingLoop(ctx, turnService, chatSettingsSvc, appLogger)
 
 	handler := httprouter.New(httprouter.Deps{
-		Config:         cfg,
-		ChatRepo:       store,
-		AuthRepo:       store,
-		ConfigRepo:     store,
-		AutomationRepo: store,
-		StorageRepo:    store,
-		AuditRepo:      store,
-		PlatformRepo:   store,
-		Turn:           turnService,
-		Query:          querySvc,
-		ModelAPIKeys:   modelKeySvc,
-		AppAPIKeys:     appKeySvc,
-		Lab:            labSvc,
-		LocalAuth:      localAuthSvc,
-		Verification:   verificationSvc,
-		Policy:         policySvc,
-		Access:         accessSvc,
-		AccessSettings: accessSettingsSvc,
-		AuthSettings:   authSettingsSvc,
-		GeeTest:        geetestSvc,
-		TOTP:           totpSvc,
-		OIDC:           oidcSvc,
-		LoginLimiter:   loginLimiter,
-		Audit:          auditSvc,
-		Accounts:       accountSvc,
-		Identity:       identitySvc,
-		UserSessions:   sessionSvc,
-		LoggerFactory:  logFactory,
+		Config:             cfg,
+		ChatRepo:           store,
+		AuthRepo:           store,
+		ConfigRepo:         store,
+		AutomationRepo:     store,
+		StorageRepo:        store,
+		AuditRepo:          store,
+		PlatformRepo:       store,
+		Turn:               turnService,
+		Query:              querySvc,
+		ModelAPIKeys:       modelKeySvc,
+		AppAPIKeys:         appKeySvc,
+		Lab:                labSvc,
+		LocalAuth:          localAuthSvc,
+		Verification:       verificationSvc,
+		Policy:             policySvc,
+		Access:             accessSvc,
+		AccessSettings:     accessSettingsSvc,
+		AuthSettings:       authSettingsSvc,
+		GeeTest:            geetestSvc,
+		TOTP:               totpSvc,
+		OIDC:               oidcSvc,
+		LoginLimiter:       loginLimiter,
+		Audit:              auditSvc,
+		Accounts:           accountSvc,
+		Identity:           identitySvc,
+		UserSessions:       sessionSvc,
+		LoggerFactory:      logFactory,
+		ChatSettings:       chatSettingsSvc,
+		MediaSettings:      mediaSettingsSvc,
+		RealtimeSettings:   realtimeSettingsSvc,
+		AutomationSettings: automationSettingsSvc,
 	})
 
 	server := &http.Server{
@@ -232,6 +246,29 @@ func run() error {
 		return nil
 	case serveErr := <-errCh:
 		return serveErr
+	}
+}
+
+func expirePendingLoop(ctx context.Context, turns *turnsvc.Service, settings *chatsettings.Service, logger *zap.Logger) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			current, err := settings.Current(ctx)
+			if err != nil {
+				logger.Warn("load chat settings for pending expiry failed", zap.Error(err))
+				continue
+			}
+			if current.PendingTurnTTL <= 0 {
+				continue
+			}
+			if _, err := turns.ExpirePendingTurns(ctx, current.PendingTurnTTL, now); err != nil {
+				logger.Warn("expire pending turns failed", zap.Error(err))
+			}
+		}
 	}
 }
 

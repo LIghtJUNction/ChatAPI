@@ -22,7 +22,8 @@ func TestAccessSettingsRoundTrip(t *testing.T) {
 	}
 
 	service := authaccess.NewSettingsService(st, authaccess.Settings{})
-	item, err := service.Set(context.Background(), map[string]any{
+	domain := service.AdminDomain()
+	updated, _, err := domain.Patch(context.Background(), map[string]any{
 		"user_rate_limit_requests":      12,
 		"user_rate_limit_window":        "1m",
 		"session_rate_limit_requests":   24,
@@ -35,8 +36,8 @@ func TestAccessSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set settings: %v", err)
 	}
-	if item["user_rate_limit_requests"].(int) != 12 {
-		t.Fatalf("unexpected settings map: %#v", item)
+	if updated.Values["user_rate_limit_requests"].(float64) != 12 {
+		t.Fatalf("unexpected settings map: %#v", updated.Values)
 	}
 
 	value, err := service.Get(context.Background())

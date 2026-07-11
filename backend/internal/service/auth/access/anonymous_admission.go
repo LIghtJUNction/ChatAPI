@@ -13,23 +13,19 @@ func (s *Service) AllowRequest(r *http.Request) bool {
 	if isLabPublicPath(r) {
 		return true
 	}
-	return s.anonymousLimiter.Allow(accessRateLimitKey(r))
+	settings := s.currentSettings(r.Context())
+	return s.anonymousLimiter.Allow(accessRateLimitKey(r), settings.GlobalRateLimitRequests, settings.GlobalRateLimitWindow)
 }
 
-func newRequestLimiter(max int, window time.Duration) *requestLimiter {
-	if max <= 0 || window <= 0 {
-		return nil
-	}
+func newRequestLimiter() *requestLimiter {
 	return &requestLimiter{
 		now:      func() time.Time { return time.Now().UTC() },
-		max:      max,
-		window:   window,
 		requests: map[string][]time.Time{},
 	}
 }
 
-func (l *requestLimiter) Allow(key string) bool {
-	if l == nil {
+func (l *requestLimiter) Allow(key string, max int, window time.Duration) bool {
+	if l == nil || max <= 0 || window <= 0 {
 		return true
 	}
 	key = strings.TrimSpace(strings.ToLower(key))
@@ -40,14 +36,14 @@ func (l *requestLimiter) Allow(key string) bool {
 	defer l.mu.Unlock()
 
 	now := l.now()
-	cutoff := now.Add(-l.window)
+	cutoff := now.Add(-window)
 	items := l.requests[key][:0]
 	for _, ts := range l.requests[key] {
 		if ts.After(cutoff) {
 			items = append(items, ts)
 		}
 	}
-	if len(items) >= l.max {
+	if len(items) >= max {
 		l.requests[key] = items
 		return false
 	}

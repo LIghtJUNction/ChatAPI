@@ -56,6 +56,22 @@ func TestRuntimeCompletionDoesNotRepeatStreamedText(t *testing.T) {
 	}
 }
 
+func TestRuntimePreservesNewlineOnlyResponsesDelta(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test"})
+	result := runtime.Apply(Action{Kind: ActionDelta, DeltaText: "\n"})
+
+	var delta string
+	for _, event := range result.StreamEvents {
+		if event.Event != "response.output_text.delta" {
+			continue
+		}
+		delta, _ = event.Data.(map[string]any)["delta"].(string)
+	}
+	if delta != "\n" {
+		t.Fatalf("newline-only delta changed on the Responses stream: %q", delta)
+	}
+}
+
 func TestRuntimeMapsOutputGuardFinishReasons(t *testing.T) {
 	t.Run("responses_length", func(t *testing.T) {
 		runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test", ResponseID: "resp_test"})
@@ -105,6 +121,23 @@ func TestRuntimeMapsOutputGuardFinishReasons(t *testing.T) {
 			t.Fatalf("unexpected anthropic stop delta: %#v", messageDelta)
 		}
 	})
+}
+
+func TestRuntimeResponsesCompletionIncludesRequiredUsageFields(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test"})
+	result := runtime.Apply(Action{Kind: ActionComplete, OutputTokens: 7})
+	terminal := result.StreamEvents[len(result.StreamEvents)-1]
+	response := terminal.Data.(map[string]any)["response"].(map[string]any)
+	usage := response["usage"].(map[string]any)
+
+	for _, field := range []string{"input_tokens", "output_tokens", "total_tokens", "input_tokens_details", "output_tokens_details"} {
+		if _, ok := usage[field]; !ok {
+			t.Fatalf("response.completed usage is missing %q: %#v", field, usage)
+		}
+	}
+	if usage["input_tokens"] != 0 || usage["output_tokens"] != 7 || usage["total_tokens"] != 7 {
+		t.Fatalf("unexpected response.completed usage: %#v", usage)
+	}
 }
 
 func streamEventText(event protocol.StreamEvent) string {

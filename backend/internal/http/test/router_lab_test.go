@@ -224,7 +224,8 @@ func TestRouterPrincipalAccessRateLimitForAppKey(t *testing.T) {
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
 	accessSettings := authaccess.NewSettingsService(st, authaccess.Settings{})
-	if _, err := accessSettings.Set(context.Background(), map[string]any{
+	accessDomain := accessSettings.AdminDomain()
+	if _, _, err := accessDomain.Patch(context.Background(), map[string]any{
 		"app_key_rate_limit_requests": 1,
 		"app_key_rate_limit_window":   "1m",
 	}); err != nil {

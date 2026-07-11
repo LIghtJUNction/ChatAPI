@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	automationrepo "github.com/zyf2007/ChatAPI/internal/repository/automation"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	automationsettings "github.com/zyf2007/ChatAPI/internal/service/automation/settings"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
 	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
@@ -35,19 +36,21 @@ type PendingLookup interface {
 }
 
 type Deps struct {
-	Rules   automationrepo.Store
-	Control ControlExecutor
-	Pending PendingLookup
-	Events  StatePublisher
-	Logger  *zap.Logger
+	Rules    automationrepo.Store
+	Control  ControlExecutor
+	Pending  PendingLookup
+	Events   StatePublisher
+	Logger   *zap.Logger
+	Settings *automationsettings.Service
 }
 
 type Service struct {
-	rules   automationrepo.Store
-	control ControlExecutor
-	pending PendingLookup
-	events  StatePublisher
-	logger  *zap.Logger
+	rules    automationrepo.Store
+	control  ControlExecutor
+	pending  PendingLookup
+	events   StatePublisher
+	logger   *zap.Logger
+	settings *automationsettings.Service
 
 	mu              sync.Mutex
 	recordings      map[string]*recording
@@ -60,7 +63,7 @@ type Service struct {
 func New(deps Deps) *Service {
 	return &Service{
 		rules: deps.Rules, control: deps.Control, pending: deps.Pending,
-		events: deps.Events, logger: deps.Logger,
+		events: deps.Events, logger: deps.Logger, settings: deps.Settings,
 		recordings: map[string]*recording{}, executions: map[string]*execution{},
 		manualTakeovers: map[string]struct{}{}, ruleGenerations: map[string]uint64{}, ownerRevisions: map[string]uint64{},
 	}
@@ -101,6 +104,18 @@ func (s *Service) SaveRule(ctx context.Context, ownerID string, rule Rule) (Rule
 	rule = NormalizeRule(rule)
 	if err := ValidateRule(rule); err != nil {
 		return Rule{}, err
+	}
+	if s.settings != nil {
+		cfg, err := s.settings.Current(ctx)
+		if err != nil {
+			return Rule{}, err
+		}
+		if len(rule.Steps) > cfg.MaxSteps {
+			return Rule{}, errors.New("automation rule exceeds global step limit")
+		}
+		if rule.Playback.LoopIntervalMS > cfg.MaxLoopIntervalMS {
+			return Rule{}, errors.New("automation loop interval exceeds global limit")
+		}
 	}
 	payload, err := rulePayload(rule)
 	if err != nil {

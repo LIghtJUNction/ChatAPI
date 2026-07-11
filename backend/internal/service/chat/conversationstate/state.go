@@ -50,7 +50,7 @@ func FromConversation(conversation common.Conversation) Runtime {
 		RequestFormat: metadataString(conversation.Metadata, "request_format"),
 		Model:         metadataString(conversation.Metadata, "model"),
 		Status:        Status(metadataString(conversation.Metadata, "realtime_status")),
-		DraftText:     metadataString(conversation.Metadata, "realtime_draft_text"),
+		DraftText:     metadataText(conversation.Metadata, "realtime_draft_text"),
 	}
 }
 
@@ -110,4 +110,12 @@ func metadataString(metadata map[string]any, key string) string {
 	}
 	value, _ := metadata[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func metadataText(metadata map[string]any, key string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	value, _ := metadata[key].(string)
+	return value
 }

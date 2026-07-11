@@ -1397,6 +1397,30 @@
   color: var(--app-text-muted) !important;
 }
 
+.admin-monitoring-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr)) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--app-border);
+}
+
+.admin-monitoring-strip .ant-statistic-title {
+  margin-bottom: 2px;
+}
+
+.admin-monitoring-strip .ant-statistic-content {
+  font-size: 18px;
+}
+
+@media (max-width: 760px) {
+  .admin-monitoring-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .user-management-form {
   border-radius: 18px;
   border: 1px solid var(--app-border);

@@ -13,7 +13,7 @@ import (
 func TestOutputMediaMigrationKeepsURLOnEventRefs(t *testing.T) {
 	var migrationSQL string
 	for _, step := range registeredMigrations {
-		if step.Version == LatestVersion {
+		if step.Version == "0006_postgresql_output_media_refs" {
 			migrationSQL = step.UpSQL
 			break
 		}

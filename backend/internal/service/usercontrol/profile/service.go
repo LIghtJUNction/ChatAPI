@@ -10,6 +10,7 @@ import (
 	localauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/local"
 	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
+	workspacesettings "github.com/zyf2007/ChatAPI/internal/service/chat/workspace/settings"
 	"go.uber.org/zap"
 )
 
@@ -34,6 +35,9 @@ type totpService interface {
 type rolePolicy interface {
 	EffectiveRole(common.User) string
 }
+type realtimeSettings interface {
+	Current(context.Context) (workspacesettings.Settings, error)
+}
 
 type Deps struct {
 	Identity  identityService
@@ -42,6 +46,7 @@ type Deps struct {
 	TOTP      totpService
 	Policy    rolePolicy
 	Logger    *zap.Logger
+	Realtime  realtimeSettings
 }
 
 type Service struct {
@@ -51,6 +56,7 @@ type Service struct {
 	totp      totpService
 	policy    rolePolicy
 	logger    *zap.Logger
+	realtime  realtimeSettings
 }
 
 type SessionView struct {
@@ -80,6 +86,7 @@ func New(deps Deps) *Service {
 		totp:      deps.TOTP,
 		policy:    policyService,
 		logger:    deps.Logger,
+		realtime:  deps.Realtime,
 	}
 }
 
@@ -97,7 +104,7 @@ func (s *Service) BuildAnonymousSessionView(ctx context.Context, cfg config.Conf
 		GeeTestEnabled:                settings.GeeTestEnabled,
 		GeeTestCaptchaID:              settings.GeeTestCaptchaID,
 		CurrentConnectionCount:        0,
-		RealtimeMaxConnectionsPerUser: cfg.RealtimeMaxConnectionsPerUser,
+		RealtimeMaxConnectionsPerUser: s.realtimeLimit(ctx, cfg),
 		OIDCEnabled:                   settings.OIDCEnabled,
 		OIDCProviderName:              settings.OIDCProviderName,
 		LocalPasswordLoginEnabled:     settings.LocalPasswordLoginEnabled,
@@ -134,7 +141,7 @@ func (s *Service) BuildAuthenticatedSessionView(ctx context.Context, cfg config.
 		GeeTestEnabled:                settings.GeeTestEnabled,
 		GeeTestCaptchaID:              settings.GeeTestCaptchaID,
 		CurrentConnectionCount:        0,
-		RealtimeMaxConnectionsPerUser: cfg.RealtimeMaxConnectionsPerUser,
+		RealtimeMaxConnectionsPerUser: s.realtimeLimit(ctx, cfg),
 		OIDCEnabled:                   settings.OIDCEnabled,
 		OIDCProviderName:              settings.OIDCProviderName,
 		LocalPasswordLoginEnabled:     settings.LocalPasswordLoginEnabled,
@@ -147,6 +154,17 @@ func (s *Service) BuildAuthenticatedSessionView(ctx context.Context, cfg config.
 		zap.Bool("auth.totp_enabled", view.TOTPEnabled),
 	).Debug("usercontrol profile built authenticated session view")
 	return view, nil
+}
+
+func (s *Service) realtimeLimit(ctx context.Context, cfg config.Config) int {
+	if s.realtime == nil {
+		return cfg.RealtimeMaxConnectionsPerUser
+	}
+	current, err := s.realtime.Current(ctx)
+	if err != nil {
+		return cfg.RealtimeMaxConnectionsPerUser
+	}
+	return current.MaxConnectionsPerUser
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID string, password string) error {

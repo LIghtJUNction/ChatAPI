@@ -69,7 +69,13 @@ func (h WorkspaceHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		)
 	})
 
-	connectionCount := h.Hub.Register(ownerID, wsConn)
+	connectionCount, registerErr := h.Hub.TryRegister(r.Context(), ownerID, wsConn)
+	if registerErr != nil {
+		disconnectReason = "connection_limit"
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, registerErr.Error()), time.Now().Add(time.Second))
+		logger.Warn("workspace websocket registration rejected", zap.Error(registerErr))
+		return
+	}
 	logger.Debug("workspace websocket registered", zap.Int("workspace.connection_count", connectionCount))
 	defer func() {
 		connectionCount := h.Hub.Unregister(ownerID, wsConn)

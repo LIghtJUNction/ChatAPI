@@ -355,39 +355,6 @@ export type StatisticsSummary = {
   end_at?: string | null
 }
 
-export type SystemConfig = {
-  public_statistics: boolean
-  title_enabled: boolean
-  title: string
-  external_registration_enabled: boolean
-  email_verification_enabled: boolean
-  email_provider: string
-  email_provider_options: Array<{
-    value: string
-    label: string
-  }>
-  registration_email_domain_restriction_enabled: boolean
-  registration_email_domains: string
-  ntfy_private_url_policy: 'disabled' | 'admin' | 'all'
-  api_key_limit_per_user: number
-  realtime_max_connections: number
-  realtime_max_connections_per_user: number
-  realtime_queue_size: number
-  image_max_single_bytes: number
-  image_max_request_bytes: number
-  image_max_total_bytes: number
-  pending_max_per_user: number
-  pending_max_age_hours: number
-  pending_max_output_chars: number
-  pending_auto_abort_message: string
-  image_usage?: {
-    total_bytes: number
-    file_count: number
-    orphan_bytes: number
-    orphan_count: number
-  }
-}
-
 export type RegisterConfig = {
   registration_enabled: boolean
   email_verification_enabled: boolean

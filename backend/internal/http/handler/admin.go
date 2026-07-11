@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,25 +14,81 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"github.com/zyf2007/ChatAPI/internal/service/admincontrol"
+	adminmonitoring "github.com/zyf2007/ChatAPI/internal/service/admincontrol/monitoring"
+	adminsettings "github.com/zyf2007/ChatAPI/internal/service/admincontrol/settings"
 	auditsvc "github.com/zyf2007/ChatAPI/internal/service/audit"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	"go.uber.org/zap"
 )
 
 type AdminHandler struct {
-	Control *admincontrol.Service
-	Timeline *timelinesvc.Service
-	Audit   *auditsvc.Service
-	Logger  *zap.Logger
+	Control    *admincontrol.Service
+	Timeline   *timelinesvc.Service
+	Audit      *auditsvc.Service
+	Logger     *zap.Logger
+	Monitoring *adminmonitoring.Service
+}
+
+func (h AdminHandler) ServeMonitoringStream(w http.ResponseWriter, r *http.Request) {
+	if h.Monitoring == nil {
+		http.Error(w, "admin monitoring unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+	userIDs := monitoringUserIDs(r.URL.Query().Get("user_ids"), 100)
+	for event := range h.Monitoring.Stream(r.Context(), userIDs) {
+		payload, err := json.Marshal(event)
+		if err != nil {
+			return
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, payload); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
+}
+
+func monitoringUserIDs(raw string, limit int) []string {
+	seen := map[string]struct{}{}
+	items := make([]string, 0)
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		items = append(items, item)
+		if len(items) == limit {
+			break
+		}
+	}
+	return items
 }
 
 func (h AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	items, err := h.Control.ListUsers(r.Context())
+	page, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("page")))
+	pageSize, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("page_size")))
+	result, err := h.Control.ListUsersPage(r.Context(), page, pageSize)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "count": len(result.Items), "items": result.Items,
+		"page": result.Page, "page_size": result.PageSize, "total": result.Total,
+	})
 }
 
 func (h AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
@@ -365,54 +422,53 @@ func (h AdminHandler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
 }
 
-func (h AdminHandler) GetAuthSettings(w http.ResponseWriter, r *http.Request) {
-	item, err := h.Control.GetAuthSettings(r.Context())
+func (h AdminHandler) SettingsCatalog(w http.ResponseWriter, r *http.Request) {
+	item, err := h.Control.SettingsCatalog()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "catalog": item})
+}
+func (h AdminHandler) SettingsOverview(w http.ResponseWriter, r *http.Request) {
+	item, err := h.Control.SettingsOverview(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	item["ok"] = true
-	httpx.WriteJSON(w, http.StatusOK, item)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "overview": item})
 }
-
-func (h AdminHandler) SetAuthSettings(w http.ResponseWriter, r *http.Request) {
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+func (h AdminHandler) GetSettings(w http.ResponseWriter, r *http.Request) {
+	item, err := h.Control.GetSettings(r.Context(), chi.URLParam(r, "domain"))
+	if err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "document": item})
+}
+func (h AdminHandler) PatchSettings(w http.ResponseWriter, r *http.Request) {
+	var body adminsettings.PatchInput
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	item, err := h.Control.SetAuthSettings(r.Context(), body)
+	result, err := h.Control.PatchSettings(r.Context(), chi.URLParam(r, "domain"), body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": map[string]any{"code": "invalid_settings_patch", "message": err.Error()}})
 		return
 	}
-	h.record(r, "admin.auth", "auth_settings", "system_settings", "update", "success", nil)
-	item["ok"] = true
-	httpx.WriteJSON(w, http.StatusOK, item)
+	h.record(r, "admin.settings", "settings", chi.URLParam(r, "domain"), "update", "success", map[string]any{"applied": result.Applied})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
 }
-
-func (h AdminHandler) GetAccessSettings(w http.ResponseWriter, r *http.Request) {
-	item, err := h.Control.GetAccessSettings(r.Context())
+func (h AdminHandler) RuntimeSettings(w http.ResponseWriter, r *http.Request) {
+	item, err := h.Control.RuntimeSettings()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, item)
-}
-
-func (h AdminHandler) SetAccessSettings(w http.ResponseWriter, r *http.Request) {
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
-		return
-	}
-	item, err := h.Control.SetAccessSettings(r.Context(), body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	h.record(r, "admin.access", "access_settings", "system_access_settings", "update", "success", nil)
-	httpx.WriteJSON(w, http.StatusOK, item)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "runtime": item})
 }
 
 func (h AdminHandler) record(r *http.Request, eventType string, resourceType string, resourceID string, action string, outcome string, metadata map[string]any) {

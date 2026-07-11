@@ -6,6 +6,13 @@
 > `/api/config/automation-rules` 已被破坏性升级移除。当前权威设计与契约见
 > [recorded-automation-design.md](./recorded-automation-design.md)。旧段落只保留迁移历史，不代表当前实现。
 
+> 管理员设置说明：本文中的 `/api/config/system`、`/api/config/system/schema`、
+> `/api/admin/config` 等描述属于迁移历史，已不再是当前设置 authority。当前实现仅使用
+> `/api/admin/settings/*` 的领域 GET/PATCH，采用明确的 last-write-wins 语义；实时连接和运行指标
+> 由独立 `/api/admin/monitor/stream` SSE 提供。详见
+> [admin-settings-impl.md](../backend/docs/admin-settings-impl.md) 和
+> [admin-monitoring-sse.md](../backend/docs/admin-monitoring-sse.md)。
+
 ## 1. 迁移目标
 
 ### 1.0 当前落地状态

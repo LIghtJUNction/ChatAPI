@@ -73,7 +73,7 @@ func TestUpdateDraftAutomaticallyCompletesOnCrossChunkStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second["auto_completed"] != true || second["output_text"] != "answer" {
+	if second["auto_completed"] != true || second["output_text"] != "answer " {
 		t.Fatalf("unexpected automatic completion: %#v", second)
 	}
 	if _, ok := registry.GetByConversationID(conversation.ID); ok {

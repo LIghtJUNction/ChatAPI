@@ -21,6 +21,12 @@ type execution struct {
 const executionStateRetention = 10 * time.Minute
 
 func (s *Service) matchAndRun(ctx context.Context, waiting chatevents.WaitingTurn) {
+	if s.settings != nil {
+		cfg, err := s.settings.Current(ctx)
+		if err != nil || !cfg.Enabled {
+			return
+		}
+	}
 	generation := s.ruleGeneration(waiting.OwnerID)
 	rules, err := s.ListRules(ctx, waiting.OwnerID)
 	if err != nil {
@@ -96,8 +102,16 @@ func (s *Service) startExecutionAtGeneration(parent context.Context, waiting cha
 func (s *Service) runExecution(ctx context.Context, waiting chatevents.WaitingTurn, rule Rule, current *execution) {
 	state := ExecutionState{OwnerID: waiting.OwnerID, RuleID: rule.ID, ConversationID: waiting.ConversationID, RequestID: waiting.RequestID, Status: "running", StepCount: len(rule.Steps), Cycle: 1}
 	for cycle := 1; ; cycle++ {
+		if err := s.validateExecutionSettings(ctx, rule); err != nil {
+			s.finishExecution(waiting.OwnerID, current, state, "cancelled", err.Error())
+			return
+		}
 		state.Cycle = cycle
 		for index, step := range rule.Steps {
+			if err := s.validateExecutionSettings(ctx, rule); err != nil {
+				s.finishExecution(waiting.OwnerID, current, state, "cancelled", err.Error())
+				return
+			}
 			state.StepIndex = index
 			delay := step.DelayBeforeMS
 			if cycle > 1 && index == 0 {
@@ -109,12 +123,18 @@ func (s *Service) runExecution(ctx context.Context, waiting chatevents.WaitingTu
 					delay = rule.Playback.FixedIntervalMS
 				}
 			}
-			if !waitContext(ctx, time.Duration(delay)*time.Millisecond) {
+			if waitErr := s.waitForStep(ctx, time.Duration(delay)*time.Millisecond, rule); waitErr != nil {
 				reason := "cancelled"
 				if cause := context.Cause(ctx); cause != nil {
 					reason = cause.Error()
+				} else {
+					reason = waitErr.Error()
 				}
 				s.finishExecution(waiting.OwnerID, current, state, "cancelled", reason)
+				return
+			}
+			if err := s.validateExecutionSettings(ctx, rule); err != nil {
+				s.finishExecution(waiting.OwnerID, current, state, "cancelled", err.Error())
 				return
 			}
 			turn, ok := s.pending.GetByConversationID(waiting.ConversationID)
@@ -155,6 +175,26 @@ func (s *Service) runExecution(ctx context.Context, waiting chatevents.WaitingTu
 	s.finishExecution(waiting.OwnerID, current, state, "completed", "")
 }
 
+func (s *Service) validateExecutionSettings(ctx context.Context, rule Rule) error {
+	if s.settings == nil {
+		return nil
+	}
+	current, err := s.settings.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if !current.Enabled {
+		return errors.New("automation_disabled")
+	}
+	if len(rule.Steps) > current.MaxSteps {
+		return errors.New("automation_step_limit_changed")
+	}
+	if rule.Playback.LoopIntervalMS > current.MaxLoopIntervalMS {
+		return errors.New("automation_loop_limit_changed")
+	}
+	return nil
+}
+
 func (s *Service) updateExecutionState(current *execution, state ExecutionState) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -166,17 +206,28 @@ func (s *Service) updateExecutionState(current *execution, state ExecutionState)
 	return true
 }
 
-func waitContext(ctx context.Context, delay time.Duration) bool {
+func (s *Service) waitForStep(ctx context.Context, delay time.Duration, rule Rule) error {
 	if delay <= 0 {
-		return ctx.Err() == nil
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return s.validateExecutionSettings(ctx, rule)
 	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
+	deadline := time.NewTimer(delay)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return s.validateExecutionSettings(ctx, rule)
+		case <-ticker.C:
+			if err := s.validateExecutionSettings(ctx, rule); err != nil {
+				return err
+			}
+		}
 	}
 }
 

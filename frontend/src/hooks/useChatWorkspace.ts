@@ -6,6 +6,7 @@ import {
   buildInitialToolFormValues,
   getLastBuiltinTools,
   getLastToolSchemas,
+  normalizeChatText,
 } from '../lib/chat-format'
 import { buildVisibleTimeline } from '../lib/visibleTimeline'
 import { buildToolCallPayload } from './chatWorkspace/buildToolCallPayload'
@@ -164,9 +165,8 @@ export function useChatWorkspace(isMobile: boolean) {
     setThinkingText('')
   }
 
-  function withDraftSeparator(text: string) {
-    if (!draftBuffer.trim()) return text
-    return text.startsWith('\n') ? text : `\n\n${text}`
+  function normalizedOutputText(text: string) {
+    return normalizeChatText(text)
   }
 
   useEffect(() => {
@@ -385,7 +385,7 @@ export function useChatWorkspace(isMobile: boolean) {
     }
   }
 
-  async function handleDraft() {
+  async function handleDraft(textOverride?: string) {
     if (!isWaitingForUser) return
     if (composerMode === 'tool_call') {
       await handleSend({ resetMode: true, successMessage: '已输出 Tool Call' })
@@ -423,11 +423,9 @@ export function useChatWorkspace(isMobile: boolean) {
       return
     }
     const isThinkingMode = composerMode === 'thinking'
-    const rawChunk = isThinkingMode
-      ? thinkingText.trim()
-      : composer.trim()
-    if (!rawChunk) return
-    const chunk = withDraftSeparator(rawChunk)
+    const rawChunk = textOverride ?? (isThinkingMode ? thinkingText : composer)
+    if (!normalizeChatText(rawChunk)) return
+    const chunk = normalizedOutputText(rawChunk)
     setSending(true)
     try {
       const ack = await sendWorkspaceCommand({
@@ -505,11 +503,11 @@ export function useChatWorkspace(isMobile: boolean) {
             }
           })()
         : composerMode === 'thinking'
-          ? thinkingText.trim()
+          ? thinkingText
           : ''
-    const pendingChunk = composerMode === 'assistant_message' ? composer.trim() : ''
+    const pendingChunk = composerMode === 'assistant_message' ? composer : ''
 
-    if (composerMode === 'assistant_message' && !draftBuffer.trim() && !pendingChunk) {
+    if (composerMode === 'assistant_message' && !draftBuffer && !normalizeChatText(pendingChunk)) {
       return
     }
 
@@ -524,7 +522,7 @@ export function useChatWorkspace(isMobile: boolean) {
     setSending(true)
     try {
       if (composerMode === 'assistant_message' && pendingChunk) {
-        const outputChunk = withDraftSeparator(pendingChunk)
+        const outputChunk = normalizedOutputText(pendingChunk)
         const deltaAck = await sendWorkspaceCommand({
           kind: 'stream_delta',
             conversation_id: selectedConversationId,
@@ -538,7 +536,7 @@ export function useChatWorkspace(isMobile: boolean) {
           return
         }
       } else if (composerMode === 'thinking' && finalText) {
-        const outputChunk = withDraftSeparator(finalText)
+        const outputChunk = normalizedOutputText(finalText)
         const deltaAck = await sendWorkspaceCommand({
           kind: 'stream_delta',
             conversation_id: selectedConversationId,
@@ -605,10 +603,13 @@ export function useChatWorkspace(isMobile: boolean) {
     if (event.shiftKey) return
 
     event.preventDefault()
-    if (sending || !isWaitingForUser || composerMode !== 'assistant_message' || !composer.trim()) {
+    const textarea = event.currentTarget
+    if (sending || !isWaitingForUser || composerMode !== 'assistant_message' || !normalizeChatText(textarea.value)) {
       return
     }
-    void handleDraft()
+    void handleDraft(textarea.value).finally(() => {
+      window.requestAnimationFrame(() => textarea.focus())
+    })
   }
 
   return {

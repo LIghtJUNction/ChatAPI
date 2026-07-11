@@ -15,6 +15,7 @@ import { WorkspaceRoute } from './components/WorkspaceRoute'
 import { useAuthSession } from './hooks/useAuthSession'
 import { appMessage } from './lib/antdMessage'
 import type { LoginFormValues } from './types/chat'
+import { AdminSettingsPage } from './features/admin-settings/pages/AdminSettingsPage'
 
 type LoginError = Error & {
   responseBody?: {
@@ -135,7 +136,7 @@ function App() {
 
   return (
     <>
-      {!location.pathname.startsWith('/app') ? (
+	  {!location.pathname.startsWith('/app') && !location.pathname.startsWith('/admin') ? (
         <div className="global-theme-toggle-wrap">
           <div className="global-theme-toggle-group">
             <GithubButton />
@@ -151,6 +152,7 @@ function App() {
         <Route path="/stat" element={<StatisticsRoute />} />
         <Route path="/statistics" element={<StatisticsRoute />} />
         <Route path="/app/*" element={<WorkspaceRoute />} />
+		<Route path="/admin/settings/*" element={<AdminSettingsPage />} />
         <Route path="*" element={<HomepageScreen />} />
       </Routes>
     </>

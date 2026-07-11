@@ -99,6 +99,31 @@ func TestWorkspaceCommandPropagatesAndAcknowledgesRequestIdentity(t *testing.T) 
 	}
 }
 
+func TestWorkspaceCommandDecodesEscapedLineBreaks(t *testing.T) {
+	executor := &turnExecutorStub{}
+	service := New(nil, nil, executor)
+	message, err := ParseClientMessage(map[string]any{
+		"type": "workspace.command",
+		"command": map[string]any{
+			"command_id": "cmd", "kind": "stream_delta", "conversation_id": "conv", "request_id": "req",
+			"text": "\n",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Command == nil || message.Command.Text != "\n" {
+		t.Fatalf("workspace parser consumed a newline-only command: %#v", message.Command)
+	}
+	_, err = service.ExecuteCommand(context.Background(), "owner", *message.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.command.Action.OutputText != "\n" {
+		t.Fatalf("workspace line break was not decoded: %q", executor.command.Action.OutputText)
+	}
+}
+
 func TestHubDispatchesAutomationRecordingAndAcknowledges(t *testing.T) {
 	recorder := &recorderStub{snapshot: automationsvc.StateSnapshot{
 		Revision:   7,

@@ -22,6 +22,7 @@ const (
 )
 
 type Config struct {
+	settingsEnvironment                   map[string]bool
 	Mode                                  Mode
 	Host                                  string
 	Port                                  int
@@ -226,6 +227,7 @@ func FromEnv(mode Mode, backendRoot string) (Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
+	cfg.settingsEnvironment = detectSettingsEnvironment()
 	return cfg, nil
 }
 

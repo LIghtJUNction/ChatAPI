@@ -550,6 +550,46 @@ func (s *Store) ListUsers(ctx context.Context) ([]common.User, error) {
 	return items, rows.Err()
 }
 
+func (s *Store) ListUsersPage(ctx context.Context, offset int, limit int) ([]common.User, int, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
+		FROM users
+		ORDER BY created_at DESC, id DESC
+		LIMIT ? OFFSET ?
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]common.User, 0, limit)
+	for rows.Next() {
+		item, err := scanUser(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 func (s *Store) PreviewUserDeletion(ctx context.Context, userID string) (common.UserDeletionPreview, error) {
 	userID = strings.TrimSpace(userID)
 	user, err := s.GetUser(ctx, userID)

@@ -378,7 +378,7 @@ func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 		"model":       r.meta.Model,
 		"output_text": r.responsesText.String(),
 		"output":      r.responsesCompletedOutput(action),
-		"usage":       map[string]any{"output_tokens": action.OutputTokens},
+		"usage":       responsesUsage(action.OutputTokens),
 	}
 	outcome := protocol.ResolveCompletionOutcome(action.FinishReason, action.Mode)
 	if outcome.ResponsesIncomplete() {
@@ -395,6 +395,26 @@ func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 		},
 	})
 	return events
+}
+
+func responsesUsage(outputTokens int) map[string]any {
+	if outputTokens < 0 {
+		outputTokens = 0
+	}
+	// Interactive output does not currently tokenize the submitted prompt. A
+	// zero count is still required because Responses clients treat these fields
+	// as mandatory in response.completed.
+	return map[string]any{
+		"input_tokens":  0,
+		"output_tokens": outputTokens,
+		"total_tokens":  outputTokens,
+		"input_tokens_details": map[string]any{
+			"cached_tokens": 0,
+		},
+		"output_tokens_details": map[string]any{
+			"reasoning_tokens": 0,
+		},
+	}
 }
 
 func (r *Runtime) responsesToolCall(action Action) []protocol.StreamEvent {

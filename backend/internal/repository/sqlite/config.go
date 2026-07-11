@@ -28,16 +28,17 @@ func (s *Store) GetSystemConfig(ctx context.Context, key string) (common.SystemC
 func (s *Store) SetSystemConfig(ctx context.Context, input common.SetSystemConfigInput) (common.SystemConfig, error) {
 	now := time.Now().UTC()
 	key := strings.TrimSpace(input.Key)
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO config(key, value_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
+	valueJSON := mustJSON(ensureMap(input.Value))
+	// System settings intentionally use last-write-wins. This project does not
+	// coordinate concurrent administrator edits or reject a later submission.
+	return scanSystemConfig(s.db.QueryRowContext(ctx, `
+		INSERT INTO config(key,value_json,created_at,updated_at)
+		VALUES(?,?,?,?)
 		ON CONFLICT(key) DO UPDATE SET
-			value_json = excluded.value_json,
-			updated_at = excluded.updated_at
-	`, key, mustJSON(ensureMap(input.Value)), formatTime(now), formatTime(now)); err != nil {
-		return common.SystemConfig{}, err
-	}
-	return s.GetSystemConfig(ctx, key)
+			value_json=excluded.value_json,
+			updated_at=excluded.updated_at
+		RETURNING key,value_json,created_at,updated_at
+	`, key, valueJSON, formatTime(now), formatTime(now)))
 }
 
 func (s *Store) DeleteSystemConfig(ctx context.Context, key string) error {

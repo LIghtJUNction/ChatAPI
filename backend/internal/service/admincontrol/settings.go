@@ -2,40 +2,38 @@ package admincontrol
 
 import "context"
 
-func (s *Service) GetAuthSettings(ctx context.Context) (map[string]any, error) {
-	if s.authSettings == nil {
-		return nil, errNotConfigured("auth settings")
-	}
-	return s.authSettings.Get(ctx)
-}
+import (
+	adminsettings "github.com/zyf2007/ChatAPI/internal/service/admincontrol/settings"
+	"github.com/zyf2007/ChatAPI/internal/service/settingscore"
+)
 
-func (s *Service) SetAuthSettings(ctx context.Context, body map[string]any) (map[string]any, error) {
-	if s.authSettings == nil {
-		return nil, errNotConfigured("auth settings")
+func (s *Service) SettingsCatalog() (map[string]any, error) {
+	if s.settings == nil {
+		return nil, errNotConfigured("admin settings")
 	}
-	return s.authSettings.Set(ctx, body)
+	return s.settings.Catalog(), nil
 }
-
-func (s *Service) GetAccessSettings(ctx context.Context) (map[string]any, error) {
-	if s.accessSettings == nil {
-		return nil, errNotConfigured("access settings")
+func (s *Service) SettingsOverview(ctx context.Context) (map[string]any, error) {
+	if s.settings == nil {
+		return nil, errNotConfigured("admin settings")
 	}
-	return s.accessSettings.GetDocument(ctx)
+	return s.settings.Overview(ctx)
 }
-
-func (s *Service) SetAccessSettings(ctx context.Context, body map[string]any) (map[string]any, error) {
-	if s.accessSettings == nil {
-		return nil, errNotConfigured("access settings")
+func (s *Service) GetSettings(ctx context.Context, domain string) (settingscore.Document, error) {
+	if s.settings == nil {
+		return settingscore.Document{}, errNotConfigured("admin settings")
 	}
-	current, err := s.accessSettings.Set(ctx, body)
-	if err != nil {
-		return nil, err
+	return s.settings.Get(ctx, domain)
+}
+func (s *Service) PatchSettings(ctx context.Context, domain string, input adminsettings.PatchInput) (adminsettings.PatchResult, error) {
+	if s.settings == nil {
+		return adminsettings.PatchResult{}, errNotConfigured("admin settings")
 	}
-	return map[string]any{
-		"ok":               true,
-		"key":              "system_access_settings",
-		"current":          current,
-		"schema":           s.accessSettings.Schema(),
-		"response_version": 1,
-	}, nil
+	return s.settings.Patch(ctx, domain, input)
+}
+func (s *Service) RuntimeSettings() (map[string]any, error) {
+	if s.settings == nil {
+		return nil, errNotConfigured("admin settings")
+	}
+	return s.settings.Runtime(), nil
 }

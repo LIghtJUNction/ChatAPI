@@ -181,6 +181,20 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 	if len(items) != 2 {
 		t.Fatalf("expected two users, got %#v", items)
 	}
+	firstPage, total, err := st.ListUsersPage(ctx, 0, 1)
+	if err != nil {
+		t.Fatalf("list first user page: %v", err)
+	}
+	if len(firstPage) != 1 || total != 2 {
+		t.Fatalf("unexpected first user page: items=%#v total=%d", firstPage, total)
+	}
+	secondPage, total, err := st.ListUsersPage(ctx, 1, 1)
+	if err != nil {
+		t.Fatalf("list second user page: %v", err)
+	}
+	if len(secondPage) != 1 || total != 2 || secondPage[0].ID == firstPage[0].ID {
+		t.Fatalf("unexpected second user page: items=%#v total=%d", secondPage, total)
+	}
 
 	if _, err := st.GetUser(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing user, got %v", err)
@@ -1122,7 +1136,6 @@ func testConfigRepositoryUpsertsListsAndDeletesSystemConfig(t *testing.T, newSto
 	if item.Key != "runtime.gc" || item.Value["gogc"].(float64) != 125 {
 		t.Fatalf("unexpected system config: %#v", item)
 	}
-
 	updated, err := st.SetSystemConfig(ctx, common.SetSystemConfigInput{
 		Key: "runtime.gc",
 		Value: map[string]any{
@@ -1138,6 +1151,13 @@ func testConfigRepositoryUpsertsListsAndDeletesSystemConfig(t *testing.T, newSto
 	}
 	if !updated.CreatedAt.Equal(item.CreatedAt) {
 		t.Fatalf("upsert should keep created_at, before=%s after=%s", item.CreatedAt, updated.CreatedAt)
+	}
+	lastWrite, err := st.SetSystemConfig(ctx, common.SetSystemConfigInput{Key: "runtime.gc", Value: map[string]any{"gogc": 70}})
+	if err != nil {
+		t.Fatalf("last-write-wins update: %v", err)
+	}
+	if lastWrite.Value["gogc"].(float64) != 70 {
+		t.Fatalf("last submitted value was not persisted: %#v", lastWrite)
 	}
 
 	if _, err := st.SetSystemConfig(ctx, common.SetSystemConfigInput{

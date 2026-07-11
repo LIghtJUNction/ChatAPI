@@ -15,13 +15,12 @@ func NewService(cfg config.Config, lab *labauth.Service, settings *SettingsServi
 			GlobalRateLimitWindow:   cfg.AccessRateLimitWindow,
 		})
 	}
-	defaults := settings.defaults
 	return &Service{
 		cfg:              cfg,
 		lab:              lab,
 		settings:         settings,
 		trustedOrigins:   buildTrustedOrigins(cfg),
-		anonymousLimiter: newRequestLimiter(defaults.GlobalRateLimitRequests, defaults.GlobalRateLimitWindow),
+		anonymousLimiter: newRequestLimiter(),
 		principalLimiter: newMultiLimiter(),
 	}
 }

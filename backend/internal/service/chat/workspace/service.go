@@ -14,6 +14,7 @@ import (
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	workspacesettings "github.com/zyf2007/ChatAPI/internal/service/chat/workspace/settings"
 )
 
 type ConversationQuery interface {
@@ -157,7 +158,7 @@ func ParseClientMessage(payload map[string]any) (ClientMessage, error) {
 			Kind:                stringValue(commandRaw["kind"], ""),
 			ConversationID:      strings.TrimSpace(stringValue(commandRaw["conversation_id"], msg.ConversationID)),
 			RequestID:           strings.TrimSpace(stringValue(commandRaw["request_id"], "")),
-			Text:                stringValue(commandRaw["text"], ""),
+			Text:                textValue(commandRaw["text"], ""),
 			Mode:                stringValue(commandRaw["mode"], ""),
 			ToolName:            stringValue(commandRaw["tool_name"], ""),
 			ToolCallID:          stringValue(commandRaw["tool_call_id"], ""),
@@ -264,37 +265,88 @@ type Hub struct {
 
 	mu          sync.RWMutex
 	connections map[string]map[*Connection]struct{}
+	settings    *workspacesettings.Service
+	presenceMu  sync.RWMutex
+	presence    map[*presenceSubscription]struct{}
+	presenceSeq uint64
 }
 
 func NewHub(workspace *Service) *Hub {
 	return &Hub{
 		workspace:   workspace,
 		connections: map[string]map[*Connection]struct{}{},
+		presence:    map[*presenceSubscription]struct{}{},
 	}
 }
 
-func (h *Hub) Register(ownerID string, conn *Connection) int {
+func (h *Hub) SetSettings(settings *workspacesettings.Service) { h.settings = settings }
+
+func (h *Hub) TryRegister(ctx context.Context, ownerID string, conn *Connection) (int, error) {
+	var limits workspacesettings.Settings
+	if h.settings != nil {
+		settings, err := h.settings.Current(ctx)
+		if err != nil {
+			return 0, err
+		}
+		limits = settings
+	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	if h.settings != nil {
+		total := 0
+		for _, items := range h.connections {
+			total += len(items)
+		}
+		if limits.MaxConnections > 0 && total >= limits.MaxConnections {
+			h.mu.Unlock()
+			return 0, fmt.Errorf("realtime global connection limit reached")
+		}
+		if limits.MaxConnectionsPerUser > 0 && len(h.connections[ownerID]) >= limits.MaxConnectionsPerUser {
+			h.mu.Unlock()
+			return 0, fmt.Errorf("realtime user connection limit reached")
+		}
+	}
 	if _, ok := h.connections[ownerID]; !ok {
 		h.connections[ownerID] = map[*Connection]struct{}{}
 	}
 	h.connections[ownerID][conn] = struct{}{}
-	return len(h.connections[ownerID])
+	count := len(h.connections[ownerID])
+	total := h.totalConnectionsLocked()
+	sequence := h.nextPresenceSequenceLocked()
+	h.mu.Unlock()
+	h.publishPresence(ownerID, count, total, sequence)
+	return count, nil
+}
+
+func (h *Hub) Register(ownerID string, conn *Connection) int {
+	h.mu.Lock()
+	if _, ok := h.connections[ownerID]; !ok {
+		h.connections[ownerID] = map[*Connection]struct{}{}
+	}
+	h.connections[ownerID][conn] = struct{}{}
+	count := len(h.connections[ownerID])
+	total := h.totalConnectionsLocked()
+	sequence := h.nextPresenceSequenceLocked()
+	h.mu.Unlock()
+	h.publishPresence(ownerID, count, total, sequence)
+	return count
 }
 
 func (h *Hub) Unregister(ownerID string, conn *Connection) int {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	count := 0
 	if items, ok := h.connections[ownerID]; ok {
 		delete(items, conn)
 		if len(items) == 0 {
 			delete(h.connections, ownerID)
-			return 0
+		} else {
+			count = len(items)
 		}
-		return len(items)
 	}
-	return 0
+	total := h.totalConnectionsLocked()
+	sequence := h.nextPresenceSequenceLocked()
+	h.mu.Unlock()
+	h.publishPresence(ownerID, count, total, sequence)
+	return count
 }
 
 func (h *Hub) Snapshot(ctx context.Context, ownerID string) (Snapshot, error) {
@@ -385,7 +437,7 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 		Source:         controlsvc.SourceWorkspace,
 		Action: turnsvc.OutputAction{
 			Kind:                kind,
-			OutputText:          command.Text,
+			OutputText:          workspaceOutputText(command.Text),
 			Mode:                strings.TrimSpace(command.Mode),
 			ToolName:            strings.TrimSpace(command.ToolName),
 			ToolCallID:          strings.TrimSpace(command.ToolCallID),
@@ -407,6 +459,11 @@ func (s *Service) ExecuteCommand(ctx context.Context, ownerID string, command Co
 		RequestID:      strings.TrimSpace(command.RequestID),
 		AutoCompleted:  boolValue(result.Body["auto_completed"]),
 	}, nil
+}
+
+func workspaceOutputText(value string) string {
+	value = strings.ReplaceAll(value, `\r\n`, "\n")
+	return strings.ReplaceAll(value, `\n`, "\n")
 }
 
 func boolValue(value any) bool {
@@ -550,6 +607,13 @@ func (c *Connection) IsSubscribed(conversationID string) bool {
 func stringValue(value any, fallback string) string {
 	if raw, ok := value.(string); ok && strings.TrimSpace(raw) != "" {
 		return strings.TrimSpace(raw)
+	}
+	return fallback
+}
+
+func textValue(value any, fallback string) string {
+	if raw, ok := value.(string); ok {
+		return raw
 	}
 	return fallback
 }

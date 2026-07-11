@@ -8,6 +8,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/config"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
+	workspacesettings "github.com/zyf2007/ChatAPI/internal/service/chat/workspace/settings"
 	userprofile "github.com/zyf2007/ChatAPI/internal/service/usercontrol/profile"
 )
 
@@ -34,6 +35,11 @@ func (f fakeSettings) Public(context.Context) (authsettings.PublicSettings, erro
 
 type fakeTOTP struct {
 	enabled bool
+}
+type fakeRealtime struct{ value workspacesettings.Settings }
+
+func (f fakeRealtime) Current(context.Context) (workspacesettings.Settings, error) {
+	return f.value, nil
 }
 
 func (f fakeTOTP) IsEnabled(context.Context, string) bool { return f.enabled }
@@ -98,7 +104,8 @@ func TestProfileServiceBuildAuthenticatedSessionViewWithRoleAndTOTP(t *testing.T
 			OIDCEnabled:               true,
 			OIDCProviderName:          "Kirari",
 		}},
-		TOTP: fakeTOTP{enabled: true},
+		TOTP:     fakeTOTP{enabled: true},
+		Realtime: fakeRealtime{value: workspacesettings.Settings{MaxConnectionsPerUser: 4}},
 	})
 
 	view, err := svc.BuildAuthenticatedSessionView(context.Background(), config.Config{
@@ -113,7 +120,7 @@ func TestProfileServiceBuildAuthenticatedSessionViewWithRoleAndTOTP(t *testing.T
 	if view.User["id"] != "user_a" || view.User["username"] != "alice" || view.User["role"] != "admin" {
 		t.Fatalf("unexpected user payload: %#v", view.User)
 	}
-	if !view.OIDCEnabled || view.OIDCProviderName != "Kirari" || view.RealtimeMaxConnectionsPerUser != 9 {
+	if !view.OIDCEnabled || view.OIDCProviderName != "Kirari" || view.RealtimeMaxConnectionsPerUser != 4 {
 		t.Fatalf("unexpected settings payload: %#v", view)
 	}
 }

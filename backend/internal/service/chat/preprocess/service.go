@@ -9,10 +9,12 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/config"
 	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"github.com/zyf2007/ChatAPI/internal/protocol"
+	preprocesssettings "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess/settings"
 )
 
 type Service struct {
-	cfg config.Config
+	cfg      config.Config
+	Settings *preprocesssettings.Service
 }
 
 func New(cfg config.Config) *Service {
@@ -20,7 +22,8 @@ func New(cfg config.Config) *Service {
 }
 
 func (s *Service) Prepare(ctx context.Context, ownerID string, req protocol.TurnRequest) (PreparedRequest, error) {
-	if !s.cfg.MediaProcessEnabled {
+	cfg := s.current(ctx)
+	if !cfg.MediaProcessEnabled {
 		return PreparedRequest{Request: req}, nil
 	}
 	processed := req
@@ -36,10 +39,10 @@ func (s *Service) Prepare(ctx context.Context, ownerID string, req protocol.Turn
 			continue
 		}
 		imageCount++
-		if s.cfg.MediaMaxImagesPerRequest > 0 && imageCount > s.cfg.MediaMaxImagesPerRequest {
+		if cfg.MediaMaxImagesPerRequest > 0 && imageCount > cfg.MediaMaxImagesPerRequest {
 			return PreparedRequest{}, protocol.InvalidRequest("too many images in request", "input")
 		}
-		next, prepared, err := s.processImagePart(ctx, ownerID, idx, part)
+		next, prepared, err := s.processImagePart(ctx, cfg, ownerID, idx, part)
 		if err != nil {
 			return PreparedRequest{}, err
 		}
@@ -55,8 +58,8 @@ func (s *Service) Prepare(ctx context.Context, ownerID string, req protocol.Turn
 	}, nil
 }
 
-func (s *Service) processImagePart(_ context.Context, ownerID string, inputPartIndex int, part protocol.InputPart) (protocol.InputPart, media.DraftAsset, error) {
-	parsed, err := media.ParseImageInput(part.URL, part.MediaType, s.cfg.MediaMaxBytes)
+func (s *Service) processImagePart(_ context.Context, cfg config.Config, ownerID string, inputPartIndex int, part protocol.InputPart) (protocol.InputPart, media.DraftAsset, error) {
+	parsed, err := media.ParseImageInput(part.URL, part.MediaType, cfg.MediaMaxBytes)
 	if err != nil {
 		switch {
 		case errors.Is(err, media.ErrImageTooLarge):
@@ -67,23 +70,23 @@ func (s *Service) processImagePart(_ context.Context, ownerID string, inputPartI
 	}
 	switch parsed.SourceKind {
 	case media.SourceRemoteURL:
-		if !s.cfg.MediaAllowRemoteURL {
+		if !cfg.MediaAllowRemoteURL {
 			return protocol.InputPart{}, media.DraftAsset{}, protocol.InvalidRequest("remote image url is not allowed", "input")
 		}
 		return part, media.DraftAsset{}, nil
 	case media.SourceDataURL:
-		if !s.cfg.MediaAllowDataURL {
+		if !cfg.MediaAllowDataURL {
 			return protocol.InputPart{}, media.DraftAsset{}, protocol.InvalidRequest("data url image is not allowed", "input")
 		}
 	case media.SourceBase64:
-		if !s.cfg.MediaAllowBase64 {
+		if !cfg.MediaAllowBase64 {
 			return protocol.InputPart{}, media.DraftAsset{}, protocol.InvalidRequest("base64 image is not allowed", "input")
 		}
 	}
-	if strings.EqualFold(parsed.DetectedMediaType, "image/svg+xml") && !s.cfg.MediaAllowSVG {
+	if strings.EqualFold(parsed.DetectedMediaType, "image/svg+xml") && !cfg.MediaAllowSVG {
 		return protocol.InputPart{}, media.DraftAsset{}, protocol.InvalidRequest("svg image is not allowed", "input")
 	}
-	encoded, err := media.EncodeAVIF(parsed, media.AVIFOptions{Quality: s.cfg.MediaAVIFQuality})
+	encoded, err := media.EncodeAVIF(parsed, media.AVIFOptions{Quality: cfg.MediaAVIFQuality})
 	if err != nil {
 		return protocol.InputPart{}, media.DraftAsset{}, protocol.InvalidRequest("failed to transcode image to avif", "input")
 	}
@@ -108,6 +111,26 @@ func (s *Service) processImagePart(_ context.Context, ownerID string, inputPartI
 		MediaType: prepared.MediaType,
 		URL:       prepared.PublicURL,
 	}, prepared, nil
+}
+
+func (s *Service) current(ctx context.Context) config.Config {
+	cfg := s.cfg
+	if s.Settings == nil {
+		return cfg
+	}
+	value, err := s.Settings.Current(ctx)
+	if err != nil {
+		return cfg
+	}
+	cfg.MediaProcessEnabled = value.Enabled
+	cfg.MediaAllowRemoteURL = value.AllowRemoteURL
+	cfg.MediaAllowDataURL = value.AllowDataURL
+	cfg.MediaAllowBase64 = value.AllowBase64
+	cfg.MediaAllowSVG = value.AllowSVG
+	cfg.MediaMaxBytes = value.MaxBytes
+	cfg.MediaMaxImagesPerRequest = value.MaxImages
+	cfg.MediaAVIFQuality = value.AVIFQuality
+	return cfg
 }
 
 func mediaOwner(ownerID string) string {

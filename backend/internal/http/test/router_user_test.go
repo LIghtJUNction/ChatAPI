@@ -123,13 +123,12 @@ func TestRouterUserFlow(t *testing.T) {
 		GlobalRateLimitWindow:   cfg.AccessRateLimitWindow,
 	})
 	adminControl := admincontrol.New(admincontrol.Deps{
-		Accounts:       accountService,
-		Query:          queryService,
-		Turn:           turnService,
-		ChatStore:      st,
-		StorageStore:   st,
-		KeyStore:       st,
-		AccessSettings: accessSettings,
+		Accounts:     accountService,
+		Query:        queryService,
+		Turn:         turnService,
+		ChatStore:    st,
+		StorageStore: st,
+		KeyStore:     st,
 	})
 
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{

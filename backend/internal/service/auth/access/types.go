@@ -34,8 +34,6 @@ type Service struct {
 type requestLimiter struct {
 	mu       sync.Mutex
 	now      func() time.Time
-	max      int
-	window   time.Duration
 	requests map[string][]time.Time
 }
 

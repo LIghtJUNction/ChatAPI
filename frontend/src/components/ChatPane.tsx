@@ -36,6 +36,7 @@ import { GithubButton } from './GithubButton'
 import { ThemeToggle } from './ThemeToggle'
 import { ToolField } from './ToolField'
 import { ChatMessageList } from './ChatMessageList'
+import { normalizeChatText } from '../lib/chat-format'
 import type {
   ComposerMode,
   BuiltinToolOption,
@@ -589,9 +590,9 @@ export function ChatPane(props: ChatPaneProps) {
                   !isWaitingForUser ||
                   sending ||
                   (composerMode === 'assistant_message'
-                    ? !composer.trim()
+                    ? !normalizeChatText(composer)
                     : composerMode === 'thinking'
-                      ? !thinkingText.trim()
+                      ? !normalizeChatText(thinkingText)
                       : composerMode === 'builtin_tool'
                         ? !builtinToolKind.trim() ||
                           (builtinToolKind === 'web_search' && !builtinToolQuery.trim()) ||
@@ -616,7 +617,7 @@ export function ChatPane(props: ChatPaneProps) {
                   sending ||
                   !isWaitingForUser ||
                   composerMode !== 'assistant_message' ||
-                  (!composer.trim() && !draftBuffer.trim())
+                  (!normalizeChatText(composer) && !draftBuffer)
                 }
               >
                 结束输出

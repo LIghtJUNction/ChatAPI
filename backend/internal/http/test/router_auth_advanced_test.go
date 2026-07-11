@@ -104,7 +104,7 @@ func TestAuthSettingsGeeTestAndTOTPFlow(t *testing.T) {
 	defer server.Close()
 
 	adminCookie := loginAndGetCookie(t, server.URL, "admin@example.com", "admin-pass")
-	postJSONWithCookie(t, server.URL+"/api/admin/auth/settings", map[string]any{
+	patchJSONWithCookie(t, server.URL+"/api/admin/settings/auth", map[string]any{"values": map[string]any{
 		"external_registration_enabled":                 true,
 		"email_verification_enabled":                    true,
 		"password_reset_enabled":                        true,
@@ -113,8 +113,7 @@ func TestAuthSettingsGeeTestAndTOTPFlow(t *testing.T) {
 		"geetest_register_enabled":                      true,
 		"geetest_password_reset_enabled":                true,
 		"registration_email_domain_restriction_enabled": false,
-	}, adminCookie, http.StatusOK)
-
+	}}, adminCookie, http.StatusOK)
 	status, body := postTextWithHeaders(t, server.URL+"/api/auth/login", map[string]any{
 		"identifier": "alice@example.com",
 		"password":   "alice-pass",
@@ -123,7 +122,7 @@ func TestAuthSettingsGeeTestAndTOTPFlow(t *testing.T) {
 		t.Fatalf("unexpected disabled login result: status=%d body=%q", status, body)
 	}
 
-	postJSONWithCookie(t, server.URL+"/api/admin/auth/settings", map[string]any{
+	patchJSONWithCookie(t, server.URL+"/api/admin/settings/auth", map[string]any{"values": map[string]any{
 		"external_registration_enabled":                 true,
 		"email_verification_enabled":                    true,
 		"password_reset_enabled":                        true,
@@ -132,7 +131,7 @@ func TestAuthSettingsGeeTestAndTOTPFlow(t *testing.T) {
 		"geetest_register_enabled":                      true,
 		"geetest_password_reset_enabled":                true,
 		"registration_email_domain_restriction_enabled": false,
-	}, adminCookie, http.StatusOK)
+	}}, adminCookie, http.StatusOK)
 
 	params := map[string]any{
 		"lot_number":     "lot",
@@ -383,14 +382,12 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 		GlobalRateLimitWindow:   cfg.AccessRateLimitWindow,
 	})
 	adminControl := admincontrol.New(admincontrol.Deps{
-		Accounts:       accountService,
-		Query:          queryService,
-		Turn:           turnService,
-		ChatStore:      st,
-		StorageStore:   st,
-		KeyStore:       st,
-		AuthSettings:   authSettings,
-		AccessSettings: accessSettings,
+		Accounts:     accountService,
+		Query:        queryService,
+		Turn:         turnService,
+		ChatStore:    st,
+		StorageStore: st,
+		KeyStore:     st,
 	})
 
 	return httpapi.RouterDeps{

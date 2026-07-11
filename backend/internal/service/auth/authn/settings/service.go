@@ -7,7 +7,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/config"
 	"github.com/zyf2007/ChatAPI/internal/repository/auth"
-	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	"github.com/zyf2007/ChatAPI/internal/service/settingscore"
 )
 
 const systemSettingsKey = "system_settings"
@@ -33,10 +33,13 @@ type PublicSettings struct {
 type Service struct {
 	store auth.SettingsStore
 	cfg   config.Config
+	core  *settingscore.Service
 }
 
 func NewService(dataStore auth.SettingsStore, cfg config.Config) *Service {
-	return &Service{store: dataStore, cfg: cfg}
+	s := &Service{store: dataStore, cfg: cfg}
+	s.core = s.newAdminDomain()
+	return s
 }
 
 func (s *Service) Public(ctx context.Context) (PublicSettings, error) {
@@ -58,87 +61,20 @@ func (s *Service) Public(ctx context.Context) (PublicSettings, error) {
 		OIDCEnabled:                        s.cfg.Mode != config.ModeLab && s.cfg.OIDCEnabled,
 		OIDCProviderName:                   providerName(s.cfg),
 	}
-	item, err := s.store.GetSystemConfig(ctx, systemSettingsKey)
-	if err != nil && !errors.Is(err, common.ErrNotFound) {
+	doc, err := s.core.Get(ctx)
+	if err != nil {
 		return PublicSettings{}, err
 	}
-	if err == nil {
-		out.LocalPasswordLoginEnabled = boolValue(item.Value["local_password_login_enabled"], out.LocalPasswordLoginEnabled)
-		out.RegistrationEnabled = boolValue(item.Value["external_registration_enabled"], out.RegistrationEnabled)
-		out.EmailVerificationEnabled = boolValue(item.Value["email_verification_enabled"], out.EmailVerificationEnabled)
-		out.RegistrationEmailDomainRestriction = boolValue(item.Value["registration_email_domain_restriction_enabled"], out.RegistrationEmailDomainRestriction)
-		out.RegistrationEmailDomains = csvValue(item.Value["registration_email_domains"])
-		out.PasswordResetEnabled = boolValue(item.Value["password_reset_enabled"], out.PasswordResetEnabled)
-		out.GeeTestLoginEnabled = boolValue(item.Value["geetest_login_enabled"], out.GeeTestLoginEnabled) && out.GeeTestEnabled
-		out.GeeTestRegisterEnabled = boolValue(item.Value["geetest_register_enabled"], out.GeeTestRegisterEnabled) && out.GeeTestEnabled
-		out.GeeTestPasswordResetEnabled = boolValue(item.Value["geetest_password_reset_enabled"], out.GeeTestPasswordResetEnabled) && out.GeeTestEnabled
-	}
+	out.LocalPasswordLoginEnabled = settingscore.Bool(doc.Values["local_password_login_enabled"])
+	out.RegistrationEnabled = settingscore.Bool(doc.Values["external_registration_enabled"])
+	out.EmailVerificationEnabled = settingscore.Bool(doc.Values["email_verification_enabled"])
+	out.RegistrationEmailDomainRestriction = settingscore.Bool(doc.Values["registration_email_domain_restriction_enabled"])
+	out.RegistrationEmailDomains = csvValue(doc.Values["registration_email_domains"])
+	out.PasswordResetEnabled = settingscore.Bool(doc.Values["password_reset_enabled"])
+	out.GeeTestLoginEnabled = settingscore.Bool(doc.Values["geetest_login_enabled"]) && out.GeeTestEnabled
+	out.GeeTestRegisterEnabled = settingscore.Bool(doc.Values["geetest_register_enabled"]) && out.GeeTestEnabled
+	out.GeeTestPasswordResetEnabled = settingscore.Bool(doc.Values["geetest_password_reset_enabled"]) && out.GeeTestEnabled
 	return out, nil
-}
-
-func (s *Service) Get(ctx context.Context) (map[string]any, error) {
-	settings, err := s.Public(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{
-		"local_password_login_enabled":                  settings.LocalPasswordLoginEnabled,
-		"external_registration_enabled":                 settings.RegistrationEnabled,
-		"email_verification_enabled":                    settings.EmailVerificationEnabled,
-		"registration_email_domain_restriction_enabled": settings.RegistrationEmailDomainRestriction,
-		"registration_email_domains":                    strings.Join(settings.RegistrationEmailDomains, ","),
-		"password_reset_enabled":                        settings.PasswordResetEnabled,
-		"geetest_enabled":                               settings.GeeTestEnabled,
-		"geetest_captcha_id":                            settings.GeeTestCaptchaID,
-		"geetest_login_enabled":                         settings.GeeTestLoginEnabled,
-		"geetest_register_enabled":                      settings.GeeTestRegisterEnabled,
-		"geetest_password_reset_enabled":                settings.GeeTestPasswordResetEnabled,
-		"oidc_enabled":                                  settings.OIDCEnabled,
-		"oidc_provider_name":                            settings.OIDCProviderName,
-		"oidc_admin_emails":                             append([]string(nil), s.cfg.OIDCAdminEmails...),
-		"oidc_allowed_emails":                           append([]string(nil), s.cfg.OIDCAllowedEmails...),
-		"oidc_allowed_domains":                          append([]string(nil), s.cfg.OIDCAllowedDomains...),
-		"oidc_auto_create_user":                         s.cfg.OIDCAutoCreateUser,
-	}, nil
-}
-
-func (s *Service) Set(ctx context.Context, input map[string]any) (map[string]any, error) {
-	if s == nil || s.store == nil {
-		return nil, ErrInvalidSettings
-	}
-	current, err := s.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	value := map[string]any{
-		"local_password_login_enabled":                  boolValue(input["local_password_login_enabled"], boolValue(current["local_password_login_enabled"], true)),
-		"external_registration_enabled":                 boolValue(input["external_registration_enabled"], boolValue(current["external_registration_enabled"], false)),
-		"email_verification_enabled":                    boolValue(input["email_verification_enabled"], boolValue(current["email_verification_enabled"], false)),
-		"registration_email_domain_restriction_enabled": boolValue(input["registration_email_domain_restriction_enabled"], boolValue(current["registration_email_domain_restriction_enabled"], false)),
-		"registration_email_domains":                    strings.Join(csvFromAny(input["registration_email_domains"], current["registration_email_domains"]), ","),
-		"password_reset_enabled":                        boolValue(input["password_reset_enabled"], boolValue(current["password_reset_enabled"], s.cfg.SMTPEnabled)),
-		"geetest_login_enabled":                         boolValue(input["geetest_login_enabled"], boolValue(current["geetest_login_enabled"], false)),
-		"geetest_register_enabled":                      boolValue(input["geetest_register_enabled"], boolValue(current["geetest_register_enabled"], false)),
-		"geetest_password_reset_enabled":                boolValue(input["geetest_password_reset_enabled"], boolValue(current["geetest_password_reset_enabled"], false)),
-	}
-	if boolValue(value["registration_email_domain_restriction_enabled"], false) && strings.TrimSpace(value["registration_email_domains"].(string)) == "" {
-		return nil, errors.New("registration email domains are required")
-	}
-	if !geetestConfigured(s.cfg) {
-		value["geetest_login_enabled"] = false
-		value["geetest_register_enabled"] = false
-		value["geetest_password_reset_enabled"] = false
-	}
-	if !s.cfg.SMTPEnabled {
-		value["password_reset_enabled"] = false
-	}
-	if _, err := s.store.SetSystemConfig(ctx, common.SetSystemConfigInput{
-		Key:   systemSettingsKey,
-		Value: value,
-	}); err != nil {
-		return nil, err
-	}
-	return s.Get(ctx)
 }
 
 func (s *Service) ValidateRegistrationEmail(email string, settings PublicSettings) error {

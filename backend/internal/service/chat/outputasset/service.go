@@ -14,6 +14,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/config"
 	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	preprocesssettings "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess/settings"
 )
 
 var ErrAssetNotFound = errors.New("output image asset not found")
@@ -36,6 +37,7 @@ type Service struct {
 	binaries BinaryStore
 	locksMu  sync.Mutex
 	locks    map[string]*consumeLock
+	Settings *preprocesssettings.Service
 }
 
 type consumeLock struct {
@@ -81,7 +83,11 @@ func (s *Service) Upload(ctx context.Context, ownerID string, conversationID str
 	if ownerID == "" {
 		return Uploaded{}, errors.New("owner id is required")
 	}
-	limit := s.cfg.UploadMaxBytes
+	cfg := s.current(ctx)
+	limit := cfg.MediaMaxBytes
+	if limit <= 0 {
+		limit = cfg.UploadMaxBytes
+	}
 	if limit <= 0 {
 		limit = 10 << 20
 	}
@@ -92,15 +98,15 @@ func (s *Service) Upload(ctx context.Context, ownerID string, conversationID str
 	if int64(len(data)) > limit {
 		return Uploaded{}, media.ErrImageTooLarge
 	}
-	parsed, err := media.ParseImageBytes(data, mediaType, s.cfg.MediaMaxBytes)
+	parsed, err := media.ParseImageBytes(data, mediaType, cfg.MediaMaxBytes)
 	if err != nil {
 		return Uploaded{}, err
 	}
-	encoded, err := media.EncodeAVIF(parsed, media.AVIFOptions{Quality: s.cfg.MediaAVIFQuality})
+	encoded, err := media.EncodeAVIF(parsed, media.AVIFOptions{Quality: cfg.MediaAVIFQuality})
 	if err != nil {
 		return Uploaded{}, err
 	}
-	mediaLimit := s.cfg.MediaMaxBytes
+	mediaLimit := cfg.MediaMaxBytes
 	if mediaLimit <= 0 {
 		mediaLimit = 10 << 20
 	}
@@ -194,7 +200,7 @@ func (s *Service) resolve(ctx context.Context, ownerID string, conversationID st
 		return Resolved{}, err
 	}
 	defer file.Close()
-	limit := s.cfg.MediaMaxBytes
+	limit := s.current(ctx).MediaMaxBytes
 	if limit <= 0 {
 		limit = 10 << 20
 	}
@@ -210,6 +216,26 @@ func (s *Service) resolve(ctx context.Context, ownerID string, conversationID st
 		URL:    media.ChatAssetPublicURL(asset.FileID),
 		Base64: base64.StdEncoding.EncodeToString(data),
 	}, nil
+}
+
+func (s *Service) current(ctx context.Context) config.Config {
+	cfg := s.cfg
+	if s.Settings == nil {
+		return cfg
+	}
+	value, err := s.Settings.Current(ctx)
+	if err != nil {
+		return cfg
+	}
+	cfg.MediaProcessEnabled = value.Enabled
+	cfg.MediaAllowRemoteURL = value.AllowRemoteURL
+	cfg.MediaAllowDataURL = value.AllowDataURL
+	cfg.MediaAllowBase64 = value.AllowBase64
+	cfg.MediaAllowSVG = value.AllowSVG
+	cfg.MediaMaxBytes = value.MaxBytes
+	cfg.MediaMaxImagesPerRequest = value.MaxImages
+	cfg.MediaAVIFQuality = value.AVIFQuality
+	return cfg
 }
 
 func (s *Service) acquireConsumeLock(assetID string) *consumeLock {

@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"io"
@@ -25,6 +26,7 @@ import (
 	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/identity"
 	localauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/local"
+	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/verification"
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
@@ -136,14 +138,14 @@ func TestRouterAdminFlow(t *testing.T) {
 		GlobalRateLimitRequests: cfg.AccessRateLimitRequests,
 		GlobalRateLimitWindow:   cfg.AccessRateLimitWindow,
 	})
+	authSettings := authsettings.NewService(st, cfg)
 	adminControl = admincontrol.New(admincontrol.Deps{
-		Accounts:       accountService,
-		Query:          queryService,
-		Turn:           turnService,
-		ChatStore:      st,
-		StorageStore:   st,
-		KeyStore:       st,
-		AccessSettings: accessSettings,
+		Accounts:     accountService,
+		Query:        queryService,
+		Turn:         turnService,
+		ChatStore:    st,
+		StorageStore: st,
+		KeyStore:     st,
 	})
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:         cfg,
@@ -161,6 +163,7 @@ func TestRouterAdminFlow(t *testing.T) {
 		Verification:   verificationService,
 		Policy:         policies,
 		AccessSettings: accessSettings,
+		AuthSettings:   authSettings,
 		Accounts:       accountService,
 		AdminControl:   adminControl,
 		Audit:          auditService,
@@ -174,14 +177,58 @@ func TestRouterAdminFlow(t *testing.T) {
 	if status != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized admin access, got %d", status)
 	}
+	status, _ = getTextWithHeaders(t, server.URL+"/api/admin/settings/overview", nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized settings access, got %d", status)
+	}
+	status, _ = getTextWithHeaders(t, server.URL+"/api/admin/monitor/stream", nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized monitoring access, got %d", status)
+	}
 
 	userCookie := loginAndGetCookie(t, server.URL, "bob@example.com", "user-pass")
 	status, body := getTextWithCookie(t, server.URL+"/api/admin/users", userCookie)
 	if status != http.StatusForbidden || !strings.Contains(body, "admin forbidden") {
 		t.Fatalf("expected forbidden non-admin access, got status=%d body=%q", status, body)
 	}
+	status, _ = getTextWithCookie(t, server.URL+"/api/admin/settings/media", userCookie)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected forbidden non-admin settings access, got %d", status)
+	}
 
 	adminCookie := loginAndGetCookie(t, server.URL, "admin@example.com", "admin-pass")
+	monitorCtx, stopMonitor := context.WithCancel(context.Background())
+	monitorReq, err := http.NewRequestWithContext(monitorCtx, http.MethodGet, server.URL+"/api/admin/monitor/stream?user_ids=normal_user", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	monitorReq.AddCookie(adminCookie)
+	monitorResp, err := http.DefaultClient.Do(monitorReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	monitorReader := bufio.NewReader(monitorResp.Body)
+	eventLine, err := monitorReader.ReadString('\n')
+	if err != nil || strings.TrimSpace(eventLine) != "event: monitor.snapshot" {
+		t.Fatalf("unexpected monitoring event line %q: %v", eventLine, err)
+	}
+	dataLine, err := monitorReader.ReadString('\n')
+	if err != nil || !strings.HasPrefix(dataLine, "data: ") {
+		t.Fatalf("unexpected monitoring data line %q: %v", dataLine, err)
+	}
+	var monitorSnapshot map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(dataLine, "data: "))), &monitorSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if monitorSnapshot["type"] != "monitor.snapshot" || monitorSnapshot["metrics"] == nil {
+		t.Fatalf("unexpected monitoring snapshot: %#v", monitorSnapshot)
+	}
+	monitorUsers, _ := monitorSnapshot["user_connections"].(map[string]any)
+	if len(monitorUsers) != 1 || monitorUsers["normal_user"] != float64(0) {
+		t.Fatalf("monitoring snapshot was not filtered to requested users: %#v", monitorSnapshot)
+	}
+	stopMonitor()
+	_ = monitorResp.Body.Close()
 
 	requestDone := make(chan map[string]any, 1)
 	go func() {
@@ -195,6 +242,9 @@ func TestRouterAdminFlow(t *testing.T) {
 	adminUsers := getJSONWithCookie(t, server.URL+"/api/admin/users", adminCookie, http.StatusOK)
 	if int(adminUsers["count"].(float64)) < 2 {
 		t.Fatalf("unexpected admin users response: %#v", adminUsers)
+	}
+	if int(adminUsers["page"].(float64)) != 1 || int(adminUsers["page_size"].(float64)) != 10 || int(adminUsers["total"].(float64)) < 2 {
+		t.Fatalf("unexpected admin users pagination: %#v", adminUsers)
 	}
 
 	getJSONWithCookie(t, server.URL+"/api/admin/users/normal_user", adminCookie, http.StatusOK)
@@ -237,35 +287,52 @@ func TestRouterAdminFlow(t *testing.T) {
 	getJSONWithCookie(t, server.URL+"/api/admin/requests/"+request.RequestID, adminCookie, http.StatusOK)
 	getJSONWithCookie(t, server.URL+"/api/admin/conversations", adminCookie, http.StatusOK)
 	getJSONWithCookie(t, server.URL+"/api/admin/conversations/"+request.ConversationID+"/messages", adminCookie, http.StatusOK)
-	accessSettingsResp := getJSONWithCookie(t, server.URL+"/api/admin/access/settings", adminCookie, http.StatusOK)
+	accessSettingsResp := getJSONWithCookie(t, server.URL+"/api/admin/settings/access", adminCookie, http.StatusOK)
 	if accessSettingsResp["ok"] != true {
 		t.Fatalf("unexpected access settings response: %#v", accessSettingsResp)
 	}
-	if accessSettingsResp["key"] != "system_access_settings" {
-		t.Fatalf("unexpected access settings key: %#v", accessSettingsResp)
+	document, ok := accessSettingsResp["document"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected settings document: %#v", accessSettingsResp)
 	}
-	if _, ok := accessSettingsResp["schema"].(map[string]any); !ok {
-		t.Fatalf("expected schema document in access settings response: %#v", accessSettingsResp)
-	}
-	current, ok := accessSettingsResp["current"].(map[string]any)
+	current, ok := document["values"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected current document in access settings response: %#v", accessSettingsResp)
 	}
 	if _, ok := current["global_rate_limit_requests"]; !ok {
 		t.Fatalf("expected current global_rate_limit_requests: %#v", accessSettingsResp)
 	}
-	accessSettingsResp = postJSONWithCookie(t, server.URL+"/api/admin/access/settings", map[string]any{
+	accessSettingsResp = patchJSONWithCookie(t, server.URL+"/api/admin/settings/access", map[string]any{"values": map[string]any{
 		"user_rate_limit_requests":    10,
 		"user_rate_limit_window":      "1m",
 		"app_key_rate_limit_requests": 20,
 		"app_key_rate_limit_window":   "2m",
-	}, adminCookie, http.StatusOK)
-	current, ok = accessSettingsResp["current"].(map[string]any)
+	}}, adminCookie, http.StatusOK)
+	result, ok := accessSettingsResp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected patch result: %#v", accessSettingsResp)
+	}
+	document, ok = result["document"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected updated document: %#v", accessSettingsResp)
+	}
+	current, ok = document["values"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected current document after update: %#v", accessSettingsResp)
 	}
 	if int(current["user_rate_limit_requests"].(float64)) != 10 {
 		t.Fatalf("unexpected saved access settings response: %#v", accessSettingsResp)
+	}
+	lastWrite := patchJSONWithCookie(t, server.URL+"/api/admin/settings/access", map[string]any{"values": map[string]any{"user_rate_limit_requests": 11}}, adminCookie, http.StatusOK)
+	lastWriteResult, _ := lastWrite["result"].(map[string]any)
+	lastWriteDocument, _ := lastWriteResult["document"].(map[string]any)
+	lastWriteValues, _ := lastWriteDocument["values"].(map[string]any)
+	if int(lastWriteValues["user_rate_limit_requests"].(float64)) != 11 {
+		t.Fatalf("last submitted settings were not persisted: %#v", lastWrite)
+	}
+	emptyPatch := patchJSONWithCookie(t, server.URL+"/api/admin/settings/access", map[string]any{"values": map[string]any{}}, adminCookie, http.StatusBadRequest)
+	if emptyPatch["ok"] != false {
+		t.Fatalf("expected empty patch rejection: %#v", emptyPatch)
 	}
 
 	postJSONWithCookie(t, server.URL+"/api/admin/conversations/"+request.ConversationID+"/complete", map[string]any{
@@ -371,6 +438,27 @@ func postJSONWithCookie(t *testing.T, url string, body map[string]any, cookie *h
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("post %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	return decodeJSONBody(t, resp.Body, resp.StatusCode, wantStatus)
+}
+
+func patchJSONWithCookie(t *testing.T, url string, body map[string]any, cookie *http.Cookie, wantStatus int) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPatch, url, strings.NewReader(string(raw)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	setSameOriginHeader(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch %s: %v", url, err)
 	}
 	defer resp.Body.Close()
 	return decodeJSONBody(t, resp.Body, resp.StatusCode, wantStatus)

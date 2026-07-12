@@ -41,6 +41,8 @@ node_modules/
 dist/
 dist-ssr/
 *.tsbuildinfo
+backend/internal/http/webassets/dist/
+/build/
 
 
 # Editors and OS files

@@ -1,28 +1,56 @@
 package router
 
 import (
+	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/http/webassets"
 )
 
 func mountSPA(router chi.Router, cfg config.Config) {
+	if assets, ok := webassets.FS(); ok {
+		router.Handle("/*", spaFallback(assets))
+		return
+	}
 	if info, err := os.Stat(cfg.WebDistDir); err == nil && info.IsDir() {
-		fs := http.FileServer(http.Dir(cfg.WebDistDir))
-		router.Handle("/*", spaFallback(fs, cfg.WebDistDir))
+		router.Handle("/*", spaFallback(os.DirFS(cfg.WebDistDir)))
 	}
 }
 
-func spaFallback(next http.Handler, webDistDir string) http.Handler {
+func spaFallback(assets fs.FS) http.Handler {
+	files := http.FileServer(http.FS(assets))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		target := filepath.Join(webDistDir, filepath.Clean(r.URL.Path))
-		if stat, err := os.Stat(target); err == nil && !stat.IsDir() {
-			next.ServeHTTP(w, r)
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
 			return
 		}
-		http.ServeFile(w, r, filepath.Join(webDistDir, "index.html"))
+		cleanPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if stat, err := fs.Stat(assets, cleanPath); err == nil && !stat.IsDir() {
+			files.ServeHTTP(w, r)
+			return
+		}
+		if isReservedBackendPath(r.URL.Path) {
+			http.NotFound(w, r)
+			return
+		}
+		index, err := fs.ReadFile(assets, "index.html")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(index)
+		}
 	})
+}
+
+func isReservedBackendPath(requestPath string) bool {
+	clean := "/" + strings.TrimPrefix(path.Clean("/"+requestPath), "/")
+	return clean == "/api" || strings.HasPrefix(clean, "/api/") || clean == "/v1" || strings.HasPrefix(clean, "/v1/")
 }

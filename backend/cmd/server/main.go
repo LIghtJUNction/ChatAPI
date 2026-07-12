@@ -101,7 +101,7 @@ func run() error {
 	}
 	defer cleanup()
 
-	policySvc := policy.NewService()
+	policySvc := policy.NewService(cfg.SuperAdminEmail)
 	sessionSvc, err := sessionsvc.NewService(sessionsvc.Config{
 		Secret:     cfg.SessionSecret,
 		CookieName: "chatapi_session",
@@ -281,14 +281,18 @@ func detectBackendRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	current := wd
+	return detectBackendRootFrom(wd), nil
+}
+
+func detectBackendRootFrom(start string) string {
+	current := filepath.Clean(start)
 	for {
 		if _, err := os.Stat(filepath.Join(current, "go.mod")); err == nil {
-			return current, nil
+			return current
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return "", errors.New("unable to locate backend root")
+			return filepath.Clean(start)
 		}
 		current = parent
 	}

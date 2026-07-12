@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:embedded": "tsc -b && vite build --outDir ../backend/internal/http/webassets/dist --emptyOutDir",
     "lint": "eslint .",
     "preview": "vite preview"
   },

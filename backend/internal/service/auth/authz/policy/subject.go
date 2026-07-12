@@ -30,17 +30,33 @@ func (s *Service) IsAdmin(pr principal.Principal) bool {
 	if pr.IsAdmin {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(pr.Role), "admin")
+	role := strings.ToLower(strings.TrimSpace(pr.Role))
+	return role == "admin" || role == "superadmin"
+}
+
+func (s *Service) IsSuperAdmin(pr principal.Principal) bool {
+	return pr.Valid() && strings.EqualFold(strings.TrimSpace(pr.Role), "superadmin")
 }
 
 func (s *Service) IsAdminUser(user common.User) bool {
+	if s.IsSuperAdminUser(user) {
+		return true
+	}
+	role := strings.ToLower(strings.TrimSpace(user.Role))
+	return role == "admin" || role == "superadmin"
+}
+
+func (s *Service) IsSuperAdminUser(user common.User) bool {
 	if user.LocalAdmin {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(user.Role), "admin")
+	return s.superAdminEmail != "" && strings.EqualFold(strings.TrimSpace(user.Email), s.superAdminEmail)
 }
 
 func (s *Service) EffectiveRole(user common.User) string {
+	if s.IsSuperAdminUser(user) {
+		return "superadmin"
+	}
 	if s.IsAdminUser(user) {
 		return "admin"
 	}

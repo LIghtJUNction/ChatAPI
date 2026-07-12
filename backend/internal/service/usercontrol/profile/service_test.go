@@ -117,7 +117,7 @@ func TestProfileServiceBuildAuthenticatedSessionViewWithRoleAndTOTP(t *testing.T
 	if !view.Authenticated || !view.TOTPEnabled {
 		t.Fatalf("unexpected auth/totp state: %#v", view)
 	}
-	if view.User["id"] != "user_a" || view.User["username"] != "alice" || view.User["role"] != "admin" {
+	if view.User["id"] != "user_a" || view.User["username"] != "alice" || view.User["role"] != "superadmin" {
 		t.Fatalf("unexpected user payload: %#v", view.User)
 	}
 	if !view.OIDCEnabled || view.OIDCProviderName != "Kirari" || view.RealtimeMaxConnectionsPerUser != 4 {

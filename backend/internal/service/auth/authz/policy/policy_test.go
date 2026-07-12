@@ -21,7 +21,7 @@ func TestSessionPrincipalMarksAdminUser(t *testing.T) {
 	if !svc.IsAuthenticated(pr) || !svc.IsHumanSession(pr) {
 		t.Fatalf("expected authenticated human session: %#v", pr)
 	}
-	if !svc.IsAdmin(pr) || pr.Role != "admin" || !pr.IsAdmin {
+	if !svc.IsAdmin(pr) || pr.Role != "superadmin" || !pr.IsAdmin {
 		t.Fatalf("expected admin principal: %#v", pr)
 	}
 }
@@ -56,6 +56,14 @@ func TestCanAccessUserAllowsOwnerAndAdmin(t *testing.T) {
 	}
 	if !svc.CanAccessUser(admin, "user_1") {
 		t.Fatal("expected admin cross-user access")
+	}
+}
+
+func TestSessionPrincipalPreservesSuperAdminRole(t *testing.T) {
+	svc := policy.NewService("root@example.com")
+	pr := svc.SessionPrincipal(common.User{ID: "user_root", Username: "root", Email: "root@example.com", Role: "user", IsActive: true}, "sess_root", "oidc")
+	if !svc.IsAdmin(pr) || !pr.IsAdmin || pr.Role != "superadmin" {
+		t.Fatalf("expected superadmin principal: %#v", pr)
 	}
 }
 

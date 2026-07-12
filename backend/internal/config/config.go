@@ -96,6 +96,7 @@ type Config struct {
 	OIDCAllowedEmails  []string
 	OIDCAdminEmails    []string
 	OIDCAutoCreateUser bool
+	SuperAdminEmail    string
 
 	KirariEnabled                    bool
 	KirariIssuerURL                  string
@@ -405,6 +406,7 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.OIDCAllowedEmails = splitCSV(os.Getenv("CHATAPI_OIDC_ALLOWED_EMAILS"))
 	cfg.OIDCAdminEmails = splitCSV(os.Getenv("CHATAPI_OIDC_ADMIN_EMAILS"))
 	cfg.OIDCAutoCreateUser = parseBool(os.Getenv("CHATAPI_OIDC_AUTO_CREATE_USER"), cfg.OIDCAutoCreateUser)
+	cfg.SuperAdminEmail = strings.ToLower(strings.TrimSpace(os.Getenv("CHATAPI_SUPERADMIN_EMAIL")))
 
 	cfg.KirariEnabled = parseBool(os.Getenv("CHATAPI_KIRARI_ENABLED"), cfg.KirariEnabled)
 	cfg.KirariIssuerURL = strings.TrimSpace(os.Getenv("CHATAPI_KIRARI_ISSUER_URL"))
@@ -566,6 +568,9 @@ func (c Config) Validate() error {
 		if !containsString(c.OIDCScopes, "openid") {
 			return errors.New("oidc scopes must include openid")
 		}
+	}
+	if strings.TrimSpace(c.SuperAdminEmail) != "" && strings.TrimSpace(c.AdminUsername) != "" && strings.TrimSpace(c.AdminPassword) != "" {
+		return errors.New("CHATAPI_SUPERADMIN_EMAIL cannot be combined with the local seed superadmin")
 	}
 	if c.KirariEnabled {
 		if strings.TrimSpace(c.KirariIssuerURL) == "" {

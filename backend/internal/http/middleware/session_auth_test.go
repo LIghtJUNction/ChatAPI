@@ -67,7 +67,7 @@ func TestLoadUserSessionRestoresPrincipalAndActor(t *testing.T) {
 	if gotUserID != "user_123" {
 		t.Fatalf("unexpected principal user: %q", gotUserID)
 	}
-	if gotActor.UserID != "user_123" || gotActor.Role != "admin" || gotActor.Source != "session" {
+	if gotActor.UserID != "user_123" || gotActor.Role != "superadmin" || gotActor.Source != "session" {
 		t.Fatalf("unexpected actor: %#v", gotActor)
 	}
 }

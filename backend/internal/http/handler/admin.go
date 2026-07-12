@@ -101,14 +101,40 @@ func (h AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
 }
 
+func (h AdminHandler) SetUserRole(w http.ResponseWriter, r *http.Request) {
+	pr, ok := actor.FromContext(r.Context())
+	if !ok {
+		http.Error(w, "actor unavailable", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
+	item, err := h.Control.SetUserRole(r.Context(), pr.Role, userID, body.Role)
+	if err != nil {
+		status := statusForStoreError(err)
+		if strings.Contains(err.Error(), "only the superadmin") {
+			status = http.StatusForbidden
+		}
+		httpx.WriteJSON(w, status, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	h.record(r, "admin.user", "user", userID, "set_role", "success", map[string]any{"role": item.Role})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
+}
+
 func (h AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Username   string `json:"username"`
-		Email      string `json:"email"`
-		Password   string `json:"password"`
-		Role       string `json:"role"`
-		IsActive   *bool  `json:"is_active"`
-		LocalAdmin bool   `json:"local_admin"`
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+		IsActive *bool  `json:"is_active"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
@@ -118,13 +144,17 @@ func (h AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if body.IsActive != nil {
 		isActive = *body.IsActive
 	}
-	item, err := h.Control.CreateUser(r.Context(), admincontrol.CreateUserInput{
-		Username:   body.Username,
-		Email:      body.Email,
-		Password:   body.Password,
-		Role:       body.Role,
-		IsActive:   isActive,
-		LocalAdmin: body.LocalAdmin,
+	pr, ok := actor.FromContext(r.Context())
+	if !ok {
+		http.Error(w, "actor unavailable", http.StatusUnauthorized)
+		return
+	}
+	item, err := h.Control.CreateUser(r.Context(), pr.Role, admincontrol.CreateUserInput{
+		Username: body.Username,
+		Email:    body.Email,
+		Password: body.Password,
+		Role:     body.Role,
+		IsActive: isActive,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

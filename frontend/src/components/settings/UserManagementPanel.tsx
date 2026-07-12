@@ -8,9 +8,10 @@ import { UserPasswordModal } from './userManagement/UserPasswordModal'
 
 type UserManagementPanelProps = {
   open: boolean
+  currentRole: string
 }
 
-export function UserManagementPanel({ open }: UserManagementPanelProps) {
+export function UserManagementPanel({ open, currentRole }: UserManagementPanelProps) {
   const [createOpen, setCreateOpen] = useState(false)
   const {
     creating,
@@ -19,6 +20,7 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
     handleCreate,
     handleDelete,
     handlePasswordChange,
+    handleRoleChange,
     loading,
     page,
     pageSize,
@@ -38,6 +40,8 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
     deletingId,
     onDelete: handleDelete,
     onOpenPassword: openPasswordModal,
+    onRoleChange: handleRoleChange,
+    canManageRoles: currentRole === 'superadmin',
   })
 
   return (
@@ -116,7 +120,7 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
           },
         }}
         size="small"
-        scroll={{ x: 840 }}
+        scroll={{ x: 1350 }}
       />
 
       <UserPasswordModal

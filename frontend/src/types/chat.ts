@@ -1,7 +1,7 @@
 export type AuthUser = {
   id: string
   username: string
-  role: 'admin' | 'user'
+  role: 'superadmin' | 'admin' | 'user'
 }
 
 export type AuthSession = {
@@ -22,8 +22,12 @@ export type AuthSession = {
 export type User = {
   id: string
   username: string
-  role: 'admin' | 'user'
+  email: string
+  role: 'superadmin' | 'admin' | 'user'
+  is_active: boolean
+  local_admin?: boolean
   created_at: string
+  updated_at?: string
   last_login_at?: string
   api_key_count?: number
   current_connection_count?: number

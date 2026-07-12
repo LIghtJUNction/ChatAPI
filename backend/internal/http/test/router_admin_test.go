@@ -68,9 +68,15 @@ func TestRouterAdminFlow(t *testing.T) {
 		PasswordHash: adminPasswordHash,
 		Role:         "admin",
 		IsActive:     true,
-		LocalAdmin:   true,
+		LocalAdmin:   false,
 	}); err != nil {
 		t.Fatalf("create admin user: %v", err)
+	}
+	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
+		ID: "superadmin_user", Username: "root", Email: "root@example.com",
+		PasswordHash: adminPasswordHash, Role: "admin", IsActive: true, LocalAdmin: true,
+	}); err != nil {
+		t.Fatalf("create superadmin user: %v", err)
 	}
 	if _, err := st.CreateUser(context.Background(), common.CreateUserInput{
 		ID:           "normal_user",
@@ -197,6 +203,17 @@ func TestRouterAdminFlow(t *testing.T) {
 	}
 
 	adminCookie := loginAndGetCookie(t, server.URL, "admin@example.com", "admin-pass")
+	roleDenied := putJSONWithCookie(t, server.URL+"/api/admin/users/normal_user/role", map[string]any{"role": "admin"}, adminCookie, http.StatusForbidden)
+	if !strings.Contains(roleDenied["error"].(string), "only the superadmin") {
+		t.Fatalf("unexpected ordinary-admin role response: %#v", roleDenied)
+	}
+	superadminCookie := loginAndGetCookie(t, server.URL, "root@example.com", "admin-pass")
+	roleUpdated := putJSONWithCookie(t, server.URL+"/api/admin/users/normal_user/role", map[string]any{"role": "admin"}, superadminCookie, http.StatusOK)
+	updatedUser, _ := roleUpdated["user"].(map[string]any)
+	if updatedUser["role"] != "admin" {
+		t.Fatalf("role was not promoted: %#v", roleUpdated)
+	}
+	putJSONWithCookie(t, server.URL+"/api/admin/users/normal_user/role", map[string]any{"role": "user"}, superadminCookie, http.StatusOK)
 	monitorCtx, stopMonitor := context.WithCancel(context.Background())
 	monitorReq, err := http.NewRequestWithContext(monitorCtx, http.MethodGet, server.URL+"/api/admin/monitor/stream?user_ids=normal_user", nil)
 	if err != nil {

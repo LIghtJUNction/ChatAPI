@@ -187,11 +187,10 @@ func (s *Service) lookupOrCreateUser(ctx context.Context, claims Claims) (common
 }
 
 func (s *Service) nextRole(user common.User, email string, verified bool) string {
-	role := s.roleForEmail(email, verified)
 	if user.LocalAdmin {
 		return "admin"
 	}
-	if strings.TrimSpace(role) != "" {
+	if role := s.adminRoleForEmail(email, verified); role != "" {
 		return role
 	}
 	if strings.TrimSpace(user.Role) != "" {
@@ -228,12 +227,22 @@ func (s *Service) roleForEmail(email string, verified bool) string {
 	if email == "" {
 		return ""
 	}
+	if role := s.adminRoleForEmail(email, verified); role != "" {
+		return role
+	}
+	return "user"
+}
+
+func (s *Service) adminRoleForEmail(email string, verified bool) string {
+	if email == "" || !verified {
+		return ""
+	}
 	for _, adminEmail := range s.cfg.OIDCAdminEmails {
-		if strings.EqualFold(strings.TrimSpace(adminEmail), email) && verified {
+		if strings.EqualFold(strings.TrimSpace(adminEmail), email) {
 			return "admin"
 		}
 	}
-	return "user"
+	return ""
 }
 
 func identityID(existing common.UserIdentity) string {

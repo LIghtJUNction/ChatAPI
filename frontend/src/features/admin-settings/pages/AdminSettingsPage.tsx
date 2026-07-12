@@ -43,14 +43,14 @@ export function AdminSettingsPage() {
   const [runtime, setRuntime] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
-    if (!auth.session.authenticated || auth.session.user?.role !== 'admin') return
+    if (!auth.session.authenticated || !isAdminRole(auth.session.user?.role)) return
     void getOverview().then(setOverview)
     void getRuntime().then(setRuntime)
   }, [auth.session.authenticated, auth.session.user?.role])
 
   if (auth.loading) return <div className="boot-screen"><Spin /></div>
   if (!auth.session.authenticated) return <Navigate to="/login" replace />
-  if (auth.session.user?.role !== 'admin') return <Navigate to="/app" replace />
+  if (!isAdminRole(auth.session.user?.role)) return <Navigate to="/app" replace />
   if (!sectionKeys.has(selected)) return <Navigate to="/admin/settings/overview" replace />
 
   return (
@@ -74,13 +74,17 @@ export function AdminSettingsPage() {
         {selected === 'overview' ? (
           <Overview overview={overview} runtime={runtime} />
         ) : selected === 'users' ? (
-          <UserManagementPanel open />
+          <UserManagementPanel open currentRole={auth.session.user.role} />
         ) : (
           <DomainSettingsSection key={selected} domain={selected} />
         )}
       </main>
     </Layout>
   )
+}
+
+function isAdminRole(role?: string) {
+  return role === 'admin' || role === 'superadmin'
 }
 
 function Overview({ overview, runtime: runtimeDocument }: { overview: Record<string, unknown> | null; runtime: Record<string, unknown> | null }) {

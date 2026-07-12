@@ -118,6 +118,19 @@ export function useUserManagementState(open: boolean) {
     }
   }
 
+  async function handleRoleChange(user: User, role: 'user' | 'admin') {
+	try {
+	  await requestJson(`/api/admin/users/${user.id}/role`, {
+		method: 'PUT',
+		body: JSON.stringify({ role }),
+	  })
+	  setReloadVersion((current) => current + 1)
+	  appMessage.success(role === 'admin' ? `已将 ${user.username} 设为管理员` : `已撤销 ${user.username} 的管理员`)
+	} catch (error) {
+	  appMessage.error(error instanceof Error ? error.message : '修改角色失败')
+	}
+  }
+
   function openPasswordModal(user: User) {
     setPwUserId(user.id)
     setPwUsername(user.username)
@@ -170,6 +183,7 @@ export function useUserManagementState(open: boolean) {
     handleCreate,
     handleDelete,
     handlePasswordChange,
+    handleRoleChange,
     historyLoading,
     historyMessages,
     loading,

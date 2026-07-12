@@ -424,6 +424,7 @@ func New(deps Deps) http.Handler {
 	router.With(adminAuth).Get("/api/admin/users", adminHandler.ListUsers)
 	router.With(adminAuth).Post("/api/admin/users", adminHandler.CreateUser)
 	router.With(adminAuth).Get("/api/admin/users/{userID}", adminHandler.GetUser)
+	router.With(adminAuth).Put("/api/admin/users/{userID}/role", adminHandler.SetUserRole)
 	router.With(adminAuth).Post("/api/admin/users/{userID}/disable", adminHandler.DisableUser)
 	router.With(adminAuth).Post("/api/admin/users/{userID}/enable", adminHandler.EnableUser)
 	router.With(adminAuth).Put("/api/admin/users/{userID}/password", adminHandler.ResetUserPassword)

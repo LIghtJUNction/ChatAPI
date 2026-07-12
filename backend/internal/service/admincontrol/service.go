@@ -36,12 +36,11 @@ type Service struct {
 }
 
 type CreateUserInput struct {
-	Username   string
-	Email      string
-	Password   string
-	Role       string
-	IsActive   bool
-	LocalAdmin bool
+	Username string
+	Email    string
+	Password string
+	Role     string
+	IsActive bool
 }
 
 func New(deps Deps) *Service {

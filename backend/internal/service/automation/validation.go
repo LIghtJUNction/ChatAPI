@@ -16,6 +16,9 @@ const (
 var ErrInvalidRule = errors.New("invalid automation rule")
 
 func NormalizeRule(rule Rule) Rule {
+	steps := make([]Step, len(rule.Steps))
+	copy(steps, rule.Steps)
+	rule.Steps = steps
 	rule.ID = strings.TrimSpace(rule.ID)
 	rule.OwnerID = strings.TrimSpace(rule.OwnerID)
 	rule.Name = strings.TrimSpace(rule.Name)

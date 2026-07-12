@@ -25,6 +25,19 @@ import type {
 
 const STORAGE_KEY = 'chatapi.conversationId'
 
+function normalizeAutomationRecordingState(state: AutomationRecordingState): AutomationRecordingState {
+  return {
+    ...state,
+    steps: Array.isArray(state.steps) ? state.steps : [],
+    draft_rule: state.draft_rule
+      ? {
+          ...state.draft_rule,
+          steps: Array.isArray(state.draft_rule.steps) ? state.draft_rule.steps : [],
+        }
+      : undefined,
+  }
+}
+
 function sortConversations(items: Conversation[]) {
   return [...items].sort((left, right) => {
     const timeOrder = Date.parse(right.updated_at) - Date.parse(left.updated_at)
@@ -359,11 +372,15 @@ export function useWorkspaceRealtime({
         }
 
         if (payload.type === 'automation.record.ack') {
+          const normalizedPayload = {
+            ...payload,
+            state: normalizeAutomationRecordingState(payload.state),
+          }
           if (payload.revision >= automationSnapshotRevisionRef.current) {
             automationSnapshotRevisionRef.current = payload.revision
-            if (payload.state.revision >= automationRecordingRevisionRef.current) {
-              automationRecordingRevisionRef.current = payload.state.revision
-              setAutomationRecording(payload.state)
+            if (normalizedPayload.state.revision >= automationRecordingRevisionRef.current) {
+              automationRecordingRevisionRef.current = normalizedPayload.state.revision
+              setAutomationRecording(normalizedPayload.state)
             }
             if (payload.executions) {
               setAutomationExecutions((current) => {
@@ -392,7 +409,7 @@ export function useWorkspaceRealtime({
           if (pending) {
             window.clearTimeout(pending.timeout)
             pendingCommandsRef.current.delete(payload.command_id)
-            pending.resolve(payload)
+            pending.resolve(normalizedPayload)
           }
           return
         }
@@ -408,9 +425,10 @@ export function useWorkspaceRealtime({
         }
 
         if (payload.type === 'automation.record.state') {
-      if (payload.state.revision < automationRecordingRevisionRef.current) return
-      automationRecordingRevisionRef.current = payload.state.revision
-          setAutomationRecording(payload.state)
+          const normalizedState = normalizeAutomationRecordingState(payload.state)
+      if (normalizedState.revision < automationRecordingRevisionRef.current) return
+      automationRecordingRevisionRef.current = normalizedState.revision
+          setAutomationRecording(normalizedState)
           return
         }
 

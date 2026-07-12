@@ -180,9 +180,10 @@ func ruleFromStored(stored common.AutomationRule) (Rule, error) {
 }
 
 func cloneRule(rule Rule) Rule {
-	copy := rule
-	copy.Steps = append([]Step(nil), rule.Steps...)
-	return copy
+	cloned := rule
+	cloned.Steps = make([]Step, len(rule.Steps))
+	copy(cloned.Steps, rule.Steps)
+	return cloned
 }
 
 func (s *Service) ExecutionStates(ownerID string) []ExecutionState {

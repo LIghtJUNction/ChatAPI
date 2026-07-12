@@ -108,8 +108,9 @@ func (s *Service) stopRecording(ctx context.Context, ownerID string, expected *r
 		Enabled:  false,
 		Match:    MatchSpec{Target: "last_user_text"},
 		Playback: PlaybackSpec{Mode: "recorded", FixedIntervalMS: 200, LoopIntervalMS: 1000},
-		Steps:    append([]Step(nil), state.Steps...),
+		Steps:    make([]Step, len(state.Steps)),
 	}
+	copy(rule.Steps, state.Steps)
 	saved, err := s.SaveRule(ctx, ownerID, rule)
 	if err != nil {
 		s.mu.Lock()
@@ -244,7 +245,9 @@ func (s *Service) ControlApplied(ctx context.Context, applied controlsvc.Applied
 }
 
 func cloneRecordingState(state RecordingState) RecordingState {
-	state.Steps = append([]Step(nil), state.Steps...)
+	steps := make([]Step, len(state.Steps))
+	copy(steps, state.Steps)
+	state.Steps = steps
 	if state.DraftRule != nil {
 		rule := cloneRule(*state.DraftRule)
 		state.DraftRule = &rule

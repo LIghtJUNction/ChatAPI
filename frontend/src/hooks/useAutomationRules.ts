@@ -22,7 +22,7 @@ function cloneRule(rule: AutomationRule): AutomationRule {
     ...rule,
     match: { ...rule.match },
     playback: { ...rule.playback },
-    steps: rule.steps.map((step) => ({ ...step, action: { ...step.action } })),
+    steps: (Array.isArray(rule.steps) ? rule.steps : []).map((step) => ({ ...step, action: { ...step.action } })),
   }
 }
 

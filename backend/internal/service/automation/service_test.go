@@ -1,7 +1,9 @@
 package automation
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -205,6 +207,45 @@ func TestRecordingCapturesManualActionsAndPersistsDraft(t *testing.T) {
 	snapshot := service.StateSnapshot("owner")
 	if snapshot.Revision < state.Revision || snapshot.Recording.Revision != snapshot.Revision {
 		t.Fatalf("snapshot did not expose an authoritative empty recording revision: %#v", snapshot)
+	}
+	if snapshot.Recording.Steps == nil {
+		t.Fatalf("snapshot must encode empty recording steps as an array: %#v", snapshot.Recording)
+	}
+}
+
+func TestEmptyRecordingStateAndDraftEncodeStepsAsArrays(t *testing.T) {
+	store := newMemoryRules()
+	pending := memoryPending{items: map[string]*turnsvc.PendingTurn{
+		"conv": {OwnerID: "owner", ConversationID: "conv", RequestID: "req", ResponseID: "resp"},
+	}}
+	service := New(Deps{Rules: store, Pending: pending})
+	if _, err := service.StartRecording(context.Background(), "owner", "conv"); err != nil {
+		t.Fatal(err)
+	}
+	active := service.StateSnapshot("owner").Recording
+	assertStepsEncodeAsArray(t, active)
+
+	stopped, err := service.StopRecording(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped.DraftRule == nil {
+		t.Fatal("empty recording did not produce a draft rule")
+	}
+	assertStepsEncodeAsArray(t, stopped)
+}
+
+func assertStepsEncodeAsArray(t *testing.T, state RecordingState) {
+	t.Helper()
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"steps":[]`)) {
+		t.Fatalf("recording arrays must not encode as null: %s", encoded)
+	}
+	if state.DraftRule != nil && state.DraftRule.Steps == nil {
+		t.Fatalf("draft rule steps must be a non-nil array: %#v", state.DraftRule)
 	}
 }
 

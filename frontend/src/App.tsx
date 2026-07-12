@@ -33,10 +33,18 @@ function RouteLoading() {
 
 function LoginRoute() {
   const navigate = useNavigate()
+  const location = useLocation()
   const auth = useAuthSession()
   const [loading, setLoading] = useState(false)
   const [totpRequired, setTotpRequired] = useState(false)
   const captchaRef = useRef<GeetestCaptcha | null>(null)
+  const localLoginRequested = new URLSearchParams(location.search).get('local') === '1'
+
+  useEffect(() => {
+    if (!auth.loading && !auth.session.authenticated && auth.session.oidc_enabled && !localLoginRequested) {
+      window.location.assign('/api/auth/oidc/login')
+    }
+  }, [auth.loading, auth.session.authenticated, auth.session.oidc_enabled, localLoginRequested])
 
   async function handleSubmit(values: LoginFormValues) {
     setLoading(true)
@@ -63,6 +71,10 @@ function LoginRoute() {
 
   if (auth.session.authenticated) {
     return <Navigate to="/app" replace />
+  }
+
+  if (auth.session.oidc_enabled && !localLoginRequested) {
+    return <RouteLoading />
   }
 
   return (

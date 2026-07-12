@@ -270,6 +270,17 @@ func TestOIDCAdminEmailFlow(t *testing.T) {
 		t.Fatalf("unexpected oidc login status: %d", resp.StatusCode)
 	}
 	location := resp.Header.Get("Location")
+	// Start a second authorization before finishing the first one. Each flow must
+	// retain its own state/nonce/PKCE cookies instead of overwriting the other.
+	secondLogin, err := client.Get(server.URL + "/api/auth/oidc/login")
+	if err != nil {
+		t.Fatalf("second oidc login: %v", err)
+	}
+	secondLocation := secondLogin.Header.Get("Location")
+	secondLogin.Body.Close()
+	if secondLogin.StatusCode != http.StatusFound || secondLocation == location {
+		t.Fatalf("unexpected second oidc login: status=%d location=%q", secondLogin.StatusCode, secondLocation)
+	}
 	resp, err = client.Get(location)
 	if err != nil {
 		t.Fatalf("provider authorize: %v", err)
@@ -284,17 +295,28 @@ func TestOIDCAdminEmailFlow(t *testing.T) {
 		t.Fatalf("oidc callback: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusSeeOther {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("unexpected oidc callback status: %d body=%q callback=%q", resp.StatusCode, string(body), callbackURL)
 	}
-	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode oidc callback payload: %v", err)
+	if location := resp.Header.Get("Location"); location != "/app" {
+		t.Fatalf("unexpected oidc callback redirect: %q", location)
 	}
-	user := payload["user"].(map[string]any)
-	if user["role"] != "admin" {
-		t.Fatalf("unexpected oidc role payload: %#v", payload)
+	resp.Body.Close()
+
+	secondAuthorize, err := client.Get(secondLocation)
+	if err != nil {
+		t.Fatalf("second provider authorize: %v", err)
+	}
+	secondCallbackURL := secondAuthorize.Header.Get("Location")
+	secondAuthorize.Body.Close()
+	secondCallback, err := client.Get(secondCallbackURL)
+	if err != nil {
+		t.Fatalf("second oidc callback: %v", err)
+	}
+	secondCallback.Body.Close()
+	if secondCallback.StatusCode != http.StatusSeeOther || secondCallback.Header.Get("Location") != "/app" {
+		t.Fatalf("second concurrent callback failed: status=%d location=%q", secondCallback.StatusCode, secondCallback.Header.Get("Location"))
 	}
 
 	resp, err = client.Get(server.URL + "/api/auth/session")

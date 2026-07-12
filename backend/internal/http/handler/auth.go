@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
@@ -263,10 +264,7 @@ func (h AuthHandler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pkceVerifier := oauth2.GenerateVerifier()
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", state, int((10*time.Minute).Seconds())))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", nonce, int((10*time.Minute).Seconds())))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", pkceVerifier, int((10*time.Minute).Seconds())))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_intent", oidcIntentLogin, int((10*time.Minute).Seconds())))
+	setOIDCFlowCookies(w, r, state, nonce, pkceVerifier, oidcIntentLogin)
 	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(pkceVerifier)), http.StatusFound)
 }
 
@@ -296,10 +294,7 @@ func (h AuthHandler) OIDCLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pkceVerifier := oauth2.GenerateVerifier()
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", state, int((10*time.Minute).Seconds())))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", nonce, int((10*time.Minute).Seconds())))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", pkceVerifier, int((10*time.Minute).Seconds())))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_intent", oidcIntentLink, int((10*time.Minute).Seconds())))
+	setOIDCFlowCookies(w, r, state, nonce, pkceVerifier, oidcIntentLink)
 	http.Redirect(w, r, oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(pkceVerifier)), http.StatusFound)
 }
 
@@ -312,17 +307,18 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, errText, http.StatusUnauthorized)
 		return
 	}
-	stateValue, err := oidcCookieValue(r, "chatapi_oidc_state")
-	if err != nil || stateValue == "" || !subtleCompare(stateValue, r.URL.Query().Get("state")) {
+	callbackState := strings.TrimSpace(r.URL.Query().Get("state"))
+	stateValue, err := oidcFlowCookieValue(r, "chatapi_oidc_state", callbackState)
+	if err != nil || stateValue == "" || !subtleCompare(stateValue, callbackState) {
 		http.Error(w, "invalid oidc state", http.StatusUnauthorized)
 		return
 	}
-	nonceValue, err := oidcCookieValue(r, "chatapi_oidc_nonce")
+	nonceValue, err := oidcFlowCookieValue(r, "chatapi_oidc_nonce", callbackState)
 	if err != nil || nonceValue == "" {
 		http.Error(w, "invalid oidc nonce", http.StatusUnauthorized)
 		return
 	}
-	pkceVerifier, err := oidcCookieValue(r, "chatapi_oidc_pkce")
+	pkceVerifier, err := oidcFlowCookieValue(r, "chatapi_oidc_pkce", callbackState)
 	if err != nil || pkceVerifier == "" {
 		http.Error(w, "invalid oidc pkce verifier", http.StatusUnauthorized)
 		return
@@ -362,7 +358,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	intent := oidcIntentLogin
-	if value, err := oidcCookieValue(r, "chatapi_oidc_intent"); err == nil && strings.TrimSpace(value) == oidcIntentLink {
+	if value, err := oidcFlowCookieValue(r, "chatapi_oidc_intent", callbackState); err == nil && strings.TrimSpace(value) == oidcIntentLink {
 		intent = oidcIntentLink
 	}
 	claims := claimsFromMap(rawClaims)
@@ -377,7 +373,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, oidcFailureMessage(err), oidcFailureStatus(err))
 			return
 		}
-		clearOIDCCookies(w, r)
+		clearOIDCCookies(w, r, callbackState)
 		if err := h.issueSessionForUser(w, result.User, "oidc_link"); err != nil {
 			http.Error(w, "session is not configured", http.StatusInternalServerError)
 			return
@@ -399,7 +395,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, oidcFailureMessage(err), oidcFailureStatus(err))
 		return
 	}
-	clearOIDCCookies(w, r)
+	clearOIDCCookies(w, r, callbackState)
 	if err := h.issueSessionForUser(w, result.User, "oidc"); err != nil {
 		http.Error(w, "session is not configured", http.StatusInternalServerError)
 		return
@@ -409,10 +405,7 @@ func (h AuthHandler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		"identity_id":  result.Identity.ID,
 		"identity_sub": result.Identity.Subject,
 	})
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"ok":   true,
-		"user": sanitizeUser(result.User),
-	})
+	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 
 func (h AuthHandler) PasswordConfig(w http.ResponseWriter, r *http.Request) {
@@ -804,11 +797,20 @@ func oidcCookie(r *http.Request, name string, value string, maxAge int) *http.Co
 	}
 }
 
-func clearOIDCCookies(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_state", "", -1))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_nonce", "", -1))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_pkce", "", -1))
-	http.SetCookie(w, oidcCookie(r, "chatapi_oidc_intent", "", -1))
+func setOIDCFlowCookies(w http.ResponseWriter, r *http.Request, state string, nonce string, pkce string, intent string) {
+	maxAge := int((10 * time.Minute).Seconds())
+	http.SetCookie(w, oidcCookie(r, oidcFlowCookieName("chatapi_oidc_state", state), state, maxAge))
+	http.SetCookie(w, oidcCookie(r, oidcFlowCookieName("chatapi_oidc_nonce", state), nonce, maxAge))
+	http.SetCookie(w, oidcCookie(r, oidcFlowCookieName("chatapi_oidc_pkce", state), pkce, maxAge))
+	http.SetCookie(w, oidcCookie(r, oidcFlowCookieName("chatapi_oidc_intent", state), intent, maxAge))
+}
+
+func clearOIDCCookies(w http.ResponseWriter, r *http.Request, state string) {
+	for _, base := range []string{"chatapi_oidc_state", "chatapi_oidc_nonce", "chatapi_oidc_pkce", "chatapi_oidc_intent"} {
+		http.SetCookie(w, oidcCookie(r, oidcFlowCookieName(base, state), "", -1))
+		// Remove legacy single-slot cookies left by versions deployed before flow isolation.
+		http.SetCookie(w, oidcCookie(r, base, "", -1))
+	}
 }
 
 func oidcCookieValue(r *http.Request, name string) (string, error) {
@@ -817,6 +819,19 @@ func oidcCookieValue(r *http.Request, name string) (string, error) {
 		return "", err
 	}
 	return url.QueryUnescape(cookie.Value)
+}
+
+func oidcFlowCookieName(base string, state string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(state)))
+	return base + "_" + base64.RawURLEncoding.EncodeToString(sum[:12])
+}
+
+func oidcFlowCookieValue(r *http.Request, base string, state string) (string, error) {
+	value, err := oidcCookieValue(r, oidcFlowCookieName(base, state))
+	if err == nil {
+		return value, nil
+	}
+	return oidcCookieValue(r, base)
 }
 
 func randomToken() (string, error) {

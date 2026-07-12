@@ -280,6 +280,7 @@ export function useChatWorkspace(isMobile: boolean) {
       automation.setAutomationRules([])
       localStorage.removeItem('chatapi.conversationId')
       appMessage.info('已退出登录')
+      window.location.replace('/')
     }
   }
 

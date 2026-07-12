@@ -263,6 +263,33 @@ func (r *PendingRegistry) Publish(conversationID string, event PendingEvent) err
 	return publishPendingEvent(turn, event)
 }
 
+// ReserveOutputEvent counts accepted workspace output actions before they mutate turn state.
+// It returns true when the requested action would exceed the configured limit.
+func (r *PendingRegistry) ReserveOutputEvent(conversationID string) (bool, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	turn, ok := r.byConversationID[conversationID]
+	if !ok {
+		return false, "", ErrPendingNotFound
+	}
+	if turn.MaxOutputEvents <= 0 {
+		return false, turn.RequestID, nil
+	}
+	if turn.OutputEventCount >= turn.MaxOutputEvents {
+		return true, turn.RequestID, nil
+	}
+	turn.OutputEventCount++
+	return false, turn.RequestID, nil
+}
+
+func (r *PendingRegistry) ReleaseOutputEvent(conversationID string, requestID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if turn, ok := r.byConversationID[conversationID]; ok && turn.RequestID == requestID && turn.OutputEventCount > 0 {
+		turn.OutputEventCount--
+	}
+}
+
 func (r *PendingRegistry) StartDelta(conversationID string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

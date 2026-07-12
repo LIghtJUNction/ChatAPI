@@ -25,6 +25,9 @@ import (
 var ErrPendingNotFound = errors.New("pending turn not found")
 var ErrPendingConflict = errors.New("pending turn already finalized")
 var ErrOutputImageNotAllowed = errors.New("image generation is not enabled for this request")
+var ErrOutputEventLimitExceeded = errors.New("message output event limit exceeded")
+
+const outputEventLimitAbortReason = "message event limit exceeded"
 
 type MutationErrorResolver func(context.Context, string, error) error
 type TextNotifier func(context.Context, string, string, string)
@@ -227,6 +230,19 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 	if err := s.ensureExpectedRequest(ctx, conversationID); err != nil {
 		return nil, err
 	}
+	release, aborted, err := s.reserveOutputEventOrAbort(ctx, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	if aborted != nil {
+		return aborted, nil
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			release()
+		}
+	}()
 	previousState, err := s.Pending.StartDelta(conversationID)
 	if err != nil {
 		return nil, s.resolveMutationError(ctx, conversationID, err)
@@ -287,6 +303,7 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 	}.Normalized()
 	if decision.Terminal {
 		deltaEvents := s.applyRuntimeAction(conversationID, action.RuntimeAction()).StreamEvents
+		committed = true
 		return s.finishCompletedTurn(ctx, completionInput, updated, completedMessage, "", deltaEvents, true)
 	}
 	_ = s.Pending.Publish(conversationID, PendingEvent{
@@ -295,6 +312,7 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 	})
 	s.publishConversationUpserted(ctx, s.eventRouteForContext(ctx, updated), updated)
 	s.notifyText(ctx, s.ownerID(ctx), updated.Title, chunk)
+	committed = true
 	body := map[string]any{"draft_text": nextDraft, "draft_length": len([]rune(nextDraft))}
 	if metadata := decision.Metadata(); len(metadata) > 0 {
 		body["output_policy"] = metadata
@@ -340,6 +358,19 @@ func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlComman
 	if !pendingRequestHasBuiltinTool(turn, kind) {
 		return nil, errors.New("builtin tool is not enabled for this request: " + kind)
 	}
+	release, aborted, err := s.reserveOutputEventOrAbort(ctx, command.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	if aborted != nil {
+		return aborted, nil
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			release()
+		}
+	}()
 	eventInput := common.AppendConversationEventInput{
 		ConversationID: command.ConversationID,
 		OwnerID:        identity.OwnerID,
@@ -379,6 +410,7 @@ func (s *Service) EmitBuiltinTool(ctx context.Context, command TurnControlComman
 		Action:       action,
 		StreamEvents: s.applyRuntimeAction(command.ConversationID, action.RuntimeAction()).StreamEvents,
 	})
+	committed = true
 	return map[string]any{"ok": true, "event": event}, nil
 }
 
@@ -420,6 +452,19 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	if err := s.ensureExpectedRequest(ctx, input.ConversationID); err != nil {
 		return nil, err
 	}
+	release, aborted, err := s.reserveOutputEventOrAbort(ctx, input.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	if aborted != nil {
+		return aborted, nil
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			release()
+		}
+	}()
 	guard := s.outputGuard(input.ConversationID)
 	var conversation common.Conversation
 	var message common.Message
@@ -455,6 +500,7 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 	if err != nil {
 		return nil, s.resolveMutationError(ctx, input.ConversationID, err)
 	}
+	committed = true
 	return s.finishCompletedTurn(ctx, input, conversation, message, decision.Text, nil, false)
 }
 
@@ -507,6 +553,10 @@ func (s *Service) finishCompletedTurn(
 func (s *Service) AbortConversation(ctx context.Context, conversationID string, reason string) error {
 	unlock := s.lockTurnMutation(conversationID)
 	defer unlock()
+	return s.abortConversationLocked(ctx, conversationID, reason)
+}
+
+func (s *Service) abortConversationLocked(ctx context.Context, conversationID string, reason string) error {
 	if err := s.ensureExpectedRequest(ctx, conversationID); err != nil {
 		return err
 	}
@@ -596,9 +646,11 @@ func (s *Service) ExecuteTurnControl(ctx context.Context, command TurnControlCom
 		zap.String("turn.control.kind", string(action.Kind)),
 		zap.String("response.id", command.ResponseID),
 	).Debug("turn control dispatch")
+	var result map[string]any
+	var err error
 	switch action.Kind {
 	case TurnControlRespond, TurnControlStreamComplete:
-		return s.CompleteConversation(ctx, common.CompletePendingInput{
+		result, err = s.CompleteConversation(ctx, common.CompletePendingInput{
 			ConversationID:      command.ConversationID,
 			ResponseID:          command.ResponseID,
 			OutputText:          action.OutputText,
@@ -609,18 +661,46 @@ func (s *Service) ExecuteTurnControl(ctx context.Context, command TurnControlCom
 			ReasoningStreamMode: action.ReasoningStreamMode,
 		})
 	case TurnControlStreamDelta:
-		return s.UpdateDraft(ctx, command.ConversationID, action.OutputText, action.Mode, action.ReasoningStreamMode)
+		result, err = s.UpdateDraft(ctx, command.ConversationID, action.OutputText, action.Mode, action.ReasoningStreamMode)
 	case TurnControlBuiltinTool:
 		command.Action = action
-		return s.EmitBuiltinTool(ctx, command)
+		result, err = s.EmitBuiltinTool(ctx, command)
 	case TurnControlAbort:
-		if err := s.AbortConversation(ctx, command.ConversationID, action.AbortReason); err != nil {
-			return nil, err
-		}
-		return map[string]any{"ok": true}, nil
+		err = s.AbortConversation(ctx, command.ConversationID, action.AbortReason)
+		result = map[string]any{"ok": true}
 	default:
 		return nil, errors.New("unsupported turn control kind: " + string(action.Kind))
 	}
+	return result, err
+}
+
+func (s *Service) reserveOutputEvent(conversationID string) (func(), error) {
+	registry, ok := s.Pending.(interface {
+		ReserveOutputEvent(string) (bool, string, error)
+		ReleaseOutputEvent(string, string)
+	})
+	if !ok {
+		return func() {}, nil
+	}
+	exceeded, requestID, err := registry.ReserveOutputEvent(conversationID)
+	if err != nil {
+		return func() {}, err
+	}
+	if exceeded {
+		return func() {}, ErrOutputEventLimitExceeded
+	}
+	return func() { registry.ReleaseOutputEvent(conversationID, requestID) }, nil
+}
+
+func (s *Service) reserveOutputEventOrAbort(ctx context.Context, conversationID string) (func(), map[string]any, error) {
+	release, err := s.reserveOutputEvent(conversationID)
+	if !errors.Is(err, ErrOutputEventLimitExceeded) {
+		return release, nil, err
+	}
+	if err := s.abortConversationLocked(ctx, conversationID, outputEventLimitAbortReason); err != nil {
+		return func() {}, nil, err
+	}
+	return func() {}, map[string]any{"ok": true, "aborted": true, "reason": outputEventLimitAbortReason}, nil
 }
 
 func (s *Service) ExecuteTurnControlByRequestID(ctx context.Context, requestID string, command TurnControlCommand) (map[string]any, error) {

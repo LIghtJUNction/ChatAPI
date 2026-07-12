@@ -38,6 +38,8 @@ type PendingTurn struct {
 	MutationMu        *sync.Mutex
 	CreatedAt         time.Time
 	State             string
+	MaxOutputEvents   int
+	OutputEventCount  int
 	Events            chan PendingEvent
 	Done              chan PendingResult
 }

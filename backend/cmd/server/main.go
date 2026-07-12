@@ -142,11 +142,16 @@ func run() error {
 		Store:  store,
 		Logger: logFactory.Layer(logging.LayerTurnQuery),
 	}
+	chatSettingsSvc := chatsettings.New(store, cfg)
 	pendingRegistry := pendingsvc.NewPendingRegistry()
 	pendingRegistry.Logger = logFactory.Layer(logging.LayerPending)
 	submitter := &turnsvc.Submitter{
 		Store:   store,
 		Pending: pendingRegistry,
+		OutputEventLimit: func(ctx context.Context) (int, error) {
+			current, err := chatSettingsSvc.Current(ctx)
+			return current.MaxOutputEventsPerMessage, err
+		},
 	}
 	turnService := &turnsvc.Service{
 		Submitter: submitter,
@@ -166,7 +171,6 @@ func run() error {
 	if _, err := turnService.DisconnectRecoveredPending(ctx, "server restarted"); err != nil {
 		return fmt.Errorf("disconnect recovered pending turns: %w", err)
 	}
-	chatSettingsSvc := chatsettings.New(store, cfg)
 	mediaSettingsSvc := preprocesssettings.New(store, cfg)
 	realtimeSettingsSvc := workspacesettings.New(store, cfg)
 	automationSettingsSvc := automationsettings.New(store)

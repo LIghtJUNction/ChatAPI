@@ -106,6 +106,79 @@ func TestExecuteTurnControlRejectsReplacedRequestIdentity(t *testing.T) {
 	}
 }
 
+func TestExecuteTurnControlAbortsWhenMessageEventLimitIsExceeded(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB().Close()
+	if err := migrations.Bootstrap(ctx, store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	conversation, _, err := store.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_event_limit", RequestID: "req_event_limit", ResponseID: "resp_event_limit",
+		OwnerID: "user_a", RequestFormat: "responses", Model: "gpt-4o", UserContent: "question",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := protocol.TurnRequest{Protocol: protocol.ProtocolResponses, Model: "gpt-4o"}
+	guard, err := outputpolicy.NewGuard(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := pending.NewPendingRegistry()
+	registered := &turn.PendingTurn{
+		RequestID: "req_event_limit", ResponseID: "resp_event_limit", ConversationID: conversation.ID,
+		OwnerID: "user_a", RequestFormat: "responses", Model: "gpt-4o", NormalizedRequest: request, OutputGuard: guard,
+		Runtime:         protocolruntime.New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-4o", ResponseID: "resp_event_limit"}),
+		MaxOutputEvents: 1,
+		CreatedAt:       time.Now().UTC(), Events: make(chan turn.PendingEvent, 8), Done: make(chan turn.PendingResult, 1),
+	}
+	registry.Add(registered)
+	service := &turn.Service{Store: store, Pending: registry, OwnerIDFromContext: func(context.Context) string { return "user_a" }}
+	command := turn.TurnControlCommand{
+		ConversationID: conversation.ID, RequestID: "req_event_limit",
+		Action: turn.OutputAction{Kind: turn.TurnControlStreamDelta, OutputText: "first"},
+	}
+	stale := command
+	stale.RequestID = "req_replaced"
+	if _, err := service.ExecuteTurnControl(ctx, stale); err != turn.ErrPendingConflict {
+		t.Fatalf("expected stale request rejection, got %v", err)
+	}
+	if _, err := service.ExecuteTurnControl(ctx, command); err != nil {
+		t.Fatalf("first event should be accepted: %v", err)
+	}
+	command.Action.OutputText = "must not be written"
+	result, err := service.ExecuteTurnControl(ctx, command)
+	if err != nil {
+		t.Fatalf("limit should abort through the protocol path: %v", err)
+	}
+	if result["aborted"] != true || result["reason"] != "message event limit exceeded" {
+		t.Fatalf("unexpected limit result: %#v", result)
+	}
+	stored, err := store.GetConversation(ctx, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata["realtime_status"] != "aborted" {
+		t.Fatalf("expected aborted conversation, got %#v", stored)
+	}
+	draft, _ := stored.Metadata["realtime_draft_text"].(string)
+	if strings.Contains(draft, "must not be written") {
+		t.Fatalf("over-limit event changed the draft: %#v", stored.Metadata)
+	}
+	firstEvent := <-registered.Events
+	abortEvent := <-registered.Events
+	if firstEvent.Action.Kind != turn.TurnControlStreamDelta {
+		t.Fatalf("unexpected first event: %#v", firstEvent)
+	}
+	if abortEvent.Action.Kind != turn.TurnControlAbort || len(abortEvent.StreamEvents) != 1 || abortEvent.StreamEvents[0].Event != "response.failed" {
+		t.Fatalf("expected standard responses abort event: %#v", abortEvent)
+	}
+}
+
 func TestConcurrentDeltasKeepGuardAndPersistedDraftInSync(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.sqlite3"))

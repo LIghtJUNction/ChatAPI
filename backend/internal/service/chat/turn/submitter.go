@@ -32,10 +32,11 @@ type SubmitHooks struct {
 }
 
 type Submitter struct {
-	Store        Store
-	Pending      PendingRegistrar
-	Hooks        SubmitHooks
-	Materializer *RequestMaterializer
+	Store            Store
+	Pending          PendingRegistrar
+	Hooks            SubmitHooks
+	Materializer     *RequestMaterializer
+	OutputEventLimit func(context.Context) (int, error)
 }
 
 func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn, common.Conversation, common.Message, error) {
@@ -51,6 +52,14 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	if err != nil {
 		s.cleanupPreparedImages(ctx, input.PreparedImages)
 		return nil, common.Conversation{}, common.Message{}, err
+	}
+	maxOutputEvents := 0
+	if s.OutputEventLimit != nil {
+		maxOutputEvents, err = s.OutputEventLimit(ctx)
+		if err != nil {
+			s.cleanupPreparedImages(ctx, input.PreparedImages)
+			return nil, common.Conversation{}, common.Message{}, err
+		}
 	}
 
 	requestID := "req_" + uuid.NewString()
@@ -113,11 +122,12 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 			Model:      input.Request.Model,
 			ResponseID: responseID,
 		}),
-		OutputGuard: outputGuard,
-		MutationMu:  &sync.Mutex{},
-		CreatedAt:   time.Now().UTC(),
-		Events:      make(chan PendingEvent, 32),
-		Done:        make(chan PendingResult, 1),
+		OutputGuard:     outputGuard,
+		MaxOutputEvents: maxOutputEvents,
+		MutationMu:      &sync.Mutex{},
+		CreatedAt:       time.Now().UTC(),
+		Events:          make(chan PendingEvent, 32),
+		Done:            make(chan PendingResult, 1),
 	}
 	s.Pending.Add(turn)
 	if s.Hooks.AfterCreate != nil {

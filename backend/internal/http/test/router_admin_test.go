@@ -308,6 +308,9 @@ func TestRouterAdminFlow(t *testing.T) {
 	if _, ok := current["pending_turn_ttl"]; !ok {
 		t.Fatalf("expected pending turn TTL in access settings: %#v", accessSettingsResp)
 	}
+	if _, ok := current["max_output_events_per_message"]; !ok {
+		t.Fatalf("expected message event limit in access settings: %#v", accessSettingsResp)
+	}
 	accessSettingsResp = patchJSONWithCookie(t, server.URL+"/api/admin/settings/access", map[string]any{"values": map[string]any{
 		"user_rate_limit_requests":              10,
 		"user_rate_limit_window":                "1m",

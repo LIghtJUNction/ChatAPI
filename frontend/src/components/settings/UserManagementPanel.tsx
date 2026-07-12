@@ -1,29 +1,29 @@
+import { useState } from 'react'
 import { Button, Form, Input, Select, Table, Typography } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
 
 import { useUserManagementState } from './userManagement/useUserManagementState'
 import { buildUserColumns } from './userManagement/userColumns'
-import { UserHistoryModal } from './userManagement/UserHistoryModal'
 import { UserPasswordModal } from './userManagement/UserPasswordModal'
 
 type UserManagementPanelProps = {
   open: boolean
+  currentRole: string
 }
 
-export function UserManagementPanel({ open }: UserManagementPanelProps) {
+export function UserManagementPanel({ open, currentRole }: UserManagementPanelProps) {
+  const [createOpen, setCreateOpen] = useState(false)
   const {
     creating,
     deletingId,
-    detailModalOpen,
-    detailUser,
     form,
     handleCreate,
     handleDelete,
     handlePasswordChange,
-    historyLoading,
-    historyMessages,
+    handleRoleChange,
     loading,
-    openDetailModal,
+    page,
+    pageSize,
     openPasswordModal,
     pwForm,
     pwModalOpen,
@@ -31,33 +31,44 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
     pwUsername,
     setPwModalOpen,
     users,
-    closeDetailModal,
+    setPage,
+    setPageSize,
+    totalUsers,
   } = useUserManagementState(open)
 
   const columns = buildUserColumns({
     deletingId,
     onDelete: handleDelete,
-    onOpenHistory: openDetailModal,
     onOpenPassword: openPasswordModal,
+    onRoleChange: handleRoleChange,
+    canManageRoles: currentRole === 'superadmin',
   })
 
   return (
     <div className="user-management-panel">
       <div className="user-management-header">
-        <Typography.Text className="user-management-subtitle">
-          管理系统中的所有用户账户。
-        </Typography.Text>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => form.submit()}>
-          添加用户
+        <div>
+          <Typography.Title level={2}>用户管理</Typography.Title>
+          <Typography.Text type="secondary">共 {totalUsers} 个账户</Typography.Text>
+        </div>
+        <Button
+          type={createOpen ? 'default' : 'primary'}
+          icon={createOpen ? <CloseOutlined /> : <PlusOutlined />}
+          onClick={() => setCreateOpen((current) => !current)}
+        >
+          {createOpen ? '取消创建' : '创建用户'}
         </Button>
       </div>
 
-      <Form form={form} layout="inline" onFinish={handleCreate} className="user-management-form">
+      {createOpen ? <Form form={form} layout="inline" onFinish={async (values) => {
+        if (await handleCreate(values)) setCreateOpen(false)
+      }} className="user-management-form">
+        <Typography.Text strong className="user-management-form-title">新账户</Typography.Text>
         <Form.Item
           name="username"
           rules={[{ required: true, message: '请输入用户名' }]}
         >
-          <Input placeholder="用户名" allowClear />
+          <Input placeholder="用户名" autoFocus allowClear />
         </Form.Item>
         <Form.Item
           name="password"
@@ -76,11 +87,15 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
         </Form.Item>
         <Form.Item>
           <Button type="primary" htmlType="submit" icon={<PlusOutlined />} loading={creating}>
-            添加
+            创建
           </Button>
         </Form.Item>
-      </Form>
+      </Form> : null}
 
+      <div className="user-management-list-heading">
+        <Typography.Text strong>账户列表</Typography.Text>
+        <Typography.Text type="secondary">连接状态每 2 秒校准</Typography.Text>
+      </div>
       <Table
         className="user-management-table"
         columns={columns}
@@ -88,24 +103,24 @@ export function UserManagementPanel({ open }: UserManagementPanelProps) {
         rowKey="id"
         loading={loading}
         pagination={{
-          defaultPageSize: 10,
+          current: page,
+          pageSize,
+          total: totalUsers,
           showSizeChanger: true,
           showQuickJumper: true,
           pageSizeOptions: ['5', '10', '20', '50'],
           showTotal: (total) => `共 ${total} 条`,
+          onChange: (nextPage, nextPageSize) => {
+            if (nextPageSize !== pageSize) {
+              setPageSize(nextPageSize)
+              setPage(1)
+              return
+            }
+            setPage(nextPage)
+          },
         }}
         size="small"
-      />
-
-      <UserHistoryModal
-        open={detailModalOpen}
-        user={detailUser}
-        historyMessages={historyMessages}
-        historyLoading={historyLoading}
-        deletingId={deletingId}
-        onClose={closeDetailModal}
-        onDelete={handleDelete}
-        onResetPassword={openPasswordModal}
+        scroll={{ x: 1350 }}
       />
 
       <UserPasswordModal

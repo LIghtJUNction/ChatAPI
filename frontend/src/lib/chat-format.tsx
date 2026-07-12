@@ -1,6 +1,8 @@
 import type {
   JsonSchema,
   MessageItem,
+  TimelineMessageContentPart,
+  BuiltinToolOption,
   ToolFieldValue,
   ToolSchemaOption,
 } from '../types/chat'
@@ -14,7 +16,7 @@ type RenderMessageContentOptions = {
   onImageClick?: (src: string, detail?: string, alt?: string) => void
 }
 
-function normalizeDisplayText(value: string): string {
+export function normalizeChatText(value: string): string {
   return value
     .replace(/\r\n/g, '\n')
     .replace(/\\r\\n/g, '\n')
@@ -22,7 +24,7 @@ function normalizeDisplayText(value: string): string {
 }
 
 function splitThinkingBlocks(value: string): RenderableContentPart[] {
-  const normalized = normalizeDisplayText(value)
+  const normalized = normalizeChatText(value)
   const pattern = /<think(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/think>/gi
   const parts: RenderableContentPart[] = []
   let lastIndex = 0
@@ -83,17 +85,34 @@ function toToolSchemaOption(schema: unknown): ToolSchemaOption | null {
 
   const description =
     typeof functionRecord.description === 'string' ? functionRecord.description : ''
-  const parameters =
-    functionRecord.parameters &&
-    typeof functionRecord.parameters === 'object'
-      ? (functionRecord.parameters as JsonSchema)
-      : { type: 'object', properties: {} }
+  const rawParameters =
+    functionRecord.parameters && typeof functionRecord.parameters === 'object'
+      ? functionRecord.parameters
+      : functionRecord.input_schema && typeof functionRecord.input_schema === 'object'
+        ? functionRecord.input_schema
+        : record.parameters && typeof record.parameters === 'object'
+          ? record.parameters
+          : record.input_schema && typeof record.input_schema === 'object'
+            ? record.input_schema
+        : null
+  const parameters = normalizeToolParameters(rawParameters)
 
   return {
     name: name.trim(),
     description,
     parameters,
   }
+}
+
+function normalizeToolParameters(parameters: unknown): JsonSchema {
+  if (!parameters || typeof parameters !== 'object') {
+    return { type: 'object', properties: {} }
+  }
+  const schema = parameters as JsonSchema
+  if (!schema.type && schema.properties) {
+    return { ...schema, type: 'object' }
+  }
+  return schema
 }
 
 export function getSchemaType(schema?: JsonSchema): string {
@@ -110,6 +129,32 @@ export function getLastToolSchemas(items: MessageItem[]): ToolSchemaOption[] {
       .filter((item): item is ToolSchemaOption => item !== null)
   }
   return []
+}
+
+export function getLastBuiltinTools(items: MessageItem[]): BuiltinToolOption[] {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const requestDebug = items[index]?.metadata?.request_debug
+    if (!requestDebug) continue
+    const candidate = requestDebug.builtin_tools
+    if (!Array.isArray(candidate) || candidate.length === 0) return []
+    return candidate
+      .map((item) => normalizeBuiltinTool(item))
+      .filter((item): item is BuiltinToolOption => item !== null)
+  }
+  return []
+}
+
+function normalizeBuiltinTool(item: unknown): BuiltinToolOption | null {
+  if (!item || typeof item !== 'object') return null
+  const record = item as Record<string, unknown>
+  const kind = typeof record.kind === 'string' ? record.kind.trim() : ''
+  if (!kind) return null
+  return {
+    kind,
+    type: typeof record.type === 'string' ? record.type : undefined,
+    label: typeof record.label === 'string' ? record.label : undefined,
+    raw: record.raw && typeof record.raw === 'object' ? record.raw as Record<string, unknown> : undefined,
+  }
 }
 
 export function buildInitialToolFormValues(schema?: JsonSchema) {
@@ -154,7 +199,7 @@ export function normalizeToolFieldValue(value: unknown, schema?: JsonSchema) {
 }
 
 function isHostedImageUrl(value: string): boolean {
-  return /^(?:https?:\/\/[^/]+)?\/api\/uploads\/imgs\/[A-Za-z0-9._-]+(?:\?.*)?$/i.test(
+  return /^(?:https?:\/\/[^/]+)?\/api\/media\/assets\/[A-Za-z0-9._-]+(?:\?.*)?$/i.test(
     value.trim(),
   )
 }
@@ -168,11 +213,11 @@ function tryParseStructuredContent(rawContent: string): unknown {
     return JSON.parse(rawContent)
   } catch {
     // Some mock payloads use Python repr style:
-    // [{'type': 'input_image', 'image_url': '/api/uploads/imgs/...'}]
+    // [{'type': 'input_image', 'image_url': '/api/media/assets/...'}]
   }
 
   const trimmed = rawContent.trim()
-  if (!trimmed || !/^[\[{]/.test(trimmed)) return null
+  if (!trimmed || (!trimmed.startsWith('[') && !trimmed.startsWith('{'))) return null
 
   let normalized = ''
   let inSingleQuote = false
@@ -317,9 +362,20 @@ function parseRenderableContent(rawContent: string): RenderableContentPart[] {
 export function renderMessageContent(
   rawContent: string,
   options: RenderMessageContentOptions = {},
+  contentParts?: TimelineMessageContentPart[],
 ) {
   const { onImageClick } = options
-  const parts = parseRenderableContent(rawContent)
+  const parts = Array.isArray(contentParts) && contentParts.length > 0
+    ? contentParts.flatMap((part) => {
+        if (part.type === 'image' && part.src) {
+          return [{ type: 'image', src: part.src, detail: part.media_type } satisfies RenderableContentPart]
+        }
+        if (part.type === 'text' && part.text) {
+          return splitThinkingBlocks(part.text)
+        }
+        return []
+      })
+    : parseRenderableContent(rawContent)
   if (parts.length === 0) return null
 
   const nodes: React.ReactNode[] = []
@@ -390,7 +446,7 @@ export function buildCurlCommand(requestBody: unknown): string {
 
   let endpoint = '/v1/responses'
   if (format === 'chat_completions') endpoint = '/v1/chat/completions'
-  else if (format === 'anthropic') endpoint = '/messages'
+  else if (format === 'anthropic') endpoint = '/v1/messages'
 
   const body = JSON.stringify(requestBody, null, 2)
   return `curl '${origin}${endpoint}' \\\n  -H 'Content-Type: application/json' \\\n  -H 'Authorization: Bearer YOUR_API_KEY' \\\n  -d '${body}'`

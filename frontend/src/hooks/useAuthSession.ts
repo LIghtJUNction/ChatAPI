@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { appMessage } from '../lib/antdApp'
+import { appMessage } from '../lib/antdMessage'
 import { requestJson } from '../lib/api'
 import type { AuthSession, AuthUser, LoginFormValues } from '../types/chat'
 

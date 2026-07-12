@@ -3,7 +3,7 @@ import { Button, Card, Form, Input, Select, Typography } from 'antd'
 
 import { CosmicBackdrop } from './CosmicBackdrop'
 import { GeetestCaptchaField, type GeetestCaptcha } from './GeetestCaptchaField'
-import { appMessage } from '../lib/antdApp'
+import { appMessage } from '../lib/antdMessage'
 import { requestJson } from '../lib/api'
 import type { GeetestValidationResult, RegisterConfig } from '../types/chat'
 

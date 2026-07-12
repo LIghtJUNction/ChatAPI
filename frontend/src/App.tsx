@@ -13,8 +13,9 @@ import { StatisticsPage } from './components/StatisticsPage'
 import { ThemeToggle } from './components/ThemeToggle'
 import { WorkspaceRoute } from './components/WorkspaceRoute'
 import { useAuthSession } from './hooks/useAuthSession'
-import { appMessage } from './lib/antdApp'
+import { appMessage } from './lib/antdMessage'
 import type { LoginFormValues } from './types/chat'
+import { AdminSettingsPage } from './features/admin-settings/pages/AdminSettingsPage'
 
 type LoginError = Error & {
   responseBody?: {
@@ -32,10 +33,18 @@ function RouteLoading() {
 
 function LoginRoute() {
   const navigate = useNavigate()
+  const location = useLocation()
   const auth = useAuthSession()
   const [loading, setLoading] = useState(false)
   const [totpRequired, setTotpRequired] = useState(false)
   const captchaRef = useRef<GeetestCaptcha | null>(null)
+  const localLoginRequested = new URLSearchParams(location.search).get('local') === '1'
+
+  useEffect(() => {
+    if (!auth.loading && !auth.session.authenticated && auth.session.oidc_enabled && !localLoginRequested) {
+      window.location.assign('/api/auth/oidc/login')
+    }
+  }, [auth.loading, auth.session.authenticated, auth.session.oidc_enabled, localLoginRequested])
 
   async function handleSubmit(values: LoginFormValues) {
     setLoading(true)
@@ -62,6 +71,10 @@ function LoginRoute() {
 
   if (auth.session.authenticated) {
     return <Navigate to="/app" replace />
+  }
+
+  if (auth.session.oidc_enabled && !localLoginRequested) {
+    return <RouteLoading />
   }
 
   return (
@@ -135,7 +148,7 @@ function App() {
 
   return (
     <>
-      {!location.pathname.startsWith('/app') ? (
+	  {!location.pathname.startsWith('/app') && !location.pathname.startsWith('/admin') ? (
         <div className="global-theme-toggle-wrap">
           <div className="global-theme-toggle-group">
             <GithubButton />
@@ -151,6 +164,7 @@ function App() {
         <Route path="/stat" element={<StatisticsRoute />} />
         <Route path="/statistics" element={<StatisticsRoute />} />
         <Route path="/app/*" element={<WorkspaceRoute />} />
+		<Route path="/admin/settings/*" element={<AdminSettingsPage />} />
         <Route path="*" element={<HomepageScreen />} />
       </Routes>
     </>

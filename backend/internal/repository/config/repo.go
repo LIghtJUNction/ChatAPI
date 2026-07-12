@@ -1,0 +1,18 @@
+package config
+
+import (
+	"context"
+
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
+)
+
+type Store interface {
+	GetSystemConfig(context.Context, string) (common.SystemConfig, error)
+	SetSystemConfig(context.Context, common.SetSystemConfigInput) (common.SystemConfig, error)
+	DeleteSystemConfig(context.Context, string) error
+	ListSystemConfigs(context.Context) ([]common.SystemConfig, error)
+	GetUserConfig(context.Context, string, string) (common.UserConfig, error)
+	SetUserConfig(context.Context, common.SetUserConfigInput) (common.UserConfig, error)
+	DeleteUserConfig(context.Context, string, string) error
+	ListUserConfigs(context.Context, string) ([]common.UserConfig, error)
+}

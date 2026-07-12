@@ -19,6 +19,19 @@ Default features:
 - Optional ntfy message push
 
 ## 1. Deployment
+### Single-binary build
+
+Run from the repository root:
+
+```bash
+make build EMBED_FRONTEND=1
+```
+
+This builds the frontend and compiles it into `build/chatapi` with the Go
+`embed_frontend` build tag. The executable does not require
+`CHATAPI_WEB_DIST_DIR` at runtime. Use `make build` to keep the external
+frontend directory mode.
+
 ### One-click deployment without Nginx
 #### Build frontend
 

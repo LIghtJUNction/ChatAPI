@@ -61,12 +61,6 @@ export function StatisticsPanel({ open }: StatisticsPanelProps) {
 
   useEffect(() => {
     if (!open) return
-    setPreset('24h')
-    setRange(getPresetRange('24h'))
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
 
     let active = true
 

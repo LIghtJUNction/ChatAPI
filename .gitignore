@@ -7,6 +7,8 @@
 # Logs
 logs/
 *.log
+tests/.sse-probe-logs/
+tests/.protocol-stream-probe-results.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -31,6 +33,7 @@ env/
 
 # Backend local data
 backend/data/
+backend.bak/
 data/
 
 # Frontend
@@ -38,6 +41,8 @@ node_modules/
 dist/
 dist-ssr/
 *.tsbuildinfo
+backend/internal/http/webassets/dist/
+/build/
 
 
 # Editors and OS files
@@ -59,3 +64,6 @@ backup.sh
 install_systemd_user.sh
 uninstall_systemd_user.sh
 certs/
+/docs/
+
+backend/docs/*.txt

@@ -1,13 +1,12 @@
 import { useState } from 'react'
-import { Modal, Tabs } from 'antd'
+import { Button, Modal, Tabs, Typography } from 'antd'
+import { ControlOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 
 import type { AutomationRule, AuthUser } from '../../types/chat'
 import { ApiKeyManagementPanel } from './ApiKeyManagementPanel'
 import { AutomationRulesPanel } from './AutomationRulesPanel'
-import { ModelManagementPanel } from './ModelManagementPanel'
-import { StatisticsPanel } from './StatisticsPanel'
-import { SystemSettingsPanel } from './SystemSettingsPanel'
-import { UserManagementPanel } from './UserManagementPanel'
+import { BrowserAssistSettingsPanel } from './BrowserAssistSettingsPanel'
 import { UserSettingsPanel } from './UserSettingsPanel'
 
 type SettingsModalProps = {
@@ -25,7 +24,7 @@ type SettingsModalProps = {
   onTotpRefresh: () => void
 }
 
-type TabKey = 'statistics' | 'user-settings' | 'api-keys' | 'models' | 'automation' | 'system' | 'users'
+type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'browser-assist' | 'system'
 
 export function SettingsModal({
   automationRuleEditorOpen,
@@ -41,19 +40,15 @@ export function SettingsModal({
   totpEnabled,
   onTotpRefresh,
 }: SettingsModalProps) {
-  const isAdmin = user?.role === 'admin'
-  const [activeTab, setActiveTab] = useState<TabKey>('statistics')
+	const navigate = useNavigate()
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin'
+  const [activeTab, setActiveTab] = useState<TabKey>('user-settings')
 
   const handleTabChange = (key: string) => {
     setActiveTab(key as TabKey)
   }
 
   const commonTabs = [
-    {
-      key: 'statistics',
-      label: '统计面板',
-      children: <StatisticsPanel open={open && activeTab === 'statistics'} />,
-    },
     {
       key: 'automation',
       label: '自动化规则',
@@ -74,9 +69,9 @@ export function SettingsModal({
       children: <ApiKeyManagementPanel open={open && activeTab === 'api-keys'} />,
     },
     {
-      key: 'models',
-      label: '模型管理',
-      children: <ModelManagementPanel open={open && activeTab === 'models'} />,
+      key: 'browser-assist',
+      label: '辅助模型',
+      children: <BrowserAssistSettingsPanel open={open && activeTab === 'browser-assist'} userID={user?.id ?? ''} />,
     },
   ]
 
@@ -94,21 +89,11 @@ export function SettingsModal({
   }
 
   const adminTabs = [
-    {
-      key: 'system',
-      label: <span style={{ color: '#13c2c2' }}>系统设置</span>,
-      children: (
-        <SystemSettingsPanel
-          open={open && activeTab === 'system'}
-          onClose={onClose}
-        />
-      ),
-    },
-    {
-      key: 'users',
-      label: <span style={{ color: '#13c2c2' }}>用户管理</span>,
-      children: <UserManagementPanel open={open && activeTab === 'users'} />,
-    },
+	{
+	  key: 'system',
+	  label: <span style={{ color: '#13c2c2' }}>系统设置</span>,
+	  children: <div className="admin-settings-entry"><ControlOutlined/><Typography.Title level={4}>系统管理设置</Typography.Title><Typography.Paragraph type="secondary">管理认证、访问限制、聊天、媒体、自动化和实时通信策略。</Typography.Paragraph><Button type="primary" onClick={()=>{onClose();navigate('/admin/settings/overview')}}>打开管理控制面</Button></div>,
+	},
   ]
 
   const tabs = isAdmin ? [...commonTabs, userSettingsTab, ...adminTabs] : [...commonTabs, userSettingsTab]

@@ -4,8 +4,6 @@ import {
   type ThemeConfig,
 } from 'antd'
 import {
-  createContext,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -13,20 +11,15 @@ import {
   type ReactNode,
 } from 'react'
 
-type ThemePreference = 'light' | 'dark' | null
-type ResolvedTheme = 'light' | 'dark'
-
-type ThemeModeContextValue = {
-  preference: ThemePreference
-  resolvedTheme: ResolvedTheme
-  setThemePreference: (value: ThemePreference) => void
-  toggleTheme: () => void
-}
+import {
+  ThemeModeContext,
+  type ResolvedTheme,
+  type ThemeModeContextValue,
+  type ThemePreference,
+} from './themeMode'
 
 const STORAGE_KEY = 'chatapi.theme.preference'
 const MEDIA_QUERY = '(prefers-color-scheme: dark)'
-
-const ThemeModeContext = createContext<ThemeModeContextValue | null>(null)
 
 function getStoredPreference(): ThemePreference {
   if (typeof window === 'undefined') return null
@@ -53,7 +46,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setSystemTheme(event.matches ? 'dark' : 'light')
     }
 
-    setSystemTheme(mediaQuery.matches ? 'dark' : 'light')
     mediaQuery.addEventListener('change', handleChange)
     return () => {
       mediaQuery.removeEventListener('change', handleChange)
@@ -154,12 +146,4 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       <ConfigProvider theme={config}>{children}</ConfigProvider>
     </ThemeModeContext.Provider>
   )
-}
-
-export function useThemeMode() {
-  const context = useContext(ThemeModeContext)
-  if (!context) {
-    throw new Error('useThemeMode must be used within ThemeProvider')
-  }
-  return context
 }

@@ -184,19 +184,32 @@ class ApiSession:
         return response.json()
 
     def get_automation_rules(self) -> list[dict[str, Any]]:
-        response = self._client.get("/api/config/automation-rules", headers=self._auth_headers)
+        response = self._client.get("/api/automation/rules", headers=self._auth_headers)
         response.raise_for_status()
         return list(response.json().get("rules", []))
 
     def set_automation_rules(self, rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        payload = self.post_json("/api/config/automation-rules", {"rules": rules})
-        return list(payload.get("rules", []))
+        for current in self.get_automation_rules():
+            rule_id = str(current.get("id", "")).strip()
+            if not rule_id:
+                continue
+            response = self._client.delete(
+                f"/api/automation/rules/{rule_id}",
+                headers=self._auth_headers,
+            )
+            response.raise_for_status()
+        restored: list[dict[str, Any]] = []
+        for rule in rules:
+            payload = self.post_json("/api/automation/rules", rule)
+            restored.append(dict(payload["rule"]))
+        return restored
 
-    def add_output_delta(self, conversation_id: str, text: str) -> None:
+    def add_output_delta(self, conversation_id: str, request_id: str, text: str) -> None:
         self.post_json(
             "/api/chat/output/delta",
             {
                 "conversation_id": conversation_id,
+                "request_id": request_id,
                 "text": text,
             },
         )
@@ -205,6 +218,7 @@ class ApiSession:
         self,
         *,
         conversation_id: str,
+        request_id: str,
         mode: ScenarioMode,
         final_text: str,
         model: str,
@@ -213,6 +227,7 @@ class ApiSession:
     ) -> None:
         payload: dict[str, Any] = {
             "conversation_id": conversation_id,
+            "request_id": request_id,
             "model": model,
             "mode": "assistant_message" if mode == "assistant_text" else "tool_call",
         }
@@ -443,21 +458,27 @@ def run_output_driver(
     rng = make_rng(10_000_000 + scenario.index, scenario.index)
     started_at = time.perf_counter()
     try:
+        request_id = ""
         while True:
             conversation_payload = api_session.get_conversation(conversation_id)
             metadata = conversation_payload.get("conversation", {}).get("metadata", {})
             if metadata.get("realtime_status") == "waiting":
+                request_id = str(metadata.get("request_id", "")).strip()
                 break
             if time.perf_counter() - started_at > timeout_seconds:
                 raise TimeoutError("conversation never entered waiting state")
             time.sleep(0.02)
 
+        if not request_id:
+            raise RuntimeError("waiting conversation did not expose request_id")
+
         for chunk in scenario.draft_chunks:
-            api_session.add_output_delta(conversation_id, chunk)
+            api_session.add_output_delta(conversation_id, request_id, chunk)
             time.sleep(rng.uniform(*scenario.chunk_delay_range))
         time.sleep(scenario.send_completion_delay)
         api_session.complete_output(
             conversation_id=conversation_id,
+            request_id=request_id,
             mode=scenario.mode,
             final_text=scenario.final_text,
             model=model,

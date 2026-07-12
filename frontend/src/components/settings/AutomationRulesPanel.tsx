@@ -24,7 +24,7 @@ export function AutomationRulesPanel({
     <div className="automation-rules-panel">
       <div className="automation-rules-header">
         <Typography.Text className="automation-rules-subtitle">
-          规则由条件、时间、动作三段组成。命中后会自动介入当前流式输出。
+          在等待中的请求上开始录制，完成后再设置匹配正则和播放节奏。
         </Typography.Text>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => void onCreateAutomationRule()}>
           添加规则
@@ -38,10 +38,10 @@ export function AutomationRulesPanel({
           <List.Item className="automation-rule-item">
             <div className="automation-rule-copy">
               <Typography.Text className="automation-rule-title">
-                {rule.id}
+                {rule.name}
               </Typography.Text>
               <Typography.Paragraph className="automation-rule-summary">
-                {`包含 ${rule.conditions.contains.length} 项，不包含 ${rule.conditions.excludes.length} 项，延时 ${rule.timing.delay_seconds} 秒，重复 ${rule.timing.repeat_interval_seconds} 秒，动作 ${rule.action.type}`}
+        {`${rule.steps.length} 个步骤 · ${rule.playback.mode === 'recorded' ? '真实节奏' : `${rule.playback.fixed_interval_ms}ms 固定间隔`}${rule.playback.loop ? ` · ${rule.playback.loop_interval_ms}ms 循环` : ''} · ${rule.match.pattern || '尚未设置匹配条件'}`}
               </Typography.Paragraph>
             </div>
             <Space size={10}>

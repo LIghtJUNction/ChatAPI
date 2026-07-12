@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Divider, Form, Input, InputNumber, Switch, Typography } from 'antd'
 
-import { appMessage } from '../../lib/antdApp'
+import { appMessage } from '../../lib/antdMessage'
 import { requestJson } from '../../lib/api'
 import type { UserConfig } from '../../types/chat'
 import { TotpSetupPanel } from './TotpSetupPanel'

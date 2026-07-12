@@ -12,124 +12,55 @@ import {
 import {
   Button,
   Card,
-  Empty,
   Flex,
   Input,
-  Modal,
   Select,
-  Tag,
   Segmented,
   Space,
   Typography,
+  Upload,
 } from 'antd'
-import { EyeOutlined, LogoutOutlined, MenuOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons'
+import {
+  DeleteOutlined,
+  LogoutOutlined,
+  MenuOutlined,
+  SaveOutlined,
+  SendOutlined,
+  UploadOutlined,
+  VideoCameraOutlined,
+  StopOutlined,
+  CloseOutlined,
+} from '@ant-design/icons'
 
 import { GithubButton } from './GithubButton'
 import { ThemeToggle } from './ThemeToggle'
 import { ToolField } from './ToolField'
 import { ChatMessageList } from './ChatMessageList'
-import { appMessage } from '../lib/antdApp'
+import { ToolCallAssistPopover } from '../features/tool-call-assist/ToolCallAssistPopover'
+import { normalizeChatText } from '../lib/chat-format'
 import type {
   ComposerMode,
+  BuiltinToolOption,
   ReasoningStreamMode,
   ToolFieldValue,
-  MessageItem,
   ToolSchemaOption,
-  VisibleMessage,
+  VisibleTimelineItem,
+  OutputImageAsset,
+  AutomationExecutionState,
+  AutomationRecordingState,
 } from '../types/chat'
 
 const { TextArea } = Input
 
-type RequestContextRecord = {
-  id: string
-  created_at: string
-  request_id: string
-  request_format: string
-  model: string
-  request_keys: string[]
-  input_payload: unknown
-  headers: {
-    user_agent?: string
-    content_type?: string
-    origin?: string
-    referer?: string
-  }
-  message_roles: string[]
-}
-
-function extractRequestContextFromMessages(messages: MessageItem[]): RequestContextRecord[] {
-  const items: RequestContextRecord[] = []
-  const seen = new Set<string>()
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    const debug = message.metadata?.request_debug
-    if (!debug || typeof debug !== 'object') continue
-
-    const requestId = String(debug.request_id || '').trim()
-    if (!requestId || seen.has(requestId)) continue
-    seen.add(requestId)
-
-    const inputPayload = debug.input_payload
-    const payloadItems = Array.isArray(inputPayload) ? inputPayload : [inputPayload]
-    const messageRoles = payloadItems
-      .map((item) => (item && typeof item === 'object' && 'role' in item ? String((item as { role?: unknown }).role || '').trim() : ''))
-      .filter(Boolean)
-
-    items.push({
-      id: message.id,
-      created_at: message.created_at,
-      request_id: requestId,
-      request_format: String(debug.request_format || ''),
-      model: String(debug.model || ''),
-      request_keys: Array.isArray(debug.request_keys) ? debug.request_keys.map((item) => String(item)) : [],
-      input_payload: inputPayload,
-      headers: debug.headers && typeof debug.headers === 'object' ? {
-        user_agent: String((debug.headers as { user_agent?: unknown }).user_agent || ''),
-        content_type: String((debug.headers as { content_type?: unknown }).content_type || ''),
-        origin: String((debug.headers as { origin?: unknown }).origin || ''),
-        referer: String((debug.headers as { referer?: unknown }).referer || ''),
-      } : {},
-      message_roles: messageRoles,
-    })
-  }
-
-  return items
-}
-
-function formatSnapshotValue(value: unknown): string {
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
-function renderSnapshotPayload(payload: unknown) {
-  const items = Array.isArray(payload) ? payload : [payload]
-  return items.map((item, index) => {
-    const role = item && typeof item === 'object' && 'role' in item
-      ? String((item as { role?: unknown }).role || 'item')
-      : 'item'
-    const content = item && typeof item === 'object' && 'content' in item
-      ? (item as { content?: unknown }).content
-      : item
-    const isHiddenRole = role === 'system' || role === 'developer'
-    return (
-      <div className={`request-context-item ${isHiddenRole ? 'request-context-item-hidden' : ''}`} key={`${role}-${index}`}>
-        <div className="request-context-item-header">
-          <Tag color={isHiddenRole ? 'gold' : role === 'assistant' ? 'blue' : role === 'tool' ? 'purple' : 'green'}>{role}</Tag>
-          {isHiddenRole ? <Typography.Text type="secondary">默认不显示在普通聊天流中</Typography.Text> : null}
-        </div>
-        <pre className="request-context-pre">{formatSnapshotValue(content)}</pre>
-      </div>
-    )
-  })
-}
-
 type ChatPaneProps = {
+  automationExecution: AutomationExecutionState | null
+  automationRecording: AutomationRecordingState
+  availableBuiltinTools: BuiltinToolOption[]
   availableToolSchemas: ToolSchemaOption[]
+  builtinToolKind: string
+  builtinToolQuery: string
+  builtinToolAsset: OutputImageAsset | null
+  uploadingOutputImage: boolean
   chatScrollRef: RefObject<HTMLDivElement | null>
   composer: string
   composerMode: ComposerMode
@@ -140,16 +71,22 @@ type ChatPaneProps = {
   keyboardOffset: number
   messagesLoading: boolean
   onDraft: () => void | Promise<void>
+  onAutomationRecording: (action: 'start' | 'stop' | 'cancel') => void | Promise<void>
+  onOutputImageUpload: (file: File) => Promise<OutputImageAsset>
   onLogout: () => void | Promise<void>
   onOpenDrawer: () => void
   onSend: () => void | Promise<void>
-  selectedConversationId: string
   selectedConversationTitle: string
+  selectedConversationId: string
+  selectedRequestId: string
   selectedRequestFormat: string
   selectedToolSchema: ToolSchemaOption | null
   sending: boolean
   setComposer: (value: string) => void
   setComposerMode: (value: ComposerMode) => void
+  setBuiltinToolKind: (value: string) => void
+  setBuiltinToolQuery: (value: string) => void
+  setBuiltinToolAsset: (value: OutputImageAsset | null) => void
   setThinkingText: (value: string) => void
   setReasoningStreamMode: (value: ReasoningStreamMode) => void
   setToolCallId: (value: string) => void
@@ -160,12 +97,20 @@ type ChatPaneProps = {
   toolCallId: string
   toolFormValues: Record<string, ToolFieldValue>
   toolName: string
-  visibleMessages: VisibleMessage[]
+  userID: string
+  visibleMessages: VisibleTimelineItem[]
 }
 
 export function ChatPane(props: ChatPaneProps) {
   const {
+    availableBuiltinTools,
+    automationExecution,
+    automationRecording,
     availableToolSchemas,
+    builtinToolKind,
+    builtinToolQuery,
+    builtinToolAsset,
+    uploadingOutputImage,
     chatScrollRef,
     composer,
     composerMode,
@@ -176,16 +121,22 @@ export function ChatPane(props: ChatPaneProps) {
     keyboardOffset,
     messagesLoading,
     onDraft,
+    onAutomationRecording,
+    onOutputImageUpload,
     onLogout,
     onOpenDrawer,
     onSend,
-    selectedConversationId,
     selectedConversationTitle,
+    selectedConversationId,
+    selectedRequestId,
     selectedRequestFormat,
     selectedToolSchema,
     sending,
     setComposer,
     setComposerMode,
+    setBuiltinToolKind,
+    setBuiltinToolQuery,
+    setBuiltinToolAsset,
     setThinkingText,
     setReasoningStreamMode,
     setToolCallId,
@@ -196,12 +147,42 @@ export function ChatPane(props: ChatPaneProps) {
     toolCallId,
     toolFormValues,
     toolName,
+    userID,
     visibleMessages,
   } = props
+  const [imageFileName, setImageFileName] = useState('')
+  const [imageFileSize, setImageFileSize] = useState(0)
+  const [imageFileError, setImageFileError] = useState('')
+
+  async function selectImageFile(file: File) {
+    if (!file.type.startsWith('image/')) {
+      setImageFileError('请选择图片文件')
+      return
+    }
+
+    try {
+      const asset = await onOutputImageUpload(file)
+      setImageFileName(file.name)
+      setImageFileSize(asset.bytes)
+      setImageFileError('')
+    } catch (error) {
+      setImageFileError(error instanceof Error ? error.message : '图片上传失败')
+    }
+  }
+
+  function clearImageFile() {
+    setBuiltinToolAsset(null)
+    setImageFileName('')
+    setImageFileSize(0)
+    setImageFileError('')
+  }
+
+  function selectBuiltinToolKind(kind: string) {
+    if (kind !== builtinToolKind) clearImageFile()
+    setBuiltinToolKind(kind)
+  }
   const composerCardRef = useRef<HTMLDivElement | null>(null)
   const [composerHeight, setComposerHeight] = useState(0)
-  const [requestContextOpen, setRequestContextOpen] = useState(false)
-  const [requestSnapshots, setRequestSnapshots] = useState<RequestContextRecord[]>([])
   const [visualViewportRect, setVisualViewportRect] = useState(() => ({
     bottomInset: 0,
     height: typeof window === 'undefined' ? 0 : window.innerHeight,
@@ -264,16 +245,6 @@ export function ChatPane(props: ChatPaneProps) {
     '--visual-keyboard-offset': `${visualViewportRect.bottomInset}px`,
     '--visual-viewport-height': `${visualViewportRect.height}px`,
   } as CSSProperties
-  function openRequestContext() {
-    if (!selectedConversationId) {
-      appMessage.warning('请先选择一个会话')
-      return
-    }
-    const snapshots = extractRequestContextFromMessages(visibleMessages)
-    setRequestSnapshots(snapshots)
-    setRequestContextOpen(true)
-  }
-
   const composerStyle = {
     bottom: isMobile ? `${visualViewportRect.bottomInset}px` : 0,
     maxHeight: isMobile
@@ -283,6 +254,12 @@ export function ChatPane(props: ChatPaneProps) {
 
   const toolFields = Object.entries(selectedToolSchema?.parameters.properties ?? {})
   const isResponsesConversation = selectedRequestFormat === 'responses'
+  const composerModeOptions = [
+    { label: 'Assistant Message', value: 'assistant_message' },
+    { label: '添加思考内容', value: 'thinking' },
+    { label: 'Tool Call', value: 'tool_call' },
+    ...(availableBuiltinTools.length ? [{ label: '内置工具', value: 'builtin_tool' }] : []),
+  ]
   const reasoningModeOptions = [
     { label: 'summery 模式', value: 'summery' },
     { label: 'reasoning 模式', value: 'reasoning' },
@@ -303,13 +280,6 @@ export function ChatPane(props: ChatPaneProps) {
           </div>
         </Space>
         <Space size={10}>
-          <Button
-            icon={<EyeOutlined />}
-            disabled={!selectedConversationId}
-            onClick={openRequestContext}
-          >
-            查看完整上下文
-          </Button>
           <GithubButton className="workspace-github-button" />
           <ThemeToggle className="workspace-theme-toggle" />
           {!isMobile && (
@@ -329,53 +299,6 @@ export function ChatPane(props: ChatPaneProps) {
         />
       </div>
 
-      <Modal
-        open={requestContextOpen}
-        title="完整请求上下文"
-        width={920}
-        footer={null}
-        onCancel={() => setRequestContextOpen(false)}
-      >
-        <Typography.Paragraph type="secondary">
-          这里展示该会话最近请求的脱敏原始上下文。system/developer 默认不会出现在普通聊天流，但会在这里用于调试。
-        </Typography.Paragraph>
-        {requestSnapshots.length === 0 ? (
-          <Empty description="当前会话暂无可用的请求上下文" />
-        ) : (
-          <Space direction="vertical" size={12} className="request-context-stack">
-            {requestSnapshots.map((snapshot) => (
-              <Card key={snapshot.id} size="small" className="request-context-card">
-                <Space direction="vertical" size={10} className="request-context-stack">
-                  <Space wrap size={8}>
-                    <Tag color="geekblue">{snapshot.request_format}</Tag>
-                    <Tag>{snapshot.model}</Tag>
-                    <Typography.Text type="secondary">{snapshot.created_at}</Typography.Text>
-                  </Space>
-                  <div className="request-summary-grid">
-                    <div className="request-summary-item"><span className="request-summary-label">请求格式</span><span className="request-summary-value">{snapshot.request_format || '-'}</span></div>
-                    <div className="request-summary-item"><span className="request-summary-label">模型</span><span className="request-summary-value">{snapshot.model || '-'}</span></div>
-                    <div className="request-summary-item"><span className="request-summary-label">请求 ID</span><span className="request-summary-value">{snapshot.request_id || '-'}</span></div>
-                    <div className="request-summary-item request-summary-item-wide"><span className="request-summary-label">请求 Keys</span><span className="request-summary-value">{(snapshot.request_keys ?? []).join(', ') || '-'}</span></div>
-                    <div className="request-summary-item request-summary-item-wide"><span className="request-summary-label">User-Agent</span><span className="request-summary-value">{snapshot.headers?.user_agent || '-'}</span></div>
-                    <div className="request-summary-item request-summary-item-wide"><span className="request-summary-label">Content-Type</span><span className="request-summary-value">{snapshot.headers?.content_type || '-'}</span></div>
-                  </div>
-                  <Space wrap size={6}>
-                    {snapshot.message_roles.map((role, index) => (
-                      <Tag key={`${snapshot.id}-${role}-${index}`} color={role === 'system' || role === 'developer' ? 'gold' : undefined}>
-                        {role}
-                      </Tag>
-                    ))}
-                  </Space>
-                  <div className="request-context-list">
-                    {renderSnapshotPayload(snapshot.input_payload)}
-                  </div>
-                </Space>
-              </Card>
-            ))}
-          </Space>
-        )}
-      </Modal>
-
       <Card ref={composerCardRef} className="composer-card" style={composerStyle}>
         <div className="composer-shell">
           <Space direction="vertical" size={12} className="composer-stack">
@@ -393,6 +316,48 @@ export function ChatPane(props: ChatPaneProps) {
                 </Button>
               </div>
             )}
+            <div className="automation-record-bar">
+              <Space size={8} wrap>
+                {!automationRecording.active ? (
+                  <Button
+                    icon={<VideoCameraOutlined />}
+                    disabled={!isWaitingForUser || sending}
+                    onClick={() => void onAutomationRecording('start')}
+                  >
+                    录制自动化
+                  </Button>
+                ) : (
+                  <>
+                    <span className="automation-record-indicator">
+                      <span className="automation-record-dot" />
+                      {automationRecording.conversation_id === selectedConversationId ? '正在录制' : '正在录制另一会话'} · {automationRecording.steps.length} 步
+                    </span>
+                    <Button type="primary" icon={<StopOutlined />} onClick={() => void onAutomationRecording('stop')}>
+                      停止并编辑
+                    </Button>
+                    <Button icon={<CloseOutlined />} onClick={() => void onAutomationRecording('cancel')}>
+                      取消
+                    </Button>
+                  </>
+                )}
+                {automationExecution?.status === 'running' ? (
+                  <Typography.Text type="secondary">
+          自动播放第 {automationExecution.cycle || 1} 轮 · {automationExecution.step_index}/{automationExecution.step_count}
+                  </Typography.Text>
+                ) : null}
+                {automationExecution?.status === 'failed' || automationExecution?.status === 'cancelled' ? (
+                  <Typography.Text type="danger">
+                    自动播放{automationExecution.status === 'failed' ? '失败' : '已取消'}{automationExecution.reason ? `：${automationExecution.reason}` : ''}
+                  </Typography.Text>
+                ) : null}
+                {automationExecution?.status === 'completed' ? (
+                  <Typography.Text type="secondary">自动播放已完成</Typography.Text>
+                ) : null}
+                {automationRecording.warning ? (
+                  <Typography.Text type="danger">{automationRecording.warning}</Typography.Text>
+                ) : null}
+              </Space>
+            </div>
             <div className="composer-mode-row">
               <Space wrap align="center" size={10}>
                 <Segmented
@@ -402,9 +367,7 @@ export function ChatPane(props: ChatPaneProps) {
                     setComposerMode(nextMode)
                   }}
                   options={[
-                    { label: 'Assistant Message', value: 'assistant_message' },
-                    { label: '添加思考内容', value: 'thinking' },
-                    { label: 'Tool Call', value: 'tool_call' },
+                    ...composerModeOptions,
                   ]}
                   disabled={sending || !isWaitingForUser}
                 />
@@ -441,6 +404,13 @@ export function ChatPane(props: ChatPaneProps) {
                     onChange={(event) => setToolCallId(event.target.value)}
                     placeholder="tool call id，可留空自动生成"
                     disabled={sending || !isWaitingForUser}
+                  />
+                  <ToolCallAssistPopover
+                    key={`${selectedConversationId}:${selectedRequestId}:${selectedToolSchema?.name ?? ''}`}
+                    disabled={sending || !isWaitingForUser}
+                    schema={selectedToolSchema}
+                    userID={userID}
+                    onApply={(values) => setToolFormValues((current) => ({ ...current, ...values }))}
                   />
                 </div>
                 {selectedToolSchema && (
@@ -482,6 +452,84 @@ export function ChatPane(props: ChatPaneProps) {
                 ) : (
                   <div className="tool-form-empty">当前消息里没有可解析的 tool schema。</div>
                 )}
+              </div>
+            )}
+            {composerMode === 'builtin_tool' && (
+              <div className="tool-call-panel">
+                <div className="tool-call-fields">
+                  <Select
+                    value={builtinToolKind || undefined}
+                    onChange={selectBuiltinToolKind}
+                    placeholder="选择内置工具"
+                    options={availableBuiltinTools.map((tool) => ({
+                      label: tool.label || tool.kind,
+                      value: tool.kind,
+                    }))}
+                    disabled={sending || !isWaitingForUser || availableBuiltinTools.length === 0}
+                  />
+                </div>
+                {builtinToolKind === 'web_search' ? (
+                  <TextArea
+                    value={builtinToolQuery}
+                    onChange={(event) => setBuiltinToolQuery(event.target.value)}
+                    placeholder="搜索词，会发送 Responses web_search_call 事件"
+                    autoSize={{ minRows: 3, maxRows: 6 }}
+                    className="composer-textarea"
+                    disabled={sending || !isWaitingForUser}
+                  />
+                ) : null}
+                {builtinToolKind === 'image_generation' ? (
+                  <div className="image-result-upload">
+                    {builtinToolAsset ? (
+                      <div className="image-result-preview">
+                        <img src={builtinToolAsset.url} alt="待输出的生图结果" />
+                        <div className="image-result-file">
+                          <Typography.Text strong ellipsis={{ tooltip: imageFileName }}>
+                            {imageFileName || '已选择图片'}
+                          </Typography.Text>
+                          {imageFileSize > 0 ? (
+                            <Typography.Text type="secondary">
+                              {(imageFileSize / 1024).toFixed(imageFileSize >= 1024 * 1024 ? 0 : 1)} KB
+                            </Typography.Text>
+                          ) : null}
+                        </div>
+                        <Button
+                          icon={<DeleteOutlined />}
+                          onClick={clearImageFile}
+                          disabled={sending || uploadingOutputImage || !isWaitingForUser}
+                        >
+                          移除
+                        </Button>
+                      </div>
+                    ) : (
+                      <Upload.Dragger
+                        accept="image/*"
+                        beforeUpload={(file) => {
+                          void selectImageFile(file)
+                          return Upload.LIST_IGNORE
+                        }}
+                        disabled={sending || uploadingOutputImage || !isWaitingForUser}
+                        maxCount={1}
+                        multiple={false}
+                        showUploadList={false}
+                      >
+                        <UploadOutlined className="image-result-upload-icon" />
+                        <Typography.Text strong>
+                          {uploadingOutputImage ? '正在处理图片' : '点击或拖入图片'}
+                        </Typography.Text>
+                        <Typography.Text type="secondary">
+                          服务端会转为 AVIF，确认输出时再生成协议 Base64
+                        </Typography.Text>
+                      </Upload.Dragger>
+                    )}
+                    {imageFileError ? (
+                      <Typography.Text type="danger">{imageFileError}</Typography.Text>
+                    ) : null}
+                  </div>
+                ) : null}
+                {!builtinToolKind ? (
+                  <div className="tool-form-empty">当前请求没有可用内置工具。</div>
+                ) : null}
               </div>
             )}
             {composerMode === 'thinking' && (
@@ -528,7 +576,9 @@ export function ChatPane(props: ChatPaneProps) {
           </Space>
           <Flex justify="space-between" align="center" gap={12} wrap className="composer-actions">
             <Typography.Text className="composer-hint">
-              {isWaitingForUser
+              {sending
+                ? '正在发送并等待服务端同步草稿…'
+                : isWaitingForUser
                 ? composerMode === 'assistant_message'
                   ? '流式输出的片段会保留在本轮回复里，结束输出之后这一轮结束。'
                 : composerMode === 'thinking'
@@ -537,6 +587,8 @@ export function ChatPane(props: ChatPaneProps) {
                           ? 'reasoning'
                           : 'summery'
                       } 追加到当前回复草稿，不会结束这一轮。`
+                    : composerMode === 'builtin_tool'
+                      ? '内置工具会输出 Responses 官方内置工具事件，不会结束这一轮。'
                     : 'Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item。'
                 : '没有新的 user 请求时不能输出回复。'}
             </Typography.Text>
@@ -545,13 +597,18 @@ export function ChatPane(props: ChatPaneProps) {
                 type={composerMode === 'assistant_message' ? 'default' : 'primary'}
                 icon={<SaveOutlined />}
                 onClick={() => void onDraft()}
+                loading={sending}
                 disabled={
                   !isWaitingForUser ||
                   sending ||
                   (composerMode === 'assistant_message'
-                    ? !composer.trim()
+                    ? !normalizeChatText(composer)
                     : composerMode === 'thinking'
-                      ? !thinkingText.trim()
+                      ? !normalizeChatText(thinkingText)
+                      : composerMode === 'builtin_tool'
+                        ? !builtinToolKind.trim() ||
+                          (builtinToolKind === 'web_search' && !builtinToolQuery.trim()) ||
+                          (builtinToolKind === 'image_generation' && !builtinToolAsset)
                       : !toolName.trim())
                 }
               >
@@ -559,6 +616,8 @@ export function ChatPane(props: ChatPaneProps) {
                   ? '流式输出'
                   : composerMode === 'thinking'
                     ? '输出思考'
+                    : composerMode === 'builtin_tool'
+                      ? '输出内置工具'
                     : '输出 Tool Call'}
               </Button>
               <Button
@@ -570,7 +629,7 @@ export function ChatPane(props: ChatPaneProps) {
                   sending ||
                   !isWaitingForUser ||
                   composerMode !== 'assistant_message' ||
-                  (!composer.trim() && !draftBuffer.trim())
+                  (!normalizeChatText(composer) && !draftBuffer)
                 }
               >
                 结束输出

@@ -1,39 +1,28 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import { requestJson } from '../lib/api'
-import { appMessage } from '../lib/antdApp'
-import type { AutomationRule, AutomationRuleCondition } from '../types/chat'
-
-function normalizeRuleConditions(items: AutomationRuleCondition[]): AutomationRuleCondition[] {
-  return items
-    .map((item) => ({
-      match_type: item.match_type === 'regex' ? ('regex' as const) : ('substring' as const),
-      pattern: item.pattern.trim(),
-    }))
-    .filter((item) => item.pattern)
-}
+import { appMessage } from '../lib/antdMessage'
+import type { AutomationRule } from '../types/chat'
 
 function buildEmptyAutomationRule(): AutomationRule {
   return {
-    id: `rule_${Math.random().toString(36).slice(2, 10)}`,
-    enabled: true,
-    conditions: {
-      contains: [],
-      excludes: [],
-    },
-    timing: {
-      delay_seconds: 0,
-      repeat_interval_seconds: 0,
-      max_output_count: 120,
-    },
-    action: {
-      type: 'output_text',
-      text: '',
-      error_message: '',
-      tool_name: '',
-      tool_arguments: '',
-      tool_call_id: '',
-    },
+    schema_version: 2,
+    id: '',
+    name: '新自动化规则',
+    enabled: false,
+    priority: 0,
+    match: { target: 'last_user_text', pattern: '' },
+    playback: { mode: 'recorded', initial_delay_ms: 0, fixed_interval_ms: 200, loop: false, loop_interval_ms: 1000 },
+    steps: [],
+  }
+}
+
+function cloneRule(rule: AutomationRule): AutomationRule {
+  return {
+    ...rule,
+    match: { ...rule.match },
+    playback: { ...rule.playback },
+    steps: (Array.isArray(rule.steps) ? rule.steps : []).map((step) => ({ ...step, action: { ...step.action } })),
   }
 }
 
@@ -44,96 +33,79 @@ export function useAutomationRules() {
   const [editingAutomationRule, setEditingAutomationRule] = useState<AutomationRule | null>(null)
   const [savingAutomationRules, setSavingAutomationRules] = useState(false)
 
-  async function loadAutomationRules() {
-    const data = await requestJson<{ ok?: boolean; rules?: AutomationRule[] }>(
-      '/api/config/automation-rules',
-    )
+  const loadAutomationRules = useCallback(async () => {
+    const data = await requestJson<{ rules?: AutomationRule[] }>('/api/automation/rules')
     setAutomationRules(Array.isArray(data.rules) ? data.rules : [])
-  }
+  }, [])
 
-  async function persistAutomationRules(nextRules: AutomationRule[], successText = '规则已保存') {
+  async function saveRule(rule: AutomationRule, successText: string) {
     setSavingAutomationRules(true)
     try {
-      const response = await requestJson<{ ok: boolean; rules: AutomationRule[] }>(
-        '/api/config/automation-rules',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            rules: nextRules,
-          }),
-        },
-      )
-      setAutomationRules(response.rules)
+      const path = rule.id
+        ? `/api/automation/rules/${encodeURIComponent(rule.id)}`
+        : '/api/automation/rules'
+      const response = await requestJson<{ rule: AutomationRule }>(path, {
+        method: rule.id ? 'PUT' : 'POST',
+        body: JSON.stringify(rule),
+      })
+      setAutomationRules((current) => {
+        const remaining = current.filter((item) => item.id !== response.rule.id)
+        return [response.rule, ...remaining]
+      })
       appMessage.success(successText)
-    } catch (error) {
-      appMessage.error(error instanceof Error ? error.message : '规则保存失败')
-      throw error
+      return response.rule
     } finally {
       setSavingAutomationRules(false)
     }
   }
 
   async function handleSaveAutomationRule(rule: AutomationRule) {
-    const normalized: AutomationRule = {
-      ...rule,
-      conditions: {
-        contains: normalizeRuleConditions(rule.conditions.contains),
-        excludes: normalizeRuleConditions(rule.conditions.excludes),
-      },
-      timing: {
-        delay_seconds: Number(rule.timing.delay_seconds) || 0,
-        repeat_interval_seconds: Number(rule.timing.repeat_interval_seconds) || 0,
-        max_output_count: Math.max(1, Number(rule.timing.max_output_count) || 120),
-      },
-      action: {
-        ...rule.action,
-        text: rule.action.text ?? '',
-        error_message: rule.action.error_message ?? '',
-        tool_name: rule.action.tool_name ?? '',
-        tool_arguments: rule.action.tool_arguments ?? '',
-        tool_call_id: rule.action.tool_call_id ?? '',
-      },
-    }
-
-    if (
-      normalized.timing.delay_seconds < 0
-      || normalized.timing.repeat_interval_seconds < 0
-      || normalized.timing.max_output_count < 1
-    ) {
-      appMessage.warning('时间和次数配置不合法')
+    if (!rule.name.trim()) {
+      appMessage.warning('请输入规则名称')
       return
     }
-    if (normalized.action.type === 'output_text' && !normalized.action.text.trim()) {
-      appMessage.warning('输出指定文本时必须填写文本')
-      return
+		if (rule.enabled && (!rule.match.pattern.trim() || rule.steps.length === 0)) {
+      appMessage.warning('启用规则前需要填写匹配正则并至少保留一个步骤')
+			return
+		}
+		if (rule.playback.loop && rule.playback.loop_interval_ms < 1) {
+			appMessage.warning('循环间隔必须大于 0ms')
+			return
+		}
+		if (rule.playback.loop && rule.steps.some((step) => ['stream_complete', 'respond', 'abort'].includes(step.action.kind))) {
+			appMessage.warning('循环规则不能包含结束输出或错误步骤')
+			return
+		}
+    try {
+      await saveRule(cloneRule(rule), '规则已保存')
+      setAutomationRuleEditorOpen(false)
+      setEditingAutomationRule(null)
+    } catch (error) {
+      appMessage.error(error instanceof Error ? error.message : '规则保存失败')
     }
-    if (normalized.action.type === 'error' && !normalized.action.error_message.trim()) {
-      appMessage.warning('返回 error 时必须填写错误信息')
-      return
-    }
-    if (normalized.action.type === 'tool_call' && !normalized.action.tool_name?.trim()) {
-      appMessage.warning('工具调用时必须选择一个 tool')
-      return
-    }
-
-    const nextRules = automationRules.some((item) => item.id === normalized.id)
-      ? automationRules.map((item) => (item.id === normalized.id ? normalized : item))
-      : [...automationRules, normalized]
-    await persistAutomationRules(nextRules)
-    setAutomationRuleEditorOpen(false)
-    setEditingAutomationRule(null)
   }
 
   async function handleDeleteAutomationRule(ruleId: string) {
-    const nextRules = automationRules.filter((item) => item.id !== ruleId)
-    await persistAutomationRules(nextRules, '规则已删除')
+    setSavingAutomationRules(true)
+    try {
+      await requestJson(`/api/automation/rules/${encodeURIComponent(ruleId)}`, { method: 'DELETE' })
+      setAutomationRules((current) => current.filter((item) => item.id !== ruleId))
+      appMessage.success('规则已删除')
+    } catch (error) {
+      appMessage.error(error instanceof Error ? error.message : '规则删除失败')
+    } finally {
+      setSavingAutomationRules(false)
+    }
   }
 
   async function handleToggleAutomationRule(ruleId: string, enabled: boolean) {
-    const nextRules = automationRules.map((item) =>
-      item.id === ruleId ? { ...item, enabled } : item,
-    )
-    await persistAutomationRules(nextRules, enabled ? '规则已启用' : '规则已停用')
+    const rule = automationRules.find((item) => item.id === ruleId)
+    if (!rule) return
+    try {
+      await saveRule({ ...cloneRule(rule), enabled }, enabled ? '规则已启用' : '规则已停用')
+    } catch (error) {
+      appMessage.error(error instanceof Error ? error.message : '规则状态更新失败')
+    }
   }
 
   function handleCreateAutomationRule() {
@@ -144,17 +116,15 @@ export function useAutomationRules() {
   function handleEditAutomationRule(ruleId: string) {
     const rule = automationRules.find((item) => item.id === ruleId)
     if (!rule) return
-    setEditingAutomationRule({
-      ...rule,
-      conditions: {
-        contains: [...rule.conditions.contains],
-        excludes: [...rule.conditions.excludes],
-      },
-      timing: { ...rule.timing },
-      action: { ...rule.action },
-    })
+    setEditingAutomationRule(cloneRule(rule))
     setAutomationRuleEditorOpen(true)
   }
+
+  const openRecordedDraft = useCallback((rule: AutomationRule) => {
+    setAutomationRules((current) => [rule, ...current.filter((item) => item.id !== rule.id)])
+    setEditingAutomationRule(cloneRule(rule))
+    setAutomationRuleEditorOpen(true)
+  }, [])
 
   function resetAutomationRuleUi() {
     setAutomationRulesModalOpen(false)
@@ -163,21 +133,10 @@ export function useAutomationRules() {
   }
 
   return {
-    automationRuleEditorOpen,
-    automationRules,
-    automationRulesModalOpen,
-    editingAutomationRule,
-    handleCreateAutomationRule,
-    handleDeleteAutomationRule,
-    handleEditAutomationRule,
-    handleSaveAutomationRule,
-    handleToggleAutomationRule,
-    loadAutomationRules,
-    resetAutomationRuleUi,
-    savingAutomationRules,
-    setAutomationRuleEditorOpen,
-    setAutomationRules,
-    setAutomationRulesModalOpen,
-    setEditingAutomationRule,
+    automationRuleEditorOpen, automationRules, automationRulesModalOpen, editingAutomationRule,
+    handleCreateAutomationRule, handleDeleteAutomationRule, handleEditAutomationRule,
+    handleSaveAutomationRule, handleToggleAutomationRule, loadAutomationRules, openRecordedDraft,
+    resetAutomationRuleUi, savingAutomationRules, setAutomationRuleEditorOpen,
+    setAutomationRules, setAutomationRulesModalOpen, setEditingAutomationRule,
   }
 }

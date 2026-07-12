@@ -1,109 +1,151 @@
 import { useEffect, useState } from 'react'
-import { Button, Form, Input, Popconfirm, Space, Table, Typography } from 'antd'
-import { DeleteOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Button, Form, Input, Popconfirm, Table, Tabs, Typography } from 'antd'
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 
-import { appMessage } from '../../lib/antdApp'
+import { appMessage } from '../../lib/antdMessage'
 import { requestJson } from '../../lib/api'
-import type { ApiKeyInfo, ApiKeyListResponse } from '../../types/chat'
+import type { ApiKeyInfo, ApiKeyListResponse, ModelKeyInfo } from '../../types/chat'
 
 type ApiKeyManagementPanelProps = {
   open: boolean
 }
 
 export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
-  const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([])
-  const [loading, setLoading] = useState(false)
-  const [creating, setCreating] = useState(false)
+  const [appKeys, setAppKeys] = useState<ApiKeyInfo[]>([])
+  const [modelKeys, setModelKeys] = useState<ModelKeyInfo[]>([])
+  const [appLoading, setAppLoading] = useState(false)
+  const [modelLoading, setModelLoading] = useState(false)
+  const [creatingAppKey, setCreatingAppKey] = useState(false)
+  const [creatingModelKey, setCreatingModelKey] = useState(false)
   const [deletingId, setDeletingId] = useState('')
-  const [generating, setGenerating] = useState(false)
-  const [apiKeyValue, setApiKeyValue] = useState('')
   const [apiKeyLimit, setApiKeyLimit] = useState(0)
-  const [form] = Form.useForm()
+  const [appForm] = Form.useForm()
+  const [modelForm] = Form.useForm()
 
   useEffect(() => {
     if (!open) return
     let active = true
-    async function loadKeys() {
-      setLoading(true)
+    async function loadAppKeys() {
+      setAppLoading(true)
       try {
         const data = await requestJson<ApiKeyListResponse>('/api/user/api-keys')
         if (!active) return
-        setApiKeys(data.api_keys)
+        setAppKeys(Array.isArray(data.api_keys) ? data.api_keys : [])
         setApiKeyLimit(Number(data.api_key_limit_per_user ?? 0))
       } catch (error) {
         if (!active) return
-        appMessage.error(error instanceof Error ? error.message : '加载 API Key 列表失败')
+        appMessage.error(error instanceof Error ? error.message : '加载应用 API Key 列表失败')
       } finally {
-        if (active) setLoading(false)
+        if (active) setAppLoading(false)
       }
     }
-    void loadKeys()
+
+    async function loadModelKeys() {
+      setModelLoading(true)
+      try {
+        const data = await requestJson<{ ok: boolean; items: ModelKeyInfo[] }>('/api/user/model-keys')
+        if (!active) return
+        setModelKeys(Array.isArray(data.items) ? data.items : [])
+      } catch (error) {
+        if (!active) return
+        appMessage.error(error instanceof Error ? error.message : '加载虚拟模型 Key 列表失败')
+      } finally {
+        if (active) setModelLoading(false)
+      }
+    }
+
+    void loadAppKeys()
+    void loadModelKeys()
     return () => { active = false }
   }, [open])
 
-  async function handleCreate(values: { name: string; api_key: string }) {
-    if (apiKeyLimit > 0 && apiKeys.length >= apiKeyLimit) {
+  async function handleCreateAppKey(values: { name: string }) {
+    if (apiKeyLimit > 0 && appKeys.length >= apiKeyLimit) {
       appMessage.warning(`当前账号最多只能创建 ${apiKeyLimit} 个 API Key`)
       return
     }
-    setCreating(true)
+    setCreatingAppKey(true)
     try {
-      const data = await requestJson<{ ok: boolean; api_key: ApiKeyInfo }>('/api/user/api-keys', {
+      const data = await requestJson<{ ok: boolean; api_key: ApiKeyInfo & { api_key?: string } }>('/api/user/api-keys', {
         method: 'POST',
         body: JSON.stringify({
           name: values.name,
-          api_key: values.api_key || undefined,
         }),
       })
-      setApiKeys((prev) => [...prev, data.api_key])
-      form.resetFields()
-      setApiKeyValue('')
-      appMessage.success('API Key 已创建')
+      setAppKeys((prev) => [...prev, data.api_key])
+      appForm.resetFields()
+      if (data.api_key.api_key) {
+        void navigator.clipboard?.writeText(data.api_key.api_key).catch(() => {})
+        appMessage.success('应用 API Key 已创建，明文已复制到剪贴板')
+      } else {
+        appMessage.success('应用 API Key 已创建')
+      }
     } catch (error) {
-      appMessage.error(error instanceof Error ? error.message : '创建 API Key 失败')
+      appMessage.error(error instanceof Error ? error.message : '创建应用 API Key 失败')
     } finally {
-      setCreating(false)
+      setCreatingAppKey(false)
     }
   }
 
-  async function handleDelete(keyId: string) {
+  async function handleCreateModelKey(values: { name: string; model: string }) {
+    setCreatingModelKey(true)
+    try {
+      const data = await requestJson<{ ok: boolean; model_key: ModelKeyInfo & { api_key?: string } }>('/api/user/model-keys', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: values.name,
+          model: values.model,
+        }),
+      })
+      setModelKeys((prev) => [...prev, data.model_key])
+      modelForm.resetFields()
+      if (data.model_key.api_key) {
+        void navigator.clipboard?.writeText(data.model_key.api_key).catch(() => {})
+        appMessage.success('虚拟模型 Key 已创建，明文已复制到剪贴板')
+      } else {
+        appMessage.success('虚拟模型 Key 已创建')
+      }
+    } catch (error) {
+      appMessage.error(error instanceof Error ? error.message : '创建虚拟模型 Key 失败')
+    } finally {
+      setCreatingModelKey(false)
+    }
+  }
+
+  async function handleDeleteAppKey(keyId: string) {
     setDeletingId(keyId)
     try {
       await requestJson(`/api/user/api-keys/${keyId}`, { method: 'DELETE' })
-      setApiKeys((prev) => prev.filter((k) => k.id !== keyId))
-      appMessage.success('API Key 已删除')
+      setAppKeys((prev) => prev.filter((k) => k.id !== keyId))
+      appMessage.success('应用 API Key 已删除')
     } catch (error) {
-      appMessage.error(error instanceof Error ? error.message : '删除 API Key 失败')
+      appMessage.error(error instanceof Error ? error.message : '删除应用 API Key 失败')
     } finally {
       setDeletingId('')
     }
   }
 
-  async function handleGenerate() {
-    setGenerating(true)
+  async function handleDeleteModelKey(keyId: string) {
+    setDeletingId(keyId)
     try {
-      const data = await requestJson<{ ok: boolean; api_key: string }>('/api/user/api-keys/generate')
-      setApiKeyValue(data.api_key)
-      form.setFieldValue('api_key', data.api_key)
+      await requestJson(`/api/user/model-keys/${keyId}`, { method: 'DELETE' })
+      setModelKeys((prev) => prev.filter((k) => k.id !== keyId))
+      appMessage.success('虚拟模型 Key 已删除')
     } catch (error) {
-      appMessage.error(error instanceof Error ? error.message : '生成 API Key 失败')
+      appMessage.error(error instanceof Error ? error.message : '删除虚拟模型 Key 失败')
     } finally {
-      setGenerating(false)
+      setDeletingId('')
     }
   }
 
-  const columns = [
+  const appKeyColumns = [
     { title: '名称', dataIndex: 'name', key: 'name', render: (v: string) => v || '-' },
     {
-      title: 'API Key',
-      dataIndex: 'api_key',
-      key: 'api_key',
+      title: 'Key 前缀',
+      dataIndex: 'key_prefix',
+      key: 'key_prefix',
       render: (v: string) => (
-        <Space>
-          <Typography.Text copyable={{ text: v }} style={{ fontFamily: 'monospace' }}>
-            {v}
-          </Typography.Text>
-        </Space>
+        <Typography.Text style={{ fontFamily: 'monospace' }}>{v || '-'}</Typography.Text>
       ),
     },
     {
@@ -117,8 +159,47 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
       key: 'action',
       render: (_: unknown, record: ApiKeyInfo) => (
         <Popconfirm
-          title="确定删除该 API Key？"
-          onConfirm={() => handleDelete(record.id)}
+          title="确定删除该应用 API Key？"
+          onConfirm={() => handleDeleteAppKey(record.id)}
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+        >
+          <Button
+            type="link"
+            danger
+            icon={<DeleteOutlined />}
+            loading={deletingId === record.id}
+          >
+            删除
+          </Button>
+        </Popconfirm>
+      ),
+    },
+  ]
+
+  const modelKeyColumns = [
+    { title: '名称', dataIndex: 'name', key: 'name', render: (v: string) => v || '-' },
+    { title: '虚拟模型', dataIndex: 'model', key: 'model', render: (v: string) => v || '-' },
+    {
+      title: 'Key 前缀',
+      dataIndex: 'key_prefix',
+      key: 'key_prefix',
+      render: (v: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{v || '-'}</Typography.Text>,
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      render: (v: string) => new Date(v).toLocaleString(),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_: unknown, record: ModelKeyInfo) => (
+        <Popconfirm
+          title="确定删除该虚拟模型 Key？"
+          onConfirm={() => handleDeleteModelKey(record.id)}
           okText="删除"
           cancelText="取消"
           okButtonProps={{ danger: true }}
@@ -137,58 +218,100 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
   ]
 
   return (
-    <div className="api-key-management-panel">
-      <div className="api-key-management-header">
-        <Typography.Text className="api-key-management-subtitle">
-          管理你的 API Key，用于程序化访问接口。{apiKeyLimit > 0 ? `已使用 ${apiKeys.length} / ${apiKeyLimit}` : '当前不限制数量。'}
-        </Typography.Text>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => form.submit()}
-          disabled={apiKeyLimit > 0 && apiKeys.length >= apiKeyLimit}
-        >
-          添加 Key
-        </Button>
-      </div>
+    <Tabs
+      items={[
+        {
+          key: 'app-keys',
+          label: '应用 API Key',
+          children: (
+            <div className="api-key-management-panel">
+              <div className="api-key-management-header">
+                <Typography.Text className="api-key-management-subtitle">
+                  管理应用 API Key，用于读写自己的 ChatAPI、规则和请求数据。
+                  {apiKeyLimit > 0 ? ` 已使用 ${appKeys.length} / ${apiKeyLimit}。` : ' 当前不限制数量。'}
+                </Typography.Text>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => appForm.submit()}
+                  disabled={apiKeyLimit > 0 && appKeys.length >= apiKeyLimit}
+                >
+                  新建应用 Key
+                </Button>
+              </div>
 
-      <Form form={form} layout="vertical" onFinish={handleCreate} className="api-key-management-form">
-        <Form.Item name="name" label="名称">
-          <Input placeholder="可选，用于标识用途" allowClear />
-        </Form.Item>
-        <Form.Item name="api_key" label="API Key" extra="自定义或点击生成按钮创建强密钥（至少 4 个字符）">
-          <Space.Compact style={{ width: '100%' }}>
-            <Input
-              placeholder="留空则自动生成"
-              allowClear
-              style={{ fontFamily: 'monospace' }}
-              value={apiKeyValue}
-              onChange={(e) => {
-                setApiKeyValue(e.target.value)
-                form.setFieldValue('api_key', e.target.value)
-              }}
-            />
-            <Button htmlType="button" icon={<ThunderboltOutlined />} onClick={handleGenerate} loading={generating}>
-              生成
-            </Button>
-          </Space.Compact>
-        </Form.Item>
-        <Form.Item>
-          <Button type="primary" htmlType="submit" icon={<PlusOutlined />} loading={creating}>
-            添加
-          </Button>
-        </Form.Item>
-      </Form>
+              <Form form={appForm} layout="vertical" onFinish={handleCreateAppKey} className="api-key-management-form">
+                <Form.Item name="name" label="名称">
+                  <Input placeholder="例如 n8n、本地调试、CI" allowClear />
+                </Form.Item>
+                <Form.Item>
+                  <Button type="primary" htmlType="submit" icon={<PlusOutlined />} loading={creatingAppKey}>
+                    创建
+                  </Button>
+                </Form.Item>
+              </Form>
 
-      <Table
-        className="api-key-management-table"
-        columns={columns}
-        dataSource={apiKeys}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-        size="small"
-      />
-    </div>
+              <Table
+                className="api-key-management-table"
+                columns={appKeyColumns}
+                dataSource={appKeys}
+                rowKey="id"
+                loading={appLoading}
+                pagination={false}
+                size="small"
+              />
+            </div>
+          ),
+        },
+        {
+          key: 'model-keys',
+          label: '虚拟模型 Key',
+          children: (
+            <div className="api-key-management-panel">
+              <div className="api-key-management-header">
+                <Typography.Text className="api-key-management-subtitle">
+                  管理虚拟模型 Key，用于以 OpenAI / Anthropic / Responses 协议请求你的虚拟模型。
+                </Typography.Text>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => modelForm.submit()}
+                >
+                  新建虚拟模型 Key
+                </Button>
+              </div>
+
+              <Form form={modelForm} layout="vertical" onFinish={handleCreateModelKey} className="api-key-management-form">
+                <Form.Item name="name" label="名称">
+                  <Input placeholder="例如 default, workspace, agent" allowClear />
+                </Form.Item>
+                <Form.Item
+                  name="model"
+                  label="虚拟模型名称"
+                  rules={[{ required: true, message: '请输入虚拟模型名称' }]}
+                >
+                  <Input placeholder="例如 kirari-chat, test-model" allowClear />
+                </Form.Item>
+                <Form.Item>
+                  <Button type="primary" htmlType="submit" icon={<PlusOutlined />} loading={creatingModelKey}>
+                    创建
+                  </Button>
+                </Form.Item>
+              </Form>
+
+              <Table
+                className="api-key-management-table"
+                columns={modelKeyColumns}
+                dataSource={modelKeys}
+                rowKey="id"
+                loading={modelLoading}
+                pagination={false}
+                size="small"
+              />
+            </div>
+          ),
+        },
+      ]}
+    />
   )
 }

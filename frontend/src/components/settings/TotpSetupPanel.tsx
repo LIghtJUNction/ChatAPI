@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button, Image, Input, Space, Typography } from 'antd'
 
-import { appMessage } from '../../lib/antdApp'
+import { appMessage } from '../../lib/antdMessage'
 import { requestJson } from '../../lib/api'
 import type { TotpSetup } from '../../types/chat'
 

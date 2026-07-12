@@ -109,7 +109,10 @@ export function WorkspaceRoute() {
       automationRulesModalOpen={workspace.automationRulesModalOpen}
       collapsed={!isMobile && sidebarCollapsed}
       conversations={workspace.conversations}
+      conversationPageError={workspace.conversationPageError}
       deletingConversationId={workspace.deletingConversationId}
+      hasMoreConversations={workspace.hasMoreConversations}
+      loadingMoreConversations={workspace.loadingMoreConversations}
       editingAutomationRule={workspace.editingAutomationRule}
       onAbortConversation={workspace.handleAbortConversation}
       onCreateAutomationRule={workspace.handleCreateAutomationRule}
@@ -117,6 +120,7 @@ export function WorkspaceRoute() {
       onDeleteConversation={workspace.handleDeleteConversation}
       onEditAutomationRule={workspace.handleEditAutomationRule}
       onLogout={workspace.handleLogout}
+      onLoadMoreConversations={workspace.loadMoreConversations}
       onPruneConversations={workspace.handlePruneConversations}
       onSaveAutomationRule={workspace.handleSaveAutomationRule}
       onSelectConversation={workspace.handleSelectConversation}
@@ -171,7 +175,14 @@ export function WorkspaceRoute() {
         </Header>
         <Content className="content-shell">
           <ChatPane
+            automationExecution={workspace.automationExecution}
+            automationRecording={workspace.automationRecording}
+            availableBuiltinTools={workspace.availableBuiltinTools}
             availableToolSchemas={workspace.availableToolSchemas}
+            builtinToolKind={workspace.builtinToolKind}
+            builtinToolQuery={workspace.builtinToolQuery}
+            builtinToolAsset={workspace.builtinToolAsset}
+            uploadingOutputImage={workspace.uploadingOutputImage}
             chatScrollRef={workspace.chatScrollRef}
             composer={workspace.composer}
             composerMode={workspace.composerMode}
@@ -182,16 +193,22 @@ export function WorkspaceRoute() {
             keyboardOffset={workspace.keyboardOffset}
             messagesLoading={workspace.messagesLoading}
             onDraft={workspace.handleDraft}
+            onAutomationRecording={workspace.handleAutomationRecording}
+            onOutputImageUpload={workspace.handleOutputImageUpload}
             onLogout={workspace.handleLogout}
             onOpenDrawer={() => workspace.setDrawerOpen(true)}
             onSend={workspace.handleSend}
-            selectedConversationId={workspace.selectedConversationId}
             selectedConversationTitle={workspace.selectedConversation?.title || ''}
+            selectedConversationId={workspace.selectedConversationId}
+            selectedRequestId={workspace.selectedConversation?.request_id ?? ''}
             selectedRequestFormat={workspace.selectedRequestFormat}
             selectedToolSchema={workspace.selectedToolSchema}
             sending={workspace.sending}
             setComposer={workspace.setComposer}
             setComposerMode={workspace.setComposerMode}
+            setBuiltinToolKind={workspace.setBuiltinToolKind}
+            setBuiltinToolQuery={workspace.setBuiltinToolQuery}
+            setBuiltinToolAsset={workspace.setBuiltinToolAsset}
             setThinkingText={workspace.setThinkingText}
             setReasoningStreamMode={workspace.setReasoningStreamMode}
             setToolCallId={workspace.setToolCallId}
@@ -202,6 +219,7 @@ export function WorkspaceRoute() {
             toolCallId={workspace.toolCallId}
             toolFormValues={workspace.toolFormValues}
             toolName={workspace.toolName}
+            userID={workspace.auth.user?.id ?? ''}
             visibleMessages={workspace.visibleMessages}
           />
         </Content>

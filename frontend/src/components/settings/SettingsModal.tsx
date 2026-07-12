@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import type { AutomationRule, AuthUser } from '../../types/chat'
 import { ApiKeyManagementPanel } from './ApiKeyManagementPanel'
 import { AutomationRulesPanel } from './AutomationRulesPanel'
+import { BrowserAssistSettingsPanel } from './BrowserAssistSettingsPanel'
 import { UserSettingsPanel } from './UserSettingsPanel'
 
 type SettingsModalProps = {
@@ -23,7 +24,7 @@ type SettingsModalProps = {
   onTotpRefresh: () => void
 }
 
-type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'system'
+type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'browser-assist' | 'system'
 
 export function SettingsModal({
   automationRuleEditorOpen,
@@ -66,6 +67,11 @@ export function SettingsModal({
       key: 'api-keys',
       label: 'API Keys',
       children: <ApiKeyManagementPanel open={open && activeTab === 'api-keys'} />,
+    },
+    {
+      key: 'browser-assist',
+      label: '辅助模型',
+      children: <BrowserAssistSettingsPanel open={open && activeTab === 'browser-assist'} userID={user?.id ?? ''} />,
     },
   ]
 

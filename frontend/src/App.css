@@ -3156,3 +3156,39 @@ body[data-route='/'] .social-link-button:focus-visible::before {
     width: 100%;
   }
 }
+.tool-assist-popover {
+  width: min(420px, calc(100vw - 48px));
+}
+
+.tool-assist-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.tool-assist-subtitle,
+.tool-assist-error {
+  display: block;
+  margin-top: 4px;
+}
+
+.tool-assist-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  width: 100%;
+}
+
+.browser-assist-settings {
+  max-width: 720px;
+}
+
+.browser-assist-settings h4 {
+  margin-top: 24px;
+}
+
+.browser-assist-form {
+  max-width: 620px;
+}

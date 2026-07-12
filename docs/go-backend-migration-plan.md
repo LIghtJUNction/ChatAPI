@@ -1287,6 +1287,12 @@ GC 设置：
 - Anthropic Messages：调用上游 `/messages`。
 - 三套协议都要通过统一前端 adapter 输出同一个内部结果模型；服务端 protocol adapter 可以复用 schema 和测试 fixture，但首版不承担上游请求代理。
 
+> 本节保留的是早期完整 assist-context / delegated-provider 方案。当前已采用的
+> 纯浏览器首版以 `browser-tool-call-assist.md` 为准：只发送所选 tool schema 和
+> 操作者在临时弹窗中的说明，不调用 `/assist/parse`，也不把模型输出上传到
+> ChatAPI。后续若启用服务端辅助，再从本节恢复相应契约，不能让两套 authority
+> 同时驱动前端。
+
 交互流程：
 
 1. 用户在浏览器本地设置中配置上游 `base_url`、`api_key`、`model`、协议类型。

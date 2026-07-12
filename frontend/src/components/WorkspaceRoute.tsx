@@ -200,6 +200,7 @@ export function WorkspaceRoute() {
             onSend={workspace.handleSend}
             selectedConversationTitle={workspace.selectedConversation?.title || ''}
             selectedConversationId={workspace.selectedConversationId}
+            selectedRequestId={workspace.selectedConversation?.request_id ?? ''}
             selectedRequestFormat={workspace.selectedRequestFormat}
             selectedToolSchema={workspace.selectedToolSchema}
             sending={workspace.sending}
@@ -218,6 +219,7 @@ export function WorkspaceRoute() {
             toolCallId={workspace.toolCallId}
             toolFormValues={workspace.toolFormValues}
             toolName={workspace.toolName}
+            userID={workspace.auth.user?.id ?? ''}
             visibleMessages={workspace.visibleMessages}
           />
         </Content>

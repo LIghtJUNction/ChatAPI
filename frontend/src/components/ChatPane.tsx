@@ -36,6 +36,7 @@ import { GithubButton } from './GithubButton'
 import { ThemeToggle } from './ThemeToggle'
 import { ToolField } from './ToolField'
 import { ChatMessageList } from './ChatMessageList'
+import { ToolCallAssistPopover } from '../features/tool-call-assist/ToolCallAssistPopover'
 import { normalizeChatText } from '../lib/chat-format'
 import type {
   ComposerMode,
@@ -77,6 +78,7 @@ type ChatPaneProps = {
   onSend: () => void | Promise<void>
   selectedConversationTitle: string
   selectedConversationId: string
+  selectedRequestId: string
   selectedRequestFormat: string
   selectedToolSchema: ToolSchemaOption | null
   sending: boolean
@@ -95,6 +97,7 @@ type ChatPaneProps = {
   toolCallId: string
   toolFormValues: Record<string, ToolFieldValue>
   toolName: string
+  userID: string
   visibleMessages: VisibleTimelineItem[]
 }
 
@@ -125,6 +128,7 @@ export function ChatPane(props: ChatPaneProps) {
     onSend,
     selectedConversationTitle,
     selectedConversationId,
+    selectedRequestId,
     selectedRequestFormat,
     selectedToolSchema,
     sending,
@@ -143,6 +147,7 @@ export function ChatPane(props: ChatPaneProps) {
     toolCallId,
     toolFormValues,
     toolName,
+    userID,
     visibleMessages,
   } = props
   const [imageFileName, setImageFileName] = useState('')
@@ -399,6 +404,13 @@ export function ChatPane(props: ChatPaneProps) {
                     onChange={(event) => setToolCallId(event.target.value)}
                     placeholder="tool call id，可留空自动生成"
                     disabled={sending || !isWaitingForUser}
+                  />
+                  <ToolCallAssistPopover
+                    key={`${selectedConversationId}:${selectedRequestId}:${selectedToolSchema?.name ?? ''}`}
+                    disabled={sending || !isWaitingForUser}
+                    schema={selectedToolSchema}
+                    userID={userID}
+                    onApply={(values) => setToolFormValues((current) => ({ ...current, ...values }))}
                   />
                 </div>
                 {selectedToolSchema && (

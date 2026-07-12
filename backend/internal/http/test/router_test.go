@@ -82,7 +82,7 @@ func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
 
 	modelKeyService := modelkey.NewService(st, "test-master-key")
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
 
 	_, modelKeyA, err := modelKeyService.CreateKey(context.Background(), "user_a", "user-a-model", "demo-query")

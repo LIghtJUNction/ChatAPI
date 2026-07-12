@@ -167,6 +167,7 @@ func scanAppAPIKey(scanner appAPIKeyScanner) (common.AppAPIKey, error) {
 		&item.UserID,
 		&item.Name,
 		&item.KeyHash,
+		&item.KeyCiphertext,
 		&item.KeyPrefix,
 		&scopesJSON,
 		&resourceLimitsJSON,

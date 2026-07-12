@@ -33,10 +33,17 @@ func New(deps Deps) *Service {
 
 func (s *Service) ListAppKeys(ctx context.Context, userID string) ([]common.AppAPIKey, error) {
 	items, err := s.store.ListAppAPIKeysByUser(ctx, strings.TrimSpace(userID))
-	if err == nil {
-		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.Int("app_keys.count", len(items))).Debug("usercontrol keys listed app keys")
+	if err != nil {
+		return nil, err
 	}
-	return items, err
+	active := make([]common.AppAPIKey, 0, len(items))
+	for _, item := range items {
+		if item.RevokedAt == nil {
+			active = append(active, item)
+		}
+	}
+	logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.Int("app_keys.count", len(active))).Debug("usercontrol keys listed app keys")
+	return active, nil
 }
 
 func (s *Service) CreateAppKey(ctx context.Context, userID string, name string, scopes []string, resourceLimits map[string]any, expiresAt *time.Time) (common.AppAPIKey, string, error) {
@@ -55,12 +62,23 @@ func (s *Service) RevokeAppKey(ctx context.Context, userID string, keyID string)
 	return err
 }
 
+func (s *Service) RevealAppKey(ctx context.Context, userID, keyID string) (string, error) {
+	return s.appKeys.RevealKey(ctx, userID, keyID)
+}
+
 func (s *Service) ListModelKeys(ctx context.Context, userID string) ([]common.ModelAPIKey, error) {
 	items, err := s.store.ListModelAPIKeysByUser(ctx, strings.TrimSpace(userID))
-	if err == nil {
-		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.Int("model_keys.count", len(items))).Debug("usercontrol keys listed model keys")
+	if err != nil {
+		return nil, err
 	}
-	return items, err
+	active := make([]common.ModelAPIKey, 0, len(items))
+	for _, item := range items {
+		if item.RevokedAt == nil {
+			active = append(active, item)
+		}
+	}
+	logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.Int("model_keys.count", len(active))).Debug("usercontrol keys listed model keys")
+	return active, nil
 }
 
 func (s *Service) CreateModelKey(ctx context.Context, userID string, name string, model string) (common.ModelAPIKey, string, error) {
@@ -77,4 +95,8 @@ func (s *Service) RevokeModelKey(ctx context.Context, userID string, keyID strin
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(userID)), zap.String("model_key.id", strings.TrimSpace(keyID))).Info("usercontrol keys revoked model key")
 	}
 	return err
+}
+
+func (s *Service) RevealModelKey(ctx context.Context, userID, keyID string) (string, error) {
+	return s.modelKeys.RevealKey(ctx, userID, keyID)
 }

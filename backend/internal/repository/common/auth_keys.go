@@ -7,6 +7,7 @@ type AppAPIKey struct {
 	UserID         string         `json:"user_id"`
 	Name           string         `json:"name"`
 	KeyHash        string         `json:"-"`
+	KeyCiphertext  string         `json:"-"`
 	KeyPrefix      string         `json:"key_prefix"`
 	Scopes         []string       `json:"scopes,omitempty"`
 	ResourceLimits map[string]any `json:"resource_limits,omitempty"`

@@ -277,6 +277,20 @@ func (h UserHandler) RevokeAppKey(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h UserHandler) RevealAppKey(w http.ResponseWriter, r *http.Request) {
+	pr, ok := session.PrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		return
+	}
+	raw, err := h.UserControl.Keys.RevealAppKey(r.Context(), pr.UserID, chi.URLParam(r, "keyID"))
+	if err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "api_key": raw})
+}
+
 func (h UserHandler) ListModelKeys(w http.ResponseWriter, r *http.Request) {
 	pr, ok := session.PrincipalFromContext(r.Context())
 	if !ok {
@@ -331,6 +345,20 @@ func (h UserHandler) RevokeModelKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h UserHandler) RevealModelKey(w http.ResponseWriter, r *http.Request) {
+	pr, ok := session.PrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		return
+	}
+	raw, err := h.UserControl.Keys.RevealModelKey(r.Context(), pr.UserID, chi.URLParam(r, "keyID"))
+	if err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "api_key": raw})
 }
 
 func (h UserHandler) ListIdentities(w http.ResponseWriter, r *http.Request) {

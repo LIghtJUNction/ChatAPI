@@ -31,3 +31,11 @@ func (s *Service) CreateKey(ctx context.Context, userID string, name string, mod
 	item.RawKey = raw
 	return item, raw, nil
 }
+
+func (s *Service) RevealKey(ctx context.Context, userID, keyID string) (string, error) {
+	item, err := s.store.GetModelAPIKeyByID(ctx, strings.TrimSpace(keyID))
+	if err != nil || item.UserID != strings.TrimSpace(userID) {
+		return "", common.ErrNotFound
+	}
+	return secretbox.Open(item.KeyCiphertext, s.masterKey)
+}

@@ -101,7 +101,7 @@ func TestRouterAdminFlow(t *testing.T) {
 	identityService := identity.NewService(accountService)
 	auditService := auditsvc.NewService(st)
 	modelKeyService := modelkey.NewService(st, "test-master-key")
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
 	pending := pendingsvc.NewPendingRegistry()
 	turnService := &turnsvc.Service{

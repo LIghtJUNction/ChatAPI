@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Form, Input, Popconfirm, Table, Tabs, Typography } from 'antd'
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
+import { CopyOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 
 import { appMessage } from '../../lib/antdMessage'
 import { requestJson } from '../../lib/api'
@@ -138,6 +138,16 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
     }
   }
 
+  async function copyKey(kind: 'api-keys' | 'model-keys', keyId: string) {
+    try {
+      const data = await requestJson<{ api_key: string }>(`/api/user/${kind}/${keyId}/secret`)
+      await navigator.clipboard.writeText(data.api_key)
+      appMessage.success('API Key 已复制')
+    } catch (error) {
+      appMessage.error(error instanceof Error ? error.message : '复制 API Key 失败')
+    }
+  }
+
   const appKeyColumns = [
     { title: '名称', dataIndex: 'name', key: 'name', render: (v: string) => v || '-' },
     {
@@ -158,7 +168,7 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
       title: '操作',
       key: 'action',
       render: (_: unknown, record: ApiKeyInfo) => (
-        <Popconfirm
+        <><Button type="text" icon={<CopyOutlined />} onClick={() => copyKey('api-keys', record.id)}>复制</Button><Popconfirm
           title="确定删除该应用 API Key？"
           onConfirm={() => handleDeleteAppKey(record.id)}
           okText="删除"
@@ -173,7 +183,7 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
           >
             删除
           </Button>
-        </Popconfirm>
+        </Popconfirm></>
       ),
     },
   ]
@@ -197,7 +207,7 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
       title: '操作',
       key: 'action',
       render: (_: unknown, record: ModelKeyInfo) => (
-        <Popconfirm
+        <><Button type="text" icon={<CopyOutlined />} onClick={() => copyKey('model-keys', record.id)}>复制</Button><Popconfirm
           title="确定删除该虚拟模型 Key？"
           onConfirm={() => handleDeleteModelKey(record.id)}
           okText="删除"
@@ -212,7 +222,7 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
           >
             删除
           </Button>
-        </Popconfirm>
+        </Popconfirm></>
       ),
     },
   ]

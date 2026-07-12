@@ -32,6 +32,7 @@ type AppKeyStore interface {
 	CreateAppAPIKey(context.Context, common.CreateAppAPIKeyInput) (common.AppAPIKey, error)
 	ListAppAPIKeysByUser(context.Context, string) ([]common.AppAPIKey, error)
 	GetAppAPIKeyByPrefix(context.Context, string) (common.AppAPIKey, error)
+	GetAppAPIKeyByID(context.Context, string) (common.AppAPIKey, error)
 	UpdateAppAPIKeyLastUsedAt(context.Context, string, time.Time) error
 	RevokeAppAPIKey(context.Context, string, string) error
 	CreateAppAPIKeyAuditLog(context.Context, common.AppAPIKeyAuditLog) error

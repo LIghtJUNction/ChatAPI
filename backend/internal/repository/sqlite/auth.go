@@ -16,13 +16,14 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input common.CreateAppAPIKe
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO user_app_api_keys(
-			id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		input.ID,
 		input.UserID,
 		input.Name,
 		input.KeyHash,
+		input.KeyCiphertext,
 		input.KeyPrefix,
 		mustJSON(input.Scopes),
 		mustJSON(input.ResourceLimits),
@@ -48,7 +49,7 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input common.CreateAppAPIKe
 
 func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]common.AppAPIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		SELECT id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
 		FROM user_app_api_keys
 		WHERE user_id = ?
 		ORDER BY created_at DESC, id DESC
@@ -71,7 +72,7 @@ func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]comm
 
 func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (common.AppAPIKey, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		SELECT id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
 		FROM user_app_api_keys
 		WHERE key_prefix = ?
 		LIMIT 1
@@ -87,6 +88,14 @@ func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (common
 	return item, nil
 }
 
+func (s *Store) GetAppAPIKeyByID(ctx context.Context, id string) (common.AppAPIKey, error) {
+	item, err := scanAppAPIKey(s.db.QueryRowContext(ctx, `SELECT id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at FROM user_app_api_keys WHERE id = ?`, strings.TrimSpace(id)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return common.AppAPIKey{}, errNotFound
+	}
+	return item, err
+}
+
 func (s *Store) UpdateAppAPIKeyLastUsedAt(ctx context.Context, id string, usedAt time.Time) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE user_app_api_keys
@@ -98,10 +107,8 @@ func (s *Store) UpdateAppAPIKeyLastUsedAt(ctx context.Context, id string, usedAt
 
 func (s *Store) RevokeAppAPIKey(ctx context.Context, id string, userID string) error {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE user_app_api_keys
-		SET revoked_at = ?
-		WHERE id = ? AND user_id = ? AND revoked_at IS NULL
-	`, formatTime(time.Now().UTC()), id, userID)
+		DELETE FROM user_app_api_keys WHERE id = ? AND user_id = ?
+	`, id, userID)
 	if err != nil {
 		return err
 	}
@@ -395,10 +402,8 @@ func (s *Store) UpdateModelAPIKeyLastUsedAt(ctx context.Context, id string, used
 
 func (s *Store) RevokeModelAPIKey(ctx context.Context, id string, userID string) error {
 	result, err := s.db.ExecContext(ctx, `
-		UPDATE user_api_keys
-		SET revoked_at = ?
-		WHERE id = ? AND user_id = ? AND revoked_at IS NULL
-	`, formatTime(time.Now().UTC()), id, userID)
+		DELETE FROM user_api_keys WHERE id = ? AND user_id = ?
+	`, id, userID)
 	if err != nil {
 		return err
 	}

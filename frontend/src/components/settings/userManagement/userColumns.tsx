@@ -9,6 +9,7 @@ type UserColumnsOptions = {
   onOpenPassword: (user: User) => void
   onRoleChange: (user: User, role: 'user' | 'admin') => void
   canManageRoles: boolean
+  onOpenDetail: (user: User) => void
 }
 
 export function buildUserColumns({
@@ -17,6 +18,7 @@ export function buildUserColumns({
   onOpenPassword,
   onRoleChange,
   canManageRoles,
+  onOpenDetail,
 }: UserColumnsOptions) {
   return [
     {
@@ -26,7 +28,7 @@ export function buildUserColumns({
       width: 220,
       render: (username: string, user: User) => (
         <div className="admin-user-identity">
-          <Typography.Text strong>{username}</Typography.Text>
+          <Typography.Link strong onClick={() => onOpenDetail(user)}>{username}</Typography.Link>
           <Typography.Text type="secondary" copyable={{ text: user.id }}>{shortID(user.id)}</Typography.Text>
         </div>
       ),

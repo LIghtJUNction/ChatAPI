@@ -106,6 +106,7 @@ export type Conversation = {
   request_id?: string
   status?: 'waiting' | 'streaming' | 'closed' | 'aborted' | 'disconnected' | 'expired' | string
   draft_text?: string
+  metadata?: Record<string, unknown>
 }
 
 export type TimelineMessageContentPart = {

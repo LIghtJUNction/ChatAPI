@@ -62,5 +62,6 @@ backup.sh
 install_systemd_user.sh
 uninstall_systemd_user.sh
 certs/
+/docs/
 
 backend/docs/*.txt

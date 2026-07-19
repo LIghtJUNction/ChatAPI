@@ -21,7 +21,7 @@ type Store struct {
 var errConflict = common.ErrTurnConflict
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0007_postgresql_conversation_owner_page"
+const LatestVersion = "0009_postgresql_virtual_models"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS
@@ -101,6 +101,7 @@ func Reset(ctx context.Context, pool *pgxpool.Pool) error {
 		DROP TABLE IF EXISTS app_api_key_audit_logs;
 		DROP TABLE IF EXISTS user_app_api_keys;
 		DROP TABLE IF EXISTS user_api_keys;
+		DROP TABLE IF EXISTS user_virtual_models;
 		DROP TABLE IF EXISTS uploaded_images;
 		DROP TABLE IF EXISTS storage_user_quotas;
 		DROP TABLE IF EXISTS storage_file_deletion_failures;

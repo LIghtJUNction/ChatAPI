@@ -30,6 +30,8 @@ export type User = {
   updated_at?: string
   last_login_at?: string
   api_key_count?: number
+  app_api_key_count?: number
+  model_api_key_count?: number
   current_connection_count?: number
 }
 
@@ -66,12 +68,17 @@ export type ApiKeyInfo = {
 export type ModelKeyInfo = {
   id: string
   name: string
-  model?: string
   key_prefix?: string
   created_at: string
   revoked_at?: string | null
   last_used_at?: string | null
   api_key?: string
+}
+
+export type VirtualModelInfo = {
+  id: string
+  name: string
+  created_at: string
 }
 
 export type ApiKeyListResponse = {

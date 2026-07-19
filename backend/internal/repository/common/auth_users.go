@@ -3,29 +3,39 @@ package common
 import "time"
 
 type ModelAPIKey struct {
-	ID            string     `json:"id"`
-	UserID        string     `json:"user_id"`
-	Name          string     `json:"name"`
-	KeyCiphertext string     `json:"-"`
-	KeyPrefix     string     `json:"key_prefix"`
-	Model         string     `json:"model,omitempty"`
-	RawKey        string     `json:"raw_key,omitempty"`
-	LastUsedAt    *time.Time `json:"last_used_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
+	ID            string `json:"id"`
+	UserID        string `json:"user_id"`
+	Name          string `json:"name"`
+	KeyCiphertext string `json:"-"`
+	KeyPrefix     string `json:"key_prefix"`
+	// Model is retained for reading pre-migration rows; virtual models are stored separately.
+	Model      string     `json:"-"`
+	RawKey     string     `json:"raw_key,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+}
+
+type VirtualModel struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type User struct {
-	ID           string     `json:"id"`
-	Username     string     `json:"username,omitempty"`
-	Email        string     `json:"email,omitempty"`
-	PasswordHash string     `json:"-"`
-	Role         string     `json:"role"`
-	IsActive     bool       `json:"is_active"`
-	LocalAdmin   bool       `json:"local_admin"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
+	ID               string     `json:"id"`
+	Username         string     `json:"username,omitempty"`
+	Email            string     `json:"email,omitempty"`
+	PasswordHash     string     `json:"-"`
+	Role             string     `json:"role"`
+	IsActive         bool       `json:"is_active"`
+	LocalAdmin       bool       `json:"local_admin"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	LastLoginAt      *time.Time `json:"last_login_at,omitempty"`
+	AppAPIKeyCount   int        `json:"app_api_key_count"`
+	ModelAPIKeyCount int        `json:"model_api_key_count"`
 }
 
 type UserDeletionPreview struct {

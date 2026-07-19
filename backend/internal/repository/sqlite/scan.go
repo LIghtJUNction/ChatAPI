@@ -278,6 +278,22 @@ func scanUser(scanner userScanner) (common.User, error) {
 	return item, nil
 }
 
+func scanUserWithKeyCounts(scanner userScanner) (common.User, error) {
+	var item common.User
+	var isActive, localAdmin int
+	var createdAt, updatedAt string
+	var lastLoginAt sql.NullString
+	if err := scanner.Scan(&item.ID, &item.Username, &item.Email, &item.PasswordHash, &item.Role, &isActive, &localAdmin, &createdAt, &updatedAt, &lastLoginAt, &item.AppAPIKeyCount, &item.ModelAPIKeyCount); err != nil {
+		return common.User{}, err
+	}
+	item.IsActive, item.LocalAdmin, item.CreatedAt, item.UpdatedAt = isActive != 0, localAdmin != 0, parseTime(createdAt), parseTime(updatedAt)
+	if lastLoginAt.Valid {
+		value := parseTime(lastLoginAt.String)
+		item.LastLoginAt = &value
+	}
+	return item, nil
+}
+
 func scanUserIdentity(scanner userIdentityScanner) (common.UserIdentity, error) {
 	var item common.UserIdentity
 	var emailVerified int

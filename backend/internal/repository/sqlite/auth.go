@@ -308,13 +308,14 @@ func (s *Store) CreateModelAPIKey(ctx context.Context, input common.CreateModelA
 	createdAt := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO user_api_keys(
-			id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, user_id, name, key_ciphertext, key_hash, key_prefix, model, last_used_at, created_at, revoked_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		input.ID,
 		input.UserID,
 		input.Name,
 		input.KeyCiphertext,
+		input.KeyHash,
 		input.KeyPrefix,
 		input.Model,
 		nil,
@@ -355,6 +356,49 @@ func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]co
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *Store) CreateVirtualModel(ctx context.Context, input common.CreateVirtualModelInput) (common.VirtualModel, error) {
+	createdAt := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `INSERT INTO user_virtual_models(id, user_id, name, created_at) VALUES (?, ?, ?, ?)`, input.ID, input.UserID, input.Name, formatTime(createdAt))
+	if err != nil {
+		return common.VirtualModel{}, err
+	}
+	return common.VirtualModel{ID: input.ID, UserID: input.UserID, Name: input.Name, CreatedAt: createdAt}, nil
+}
+
+func (s *Store) ListVirtualModelsByUser(ctx context.Context, userID string) ([]common.VirtualModel, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, user_id, name, created_at FROM user_virtual_models WHERE user_id = ? ORDER BY created_at DESC, id DESC`, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]common.VirtualModel, 0)
+	for rows.Next() {
+		var item common.VirtualModel
+		var createdAt string
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Name, &createdAt); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = parseTime(createdAt)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) DeleteVirtualModel(ctx context.Context, id, userID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM user_virtual_models WHERE id = ? AND user_id = ?`, strings.TrimSpace(id), strings.TrimSpace(userID))
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errNotFound
+	}
+	return nil
 }
 
 func (s *Store) GetModelAPIKeyByPrefix(ctx context.Context, prefix string) (common.ModelAPIKey, error) {
@@ -489,9 +533,10 @@ func (s *Store) UpdateUser(ctx context.Context, input common.UpdateUserInput) (c
 }
 
 func (s *Store) GetUser(ctx context.Context, id string) (common.User, error) {
-	item, err := scanUser(s.db.QueryRowContext(ctx, `
-		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
-		FROM users
+	item, err := scanUserWithKeyCounts(s.db.QueryRowContext(ctx, `
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active, u.local_admin, u.created_at, u.updated_at, u.last_login_at,
+		(SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = u.id), (SELECT COUNT(*) FROM user_api_keys WHERE user_id = u.id)
+		FROM users u
 		WHERE id = ?
 	`, id))
 	if err != nil {
@@ -504,9 +549,10 @@ func (s *Store) GetUser(ctx context.Context, id string) (common.User, error) {
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (common.User, error) {
-	item, err := scanUser(s.db.QueryRowContext(ctx, `
-		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
-		FROM users
+	item, err := scanUserWithKeyCounts(s.db.QueryRowContext(ctx, `
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active, u.local_admin, u.created_at, u.updated_at, u.last_login_at,
+		(SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = u.id), (SELECT COUNT(*) FROM user_api_keys WHERE user_id = u.id)
+		FROM users u
 		WHERE email = ?
 	`, strings.TrimSpace(email)))
 	if err != nil {
@@ -535,8 +581,9 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (common.
 
 func (s *Store) ListUsers(ctx context.Context) ([]common.User, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
-		FROM users
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active, u.local_admin, u.created_at, u.updated_at, u.last_login_at,
+		(SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = u.id), (SELECT COUNT(*) FROM user_api_keys WHERE user_id = u.id)
+		FROM users u
 		ORDER BY created_at DESC, id DESC
 	`)
 	if err != nil {
@@ -546,7 +593,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]common.User, error) {
 
 	items := make([]common.User, 0)
 	for rows.Next() {
-		item, err := scanUser(rows)
+		item, err := scanUserWithKeyCounts(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -566,8 +613,9 @@ func (s *Store) ListUsersPage(ctx context.Context, offset int, limit int) ([]com
 		return nil, 0, err
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
-		FROM users
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active, u.local_admin, u.created_at, u.updated_at, u.last_login_at,
+		(SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = u.id), (SELECT COUNT(*) FROM user_api_keys WHERE user_id = u.id)
+		FROM users u
 		ORDER BY created_at DESC, id DESC
 		LIMIT ? OFFSET ?
 	`, limit, offset)
@@ -577,7 +625,7 @@ func (s *Store) ListUsersPage(ctx context.Context, offset int, limit int) ([]com
 	defer rows.Close()
 	items := make([]common.User, 0, limit)
 	for rows.Next() {
-		item, err := scanUser(rows)
+		item, err := scanUserWithKeyCounts(rows)
 		if err != nil {
 			return nil, 0, err
 		}

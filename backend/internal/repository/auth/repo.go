@@ -48,6 +48,12 @@ type ModelKeyStore interface {
 	RevokeModelAPIKey(context.Context, string, string) error
 }
 
+type VirtualModelStore interface {
+	CreateVirtualModel(context.Context, common.CreateVirtualModelInput) (common.VirtualModel, error)
+	ListVirtualModelsByUser(context.Context, string) ([]common.VirtualModel, error)
+	DeleteVirtualModel(context.Context, string, string) error
+}
+
 type VerificationStore interface {
 	GetAuthVerificationCode(context.Context, string, string) (common.AuthVerificationCode, error)
 	UpsertAuthVerificationCode(context.Context, common.UpsertAuthVerificationCodeInput) (common.AuthVerificationCode, error)
@@ -69,6 +75,7 @@ type Store interface {
 	IdentityStore
 	AppKeyStore
 	ModelKeyStore
+	VirtualModelStore
 	VerificationStore
 	SettingsStore
 }
@@ -76,4 +83,5 @@ type Store interface {
 type KeyStore interface {
 	AppKeyStore
 	ModelKeyStore
+	VirtualModelStore
 }

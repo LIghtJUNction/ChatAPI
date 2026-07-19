@@ -7,7 +7,6 @@ type Principal struct {
 	UserID    string
 	Name      string
 	KeyPrefix string
-	Model     string
 }
 
 type AdmissionInput struct {

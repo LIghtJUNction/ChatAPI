@@ -312,14 +312,14 @@ func (h UserHandler) CreateModelKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name  string `json:"name"`
-		Model string `json:"model"`
+		Name string `json:"name"`
+		Key  string `json:"key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	item, rawKey, err := h.UserControl.Keys.CreateModelKey(r.Context(), pr.UserID, body.Name, body.Model)
+	item, rawKey, err := h.UserControl.Keys.CreateManualModelKey(r.Context(), pr.UserID, body.Name, body.Key)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -327,10 +327,57 @@ func (h UserHandler) CreateModelKey(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "model_key": map[string]any{
 		"id":         item.ID,
 		"name":       item.Name,
-		"model":      item.Model,
 		"created_at": item.CreatedAt,
 		"api_key":    rawKey,
 	}})
+}
+
+func (h UserHandler) ListVirtualModels(w http.ResponseWriter, r *http.Request) {
+	pr, ok := session.PrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		return
+	}
+	items, err := h.UserControl.Keys.ListVirtualModels(r.Context(), pr.UserID)
+	if err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+}
+
+func (h UserHandler) CreateVirtualModel(w http.ResponseWriter, r *http.Request) {
+	pr, ok := session.PrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json body", http.StatusBadRequest)
+		return
+	}
+	item, err := h.UserControl.Keys.CreateVirtualModel(r.Context(), pr.UserID, body.Name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"ok": true, "item": item})
+}
+
+func (h UserHandler) DeleteVirtualModel(w http.ResponseWriter, r *http.Request) {
+	pr, ok := session.PrincipalFromContext(r.Context())
+	if !ok {
+		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if err := h.UserControl.Keys.DeleteVirtualModel(r.Context(), pr.UserID, chi.URLParam(r, "modelID")); err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h UserHandler) RevokeModelKey(w http.ResponseWriter, r *http.Request) {

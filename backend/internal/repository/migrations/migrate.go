@@ -10,7 +10,7 @@ import (
 )
 
 const BootstrapVersion = "0001_bootstrap"
-const LatestVersion = "0009_sqlite_rebuild_api_keys"
+const LatestVersion = "0010_sqlite_virtual_models"
 
 //go:embed sql/*.up.sql
 var migrationFiles embed.FS
@@ -35,6 +35,7 @@ var bootstrapTables = []string{
 	"auth_verification_codes",
 	"automation_rules",
 	"user_api_keys",
+	"user_virtual_models",
 	"users",
 	"config",
 	"messages",

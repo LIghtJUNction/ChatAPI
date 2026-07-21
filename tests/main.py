@@ -23,7 +23,7 @@ ScenarioMode = Literal["assistant_text", "tool_call"]
 
 DEFAULT_BASE_URL = "http://127.0.0.1:5000"
 DEFAULT_USERNAME = "admin"
-DEFAULT_PASSWORD = "change-me"
+DEFAULT_PASSWORD = "admin12345"
 DEFAULT_MODEL = "mock-gpt-4.1-mini"
 
 WORDS = [
@@ -99,12 +99,12 @@ class Scenario:
     provider: ToolProvider
     mode: ScenarioMode
     prompt: str
+    marker: str
     draft_chunks: list[str]
     final_text: str
     tool_name: str
     tool_arguments_text: str
     tool_arguments: dict[str, Any]
-    conversation_title: str
     send_completion_delay: float
     chunk_delay_range: tuple[float, float]
 
@@ -133,9 +133,9 @@ class ApiSession:
         self,
         *,
         base_url: str,
-        api_key: str,
-        username: str,
-        password: str,
+        api_key: str = "",
+        username: str = "",
+        password: str = "",
         timeout_seconds: float,
         verify: bool,
         trust_env: bool,
@@ -148,15 +148,20 @@ class ApiSession:
             trust_env=trust_env,
             follow_redirects=True,
         )
+        # Session cookie writes require a trusted Origin for CSRF validation.
+        self._client.headers.setdefault("Origin", self.base_url)
         self._auth_headers: dict[str, str] = {}
+        self._api_key = api_key
         if api_key:
             self._auth_headers = {"Authorization": f"Bearer {api_key}"}
-        else:
+        elif username and password:
             response = self._client.post(
                 "/api/auth/login",
                 json={"username": username, "password": password},
             )
             response.raise_for_status()
+        else:
+            raise ValueError("api_key or username/password is required")
 
     @property
     def client(self) -> httpx.Client:
@@ -171,17 +176,18 @@ class ApiSession:
         response.raise_for_status()
         return response.json()
 
-    def create_conversation(self, title: str) -> str:
-        payload = self.post_json("/api/conversations", {"title": title})
-        return str(payload["conversation"]["id"])
+    def list_conversations(self) -> list[dict[str, Any]]:
+        response = self._client.get("/api/conversations", headers=self._auth_headers)
+        response.raise_for_status()
+        return list(response.json().get("conversations", []))
 
-    def get_conversation(self, conversation_id: str) -> dict[str, Any]:
+    def get_conversation_messages(self, conversation_id: str) -> list[dict[str, Any]]:
         response = self._client.get(
-            f"/api/conversations/{conversation_id}",
+            f"/api/conversations/{conversation_id}/messages",
             headers=self._auth_headers,
         )
         response.raise_for_status()
-        return response.json()
+        return list(response.json().get("items", []))
 
     def get_automation_rules(self) -> list[dict[str, Any]]:
         response = self._client.get("/api/automation/rules", headers=self._auth_headers)
@@ -204,6 +210,20 @@ class ApiSession:
             restored.append(dict(payload["rule"]))
         return restored
 
+    def create_model_key(self, name: str, key: str) -> str:
+        payload = self.post_json(
+            "/api/user/model-keys",
+            {"name": name, "key": key},
+        )
+        return str(payload["model_key"]["api_key"])
+
+    def create_app_key(self, name: str, scopes: list[str]) -> str:
+        payload = self.post_json(
+            "/api/user/app-keys",
+            {"name": name, "scopes": scopes},
+        )
+        return str(payload["api_key"]["api_key"])
+
     def add_output_delta(self, conversation_id: str, request_id: str, text: str) -> None:
         self.post_json(
             "/api/chat/output/delta",
@@ -220,20 +240,15 @@ class ApiSession:
         conversation_id: str,
         request_id: str,
         mode: ScenarioMode,
-        final_text: str,
-        model: str,
         tool_name: str,
         tool_arguments_text: str,
     ) -> None:
         payload: dict[str, Any] = {
             "conversation_id": conversation_id,
             "request_id": request_id,
-            "model": model,
             "mode": "assistant_message" if mode == "assistant_text" else "tool_call",
         }
-        if mode == "assistant_text":
-            payload["text"] = final_text
-        else:
+        if mode == "tool_call":
             payload["tool_name"] = tool_name
             payload["text"] = tool_arguments_text
         self.post_json("/api/chat/output/complete", payload)
@@ -251,17 +266,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--api-key",
         default=os.environ.get("CHATAPI_API_KEY", backend_env.get("CHATAPI_API_KEY", "")),
-        help="如果后端启用了 CHATAPI_API_KEY，优先使用它",
+        help="如果已有一个 model key，可跳过自动创建（但仍需用户名密码创建 app key）",
     )
     parser.add_argument(
         "--username",
         default=os.environ.get("CHATAPI_USERNAME", backend_env.get("CHATAPI_USERNAME", DEFAULT_USERNAME)),
-        help="未提供 API key 时使用的用户名",
+        help="管理员用户名，用于登录和创建 key",
     )
     parser.add_argument(
         "--password",
         default=os.environ.get("CHATAPI_PASSWORD", backend_env.get("CHATAPI_PASSWORD", DEFAULT_PASSWORD)),
-        help="未提供 API key 时使用的密码",
+        help="管理员密码，用于登录和创建 key",
     )
     parser.add_argument("--model", default=DEFAULT_MODEL, help="请求里传入的模型名")
     parser.add_argument("--requests", type=int, default=24, help="总请求数")
@@ -348,22 +363,18 @@ def build_scenario(index: int, providers: list[ToolProvider], args: argparse.Nam
     rng = make_rng(args.seed, index)
     provider = providers[index % len(providers)]
     mode: ScenarioMode = "tool_call" if rng.random() < args.tool_call_rate else "assistant_text"
+    marker = f"fuzz-{index}-{uuid.uuid4().hex[:8]}"
     prompt = (
         f"scenario {index}: please stream output in chunks, sometimes end with a tool call, "
-        f"and never repeat the final suffix. payload={random_sentence(rng, min_words=5, max_words=10)}"
+        f"and never repeat the final suffix. marker={marker} payload={random_sentence(rng, min_words=5, max_words=10)}"
     )
 
-    full_draft_seed = random_output_text(
+    final_text = random_output_text(
         rng,
         min_units=max(4, args.max_chunk_words),
         max_units=max(10, args.max_chunk_words * max(2, args.max_draft_chunks // 2)),
     )
-    draft_chunks = split_text_into_chunks(rng, full_draft_seed, args.max_draft_chunks)
-
-    extra_suffix = ""
-    if mode == "assistant_text" and rng.random() < 0.55:
-        extra_suffix = random_output_text(rng, min_units=3, max_units=args.max_chunk_words)
-    final_text = "".join(draft_chunks) + extra_suffix
+    draft_chunks = split_text_into_chunks(rng, final_text, args.max_draft_chunks)
 
     if mode == "tool_call" and rng.random() < 0.25:
         draft_chunks = []
@@ -371,19 +382,18 @@ def build_scenario(index: int, providers: list[ToolProvider], args: argparse.Nam
     tool_name = rng.choice(TOOL_NAMES)
     tool_arguments = build_tool_arguments(rng)
     tool_arguments_text = json.dumps(tool_arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    title_suffix = "".join(rng.choice(string.ascii_lowercase) for _ in range(6))
 
     return Scenario(
         index=index,
         provider=provider,
         mode=mode,
         prompt=prompt,
+        marker=marker,
         draft_chunks=draft_chunks,
         final_text=final_text,
         tool_name=tool_name,
         tool_arguments_text=tool_arguments_text,
         tool_arguments=tool_arguments,
-        conversation_title=f"stream-fuzz-{provider}-{index}-{title_suffix}",
         send_completion_delay=rng.uniform(0.01, 0.12),
         chunk_delay_range=(0.01, 0.08),
     )
@@ -450,25 +460,30 @@ def tail_repeat_note(expected: str, observed: str) -> str:
 def run_output_driver(
     api_session: ApiSession,
     scenario: Scenario,
-    conversation_id: str,
-    model: str,
     timeout_seconds: float,
     error_queue: Queue[str],
+    result_queue: Queue[dict[str, str]],
 ) -> None:
     rng = make_rng(10_000_000 + scenario.index, scenario.index)
     started_at = time.perf_counter()
     try:
+        conversation_id = ""
         request_id = ""
         while True:
-            conversation_payload = api_session.get_conversation(conversation_id)
-            metadata = conversation_payload.get("conversation", {}).get("metadata", {})
-            if metadata.get("realtime_status") == "waiting":
-                request_id = str(metadata.get("request_id", "")).strip()
+            items = api_session.list_conversations()
+            for item in items:
+                if scenario.marker in (item.get("last_user_text") or "") and item.get("status") == "waiting":
+                    conversation_id = str(item["id"])
+                    request_id = str(item.get("request_id", ""))
+                    break
+            if conversation_id:
                 break
             if time.perf_counter() - started_at > timeout_seconds:
-                raise TimeoutError("conversation never entered waiting state")
-            time.sleep(0.02)
+                raise TimeoutError("conversation with marker did not appear")
+            time.sleep(0.05)
 
+        if not conversation_id:
+            raise RuntimeError("matching waiting conversation not found")
         if not request_id:
             raise RuntimeError("waiting conversation did not expose request_id")
 
@@ -480,11 +495,10 @@ def run_output_driver(
             conversation_id=conversation_id,
             request_id=request_id,
             mode=scenario.mode,
-            final_text=scenario.final_text,
-            model=model,
             tool_name=scenario.tool_name,
             tool_arguments_text=scenario.tool_arguments_text,
         )
+        result_queue.put({"conversation_id": conversation_id, "request_id": request_id})
     except Exception as exc:
         error_queue.put(f"{type(exc).__name__}: {exc}")
 
@@ -492,7 +506,6 @@ def run_output_driver(
 def consume_openai_stream(
     client: OpenAI,
     scenario: Scenario,
-    conversation_id: str,
     model: str,
 ) -> tuple[str, str, str, list[str]]:
     observed_text_parts: list[str] = []
@@ -504,7 +517,6 @@ def consume_openai_stream(
         messages=[{"role": "user", "content": scenario.prompt}],
         tools=build_openai_tools(scenario),
         stream=True,
-        extra_body={"conversation_id": conversation_id},
     )
     for chunk in stream:
         for choice in chunk.choices:
@@ -525,7 +537,6 @@ def consume_openai_stream(
 def consume_anthropic_stream(
     client: Anthropic,
     scenario: Scenario,
-    conversation_id: str,
     model: str,
 ) -> tuple[str, str, str, list[str]]:
     observed_text_parts: list[str] = []
@@ -538,7 +549,6 @@ def consume_anthropic_stream(
         messages=[{"role": "user", "content": scenario.prompt}],
         tools=build_anthropic_tools(scenario),
         stream=True,
-        extra_body={"conversation_id": conversation_id},
     )
     for event in stream:
         if event.type == "content_block_delta" and getattr(event.delta, "type", "") == "text_delta":
@@ -557,16 +567,22 @@ def consume_anthropic_stream(
     )
 
 
-def run_one_scenario(args: argparse.Namespace, scenario: Scenario, print_lock: threading.Lock) -> ScenarioResult:
+def run_one_scenario(
+    args: argparse.Namespace,
+    scenario: Scenario,
+    model_key: str,
+    app_key: str,
+    print_lock: threading.Lock,
+) -> ScenarioResult:
     start = time.perf_counter()
-    api_session: ApiSession | None = None
+    control_session: ApiSession | None = None
     shared_http_client: httpx.Client | None = None
     try:
-        api_session = ApiSession(
+        control_session = ApiSession(
             base_url=args.base_url,
-            api_key=args.api_key,
-            username=args.username,
-            password=args.password,
+            api_key=app_key,
+            username="",
+            password="",
             timeout_seconds=args.timeout,
             verify=args.verify,
             trust_env=args.trust_env,
@@ -577,32 +593,29 @@ def run_one_scenario(args: argparse.Namespace, scenario: Scenario, print_lock: t
             trust_env=args.trust_env,
             follow_redirects=True,
         )
-        conversation_id = api_session.create_conversation(scenario.conversation_title)
         if scenario.provider == "openai":
             sdk_client = OpenAI(
-                api_key=args.api_key or "local-test-key",
+                api_key=model_key,
                 base_url=f"{args.base_url.rstrip('/')}/v1",
                 http_client=shared_http_client,
-                default_headers=api_session.auth_headers,
             )
         else:
             sdk_client = Anthropic(
-                api_key=args.api_key or "local-test-key",
+                api_key=model_key,
                 base_url=args.base_url.rstrip('/'),
                 http_client=shared_http_client,
-                default_headers=api_session.auth_headers,
             )
 
         driver_error_queue: Queue[str] = Queue()
+        driver_result_queue: Queue[dict[str, str]] = Queue()
         driver_thread = threading.Thread(
             target=run_output_driver,
             kwargs={
-                "api_session": api_session,
+                "api_session": control_session,
                 "scenario": scenario,
-                "conversation_id": conversation_id,
-                "model": args.model,
                 "timeout_seconds": args.timeout,
                 "error_queue": driver_error_queue,
+                "result_queue": driver_result_queue,
             },
             daemon=True,
         )
@@ -612,14 +625,12 @@ def run_one_scenario(args: argparse.Namespace, scenario: Scenario, print_lock: t
             observed_text, observed_tool_name, observed_tool_arguments, finish_reasons = consume_openai_stream(
                 sdk_client,
                 scenario,
-                conversation_id,
                 args.model,
             )
         else:
             observed_text, observed_tool_name, observed_tool_arguments, finish_reasons = consume_anthropic_stream(
                 sdk_client,
                 scenario,
-                conversation_id,
                 args.model,
             )
 
@@ -628,6 +639,9 @@ def run_one_scenario(args: argparse.Namespace, scenario: Scenario, print_lock: t
             raise TimeoutError("output driver did not finish in time")
         if not driver_error_queue.empty():
             raise RuntimeError(driver_error_queue.get())
+
+        driver_result = driver_result_queue.get() if not driver_result_queue.empty() else {}
+        conversation_id = driver_result.get("conversation_id", "")
 
         notes: list[str] = []
         ok = True
@@ -690,8 +704,8 @@ def run_one_scenario(args: argparse.Namespace, scenario: Scenario, print_lock: t
     finally:
         if shared_http_client is not None:
             shared_http_client.close()
-        if api_session is not None:
-            api_session.close()
+        if control_session is not None:
+            control_session.close()
         if args.verbose:
             with print_lock:
                 print(f"[debug] finished scenario {scenario.index} provider={scenario.provider} mode={scenario.mode}")
@@ -752,9 +766,10 @@ def main() -> int:
     providers = [provider for provider in args.providers]
     scenarios = [build_scenario(index, providers, args) for index in range(args.requests)]
     print_lock = threading.Lock()
+
     setup_session = ApiSession(
         base_url=args.base_url,
-        api_key=args.api_key,
+        api_key="",
         username=args.username,
         password=args.password,
         timeout_seconds=args.timeout,
@@ -762,6 +777,19 @@ def main() -> int:
         trust_env=args.trust_env,
     )
     original_rules: list[dict[str, Any]] | None = None
+
+    if args.api_key:
+        model_key = args.api_key
+    else:
+        model_key = setup_session.create_model_key(
+            name="fuzz-model-key",
+            key=f"sk-{uuid.uuid4().hex}",
+        )
+
+    app_key = setup_session.create_app_key(
+        name="fuzz-app-key",
+        scopes=["requests:read", "requests:respond", "conversations:read"],
+    )
 
     print(
         f"Running {len(scenarios)} scenarios against {args.base_url} "
@@ -778,7 +806,7 @@ def main() -> int:
         results: list[ScenarioResult] = []
         with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
             future_map = {
-                executor.submit(run_one_scenario, args, scenario, print_lock): scenario
+                executor.submit(run_one_scenario, args, scenario, model_key, app_key, print_lock): scenario
                 for scenario in scenarios
             }
             for future in as_completed(future_map):

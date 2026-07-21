@@ -217,7 +217,7 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 	workspaceHub = workspacesvc.NewHub(workspaceService)
 	turnService.Events = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(workspaceHub))
 	modelKeyService := modelkey.NewService(st, "test-master-key")
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
@@ -404,7 +404,7 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 	workspaceHub = workspacesvc.NewHub(workspaceService)
 	turnService.Events = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(workspaceHub))
 	modelKeyService := modelkey.NewService(st, "test-master-key")
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
@@ -549,7 +549,7 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 	workspaceHub = workspacesvc.NewHub(workspaceService)
 	turnService.Events = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(workspaceHub))
 	modelKeyService := modelkey.NewService(st, "test-master-key")
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{

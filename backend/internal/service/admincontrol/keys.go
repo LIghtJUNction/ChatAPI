@@ -8,7 +8,17 @@ import (
 )
 
 func (s *Service) ListAppKeys(ctx context.Context, userID string) ([]common.AppAPIKey, error) {
-	return s.keyStore.ListAppAPIKeysByUser(ctx, strings.TrimSpace(userID))
+	items, err := s.keyStore.ListAppAPIKeysByUser(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	active := make([]common.AppAPIKey, 0, len(items))
+	for _, item := range items {
+		if item.RevokedAt == nil {
+			active = append(active, item)
+		}
+	}
+	return active, nil
 }
 
 func (s *Service) RevokeAppKey(ctx context.Context, userID string, keyID string) error {
@@ -16,7 +26,17 @@ func (s *Service) RevokeAppKey(ctx context.Context, userID string, keyID string)
 }
 
 func (s *Service) ListModelKeys(ctx context.Context, userID string) ([]common.ModelAPIKey, error) {
-	return s.keyStore.ListModelAPIKeysByUser(ctx, strings.TrimSpace(userID))
+	items, err := s.keyStore.ListModelAPIKeysByUser(ctx, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	active := make([]common.ModelAPIKey, 0, len(items))
+	for _, item := range items {
+		if item.RevokedAt == nil {
+			active = append(active, item)
+		}
+	}
+	return active, nil
 }
 
 func (s *Service) RevokeModelKey(ctx context.Context, userID string, keyID string) error {

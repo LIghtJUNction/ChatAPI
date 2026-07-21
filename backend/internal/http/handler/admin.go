@@ -101,6 +101,32 @@ func (h AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "user": item})
 }
 
+func (h AdminHandler) ListUserConversations(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
+	if _, err := h.Control.GetUser(r.Context(), userID); err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	items, err := h.Control.ListUserConversations(r.Context(), userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(items), "items": items})
+}
+
+func (h AdminHandler) DeleteUserConversation(w http.ResponseWriter, r *http.Request) {
+	userID := strings.TrimSpace(chi.URLParam(r, "userID"))
+	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
+	result, err := h.Control.DeleteUserConversation(r.Context(), userID, conversationID)
+	if err != nil {
+		http.Error(w, err.Error(), statusForStoreError(err))
+		return
+	}
+	h.record(r, "admin.user", "conversation", conversationID, "delete", "success", map[string]any{"user_id": userID})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
+}
+
 func (h AdminHandler) SetUserRole(w http.ResponseWriter, r *http.Request) {
 	pr, ok := actor.FromContext(r.Context())
 	if !ok {

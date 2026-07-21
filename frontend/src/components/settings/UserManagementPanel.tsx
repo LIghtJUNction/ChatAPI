@@ -5,6 +5,7 @@ import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
 import { useUserManagementState } from './userManagement/useUserManagementState'
 import { buildUserColumns } from './userManagement/userColumns'
 import { UserPasswordModal } from './userManagement/UserPasswordModal'
+import { UserSessionsModal } from './userManagement/UserSessionsModal'
 
 type UserManagementPanelProps = {
   open: boolean
@@ -16,6 +17,8 @@ export function UserManagementPanel({ open, currentRole }: UserManagementPanelPr
   const {
     creating,
     deletingId,
+    detailModalOpen,
+    detailUser,
     form,
     handleCreate,
     handleDelete,
@@ -25,6 +28,7 @@ export function UserManagementPanel({ open, currentRole }: UserManagementPanelPr
     page,
     pageSize,
     openPasswordModal,
+    openDetailModal,
     pwForm,
     pwModalOpen,
     pwSubmitting,
@@ -34,6 +38,7 @@ export function UserManagementPanel({ open, currentRole }: UserManagementPanelPr
     setPage,
     setPageSize,
     totalUsers,
+    closeDetailModal,
   } = useUserManagementState(open)
 
   const columns = buildUserColumns({
@@ -42,6 +47,7 @@ export function UserManagementPanel({ open, currentRole }: UserManagementPanelPr
     onOpenPassword: openPasswordModal,
     onRoleChange: handleRoleChange,
     canManageRoles: currentRole === 'superadmin',
+    onOpenDetail: openDetailModal,
   })
 
   return (
@@ -131,6 +137,7 @@ export function UserManagementPanel({ open, currentRole }: UserManagementPanelPr
         onCancel={setPwModalOpen}
         onSubmit={handlePasswordChange}
       />
+      <UserSessionsModal open={detailModalOpen} user={detailUser} onClose={closeDetailModal} />
     </div>
   )
 }

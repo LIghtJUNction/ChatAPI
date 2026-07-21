@@ -1471,6 +1471,18 @@
   box-shadow: none;
 }
 
+.user-session-message {
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-bg-panel-strong);
+}
+
+.user-session-message .ant-typography {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+}
+
 .totp-section {
   border-radius: 18px;
   border: 1px solid var(--app-border);

@@ -99,7 +99,7 @@ func TestRouterUserFlow(t *testing.T) {
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
 	identityService := identity.NewService(accountService)
 	modelKeyService := modelkey.NewService(st, "test-master-key")
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
 	pending := pendingsvc.NewPendingRegistry()
 	pending.Logger = logFactory.Layer(logging.LayerPending)
@@ -252,8 +252,8 @@ func TestRouterUserFlow(t *testing.T) {
 		t.Fatalf("unexpected initial model keys: %#v", modelKeysResp)
 	}
 	createModelResp := postJSONWithCookie(t, server.URL+"/api/user/model-keys", map[string]any{
-		"name":  "extra-model",
-		"model": "demo-model-2",
+		"name": "extra-model",
+		"key":  "demo-model-2",
 	}, userCookie, http.StatusCreated)
 	modelKey := createModelResp["model_key"].(map[string]any)
 	deleteJSONWithCookie(t, server.URL+"/api/user/model-keys/"+modelKey["id"].(string), userCookie, http.StatusOK)

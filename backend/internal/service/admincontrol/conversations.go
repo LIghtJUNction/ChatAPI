@@ -6,12 +6,17 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
 
 func (s *Service) ListConversations(ctx context.Context) ([]common.Conversation, error) {
 	return s.chatStore.ListConversations(ctx)
+}
+
+func (s *Service) ListUserConversations(ctx context.Context, userID string) ([]common.Conversation, error) {
+	return s.query.ListConversationsForOwner(ctx, strings.TrimSpace(userID))
 }
 
 func (s *Service) ListMessages(ctx context.Context, conversationID string) ([]common.Message, error) {
@@ -52,4 +57,15 @@ func (s *Service) DeleteConversation(ctx context.Context, conversationID string)
 		chatevents.PublishDeletedConversations(ctx, s.events, result)
 	}
 	return result, err
+}
+
+func (s *Service) DeleteUserConversation(ctx context.Context, userID string, conversationID string) (common.DeleteConversationsResult, error) {
+	conversation, err := s.chatStore.GetConversation(ctx, strings.TrimSpace(conversationID))
+	if err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	if conversationstate.OwnerID(conversation) != strings.TrimSpace(userID) {
+		return common.DeleteConversationsResult{}, common.ErrNotFound
+	}
+	return s.DeleteConversation(ctx, conversationID)
 }

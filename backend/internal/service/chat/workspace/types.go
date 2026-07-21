@@ -11,25 +11,27 @@ import (
 )
 
 type ConversationSummary struct {
-	ID                 string                   `json:"id"`
-	Title              string                   `json:"title"`
-	LastUserText       string                   `json:"last_user_text"`
-	CreatedAt          time.Time                `json:"created_at"`
-	UpdatedAt          time.Time                `json:"updated_at"`
-	LastMessageAt      time.Time                `json:"last_message_at"`
-	MessageCount       int                      `json:"message_count"`
-	LastMessagePreview string                   `json:"last_message_preview"`
-	RequestFormat      string                   `json:"request_format,omitempty"`
-	RequestID          string                   `json:"request_id,omitempty"`
-	Status             conversationstate.Status `json:"status,omitempty"`
-	DraftText          string                   `json:"draft_text,omitempty"`
+	ID                 string                       `json:"id"`
+	Title              string                       `json:"title"`
+	LastUserText       string                       `json:"last_user_text"`
+	CreatedAt          time.Time                    `json:"created_at"`
+	UpdatedAt          time.Time                    `json:"updated_at"`
+	LastMessageAt      time.Time                    `json:"last_message_at"`
+	MessageCount       int                          `json:"message_count"`
+	LastMessagePreview string                       `json:"last_message_preview"`
+	RequestFormat      string                       `json:"request_format,omitempty"`
+	RequestID          string                       `json:"request_id,omitempty"`
+	Status             conversationstate.Status     `json:"status,omitempty"`
+	DraftText          string                       `json:"draft_text,omitempty"`
+	DraftSegments      []TimelineMessageContentPart `json:"draft_output_segments,omitempty"`
 }
 
 type TimelineMessageContentPart struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	Src       string `json:"src,omitempty"`
-	MediaType string `json:"media_type,omitempty"`
+	Type                string `json:"type"`
+	Text                string `json:"text,omitempty"`
+	Src                 string `json:"src,omitempty"`
+	MediaType           string `json:"media_type,omitempty"`
+	ReasoningStreamMode string `json:"reasoning_stream_mode,omitempty"`
 }
 
 type TimelineMessage struct {
@@ -86,6 +88,28 @@ type CommandError struct {
 	Message        string `json:"message"`
 }
 
+func draftPartsFromSegments(segments []common.OutputSegment) []TimelineMessageContentPart {
+	if len(segments) == 0 {
+		return nil
+	}
+	parts := make([]TimelineMessageContentPart, 0, len(segments))
+	for _, segment := range segments {
+		if segment.Text == "" {
+			continue
+		}
+		partType := "text"
+		if conversationstate.SegmentMode(segment.Mode) == "thinking" {
+			partType = "thinking"
+		}
+		parts = append(parts, TimelineMessageContentPart{
+			Type:                partType,
+			Text:                segment.Text,
+			ReasoningStreamMode: segment.ReasoningStreamMode,
+		})
+	}
+	return parts
+}
+
 func SummaryFromConversation(conversation common.Conversation) ConversationSummary {
 	summary := conversationstate.SummaryFromConversation(conversation)
 	return ConversationSummary{
@@ -101,6 +125,7 @@ func SummaryFromConversation(conversation common.Conversation) ConversationSumma
 		RequestID:          summary.RequestID,
 		Status:             summary.Status,
 		DraftText:          summary.DraftText,
+		DraftSegments:      draftPartsFromSegments(summary.DraftSegments),
 	}
 }
 
@@ -147,6 +172,7 @@ func buildEventContentParts(event common.ConversationEvent) []TimelineMessageCon
 }
 
 func buildMessageContentParts(message common.Message) []TimelineMessageContentPart {
+	// User-side request reconstruction still wins for request messages with images.
 	requestDebug, _ := message.Metadata["request_debug"].(map[string]any)
 	requestBody, _ := requestDebug["request_body"].(map[string]any)
 	requestFormat, _ := requestDebug["request_format"].(string)
@@ -154,10 +180,55 @@ func buildMessageContentParts(message common.Message) []TimelineMessageContentPa
 	if len(parts) != 0 {
 		return parts
 	}
-	if strings.TrimSpace(message.Content) == "" {
-		return nil
+	// Tool turns own tool payload fields, not ordinary answer/thinking segments.
+	// Historical dirty tool rows may still carry leftover output_segments; ignore them.
+	// Content is the authoritative typed text so the frontend never legacy-parses
+	// tool arguments/output that may literally contain <think>...</think>.
+	if isToolResponseMode(message.Metadata) {
+		if message.Content == "" {
+			return nil
+		}
+		return []TimelineMessageContentPart{{Type: "text", Text: message.Content}}
 	}
-	return []TimelineMessageContentPart{{Type: "text", Text: message.Content}}
+	// New assistant turns expose typed segments so the workspace never re-parses
+	// tags from Content. Historical messages without segments omit content_parts so
+	// the frontend can apply legacy <think> fallback from Content only in that case.
+	if segments := conversationstate.DecodeOutputSegments(message.Metadata["output_segments"]); len(segments) > 0 {
+		typed := make([]TimelineMessageContentPart, 0, len(segments))
+		for _, segment := range segments {
+			if segment.Text == "" {
+				continue
+			}
+			partType := "text"
+			if conversationstate.SegmentMode(segment.Mode) == "thinking" {
+				partType = "thinking"
+			}
+			typed = append(typed, TimelineMessageContentPart{
+				Type:                partType,
+				Text:                segment.Text,
+				ReasoningStreamMode: segment.ReasoningStreamMode,
+			})
+		}
+		if len(typed) > 0 {
+			return typed
+		}
+	}
+	// No authoritative typed segments: omit content_parts entirely. Fabricating a
+	// single text part would short-circuit frontend legacy <think> parsing.
+	return nil
+}
+
+func isToolResponseMode(metadata map[string]any) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	mode, _ := metadata["response_mode"].(string)
+	switch strings.TrimSpace(mode) {
+	case "tool_call", "tool_result":
+		return true
+	default:
+		return false
+	}
 }
 
 func partsFromRequestBody(requestFormat string, body map[string]any) []TimelineMessageContentPart {

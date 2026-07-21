@@ -9,6 +9,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 )
 
 type NewStoreFunc func(t *testing.T) repositorycontract.Store
@@ -1636,25 +1637,44 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("expected two requests, got %#v", requests)
 	}
 
+	draftSegments := []common.OutputSegment{
+		{Mode: "thinking", Text: "alpha", ReasoningStreamMode: "summary"},
+		{Mode: "answer", Text: "beta"},
+		{Mode: "thinking", Text: "gamma", ReasoningStreamMode: "reasoning"},
+		{Mode: "answer", Text: "delta"},
+	}
 	draftConversation, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
 		ConversationID: firstConversation.ID,
-		DraftText:      "draft answer",
+		DraftText:      conversationstate.ContentFromSegments(draftSegments),
+		OutputSegments: draftSegments,
 	})
 	if err != nil {
 		t.Fatalf("update draft: %v", err)
 	}
-	if draftConversation.Metadata["realtime_status"] != "streaming" || draftConversation.Metadata["realtime_draft_text"] != "draft answer" {
+	if draftConversation.Metadata["realtime_status"] != "streaming" || draftConversation.Metadata["realtime_draft_text"] != "betadelta" {
 		t.Fatalf("unexpected draft conversation: %#v", draftConversation)
 	}
+	// Real repository re-read after UpdateDraft — not the in-memory return value alone.
+	reloadedDraft, err := st.GetConversation(ctx, firstConversation.ID)
+	if err != nil {
+		t.Fatalf("reload draft conversation: %v", err)
+	}
+	assertOutputSegmentsEqual(t, conversationstate.DecodeOutputSegments(reloadedDraft.Metadata["realtime_output_segments"]), draftSegments)
 
+	// Completing as tool_call must not persist draft answer/thinking segments. Tool
+	// payload lives in Content/arguments; output_segments must be empty/omitted.
+	toolArgs := `{"city":"Hangzhou"}`
 	completedConversation, completedMessage, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
 		ConversationID:      firstConversation.ID,
 		ResponseID:          "resp_waiting",
-		OutputText:          "",
+		OutputText:          toolArgs,
 		Mode:                "tool_call",
 		ToolName:            "tool_a",
 		ToolCallID:          "call_1",
 		ReasoningStreamMode: "summary",
+		// Even if a caller still forwards leftover draft segments, storage must drop them.
+		OutputSegments: draftSegments,
+		OutputPreview:  toolArgs,
 	})
 	if err != nil {
 		t.Fatalf("complete pending turn: %v", err)
@@ -1662,8 +1682,35 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	if completedConversation.MessageCount != 2 || completedConversation.Metadata["realtime_status"] != "closed" {
 		t.Fatalf("unexpected completed conversation: %#v", completedConversation)
 	}
-	if completedMessage.Content != "draft answer" || completedMessage.Metadata["tool_name"] != "tool_a" || completedMessage.Metadata["arguments"] != "draft answer" {
+	if completedMessage.Content != toolArgs || completedMessage.Metadata["tool_name"] != "tool_a" || completedMessage.Metadata["arguments"] != toolArgs {
 		t.Fatalf("unexpected completed message: %#v", completedMessage)
+	}
+	if completedMessage.Metadata["response_mode"] != "tool_call" {
+		t.Fatalf("tool completion lost response_mode: %#v", completedMessage.Metadata)
+	}
+	if segs := conversationstate.DecodeOutputSegments(completedMessage.Metadata["output_segments"]); len(segs) != 0 {
+		t.Fatalf("tool_call must not persist output_segments: %#v", segs)
+	}
+	// Real List/Get after Complete — exercises JSON marshal/unmarshal key stability.
+	messages, err := st.ListMessages(ctx, firstConversation.ID)
+	if err != nil {
+		t.Fatalf("list messages after complete: %v", err)
+	}
+	var reloadedMessage common.Message
+	for _, item := range messages {
+		if item.ID == completedMessage.ID {
+			reloadedMessage = item
+			break
+		}
+	}
+	if reloadedMessage.ID == "" {
+		t.Fatalf("completed message missing from ListMessages: %#v", messages)
+	}
+	if segs := conversationstate.DecodeOutputSegments(reloadedMessage.Metadata["output_segments"]); len(segs) != 0 {
+		t.Fatalf("reloaded tool_call must not keep output_segments: %#v", segs)
+	}
+	if reloadedMessage.Content != toolArgs || reloadedMessage.Metadata["arguments"] != toolArgs {
+		t.Fatalf("reloaded tool payload changed: %#v", reloadedMessage)
 	}
 
 	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
@@ -1680,6 +1727,107 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	}); !errors.Is(err, common.ErrTurnConflict) {
 		t.Fatalf("expected ErrTurnConflict completing closed turn, got %v", err)
 	}
+
+	// tool_result with empty OutputText must materialize Content/metadata.output from ToolOutput
+	// and must not inherit stale draft answer text (symmetric SQLite/Postgres).
+	toolResultConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_tool_result_payload",
+		RequestID:      "req_tool_result_payload",
+		ResponseID:     "resp_tool_result_payload",
+		OwnerID:        "user_a",
+		RequestFormat:  "responses",
+		Model:          "gpt-test",
+		UserContent:    "tool result payload",
+	})
+	if err != nil {
+		t.Fatalf("create tool_result pending turn: %v", err)
+	}
+	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
+		ConversationID: toolResultConversation.ID,
+		DraftText:      "stale draft answer",
+		OutputSegments: draftSegments,
+	}); err != nil {
+		t.Fatalf("update tool_result draft: %v", err)
+	}
+	toolResultPayload := `{"ok":true}`
+	toolResultCompleted, toolResultMessage, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
+		ConversationID: toolResultConversation.ID,
+		ResponseID:     "resp_tool_result_payload",
+		Mode:           "tool_result",
+		ToolCallID:     "call_result_1",
+		ToolOutput:     toolResultPayload,
+		// OutputText intentionally empty: repository fail-safe must use ToolOutput.
+		OutputSegments: draftSegments,
+		OutputPreview:  toolResultPayload,
+	})
+	if err != nil {
+		t.Fatalf("complete tool_result pending turn: %v", err)
+	}
+	if toolResultCompleted.MessageCount != 2 || toolResultCompleted.Metadata["realtime_status"] != "closed" {
+		t.Fatalf("unexpected tool_result conversation: %#v", toolResultCompleted)
+	}
+	if toolResultMessage.Content != toolResultPayload {
+		t.Fatalf("tool_result Content must come from ToolOutput, got %q", toolResultMessage.Content)
+	}
+	if toolResultMessage.Metadata["response_mode"] != "tool_result" || toolResultMessage.Metadata["output"] != toolResultPayload {
+		t.Fatalf("tool_result metadata incomplete: %#v", toolResultMessage.Metadata)
+	}
+	if segs := conversationstate.DecodeOutputSegments(toolResultMessage.Metadata["output_segments"]); len(segs) != 0 {
+		t.Fatalf("tool_result must not persist output_segments: %#v", segs)
+	}
+	toolResultMessages, err := st.ListMessages(ctx, toolResultConversation.ID)
+	if err != nil {
+		t.Fatalf("list messages after tool_result complete: %v", err)
+	}
+	var reloadedToolResult common.Message
+	for _, item := range toolResultMessages {
+		if item.ID == toolResultMessage.ID {
+			reloadedToolResult = item
+			break
+		}
+	}
+	if reloadedToolResult.ID == "" {
+		t.Fatalf("tool_result message missing from ListMessages: %#v", toolResultMessages)
+	}
+	if reloadedToolResult.Content != toolResultPayload || reloadedToolResult.Metadata["output"] != toolResultPayload {
+		t.Fatalf("reloaded tool_result payload changed: %#v", reloadedToolResult)
+	}
+
+	// Ordinary assistant completion still persists structured segments (symmetric SQLite/PG).
+	ordinaryConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_segments",
+		RequestID:      "req_segments",
+		ResponseID:     "resp_segments",
+		OwnerID:        "user_a",
+		RequestFormat:  "responses",
+		Model:          "gpt-test",
+		UserContent:    "segmented answer",
+	})
+	if err != nil {
+		t.Fatalf("create ordinary pending turn: %v", err)
+	}
+	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
+		ConversationID: ordinaryConversation.ID,
+		DraftText:      conversationstate.ContentFromSegments(draftSegments),
+		OutputSegments: draftSegments,
+	}); err != nil {
+		t.Fatalf("update ordinary draft: %v", err)
+	}
+	ordinaryCompleted, ordinaryMessage, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
+		ConversationID: ordinaryConversation.ID,
+		ResponseID:     "resp_segments",
+		OutputText:     conversationstate.ContentFromSegments(draftSegments),
+		Mode:           "assistant_message",
+		OutputSegments: draftSegments,
+		OutputPreview:  conversationstate.PreviewFromSegments(draftSegments),
+	})
+	if err != nil {
+		t.Fatalf("complete ordinary pending turn: %v", err)
+	}
+	if ordinaryCompleted.MessageCount != 2 || ordinaryMessage.Content != "betadelta" {
+		t.Fatalf("unexpected ordinary completion: conv=%#v msg=%#v", ordinaryCompleted, ordinaryMessage)
+	}
+	assertOutputSegmentsEqual(t, conversationstate.DecodeOutputSegments(ordinaryMessage.Metadata["output_segments"]), draftSegments)
 
 	abortedResult, err := st.AbortPendingTurnWithEvent(ctx, common.PendingTurnLifecycleMutationInput{
 		ConversationID: secondConversation.ID,
@@ -1918,7 +2066,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("unexpected expired conversation metadata: %#v", expiredConversation)
 	}
 
-	messages, err := st.ListMessages(ctx, firstConversation.ID)
+	messages, err = st.ListMessages(ctx, firstConversation.ID)
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
 	}
@@ -1992,5 +2140,19 @@ func testConversationRepositoryConversationEvents(t *testing.T, newStore NewStor
 	}
 	if items[0].ID != first.ID || items[1].ID != second.ID {
 		t.Fatalf("unexpected event order: %#v", items)
+	}
+}
+
+func assertOutputSegmentsEqual(t *testing.T, got, want []common.OutputSegment) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("segment count mismatch got=%#v want=%#v", got, want)
+	}
+	for index := range want {
+		if got[index].Mode != want[index].Mode ||
+			got[index].Text != want[index].Text ||
+			got[index].ReasoningStreamMode != want[index].ReasoningStreamMode {
+			t.Fatalf("segment[%d] mismatch got=%#v want=%#v", index, got[index], want[index])
+		}
 	}
 }

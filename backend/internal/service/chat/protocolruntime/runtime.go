@@ -21,6 +21,7 @@ type Action struct {
 	Kind                ActionKind
 	DeltaText           string
 	OutputText          string
+	OutputSegments      []protocol.OutputSegment
 	Mode                string
 	ReasoningStreamMode string
 	ToolName            string
@@ -49,12 +50,14 @@ type Runtime struct {
 	responsesOutputIndex      int
 	responsesMessageItemID    string
 	responsesTextPartOpen     bool
-	responsesText             strings.Builder
+	responsesText             strings.Builder // current open answer segment only
+	responsesAnswerAggregate  strings.Builder // response-level concatenation of all answer segments
+	responsesClosedOutput     []map[string]any
 	responsesReasoningItemID  string
 	responsesReasoningMode    string
 	responsesReasoningOpen    bool
-	responsesReasoningText    strings.Builder
-	responsesReasoningSummary strings.Builder
+	responsesReasoningText    strings.Builder // current open reasoning segment only
+	responsesReasoningSummary strings.Builder // current open reasoning segment only
 	responsesLastToolCallID   string
 	responsesLastToolName     string
 	responsesLastToolArgs     string
@@ -177,10 +180,9 @@ func (r *Runtime) delta(action Action) []protocol.StreamEvent {
 		}
 		return []protocol.StreamEvent{r.chatChunk(map[string]any{"content": action.DeltaText}, nil)}
 	case protocol.ProtocolAnthropicMessages:
-		if normalizedMode(action.Mode) == "thinking" {
-			return r.anthropicThinkingDelta(action.DeltaText)
-		}
-		return r.anthropicTextDelta(action.DeltaText)
+		// Human thinking is still text (no signature), but mode/segment switches must
+		// close the current block so stream block count matches non-stream content.
+		return r.anthropicLogicalTextDelta(action)
 	default:
 		if normalizedMode(action.Mode) == "thinking" {
 			return r.responsesReasoningDelta(action)
@@ -356,19 +358,28 @@ func (r *Runtime) responsesReasoningDelta(action Action) []protocol.StreamEvent 
 func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 	events := make([]protocol.StreamEvent, 0)
 	mode := normalizedMode(action.Mode)
-	if mode == "tool_call" {
+	switch mode {
+	case "tool_call":
 		events = append(events, r.closeResponsesReasoning()...)
 		events = append(events, r.closeResponsesTextPart()...)
 		events = append(events, r.responsesToolCall(action)...)
-	} else if mode == "thinking" && action.OutputText != "" {
-		events = append(events, r.responsesReasoningDelta(Action{
-			Kind:                ActionDelta,
-			DeltaText:           action.OutputText,
-			Mode:                action.Mode,
-			ReasoningStreamMode: action.ReasoningStreamMode,
-		})...)
-	} else if action.OutputText != "" {
-		events = append(events, r.responsesTextDelta(action.OutputText)...)
+	case "thinking":
+		if action.OutputText != "" {
+			events = append(events, r.responsesReasoningDelta(Action{
+				Kind:                ActionDelta,
+				DeltaText:           action.OutputText,
+				Mode:                action.Mode,
+				ReasoningStreamMode: action.ReasoningStreamMode,
+			})...)
+		}
+	default:
+		// tool_result streaming lifecycle is intentionally not invented here
+		// (openai-go ResponseOutputItemUnion has no function_call_output).
+		// Protocol-level Tool Result redesign is tracked separately; keep pre-extension
+		// complete behavior: optional text delta only when OutputText is present.
+		if action.OutputText != "" {
+			events = append(events, r.responsesTextDelta(action.OutputText)...)
+		}
 	}
 	events = append(events, r.closeResponsesReasoning()...)
 	events = append(events, r.closeResponsesTextPart()...)
@@ -379,7 +390,7 @@ func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 		"object":      "response",
 		"status":      status,
 		"model":       r.meta.Model,
-		"output_text": r.responsesText.String(),
+		"output_text": r.responsesAnswerAggregate.String(),
 		"output":      r.responsesCompletedOutput(action),
 		"usage":       responsesUsage(action.OutputTokens),
 	}
@@ -430,6 +441,14 @@ func (r *Runtime) responsesToolCall(action Action) []protocol.StreamEvent {
 	r.responsesLastToolName = strings.TrimSpace(action.ToolName)
 	r.responsesLastToolArgs = arguments
 	itemID := "fc_" + uuid.NewString()
+	completedItem := map[string]any{
+		"id":        itemID,
+		"type":      "function_call",
+		"status":    "completed",
+		"name":      action.ToolName,
+		"call_id":   callID,
+		"arguments": arguments,
+	}
 	events := []protocol.StreamEvent{
 		{
 			Event: "response.output_item.added",
@@ -473,17 +492,11 @@ func (r *Runtime) responsesToolCall(action Action) []protocol.StreamEvent {
 			Data: map[string]any{
 				"type":         "response.output_item.done",
 				"output_index": r.responsesOutputIndex,
-				"item": map[string]any{
-					"id":        itemID,
-					"type":      "function_call",
-					"status":    "completed",
-					"name":      action.ToolName,
-					"call_id":   callID,
-					"arguments": arguments,
-				},
+				"item":         completedItem,
 			},
 		},
 	)
+	r.responsesClosedOutput = append(r.responsesClosedOutput, completedItem)
 	r.responsesOutputIndex++
 	return events
 }
@@ -612,15 +625,33 @@ func (r *Runtime) closeResponsesTextPart() []protocol.StreamEvent {
 	if !r.responsesTextPartOpen {
 		return nil
 	}
+	// Segment-level close: done text is this segment only. Response-level aggregate
+	// keeps every answer segment so response.output_text stays the full join.
 	text := r.responsesText.String()
+	itemID := r.responsesMessageItemID
+	outputIndex := r.responsesOutputIndex
 	r.responsesTextPartOpen = false
+	r.responsesText.Reset()
+	r.responsesMessageItemID = ""
+	r.responsesAnswerAggregate.WriteString(text)
+	item := map[string]any{
+		"id":     itemID,
+		"type":   "message",
+		"status": "completed",
+		"role":   "assistant",
+		"content": []map[string]any{{
+			"type": "output_text",
+			"text": text,
+		}},
+	}
+	r.responsesClosedOutput = append(r.responsesClosedOutput, item)
 	events := []protocol.StreamEvent{
 		{
 			Event: "response.output_text.done",
 			Data: map[string]any{
 				"type":          "response.output_text.done",
-				"item_id":       r.responsesMessageItemID,
-				"output_index":  r.responsesOutputIndex,
+				"item_id":       itemID,
+				"output_index":  outputIndex,
 				"content_index": 0,
 				"text":          text,
 			},
@@ -629,8 +660,8 @@ func (r *Runtime) closeResponsesTextPart() []protocol.StreamEvent {
 			Event: "response.content_part.done",
 			Data: map[string]any{
 				"type":          "response.content_part.done",
-				"item_id":       r.responsesMessageItemID,
-				"output_index":  r.responsesOutputIndex,
+				"item_id":       itemID,
+				"output_index":  outputIndex,
 				"content_index": 0,
 				"part":          map[string]any{"type": "output_text", "text": text},
 			},
@@ -639,17 +670,8 @@ func (r *Runtime) closeResponsesTextPart() []protocol.StreamEvent {
 			Event: "response.output_item.done",
 			Data: map[string]any{
 				"type":         "response.output_item.done",
-				"output_index": r.responsesOutputIndex,
-				"item": map[string]any{
-					"id":     r.responsesMessageItemID,
-					"type":   "message",
-					"status": "completed",
-					"role":   "assistant",
-					"content": []map[string]any{{
-						"type": "output_text",
-						"text": text,
-					}},
-				},
+				"output_index": outputIndex,
+				"item":         item,
 			},
 		},
 	}
@@ -661,18 +683,33 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 	if !r.responsesReasoningOpen {
 		return nil
 	}
+	// Segment-level close: each reasoning item is independent. Reset builders so the
+	// next thinking segment cannot accumulate prior text or reuse the item id.
 	itemID := r.responsesReasoningItemID
 	mode := r.responsesReasoningMode
+	outputIndex := r.responsesOutputIndex
 	r.responsesReasoningOpen = false
+	r.responsesReasoningItemID = ""
+	r.responsesReasoningMode = ""
 	if mode == "reasoning" {
 		text := r.responsesReasoningText.String()
+		r.responsesReasoningText.Reset()
+		r.responsesReasoningSummary.Reset()
+		item := map[string]any{
+			"id":      itemID,
+			"type":    "reasoning",
+			"status":  "completed",
+			"summary": []any{},
+			"content": []map[string]any{{"type": "reasoning_text", "text": text}},
+		}
+		r.responsesClosedOutput = append(r.responsesClosedOutput, item)
 		events := []protocol.StreamEvent{
 			{
 				Event: "response.reasoning_text.done",
 				Data: map[string]any{
 					"type":          "response.reasoning_text.done",
 					"item_id":       itemID,
-					"output_index":  r.responsesOutputIndex,
+					"output_index":  outputIndex,
 					"content_index": 0,
 					"text":          text,
 				},
@@ -682,7 +719,7 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 				Data: map[string]any{
 					"type":          "response.content_part.done",
 					"item_id":       itemID,
-					"output_index":  r.responsesOutputIndex,
+					"output_index":  outputIndex,
 					"content_index": 0,
 					"part":          map[string]any{"type": "reasoning_text", "text": text},
 				},
@@ -691,14 +728,8 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 				Event: "response.output_item.done",
 				Data: map[string]any{
 					"type":         "response.output_item.done",
-					"output_index": r.responsesOutputIndex,
-					"item": map[string]any{
-						"id":      itemID,
-						"type":    "reasoning",
-						"status":  "completed",
-						"summary": []any{},
-						"content": []map[string]any{{"type": "reasoning_text", "text": text}},
-					},
+					"output_index": outputIndex,
+					"item":         item,
 				},
 			},
 		}
@@ -706,13 +737,23 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 		return events
 	}
 	text := r.responsesReasoningSummary.String()
+	r.responsesReasoningText.Reset()
+	r.responsesReasoningSummary.Reset()
+	item := map[string]any{
+		"id":      itemID,
+		"type":    "reasoning",
+		"status":  "completed",
+		"summary": []map[string]any{{"type": "summary_text", "text": text}},
+		"content": []any{},
+	}
+	r.responsesClosedOutput = append(r.responsesClosedOutput, item)
 	events := []protocol.StreamEvent{
 		{
 			Event: "response.reasoning_summary_text.done",
 			Data: map[string]any{
 				"type":          "response.reasoning_summary_text.done",
 				"item_id":       itemID,
-				"output_index":  r.responsesOutputIndex,
+				"output_index":  outputIndex,
 				"summary_index": 0,
 				"text":          text,
 			},
@@ -722,7 +763,7 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 			Data: map[string]any{
 				"type":          "response.reasoning_summary_part.done",
 				"item_id":       itemID,
-				"output_index":  r.responsesOutputIndex,
+				"output_index":  outputIndex,
 				"summary_index": 0,
 				"part":          map[string]any{"type": "summary_text", "text": text},
 			},
@@ -731,14 +772,8 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 			Event: "response.output_item.done",
 			Data: map[string]any{
 				"type":         "response.output_item.done",
-				"output_index": r.responsesOutputIndex,
-				"item": map[string]any{
-					"id":      itemID,
-					"type":    "reasoning",
-					"status":  "completed",
-					"summary": []map[string]any{{"type": "summary_text", "text": text}},
-					"content": []any{},
-				},
+				"output_index": outputIndex,
+				"item":         item,
 			},
 		},
 	}
@@ -747,6 +782,27 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 }
 
 func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
+	// Live stream ledger is authoritative when any output_item.done was already
+	// emitted. Rebuilding from OutputSegments would mint new random IDs and break
+	// response.completed.output identity against prior done events.
+	if len(r.responsesClosedOutput) > 0 {
+		output := make([]map[string]any, len(r.responsesClosedOutput))
+		copy(output, r.responsesClosedOutput)
+		return output
+	}
+	// No live ledger: ordinary complete with durable segments can share the
+	// non-stream BuildResponsesOutput shape (IDs are newly minted here).
+	if len(action.OutputSegments) > 0 {
+		return protocol.BuildResponsesOutput(protocol.TurnResult{
+			Mode:           action.Mode,
+			OutputText:     action.OutputText,
+			ToolName:       action.ToolName,
+			ToolCallID:     action.ToolCallID,
+			ToolOutput:     action.ToolOutput,
+			OutputSegments: action.OutputSegments,
+		})
+	}
+	// Last-resort rebuild when complete arrived without streamed items or segments.
 	if normalizedMode(action.Mode) == "tool_call" {
 		callID := strings.TrimSpace(action.ToolCallID)
 		if callID == "" {
@@ -764,32 +820,7 @@ func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
 			"arguments": arguments,
 		}}
 	}
-	output := make([]map[string]any, 0, 2)
-	if r.responsesReasoningText.Len() > 0 || r.responsesReasoningSummary.Len() > 0 {
-		reasoning := map[string]any{
-			"id":     nonEmpty(r.responsesReasoningItemID, "rs_"+uuid.NewString()),
-			"type":   "reasoning",
-			"status": "completed",
-			"summary": []map[string]any{{
-				"type": "summary_text",
-				"text": r.responsesReasoningSummary.String(),
-			}},
-			"content": []map[string]any{{
-				"type": "reasoning_text",
-				"text": r.responsesReasoningText.String(),
-			}},
-		}
-		output = append(output, reasoning)
-	}
-	output = append(output, map[string]any{
-		"type": "message",
-		"role": "assistant",
-		"content": []map[string]any{{
-			"type": "output_text",
-			"text": r.responsesText.String(),
-		}},
-	})
-	return output
+	return []map[string]any{}
 }
 
 func (r *Runtime) completeChat(action Action) []protocol.StreamEvent {
@@ -852,11 +883,19 @@ func (r *Runtime) chatChunk(delta map[string]any, finishReason *string) protocol
 	}}
 }
 
-func (r *Runtime) anthropicTextDelta(delta string) []protocol.StreamEvent {
+func (r *Runtime) anthropicLogicalTextDelta(action Action) []protocol.StreamEvent {
+	delta := action.DeltaText
 	if delta == "" {
 		return nil
 	}
-	events := r.ensureAnthropicBlock("text", map[string]any{"type": "text", "text": ""})
+	// Logical segment identity, not Anthropic thinking type. Same mode continues
+	// the current text block; mode changes force close/open so one block maps to
+	// one durable segment (and to non-stream content[] entries).
+	blockKey := "answer"
+	if normalizedMode(action.Mode) == "thinking" {
+		blockKey = "thinking"
+	}
+	events := r.ensureAnthropicBlock(blockKey, map[string]any{"type": "text", "text": ""})
 	r.anthropicText.WriteString(delta)
 	events = append(events, protocol.StreamEvent{
 		Event: "content_block_delta",
@@ -864,25 +903,6 @@ func (r *Runtime) anthropicTextDelta(delta string) []protocol.StreamEvent {
 			"type":  "content_block_delta",
 			"index": r.anthropicBlockIndex,
 			"delta": map[string]any{"type": "text_delta", "text": delta},
-		},
-	})
-	return events
-}
-
-func (r *Runtime) anthropicThinkingDelta(delta string) []protocol.StreamEvent {
-	if delta == "" {
-		return nil
-	}
-	// Emit Anthropic thinking blocks so clients that understand them can render
-	// the human-authored reasoning stream. Signature is left empty for lab/mock use.
-	events := r.ensureAnthropicBlock("thinking", map[string]any{"type": "thinking", "thinking": ""})
-	r.anthropicThinking.WriteString(delta)
-	events = append(events, protocol.StreamEvent{
-		Event: "content_block_delta",
-		Data: map[string]any{
-			"type":  "content_block_delta",
-			"index": r.anthropicBlockIndex,
-			"delta": map[string]any{"type": "thinking_delta", "thinking": delta},
 		},
 	})
 	return events
@@ -897,10 +917,12 @@ func (r *Runtime) completeAnthropic(action Action) []protocol.StreamEvent {
 		events = append(events, r.anthropicToolUse(action)...)
 		return append(events, r.anthropicStop(outcome.AnthropicStopReason(), action.StopSequence, action.OutputTokens)...)
 	}
-	if mode == "thinking" && action.OutputText != "" {
-		events = append(events, r.anthropicThinkingDelta(action.OutputText)...)
-	} else if mode != "thinking" && action.OutputText != "" {
-		events = append(events, r.anthropicTextDelta(action.OutputText)...)
+	if action.OutputText != "" {
+		events = append(events, r.anthropicLogicalTextDelta(Action{
+			Kind:      ActionDelta,
+			DeltaText: action.OutputText,
+			Mode:      action.Mode,
+		})...)
 	}
 	events = append(events, r.closeAnthropicBlock()...)
 	return append(events, r.anthropicStop(outcome.AnthropicStopReason(), action.StopSequence, action.OutputTokens)...)

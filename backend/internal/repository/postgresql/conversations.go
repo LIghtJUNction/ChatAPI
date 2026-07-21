@@ -522,6 +522,7 @@ func (s *Store) UpdateDraft(ctx context.Context, input common.UpdateDraftInput) 
 		return common.Conversation{}, common.ErrTurnConflict
 	}
 	metadata["realtime_draft_text"] = input.DraftText
+	metadata["realtime_output_segments"] = input.OutputSegments
 	metadata["realtime_status"] = "streaming"
 	conversation.Metadata = metadata
 	conversation.UpdatedAt = time.Now().UTC()
@@ -549,15 +550,27 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	}
 	draftText, _ := metadata["realtime_draft_text"].(string)
 	finalText := input.OutputText
-	if finalText == "" {
+	// Tool payloads never inherit draft answer text. Only ordinary completions may
+	// fall back to the streamed draft when OutputText is empty.
+	// tool_result Content must still materialize from ToolOutput when OutputText is
+	// empty so message.Content, metadata.output, and workspace typed text stay aligned.
+	if input.Mode == "tool_result" {
+		finalText = stringValue(finalText, input.ToolOutput)
+	} else if finalText == "" && input.Mode != "tool_call" {
 		finalText = draftText
 	}
 	now := time.Now().UTC()
 	metadata["realtime_status"] = "closed"
 	metadata["realtime_draft_text"] = ""
+	metadata["realtime_output_segments"] = nil
 
 	messageMetadata := map[string]any{
 		"response_mode": input.Mode,
+	}
+	// Tool turns store payload in arguments/output. Ordinary answer/thinking segments
+	// do not apply; fail-safe omit output_segments so dirty draft state cannot stick.
+	if input.Mode != "tool_call" && input.Mode != "tool_result" {
+		messageMetadata["output_segments"] = input.OutputSegments
 	}
 	if input.ToolName != "" {
 		messageMetadata["tool_name"] = input.ToolName

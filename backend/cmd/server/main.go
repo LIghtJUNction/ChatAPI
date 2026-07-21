@@ -136,7 +136,7 @@ func run() error {
 	}, cfg.SettingsEnvironment("access"))
 	accessSvc := authaccess.NewService(cfg, labSvc, accessSettingsSvc)
 	identitySvc := identity.NewService(accountSvc)
-	appKeySvc := appkeysvc.NewService(store)
+	appKeySvc := appkeysvc.NewService(store, cfg.MasterKey)
 	appKeySvc.Logger = logFactory.Layer(logging.LayerAuth)
 	modelKeySvc := modelkeysvc.NewService(store, cfg.MasterKey)
 	modelKeySvc.Logger = logFactory.Layer(logging.LayerAuth)

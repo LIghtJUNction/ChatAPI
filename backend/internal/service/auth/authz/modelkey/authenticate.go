@@ -32,6 +32,5 @@ func (s *Service) Authenticate(ctx context.Context, rawKey string) (Principal, e
 		UserID:    item.UserID,
 		Name:      item.Name,
 		KeyPrefix: item.KeyPrefix,
-		Model:     item.Model,
 	}, nil
 }

@@ -954,12 +954,8 @@ func testAppAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore Ne
 	if err := st.RevokeAppAPIKey(ctx, created.ID, "user_keys"); err != nil {
 		t.Fatalf("revoke app key: %v", err)
 	}
-	revoked, err := st.GetAppAPIKeyByPrefix(ctx, "ak-demo")
-	if err != nil {
-		t.Fatalf("get revoked app key: %v", err)
-	}
-	if revoked.RevokedAt == nil {
-		t.Fatalf("expected revoked_at after revoke: %#v", revoked)
+	if _, err := st.GetAppAPIKeyByPrefix(ctx, "ak-demo"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("expected deleted app key to be absent, got %v", err)
 	}
 	if err := st.RevokeAppAPIKey(ctx, created.ID, "user_keys"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound revoking already revoked key, got %v", err)
@@ -1059,12 +1055,8 @@ func testModelAPIKeyRepositoryCreatesListsUsesAndRevokes(t *testing.T, newStore 
 	if err := st.RevokeModelAPIKey(ctx, created.ID, "user_model_keys"); err != nil {
 		t.Fatalf("revoke model key: %v", err)
 	}
-	revoked, err := st.GetModelAPIKeyByID(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("get revoked model key: %v", err)
-	}
-	if revoked.RevokedAt == nil {
-		t.Fatalf("expected revoked_at after model revoke: %#v", revoked)
+	if _, err := st.GetModelAPIKeyByID(ctx, created.ID); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("expected deleted model key to be absent, got %v", err)
 	}
 	if _, err := st.GetModelAPIKeyByPrefix(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing model prefix, got %v", err)

@@ -12,7 +12,23 @@ import (
 )
 
 func (s *Service) CreateKey(ctx context.Context, userID string, name string, modelName string) (common.ModelAPIKey, string, error) {
-	raw := "sk-" + uuid.NewString()
+	item, raw, err := s.createKey(ctx, userID, name, "")
+	if err == nil && strings.TrimSpace(modelName) != "" {
+		_, _ = s.store.CreateVirtualModel(ctx, common.CreateVirtualModelInput{ID: "vmodel_" + uuid.NewString(), UserID: strings.TrimSpace(userID), Name: strings.TrimSpace(modelName)})
+		item.Model = strings.TrimSpace(modelName)
+	}
+	return item, raw, err
+}
+
+func (s *Service) CreateKeyWithRaw(ctx context.Context, userID, name, raw string) (common.ModelAPIKey, string, error) {
+	return s.createKey(ctx, userID, name, raw)
+}
+
+func (s *Service) createKey(ctx context.Context, userID string, name string, raw string) (common.ModelAPIKey, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "sk-" + uuid.NewString()
+	}
 	ciphertext, err := secretbox.Seal(raw, s.masterKey)
 	if err != nil {
 		return common.ModelAPIKey{}, "", err
@@ -22,12 +38,20 @@ func (s *Service) CreateKey(ctx context.Context, userID string, name string, mod
 		UserID:        strings.TrimSpace(userID),
 		Name:          strings.TrimSpace(name),
 		KeyCiphertext: ciphertext,
+		KeyHash:       keyutil.Hash(raw),
 		KeyPrefix:     keyutil.Prefix(raw),
-		Model:         strings.TrimSpace(modelName),
 	})
 	if err != nil {
 		return common.ModelAPIKey{}, "", err
 	}
 	item.RawKey = raw
 	return item, raw, nil
+}
+
+func (s *Service) RevealKey(ctx context.Context, userID, keyID string) (string, error) {
+	item, err := s.store.GetModelAPIKeyByID(ctx, strings.TrimSpace(keyID))
+	if err != nil || item.UserID != strings.TrimSpace(userID) {
+		return "", common.ErrNotFound
+	}
+	return secretbox.Open(item.KeyCiphertext, s.masterKey)
 }

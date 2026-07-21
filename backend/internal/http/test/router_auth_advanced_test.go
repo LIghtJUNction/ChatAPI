@@ -375,7 +375,7 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
 	identityService := identity.NewService(accountService)
 	modelKeyService := modelkey.NewService(st, cfg.MasterKey)
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 	appKeyService.Logger = logFactory.Layer(logging.LayerAudit)
 	authSettings := authsettings.NewService(st, cfg)
 	geetestService := geetest.NewService(cfg, nil)

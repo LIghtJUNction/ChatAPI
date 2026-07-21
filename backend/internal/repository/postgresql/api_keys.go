@@ -17,13 +17,14 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input common.CreateAppAPIKe
 	createdAt := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_app_api_keys(
-			id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, NULL, $9, NULL)
+			id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, NULL, $10, NULL)
 	`,
 		input.ID,
 		input.UserID,
 		input.Name,
 		input.KeyHash,
+		input.KeyCiphertext,
 		input.KeyPrefix,
 		mustJSON(input.Scopes),
 		mustJSON(ensureMap(input.ResourceLimits)),
@@ -48,7 +49,7 @@ func (s *Store) CreateAppAPIKey(ctx context.Context, input common.CreateAppAPIKe
 
 func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]common.AppAPIKey, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		SELECT id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
 		FROM user_app_api_keys
 		WHERE user_id = $1
 		ORDER BY created_at DESC, id DESC
@@ -71,11 +72,15 @@ func (s *Store) ListAppAPIKeysByUser(ctx context.Context, userID string) ([]comm
 
 func (s *Store) GetAppAPIKeyByPrefix(ctx context.Context, prefix string) (common.AppAPIKey, error) {
 	return scanAppAPIKey(s.pool.QueryRow(ctx, `
-		SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
+		SELECT id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at
 		FROM user_app_api_keys
 		WHERE key_prefix = $1
 		LIMIT 1
 	`, strings.TrimSpace(prefix)))
+}
+
+func (s *Store) GetAppAPIKeyByID(ctx context.Context, id string) (common.AppAPIKey, error) {
+	return scanAppAPIKey(s.pool.QueryRow(ctx, `SELECT id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at FROM user_app_api_keys WHERE id = $1`, strings.TrimSpace(id)))
 }
 
 func (s *Store) UpdateAppAPIKeyLastUsedAt(ctx context.Context, id string, usedAt time.Time) error {
@@ -89,10 +94,8 @@ func (s *Store) UpdateAppAPIKeyLastUsedAt(ctx context.Context, id string, usedAt
 
 func (s *Store) RevokeAppAPIKey(ctx context.Context, id string, userID string) error {
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE user_app_api_keys
-		SET revoked_at = $1
-		WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL
-	`, time.Now().UTC(), strings.TrimSpace(id), strings.TrimSpace(userID))
+		DELETE FROM user_app_api_keys WHERE id = $1 AND user_id = $2
+	`, strings.TrimSpace(id), strings.TrimSpace(userID))
 	if err != nil {
 		return err
 	}
@@ -156,9 +159,9 @@ func (s *Store) ListAppAPIKeyAuditLogs(ctx context.Context, input common.ListApp
 func (s *Store) CreateModelAPIKey(ctx context.Context, input common.CreateModelAPIKeyInput) (common.ModelAPIKey, error) {
 	createdAt := time.Now().UTC()
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO user_api_keys(id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at)
-		VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, NULL)
-	`, input.ID, input.UserID, input.Name, input.KeyCiphertext, input.KeyPrefix, input.Model, createdAt)
+		INSERT INTO user_api_keys(id, user_id, name, key_ciphertext, key_hash, key_prefix, model, last_used_at, created_at, revoked_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, NULL)
+	`, input.ID, input.UserID, input.Name, input.KeyCiphertext, input.KeyHash, input.KeyPrefix, input.Model, createdAt)
 	if err != nil {
 		return common.ModelAPIKey{}, err
 	}
@@ -171,6 +174,43 @@ func (s *Store) CreateModelAPIKey(ctx context.Context, input common.CreateModelA
 		Model:         input.Model,
 		CreatedAt:     createdAt,
 	}, nil
+}
+
+func (s *Store) CreateVirtualModel(ctx context.Context, input common.CreateVirtualModelInput) (common.VirtualModel, error) {
+	createdAt := time.Now().UTC()
+	_, err := s.pool.Exec(ctx, `INSERT INTO user_virtual_models(id, user_id, name, created_at) VALUES ($1, $2, $3, $4)`, input.ID, input.UserID, input.Name, createdAt)
+	if err != nil {
+		return common.VirtualModel{}, err
+	}
+	return common.VirtualModel{ID: input.ID, UserID: input.UserID, Name: input.Name, CreatedAt: createdAt}, nil
+}
+
+func (s *Store) ListVirtualModelsByUser(ctx context.Context, userID string) ([]common.VirtualModel, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id, user_id, name, created_at FROM user_virtual_models WHERE user_id = $1 ORDER BY created_at DESC, id DESC`, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]common.VirtualModel, 0)
+	for rows.Next() {
+		var item common.VirtualModel
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Name, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) DeleteVirtualModel(ctx context.Context, id, userID string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM user_virtual_models WHERE id = $1 AND user_id = $2`, strings.TrimSpace(id), strings.TrimSpace(userID))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return common.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) ListModelAPIKeysByUser(ctx context.Context, userID string) ([]common.ModelAPIKey, error) {
@@ -225,10 +265,8 @@ func (s *Store) UpdateModelAPIKeyLastUsedAt(ctx context.Context, id string, used
 
 func (s *Store) RevokeModelAPIKey(ctx context.Context, id string, userID string) error {
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE user_api_keys
-		SET revoked_at = $1
-		WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL
-	`, time.Now().UTC(), strings.TrimSpace(id), strings.TrimSpace(userID))
+		DELETE FROM user_api_keys WHERE id = $1 AND user_id = $2
+	`, strings.TrimSpace(id), strings.TrimSpace(userID))
 	if err != nil {
 		return err
 	}
@@ -250,6 +288,7 @@ func scanAppAPIKey(row rowScanner) (common.AppAPIKey, error) {
 		&item.UserID,
 		&item.Name,
 		&item.KeyHash,
+		&item.KeyCiphertext,
 		&item.KeyPrefix,
 		&scopesJSON,
 		&limitsJSON,
@@ -293,6 +332,19 @@ func scanModelAPIKey(row rowScanner) (common.ModelAPIKey, error) {
 	}
 	item.LastUsedAt = lastUsedAt
 	item.RevokedAt = revokedAt
+	return item, nil
+}
+
+func scanUserWithKeyCounts(row rowScanner) (common.User, error) {
+	var item common.User
+	var lastLoginAt *time.Time
+	if err := row.Scan(&item.ID, &item.Username, &item.Email, &item.PasswordHash, &item.Role, &item.IsActive, &item.LocalAdmin, &item.CreatedAt, &item.UpdatedAt, &lastLoginAt, &item.AppAPIKeyCount, &item.ModelAPIKeyCount); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return common.User{}, common.ErrNotFound
+		}
+		return common.User{}, err
+	}
+	item.LastLoginAt = lastLoginAt
 	return item, nil
 }
 

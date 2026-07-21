@@ -7,6 +7,7 @@ type CreateAppAPIKeyInput struct {
 	UserID         string
 	Name           string
 	KeyHash        string
+	KeyCiphertext  string
 	KeyPrefix      string
 	Scopes         []string
 	ResourceLimits map[string]any
@@ -18,8 +19,15 @@ type CreateModelAPIKeyInput struct {
 	UserID        string
 	Name          string
 	KeyCiphertext string
+	KeyHash       string
 	KeyPrefix     string
 	Model         string
+}
+
+type CreateVirtualModelInput struct {
+	ID     string
+	UserID string
+	Name   string
 }
 
 type CreateUserInput struct {

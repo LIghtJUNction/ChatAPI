@@ -32,6 +32,7 @@ type AppKeyStore interface {
 	CreateAppAPIKey(context.Context, common.CreateAppAPIKeyInput) (common.AppAPIKey, error)
 	ListAppAPIKeysByUser(context.Context, string) ([]common.AppAPIKey, error)
 	GetAppAPIKeyByPrefix(context.Context, string) (common.AppAPIKey, error)
+	GetAppAPIKeyByID(context.Context, string) (common.AppAPIKey, error)
 	UpdateAppAPIKeyLastUsedAt(context.Context, string, time.Time) error
 	RevokeAppAPIKey(context.Context, string, string) error
 	CreateAppAPIKeyAuditLog(context.Context, common.AppAPIKeyAuditLog) error
@@ -45,6 +46,12 @@ type ModelKeyStore interface {
 	GetModelAPIKeyByID(context.Context, string) (common.ModelAPIKey, error)
 	UpdateModelAPIKeyLastUsedAt(context.Context, string, time.Time) error
 	RevokeModelAPIKey(context.Context, string, string) error
+}
+
+type VirtualModelStore interface {
+	CreateVirtualModel(context.Context, common.CreateVirtualModelInput) (common.VirtualModel, error)
+	ListVirtualModelsByUser(context.Context, string) ([]common.VirtualModel, error)
+	DeleteVirtualModel(context.Context, string, string) error
 }
 
 type VerificationStore interface {
@@ -68,6 +75,7 @@ type Store interface {
 	IdentityStore
 	AppKeyStore
 	ModelKeyStore
+	VirtualModelStore
 	VerificationStore
 	SettingsStore
 }
@@ -75,4 +83,5 @@ type Store interface {
 type KeyStore interface {
 	AppKeyStore
 	ModelKeyStore
+	VirtualModelStore
 }

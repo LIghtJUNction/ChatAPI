@@ -76,9 +76,10 @@ func (s *Store) UpdateUser(ctx context.Context, input common.UpdateUserInput) (c
 }
 
 func (s *Store) GetUser(ctx context.Context, id string) (common.User, error) {
-	return scanUser(s.pool.QueryRow(ctx, `
-		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
-		FROM users
+	return scanUserWithKeyCounts(s.pool.QueryRow(ctx, `
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active, u.local_admin, u.created_at, u.updated_at, u.last_login_at,
+		(SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = u.id), (SELECT COUNT(*) FROM user_api_keys WHERE user_id = u.id)
+		FROM users u
 		WHERE id = $1
 	`, id))
 }
@@ -101,8 +102,9 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (common.
 
 func (s *Store) ListUsers(ctx context.Context) ([]common.User, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
-		FROM users
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active, u.local_admin, u.created_at, u.updated_at, u.last_login_at,
+		(SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = u.id), (SELECT COUNT(*) FROM user_api_keys WHERE user_id = u.id)
+		FROM users u
 		ORDER BY created_at DESC, id DESC
 	`)
 	if err != nil {
@@ -112,7 +114,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]common.User, error) {
 
 	items := make([]common.User, 0)
 	for rows.Next() {
-		item, err := scanUser(rows)
+		item, err := scanUserWithKeyCounts(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -132,8 +134,9 @@ func (s *Store) ListUsersPage(ctx context.Context, offset int, limit int) ([]com
 		return nil, 0, err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at
-		FROM users
+		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active, u.local_admin, u.created_at, u.updated_at, u.last_login_at,
+		(SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = u.id), (SELECT COUNT(*) FROM user_api_keys WHERE user_id = u.id)
+		FROM users u
 		ORDER BY created_at DESC, id DESC
 		LIMIT $1 OFFSET $2
 	`, limit, offset)
@@ -143,7 +146,7 @@ func (s *Store) ListUsersPage(ctx context.Context, offset int, limit int) ([]com
 	defer rows.Close()
 	items := make([]common.User, 0, limit)
 	for rows.Next() {
-		item, err := scanUser(rows)
+		item, err := scanUserWithKeyCounts(rows)
 		if err != nil {
 			return nil, 0, err
 		}

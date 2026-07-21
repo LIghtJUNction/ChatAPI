@@ -3,7 +3,7 @@ import { Form } from 'antd'
 
 import { appMessage } from '../../../lib/antdMessage'
 import { requestJson } from '../../../lib/api'
-import type { AdminUserHistoryMessage, User } from '../../../types/chat'
+import type { User } from '../../../types/chat'
 import { useAdminMonitoring } from '../../../features/admin-settings/hooks/useAdminMonitoring'
 
 type CreateUserValues = {
@@ -32,8 +32,6 @@ export function useUserManagementState(open: boolean) {
 
   const [detailModalOpen, setDetailModalOpen] = useState(false)
   const [detailUser, setDetailUser] = useState<User | null>(null)
-  const [historyMessages, setHistoryMessages] = useState<AdminUserHistoryMessage[]>([])
-  const [historyLoading, setHistoryLoading] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -144,15 +142,12 @@ export function useUserManagementState(open: boolean) {
 
   function openDetailModal(user: User) {
     setDetailUser(user)
-    setHistoryMessages([])
-    setHistoryLoading(false)
     setDetailModalOpen(true)
   }
 
   function closeDetailModal() {
     setDetailModalOpen(false)
     setDetailUser(null)
-    setHistoryMessages([])
   }
 
   async function handlePasswordChange() {
@@ -184,8 +179,6 @@ export function useUserManagementState(open: boolean) {
     handleDelete,
     handlePasswordChange,
     handleRoleChange,
-    historyLoading,
-    historyMessages,
     loading,
     page,
     pageSize,

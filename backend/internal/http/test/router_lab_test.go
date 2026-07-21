@@ -58,7 +58,7 @@ func TestRouterLabModeAccessAndEndpoints(t *testing.T) {
 	}
 	queryService := &turnquerysvc.Service{Store: st, Logger: logFactory.Layer(logging.LayerTurnQuery)}
 	modelKeyService := modelkey.NewService(st, "test-master-key")
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 
 	cfg := config.Default(config.ModeLab, "/tmp/chatapi-test")
 	cfg.MetricsEnabled = true
@@ -217,7 +217,7 @@ func TestRouterPrincipalAccessRateLimitForAppKey(t *testing.T) {
 	}
 	st.Logger = logFactory.Layer(logging.LayerRepository)
 
-	appKeyService := appkey.NewService(st)
+	appKeyService := appkey.NewService(st, "test-master-key")
 	_, rawAppKey, err := appKeyService.CreateKey(context.Background(), "user_a", "user-a-app", []string{"requests:read"}, nil, nil)
 	if err != nil {
 		t.Fatalf("create app key: %v", err)

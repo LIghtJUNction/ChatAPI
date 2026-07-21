@@ -24,7 +24,7 @@ func TestKeysServiceCreateListRevoke(t *testing.T) {
 	}
 	accountService := account.NewService(st)
 	_ = accountService
-	appKeys := appkeysvc.NewService(st)
+	appKeys := appkeysvc.NewService(st, "test-master-key")
 	modelKeys := modelkeysvc.NewService(st, "test-master-key")
 	svc := userkeys.New(userkeys.Deps{Keys: st, AppKeys: appKeys, ModelKeys: modelKeys})
 
@@ -36,6 +36,9 @@ func TestKeysServiceCreateListRevoke(t *testing.T) {
 	if rawAppKey == "" || appItem.UserID != "user_a" {
 		t.Fatalf("unexpected app key: %#v raw=%q", appItem, rawAppKey)
 	}
+	if revealed, err := svc.RevealAppKey(ctx, "user_a", appItem.ID); err != nil || revealed != rawAppKey {
+		t.Fatalf("reveal app key: value=%q err=%v", revealed, err)
+	}
 
 	modelItem, rawModelKey, err := svc.CreateModelKey(ctx, " user_a ", " my-model ", " demo-model ")
 	if err != nil {
@@ -43,6 +46,9 @@ func TestKeysServiceCreateListRevoke(t *testing.T) {
 	}
 	if rawModelKey == "" || modelItem.Model != "demo-model" {
 		t.Fatalf("unexpected model key: %#v raw=%q", modelItem, rawModelKey)
+	}
+	if revealed, err := svc.RevealModelKey(ctx, "user_a", modelItem.ID); err != nil || revealed != rawModelKey {
+		t.Fatalf("reveal model key: value=%q err=%v", revealed, err)
 	}
 
 	appList, err := svc.ListAppKeys(ctx, "user_a")
@@ -68,12 +74,12 @@ func TestKeysServiceCreateListRevoke(t *testing.T) {
 	}
 
 	appList, err = svc.ListAppKeys(ctx, "user_a")
-	if err != nil || len(appList) != 1 || appList[0].RevokedAt == nil {
-		t.Fatalf("expected revoked app key in list: len=%d err=%v item=%#v", len(appList), err, appList)
+	if err != nil || len(appList) != 0 {
+		t.Fatalf("revoked app key should be hidden from list: len=%d err=%v item=%#v", len(appList), err, appList)
 	}
 	modelList, err = svc.ListModelKeys(ctx, "user_a")
-	if err != nil || len(modelList) != 1 || modelList[0].RevokedAt == nil {
-		t.Fatalf("expected revoked model key in list: len=%d err=%v item=%#v", len(modelList), err, modelList)
+	if err != nil || len(modelList) != 0 {
+		t.Fatalf("revoked model key should be hidden from list: len=%d err=%v item=%#v", len(modelList), err, modelList)
 	}
 }
 

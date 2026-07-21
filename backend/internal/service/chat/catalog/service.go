@@ -9,7 +9,7 @@ import (
 )
 
 type ModelKeyStore interface {
-	ListKeysByUser(context.Context, string) ([]common.ModelAPIKey, error)
+	ListModelsByUser(context.Context, string) ([]common.VirtualModel, error)
 }
 
 type Service struct {
@@ -36,7 +36,7 @@ func (s *Service) ListModelsForPrincipal(ctx context.Context) ([]ModelDescriptor
 		return nil, nil
 	}
 
-	items, err := s.modelKeys.ListKeysByUser(ctx, principal.UserID)
+	items, err := s.modelKeys.ListModelsByUser(ctx, principal.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -44,8 +44,8 @@ func (s *Service) ListModelsForPrincipal(ctx context.Context) ([]ModelDescriptor
 	seen := map[string]struct{}{}
 	models := make([]ModelDescriptor, 0, len(items))
 	for _, item := range items {
-		name := strings.TrimSpace(item.Model)
-		if name == "" || item.RevokedAt != nil {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
 			continue
 		}
 		if _, exists := seen[name]; exists {

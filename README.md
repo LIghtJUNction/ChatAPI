@@ -53,7 +53,7 @@ CHATAPI_WEB_DIST_DIR=../frontend/dist
 CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-将现有 SQLite 数据库导入空的 PostgreSQL 数据库：
+将现有 SQLite 数据库导入空的 PostgreSQL 数据库。该命令是离线迁移工具：执行前必须停止会写入源库的 ChatAPI 实例，迁移完成并校验后再修改数据库配置；它不会持续复制迁移期间或迁移后的增量写入。
 
 ```bash
 cd backend

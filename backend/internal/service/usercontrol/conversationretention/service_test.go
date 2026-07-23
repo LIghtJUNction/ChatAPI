@@ -22,11 +22,15 @@ func TestSettingsUpdatedOnlyReconcilesConversationLimit(t *testing.T) {
 	pruner := &recordingPruner{}
 	service := New(fakeUsers{items: []common.User{{ID: "a"}, {ID: "b"}}}, pruner, func(context.Context) int { return 30 }, nil)
 
-	service.SettingsUpdated(context.Background(), []string{"global_rate_limit_requests"})
+	if err := service.SettingsUpdated(context.Background(), []string{"global_rate_limit_requests"}); err != nil {
+		t.Fatal(err)
+	}
 	if len(pruner.calls) != 0 {
 		t.Fatalf("unrelated setting triggered reconciliation: %v", pruner.calls)
 	}
-	service.SettingsUpdated(context.Background(), []string{LimitSettingKey})
+	if err := service.SettingsUpdated(context.Background(), []string{LimitSettingKey}); err != nil {
+		t.Fatal(err)
+	}
 	if len(pruner.calls) != 2 || pruner.calls[0] != "a" || pruner.calls[1] != "b" {
 		t.Fatalf("unexpected reconciliation calls: %v", pruner.calls)
 	}

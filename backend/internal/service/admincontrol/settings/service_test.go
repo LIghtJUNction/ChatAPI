@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -17,6 +18,17 @@ func (fakeDomain) Fields() []settingscore.Descriptor { return nil }
 func (fakeDomain) Get(context.Context) (settingscore.Document, error) {
 	return settingscore.Document{Domain: "access"}, nil
 }
+
+func TestPatchReturnsAfterUpdateFailure(t *testing.T) {
+	wantErr := errors.New("reconcile failed")
+	service := New(config.Config{}, Domain{
+		Settings:    fakeDomain{},
+		AfterUpdate: func(context.Context, []string) error { return wantErr },
+	})
+	if _, err := service.Patch(context.Background(), "access", PatchInput{Values: map[string]any{"user_conversation_limit": 10}}); !errors.Is(err, wantErr) {
+		t.Fatalf("patch error = %v, want %v", err, wantErr)
+	}
+}
 func (fakeDomain) Reload(ctx context.Context) (settingscore.Document, error) {
 	return fakeDomain{}.Get(ctx)
 }
@@ -28,8 +40,9 @@ func TestPatchPassesSortedChangedKeysToAfterUpdate(t *testing.T) {
 	var changed []string
 	service := New(config.Config{}, Domain{
 		Settings: fakeDomain{},
-		AfterUpdate: func(_ context.Context, keys []string) {
+		AfterUpdate: func(_ context.Context, keys []string) error {
 			changed = append([]string(nil), keys...)
+			return nil
 		},
 	})
 	_, err := service.Patch(context.Background(), "access", PatchInput{Values: map[string]any{"z": 1, "a": 2}})

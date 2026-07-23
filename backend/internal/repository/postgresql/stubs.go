@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	platformrepo "github.com/zyf2007/ChatAPI/internal/repository/platform"
 )
 
 func (s *Store) MigrationStatus(ctx context.Context) (common.MigrationStatus, error) {
@@ -63,6 +64,6 @@ func (s *Store) MigrationStatus(ctx context.Context) (common.MigrationStatus, er
 	}, nil
 }
 
-func (s *Store) Checkpoint(context.Context) error { return nil }
+func (s *Store) Checkpoint(context.Context) error { return platformrepo.ErrMaintenanceUnsupported }
 
-func (s *Store) Vacuum(context.Context) error { return nil }
+func (s *Store) Vacuum(context.Context) error { return platformrepo.ErrMaintenanceUnsupported }

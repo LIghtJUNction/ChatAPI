@@ -2,7 +2,10 @@ package conversationretention
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
+	"time"
 
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
@@ -31,28 +34,40 @@ func New(users UserLister, pruner Pruner, limit func(context.Context) int, logge
 }
 
 func (s *Service) Enforce(ctx context.Context, ownerID string) {
+	_ = s.enforce(ctx, ownerID)
+}
+
+func (s *Service) enforce(ctx context.Context, ownerID string) error {
 	if s == nil || s.pruner == nil || s.limit == nil {
-		return
+		return nil
 	}
 	limit := s.limit(ctx)
 	if limit <= 0 {
-		return
+		return nil
 	}
 	if _, _, err := s.pruner.PruneConversations(ctx, ownerID, limit); err != nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", ownerID), zap.Int("conversation.limit", limit)).Warn("failed to enforce conversation retention", zap.Error(err))
+		return err
 	}
+	return nil
 }
 
-func (s *Service) SettingsUpdated(ctx context.Context, changedKeys []string) {
+func (s *Service) SettingsUpdated(ctx context.Context, changedKeys []string) error {
 	if s == nil || !slices.Contains(changedKeys, LimitSettingKey) || s.users == nil {
-		return
+		return nil
 	}
-	users, err := s.users.ListUsers(ctx)
+	reconcileCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	users, err := s.users.ListUsers(reconcileCtx)
 	if err != nil {
-		logging.BindContext(s.logger, ctx).Warn("failed to list users for conversation retention reconciliation", zap.Error(err))
-		return
+		logging.BindContext(s.logger, reconcileCtx).Warn("failed to list users for conversation retention reconciliation", zap.Error(err))
+		return fmt.Errorf("list users for conversation retention: %w", err)
 	}
+	var reconcileErrors []error
 	for _, user := range users {
-		s.Enforce(ctx, user.ID)
+		if err := s.enforce(reconcileCtx, user.ID); err != nil {
+			reconcileErrors = append(reconcileErrors, fmt.Errorf("user %s: %w", user.ID, err))
+		}
 	}
+	return errors.Join(reconcileErrors...)
 }

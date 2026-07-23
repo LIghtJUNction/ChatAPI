@@ -2,13 +2,25 @@ package postgresql
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	platformrepo "github.com/zyf2007/ChatAPI/internal/repository/platform"
 	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
 	"github.com/zyf2007/ChatAPI/internal/repository/storetest"
 	"github.com/zyf2007/ChatAPI/internal/testutil/pgtest"
 )
+
+func TestPostgreSQLRejectsSQLiteMaintenanceOperations(t *testing.T) {
+	store := openTestStore()(t)
+	if err := store.Checkpoint(context.Background()); !errors.Is(err, platformrepo.ErrMaintenanceUnsupported) {
+		t.Fatalf("checkpoint error = %v", err)
+	}
+	if err := store.Vacuum(context.Background()); !errors.Is(err, platformrepo.ErrMaintenanceUnsupported) {
+		t.Fatalf("vacuum error = %v", err)
+	}
+}
 
 func TestOutputMediaMigrationKeepsURLOnEventRefs(t *testing.T) {
 	var migrationSQL string

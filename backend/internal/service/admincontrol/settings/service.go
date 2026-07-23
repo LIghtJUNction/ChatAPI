@@ -21,7 +21,7 @@ type SettingsDomain interface {
 }
 type Domain struct {
 	Settings    SettingsDomain
-	AfterUpdate func(context.Context, []string)
+	AfterUpdate func(context.Context, []string) error
 }
 type Service struct {
 	domains map[string]Domain
@@ -71,7 +71,9 @@ func (s *Service) Patch(ctx context.Context, domain string, input PatchInput) (P
 	sort.Strings(applied)
 	sort.Strings(restart)
 	if d.AfterUpdate != nil {
-		d.AfterUpdate(ctx, applied)
+		if err := d.AfterUpdate(ctx, applied); err != nil {
+			return PatchResult{}, fmt.Errorf("apply settings side effects: %w", err)
+		}
 	}
 	return PatchResult{Document: doc, Applied: applied, RestartRequired: restart}, nil
 }

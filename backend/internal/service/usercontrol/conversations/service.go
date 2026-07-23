@@ -8,7 +8,6 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
-	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
@@ -30,7 +29,7 @@ type turnService interface {
 type Deps struct {
 	Query     queryService
 	Turn      turnService
-	DeleteOne func(context.Context, string) (common.DeleteConversationsResult, error)
+	DeleteOne func(context.Context, string, string) (common.DeleteConversationsResult, error)
 	Prune     func(context.Context, string, int) (common.DeleteConversationsResult, int, error)
 	Events    chatevents.Publisher
 	Logger    *zap.Logger
@@ -39,7 +38,7 @@ type Deps struct {
 type Service struct {
 	query     queryService
 	turn      turnService
-	deleteOne func(context.Context, string) (common.DeleteConversationsResult, error)
+	deleteOne func(context.Context, string, string) (common.DeleteConversationsResult, error)
 	prune     func(context.Context, string, int) (common.DeleteConversationsResult, int, error)
 	events    chatevents.Publisher
 	logger    *zap.Logger
@@ -90,29 +89,19 @@ func (s *Service) AbortConversation(ctx context.Context, ownerID string, convers
 }
 
 func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conversationID string) (common.DeleteConversationsResult, error) {
-	conversations, err := s.query.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
-	if err != nil {
-		return common.DeleteConversationsResult{}, err
+	ownerID = strings.TrimSpace(ownerID)
+	conversationID = strings.TrimSpace(conversationID)
+	result, err := s.deleteOne(ctx, ownerID, conversationID)
+	if errors.Is(err, common.ErrConversationPending) {
+		logging.BindContext(s.logger, ctx, zap.String("owner.id", ownerID), zap.String("conversation.id", conversationID)).Warn("usercontrol conversations delete rejected pending conversation")
+		return common.DeleteConversationsResult{}, ErrWaitingConversationDelete
 	}
-	found := false
-	for _, item := range conversations {
-		if item.ID == strings.TrimSpace(conversationID) {
-			found = true
-			if conversationstate.IsPendingStatus(conversationstate.FromConversation(item).Status) {
-				logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Warn("usercontrol conversations delete rejected pending conversation")
-				return common.DeleteConversationsResult{}, ErrWaitingConversationDelete
-			}
-			break
-		}
+	if errors.Is(err, common.ErrNotFound) {
+		logging.BindContext(s.logger, ctx, zap.String("owner.id", ownerID), zap.String("conversation.id", conversationID)).Warn("usercontrol conversations delete rejected missing conversation")
 	}
-	if !found {
-		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Warn("usercontrol conversations delete rejected missing conversation")
-		return common.DeleteConversationsResult{}, common.ErrNotFound
-	}
-	result, err := s.deleteOne(ctx, strings.TrimSpace(conversationID))
 	if err == nil {
 		chatevents.PublishDeletedConversations(ctx, s.events, result)
-		logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Info("usercontrol conversations deleted conversation")
+		logging.BindContext(s.logger, ctx, zap.String("owner.id", ownerID), zap.String("conversation.id", conversationID)).Info("usercontrol conversations deleted conversation")
 	}
 	return result, err
 }

@@ -5,7 +5,6 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/repository/auth"
 	"github.com/zyf2007/ChatAPI/internal/repository/chat"
-	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	configrepo "github.com/zyf2007/ChatAPI/internal/repository/config"
 	"github.com/zyf2007/ChatAPI/internal/repository/storage"
 	"github.com/zyf2007/ChatAPI/internal/service/account"
@@ -80,14 +79,12 @@ func New(deps Deps) *Service {
 		Config:   userconfig.New(userconfig.Deps{Configs: deps.Configs, Chat: deps.Chat, Events: deps.Events, Logger: deps.Logger}),
 		Identity: identity.New(identity.Deps{Accounts: deps.Accounts, Logger: deps.Logger}),
 		Conversations: conversations.New(conversations.Deps{
-			Query:  deps.Query,
-			Turn:   deps.Turn,
-			Logger: deps.Logger,
-			Events: deps.Events,
-			DeleteOne: func(ctx context.Context, conversationID string) (common.DeleteConversationsResult, error) {
-				return deps.Chat.DeleteConversations(ctx, []string{conversationID})
-			},
-			Prune: deps.Chat.PruneConversationsForOwner,
+			Query:     deps.Query,
+			Turn:      deps.Turn,
+			Logger:    deps.Logger,
+			Events:    deps.Events,
+			DeleteOne: deps.Chat.DeleteConversationForOwner,
+			Prune:     deps.Chat.PruneConversationsForOwner,
 		}),
 		Automation: deps.Automation,
 	}

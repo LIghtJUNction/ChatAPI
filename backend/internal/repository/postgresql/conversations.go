@@ -227,6 +227,65 @@ func (s *Store) ListMessages(ctx context.Context, conversationID string) ([]comm
 	return items, nil
 }
 
+func (s *Store) DeleteConversationForOwner(ctx context.Context, ownerID, conversationID string) (common.DeleteConversationsResult, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	conversationID = strings.TrimSpace(conversationID)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var storedOwner, status string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(metadata_json->>'owner_id', ''), COALESCE(metadata_json->>'realtime_status', '')
+		FROM conversations WHERE id = $1
+		FOR UPDATE
+	`, conversationID).Scan(&storedOwner, &status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return common.DeleteConversationsResult{}, common.ErrNotFound
+		}
+		return common.DeleteConversationsResult{}, err
+	}
+	if storedOwner != ownerID {
+		return common.DeleteConversationsResult{}, common.ErrNotFound
+	}
+	if status == "waiting" || status == "streaming" {
+		return common.DeleteConversationsResult{}, common.ErrConversationPending
+	}
+
+	result := common.DeleteConversationsResult{
+		DeletedConversationItems: []common.DeletedConversation{{ID: conversationID, OwnerID: ownerID}},
+	}
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE conversation_id = $1`, conversationID).Scan(&result.DeletedMessages); err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id = $1) +
+			(SELECT COUNT(*) FROM media_asset_event_refs WHERE conversation_id = $1)
+	`, conversationID).Scan(&result.DeletedAssetRefs); err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM conversations
+		WHERE id = $1
+			AND COALESCE(metadata_json->>'owner_id', '') = $2
+			AND COALESCE(metadata_json->>'realtime_status', '') NOT IN ('waiting', 'streaming')
+	`, conversationID, ownerID)
+	if err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	if tag.RowsAffected() != 1 {
+		return common.DeleteConversationsResult{}, common.ErrConversationPending
+	}
+	result.DeletedConversations = 1
+	if err := tx.Commit(ctx); err != nil {
+		return common.DeleteConversationsResult{}, err
+	}
+	return result, nil
+}
+
 func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []string) (common.DeleteConversationsResult, error) {
 	conversationIDs = uniqueNonEmptyStrings(conversationIDs)
 	if len(conversationIDs) == 0 {

@@ -60,7 +60,19 @@ func (s *Store) logger(ctx context.Context) *zap.Logger {
 }
 
 func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, bootstrapSchema)
+	lockConnection, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire postgresql migration lock connection: %w", err)
+	}
+	defer lockConnection.Release()
+	if _, err := lockConnection.Exec(ctx, `SELECT pg_advisory_lock(hashtext('chatapi_schema_migrations'))`); err != nil {
+		return fmt.Errorf("lock postgresql migrations: %w", err)
+	}
+	defer func() {
+		_, _ = lockConnection.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext('chatapi_schema_migrations'))`)
+	}()
+
+	_, err = pool.Exec(ctx, bootstrapSchema)
 	if err != nil {
 		return fmt.Errorf("bootstrap postgresql schema: %w", err)
 	}

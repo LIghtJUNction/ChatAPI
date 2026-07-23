@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	platformrepo "github.com/zyf2007/ChatAPI/internal/repository/platform"
@@ -101,6 +102,39 @@ func TestBootstrapAppliesLatestPostgreSQLMigration(t *testing.T) {
 		}
 		if !exists {
 			t.Fatalf("expected postgresql migration index %s", index)
+		}
+	}
+}
+
+func TestConcurrentBootstrapSerializesPostgreSQLMigrations(t *testing.T) {
+	dsn := pgtest.IsolatedDSN(t)
+	ctx := context.Background()
+	st, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close)
+	if err := Reset(ctx, st.Pool()); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	errorsFound := make(chan error, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			errorsFound <- Bootstrap(ctx, st.Pool())
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(errorsFound)
+	for err := range errorsFound {
+		if err != nil {
+			t.Fatalf("concurrent bootstrap failed: %v", err)
 		}
 	}
 }

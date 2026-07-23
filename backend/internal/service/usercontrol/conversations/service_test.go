@@ -79,7 +79,13 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 			},
 		},
 		Turn: &fakeTurn{},
-		DeleteOne: func(_ context.Context, id string) (common.DeleteConversationsResult, error) {
+		DeleteOne: func(_ context.Context, ownerID, id string) (common.DeleteConversationsResult, error) {
+			if ownerID != "user_a" || id == "missing" {
+				return common.DeleteConversationsResult{}, common.ErrNotFound
+			}
+			if id == "conv_wait" || id == "conv_stream" {
+				return common.DeleteConversationsResult{}, common.ErrConversationPending
+			}
 			deleteCalled++
 			return common.DeleteConversationsResult{
 				DeletedConversations: 1,
@@ -143,7 +149,7 @@ func TestConversationsPruneRandomized(t *testing.T) {
 	svc := userconv.New(userconv.Deps{
 		Query: &fakeQuery{conversations: map[string][]common.Conversation{"user_a": items}},
 		Turn:  &fakeTurn{},
-		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
+		DeleteOne: func(context.Context, string, string) (common.DeleteConversationsResult, error) {
 			return common.DeleteConversationsResult{}, nil
 		},
 		Prune: func(_ context.Context, _ string, keep int) (common.DeleteConversationsResult, int, error) {
@@ -209,7 +215,7 @@ func TestConversationsAbortConversationChecksOwnershipAndForwardsReason(t *testi
 			},
 		},
 		Turn: turn,
-		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
+		DeleteOne: func(context.Context, string, string) (common.DeleteConversationsResult, error) {
 			return common.DeleteConversationsResult{}, nil
 		},
 		Prune: func(context.Context, string, int) (common.DeleteConversationsResult, int, error) {
@@ -237,7 +243,7 @@ func TestConversationsAbortConversationRejectsForbidden(t *testing.T) {
 	svc := userconv.New(userconv.Deps{
 		Query: &fakeQuery{messageErr: userconv.ErrForbidden},
 		Turn:  &fakeTurn{err: userconv.ErrForbidden},
-		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
+		DeleteOne: func(context.Context, string, string) (common.DeleteConversationsResult, error) {
 			return common.DeleteConversationsResult{}, nil
 		},
 		Prune: func(context.Context, string, int) (common.DeleteConversationsResult, int, error) {

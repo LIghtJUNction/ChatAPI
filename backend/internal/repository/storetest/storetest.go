@@ -135,6 +135,12 @@ func testConversationRepositoryRetention(t *testing.T, newStore NewStoreFunc) {
 			}
 		}
 	}
+	if _, err := st.DeleteConversationForOwner(ctx, "retention-owner", "retention-0"); !errors.Is(err, common.ErrConversationPending) {
+		t.Fatalf("pending conversation delete error=%v", err)
+	}
+	if _, err := st.DeleteConversationForOwner(ctx, "other-owner", "retention-3"); !errors.Is(err, common.ErrNotFound) {
+		t.Fatalf("cross-owner conversation delete error=%v", err)
+	}
 
 	result, skipped, err := st.PruneConversationsForOwner(ctx, "retention-owner", 1)
 	if err != nil {

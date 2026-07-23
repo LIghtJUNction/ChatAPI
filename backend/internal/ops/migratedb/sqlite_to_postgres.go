@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -240,7 +241,7 @@ type messageRow struct {
 func SQLiteToPostgres(ctx context.Context, sqlitePath string, postgresDSN string) (Report, error) {
 	report := Report{
 		Source:    strings.TrimSpace(sqlitePath),
-		Target:    strings.TrimSpace(postgresDSN),
+		Target:    safePostgresTarget(postgresDSN),
 		StartedAt: time.Now().UTC(),
 	}
 
@@ -309,6 +310,14 @@ func SQLiteToPostgres(ctx context.Context, sqlitePath string, postgresDSN string
 	}
 	report.CompletedAt = time.Now().UTC()
 	return report, nil
+}
+
+func safePostgresTarget(dsn string) string {
+	parsed, err := url.Parse(strings.TrimSpace(dsn))
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") {
+		return "postgresql"
+	}
+	return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}).String()
 }
 
 func ensureEmptyPostgresTarget(ctx context.Context, pool *pgxpool.Pool) error {

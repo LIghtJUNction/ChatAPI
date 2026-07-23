@@ -49,6 +49,7 @@ type UseWorkspaceRealtimeParams = {
   authenticated: boolean
   conversations: Conversation[]
   onConnectionCountChange: (value: number) => void
+  onConversationCountChange: (value: number) => void
   selectedConversationId: string
   setConversations: Dispatch<SetStateAction<Conversation[]>>
   setTimelineByConversation: Dispatch<SetStateAction<Record<string, TimelineItem[]>>>
@@ -60,6 +61,7 @@ export function useWorkspaceRealtime({
   authenticated,
   conversations,
   onConnectionCountChange,
+  onConversationCountChange,
   selectedConversationId,
   setConversations,
   setTimelineByConversation,
@@ -308,6 +310,7 @@ export function useWorkspaceRealtime({
           setHasMoreConversations(payload.has_more)
           setLoadingMoreConversations(false)
           setConversationPageError('')
+          onConversationCountChange(payload.conversation_count)
           conversationsRef.current = nextConversations
           setConversations(nextConversations)
           applySelectedConversation(resolvePreferredConversationId(nextConversations))
@@ -452,6 +455,9 @@ export function useWorkspaceRealtime({
         }
 
         if (payload.type === 'conversation.upsert') {
+          if (typeof payload.conversation_count === 'number') {
+            onConversationCountChange(payload.conversation_count)
+          }
           removedConversationIDs.delete(payload.conversation.id)
           const remaining = conversationsRef.current.filter((item) => item.id !== payload.conversation.id)
           const nextConversations = sortConversations([payload.conversation, ...remaining])
@@ -486,6 +492,9 @@ export function useWorkspaceRealtime({
           return
         }
 
+        if (typeof payload.conversation_count === 'number') {
+          onConversationCountChange(payload.conversation_count)
+        }
         removedConversationIDs.add(payload.conversation_id)
         const nextConversations = conversationsRef.current.filter((item) => item.id !== payload.conversation_id)
         conversationsRef.current = nextConversations
@@ -551,6 +560,7 @@ export function useWorkspaceRealtime({
     applySelectedConversation,
     authenticated,
     onConnectionCountChange,
+    onConversationCountChange,
     rejectPendingCommands,
     resolvePreferredConversationId,
     sendJSON,

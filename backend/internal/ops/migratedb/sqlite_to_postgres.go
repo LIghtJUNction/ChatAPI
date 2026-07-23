@@ -74,6 +74,10 @@ type tableCopy struct {
 	Rows [][]any
 }
 
+type sqliteQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 var extendedTableSpecs = []tableCopySpec{
 	{Name: "auth_verification_codes", Columns: []string{"email", "purpose", "code_hash", "expires_at", "created_at", "updated_at", "failed_attempts", "last_sent_at"}, TimeColumns: map[string]bool{"expires_at": true, "created_at": true, "updated_at": true, "last_sent_at": true}},
 	{Name: "conversation_events", Columns: []string{"id", "conversation_id", "owner_id", "type", "level", "title", "detail", "request_id", "metadata_json", "created_at"}, TimeColumns: map[string]bool{"created_at": true}, JSONColumns: map[string]bool{"metadata_json": true}},
@@ -268,9 +272,17 @@ func SQLiteToPostgres(ctx context.Context, sqlitePath string, postgresDSN string
 		return report, err
 	}
 
-	data, err := loadSQLiteSnapshot(ctx, src.DB())
+	sourceTx, err := src.DB().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return report, fmt.Errorf("begin sqlite snapshot: %w", err)
+	}
+	defer sourceTx.Rollback()
+	data, err := loadSQLiteSnapshot(ctx, sourceTx)
 	if err != nil {
 		return report, err
+	}
+	if err := sourceTx.Commit(); err != nil {
+		return report, fmt.Errorf("complete sqlite snapshot: %w", err)
 	}
 	if err := importSnapshot(ctx, dst.Pool(), data); err != nil {
 		return report, err
@@ -355,7 +367,7 @@ func ensureEmptyPostgresTarget(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-func loadSQLiteSnapshot(ctx context.Context, db *sql.DB) (snapshot, error) {
+func loadSQLiteSnapshot(ctx context.Context, db sqliteQuerier) (snapshot, error) {
 	var data snapshot
 	var err error
 	if data.Users, err = loadUsers(ctx, db); err != nil {
@@ -548,7 +560,7 @@ func importSnapshot(ctx context.Context, pool *pgxpool.Pool, data snapshot) erro
 	return tx.Commit(ctx)
 }
 
-func loadExtendedTable(ctx context.Context, db *sql.DB, spec tableCopySpec) (tableCopy, error) {
+func loadExtendedTable(ctx context.Context, db sqliteQuerier, spec tableCopySpec) (tableCopy, error) {
 	table := tableCopy{Spec: spec}
 	rows, err := db.QueryContext(ctx, "SELECT "+strings.Join(spec.Columns, ", ")+" FROM "+spec.Name)
 	if err != nil {
@@ -594,7 +606,7 @@ func normalizeJSON(raw string, fallback string) string {
 	return raw
 }
 
-func loadUsers(ctx context.Context, db *sql.DB) ([]userRow, error) {
+func loadUsers(ctx context.Context, db sqliteQuerier) ([]userRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, username, email, password_hash, role, is_active, local_admin, created_at, updated_at, last_login_at FROM users ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite users: %w", err)
@@ -620,7 +632,7 @@ func loadUsers(ctx context.Context, db *sql.DB) ([]userRow, error) {
 	return items, rows.Err()
 }
 
-func loadUserIdentities(ctx context.Context, db *sql.DB) ([]userIdentityRow, error) {
+func loadUserIdentities(ctx context.Context, db sqliteQuerier) ([]userIdentityRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, user_id, provider, subject, email, email_verified, profile_json, created_at, updated_at, last_login_at FROM user_identities ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite user_identities: %w", err)
@@ -644,7 +656,7 @@ func loadUserIdentities(ctx context.Context, db *sql.DB) ([]userIdentityRow, err
 	return items, rows.Err()
 }
 
-func loadSystemConfigs(ctx context.Context, db *sql.DB) ([]configRow, error) {
+func loadSystemConfigs(ctx context.Context, db sqliteQuerier) ([]configRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT key, value_json, created_at, updated_at FROM config ORDER BY key ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite config: %w", err)
@@ -664,7 +676,7 @@ func loadSystemConfigs(ctx context.Context, db *sql.DB) ([]configRow, error) {
 	return items, rows.Err()
 }
 
-func loadUserConfigs(ctx context.Context, db *sql.DB) ([]userConfigRow, error) {
+func loadUserConfigs(ctx context.Context, db sqliteQuerier) ([]userConfigRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT user_id, key, value_json, created_at, updated_at FROM user_configs ORDER BY user_id ASC, key ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite user_configs: %w", err)
@@ -684,7 +696,7 @@ func loadUserConfigs(ctx context.Context, db *sql.DB) ([]userConfigRow, error) {
 	return items, rows.Err()
 }
 
-func loadModelAPIKeys(ctx context.Context, db *sql.DB) ([]modelAPIKeyRow, error) {
+func loadModelAPIKeys(ctx context.Context, db sqliteQuerier) ([]modelAPIKeyRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at FROM user_api_keys ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite user_api_keys: %w", err)
@@ -706,7 +718,7 @@ func loadModelAPIKeys(ctx context.Context, db *sql.DB) ([]modelAPIKeyRow, error)
 	return items, rows.Err()
 }
 
-func loadAppAPIKeys(ctx context.Context, db *sql.DB) ([]appAPIKeyRow, error) {
+func loadAppAPIKeys(ctx context.Context, db sqliteQuerier) ([]appAPIKeyRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at FROM user_app_api_keys ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite user_app_api_keys: %w", err)
@@ -729,7 +741,7 @@ func loadAppAPIKeys(ctx context.Context, db *sql.DB) ([]appAPIKeyRow, error) {
 	return items, rows.Err()
 }
 
-func loadAppAPIKeyAuditLogs(ctx context.Context, db *sql.DB) ([]appAPIKeyAuditLogRow, error) {
+func loadAppAPIKeyAuditLogs(ctx context.Context, db sqliteQuerier) ([]appAPIKeyAuditLogRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, app_api_key_id, user_id, route, status_code, error_code, created_at FROM app_api_key_audit_logs ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite app_api_key_audit_logs: %w", err)
@@ -748,7 +760,7 @@ func loadAppAPIKeyAuditLogs(ctx context.Context, db *sql.DB) ([]appAPIKeyAuditLo
 	return items, rows.Err()
 }
 
-func loadAuditLogs(ctx context.Context, db *sql.DB) ([]auditLogRow, error) {
+func loadAuditLogs(ctx context.Context, db sqliteQuerier) ([]auditLogRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, actor_user_id, actor_role, actor_source, event_type, resource_type, resource_id, action, outcome, ip_address, user_agent, metadata_json, created_at FROM audit_logs ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite audit_logs: %w", err)
@@ -767,7 +779,7 @@ func loadAuditLogs(ctx context.Context, db *sql.DB) ([]auditLogRow, error) {
 	return items, rows.Err()
 }
 
-func loadAutomationRules(ctx context.Context, db *sql.DB) ([]automationRuleRow, error) {
+func loadAutomationRules(ctx context.Context, db sqliteQuerier) ([]automationRuleRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, user_id, enabled, rule_json, created_at, updated_at FROM automation_rules ORDER BY user_id ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite automation_rules: %w", err)
@@ -789,7 +801,7 @@ func loadAutomationRules(ctx context.Context, db *sql.DB) ([]automationRuleRow, 
 	return items, rows.Err()
 }
 
-func loadUploadedImages(ctx context.Context, db *sql.DB) ([]uploadedImageRow, error) {
+func loadUploadedImages(ctx context.Context, db sqliteQuerier) ([]uploadedImageRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, owner_id, filename, original_filename, content_type, bytes, url, created_at FROM uploaded_images ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite uploaded_images: %w", err)
@@ -808,7 +820,7 @@ func loadUploadedImages(ctx context.Context, db *sql.DB) ([]uploadedImageRow, er
 	return items, rows.Err()
 }
 
-func loadStorageUserQuotas(ctx context.Context, db *sql.DB) ([]storageUserQuotaRow, error) {
+func loadStorageUserQuotas(ctx context.Context, db sqliteQuerier) ([]storageUserQuotaRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT owner_id, quota_bytes, created_at, updated_at FROM storage_user_quotas ORDER BY owner_id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite storage_user_quotas: %w", err)
@@ -828,7 +840,7 @@ func loadStorageUserQuotas(ctx context.Context, db *sql.DB) ([]storageUserQuotaR
 	return items, rows.Err()
 }
 
-func loadDeletionFailures(ctx context.Context, db *sql.DB) ([]storageFileDeletionFailureRow, error) {
+func loadDeletionFailures(ctx context.Context, db sqliteQuerier) ([]storageFileDeletionFailureRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT path, filename, owner_id, bytes, last_error, attempts, created_at, updated_at FROM storage_file_deletion_failures ORDER BY updated_at ASC, path ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite storage_file_deletion_failures: %w", err)
@@ -848,7 +860,7 @@ func loadDeletionFailures(ctx context.Context, db *sql.DB) ([]storageFileDeletio
 	return items, rows.Err()
 }
 
-func loadConversations(ctx context.Context, db *sql.DB) ([]conversationRow, error) {
+func loadConversations(ctx context.Context, db sqliteQuerier) ([]conversationRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json FROM conversations ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite conversations: %w", err)
@@ -869,7 +881,7 @@ func loadConversations(ctx context.Context, db *sql.DB) ([]conversationRow, erro
 	return items, rows.Err()
 }
 
-func loadMessages(ctx context.Context, db *sql.DB) ([]messageRow, error) {
+func loadMessages(ctx context.Context, db sqliteQuerier) ([]messageRow, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, conversation_id, role, content, created_at, status, response_id, metadata_json FROM messages ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite messages: %w", err)

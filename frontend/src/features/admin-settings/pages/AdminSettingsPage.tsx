@@ -108,12 +108,10 @@ function SystemSettings({ runtime }: { runtime: Record<string, unknown> | null }
     <section className="admin-domain-section">
       <div className="admin-domain-heading"><Typography.Title level={3}>系统设置</Typography.Title></div>
       <Typography.Paragraph type="secondary">以下参数来自服务启动环境，修改后需重启 ChatAPI 才会生效。</Typography.Paragraph>
-      <Descriptions bordered size="small" column={1} title="存储维护">
-        <Descriptions.Item label="自动维护">{config.storage_cleanup_enabled ? '已启用' : '未启用'}</Descriptions.Item>
+      <Descriptions bordered size="small" column={1} title="SQLite 存储维护">
+        <Descriptions.Item label="定时 VACUUM">{config.database_driver === 'sqlite' && config.storage_cleanup_enabled && config.storage_vacuum_enabled ? '已启用' : '未启用'}</Descriptions.Item>
         <Descriptions.Item label="执行时间">{String(config.storage_cleanup_time ?? '-')}</Descriptions.Item>
-        <Descriptions.Item label="保留最近会话">{String(config.storage_cleanup_keep_recent_conversations ?? '-')}</Descriptions.Item>
-        <Descriptions.Item label="保留最近天数">{String(config.storage_cleanup_keep_recent_days ?? '-')}</Descriptions.Item>
-        <Descriptions.Item label="SQLite VACUUM">{config.database_driver === 'sqlite' && config.storage_vacuum_enabled ? '已启用' : '未启用'}</Descriptions.Item>
+        <Descriptions.Item label="数据库驱动">{String(config.database_driver ?? '-')}</Descriptions.Item>
       </Descriptions>
       <Typography.Title level={4} style={{ marginTop: 24 }}>最近维护日志</Typography.Title>
       <List

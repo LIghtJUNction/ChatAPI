@@ -44,8 +44,8 @@ func (f fakeRealtime) Current(context.Context) (workspacesettings.Settings, erro
 
 type fakeConversations struct{ items []common.Conversation }
 
-func (f fakeConversations) ListConversationsForOwner(context.Context, string) ([]common.Conversation, error) {
-	return f.items, nil
+func (f fakeConversations) CountConversationsForOwner(context.Context, string) (int, error) {
+	return len(f.items), nil
 }
 
 func (f fakeTOTP) IsEnabled(context.Context, string) bool { return f.enabled }

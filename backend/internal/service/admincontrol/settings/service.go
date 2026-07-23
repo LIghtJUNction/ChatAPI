@@ -21,7 +21,7 @@ type SettingsDomain interface {
 }
 type Domain struct {
 	Settings    SettingsDomain
-	AfterUpdate func(context.Context)
+	AfterUpdate func(context.Context, []string)
 }
 type Service struct {
 	domains map[string]Domain
@@ -64,15 +64,15 @@ func (s *Service) Patch(ctx context.Context, domain string, input PatchInput) (P
 	if err != nil {
 		return PatchResult{}, err
 	}
-	if d.AfterUpdate != nil {
-		d.AfterUpdate(ctx)
-	}
 	applied := make([]string, 0, len(input.Values))
 	for k := range input.Values {
 		applied = append(applied, k)
 	}
 	sort.Strings(applied)
 	sort.Strings(restart)
+	if d.AfterUpdate != nil {
+		d.AfterUpdate(ctx, applied)
+	}
 	return PatchResult{Document: doc, Applied: applied, RestartRequired: restart}, nil
 }
 func (s *Service) Catalog() map[string]any {

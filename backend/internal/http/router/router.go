@@ -62,6 +62,7 @@ import (
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 	workspacesettings "github.com/zyf2007/ChatAPI/internal/service/chat/workspace/settings"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
+	"github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversationretention"
 )
 
 type Deps struct {
@@ -238,17 +239,13 @@ func New(deps Deps) http.Handler {
 			ConversationLimit: conversationLimit,
 		})
 	}
-	pruneUserConversations := func(ctx context.Context, ownerID string) {
-		limit := conversationLimit(ctx)
-		if limit <= 0 || deps.UserControl == nil || deps.UserControl.Conversations == nil {
-			return
-		}
-		if _, _, err := deps.UserControl.Conversations.PruneConversations(ctx, ownerID, limit); err != nil {
-			logging.BindContext(httpLogger, ctx, zap.String("owner.id", ownerID), zap.Int("conversation.limit", limit)).Warn("failed to prune user conversations", zap.Error(err))
-		}
+	var retentionPruner conversationretention.Pruner
+	if deps.UserControl != nil && deps.UserControl.Conversations != nil {
+		retentionPruner = deps.UserControl.Conversations
 	}
+	conversationRetention := conversationretention.New(deps.Accounts, retentionPruner, conversationLimit, httpLogger)
 	if deps.Turn != nil {
-		deps.Turn.PruneConversations = pruneUserConversations
+		deps.Turn.ConversationCreated = conversationRetention.Enforce
 	}
 	if deps.AdminSettings == nil && deps.AuthSettings != nil && deps.AccessSettings != nil {
 		accessDomain, err := adminsettings.Combine("access", "访问限流", deps.AccessSettings.AdminDomain(), deps.RealtimeSettings, deps.ChatSettings)
@@ -257,19 +254,7 @@ func New(deps Deps) http.Handler {
 		}
 		deps.AdminSettings = adminsettings.New(deps.Config,
 			adminsettings.Domain{Settings: deps.AuthSettings.AdminDomain()},
-			adminsettings.Domain{Settings: accessDomain, AfterUpdate: func(ctx context.Context) {
-				if deps.Accounts == nil {
-					return
-				}
-				users, err := deps.Accounts.ListUsers(ctx)
-				if err != nil {
-					logging.BindContext(httpLogger, ctx).Warn("failed to list users for conversation cleanup", zap.Error(err))
-					return
-				}
-				for _, user := range users {
-					pruneUserConversations(ctx, user.ID)
-				}
-			}},
+			adminsettings.Domain{Settings: accessDomain, AfterUpdate: conversationRetention.SettingsUpdated},
 			adminsettings.Domain{Settings: deps.MediaSettings},
 			adminsettings.Domain{Settings: deps.AutomationSettings},
 		)

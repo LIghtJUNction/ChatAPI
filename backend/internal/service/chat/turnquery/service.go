@@ -48,19 +48,22 @@ func (s *Service) ListMessagesForOwner(ctx context.Context, conversationID strin
 }
 
 func (s *Service) ListConversationsForOwner(ctx context.Context, ownerID string) ([]common.Conversation, error) {
-	items, err := s.Store.ListConversations(ctx)
+	items, err := s.Store.ListConversationsForOwner(ctx, ownerID)
 	if err != nil {
 		s.logger().Warn("list conversations failed", zap.String("owner.id", ownerID), zap.Error(err))
 		return nil, err
 	}
-	filtered := make([]common.Conversation, 0, len(items))
-	for _, item := range items {
-		if ownerID == "" || conversationstate.OwnerID(item) == ownerID {
-			filtered = append(filtered, item)
-		}
+	s.logger().Debug("listed conversations for owner", zap.String("owner.id", ownerID), zap.Int("conversations.count", len(items)))
+	return items, nil
+}
+
+func (s *Service) CountConversationsForOwner(ctx context.Context, ownerID string) (int, error) {
+	count, err := s.Store.CountConversationsForOwner(ctx, ownerID)
+	if err != nil {
+		s.logger().Warn("count conversations failed", zap.String("owner.id", ownerID), zap.Error(err))
+		return 0, err
 	}
-	s.logger().Debug("listed conversations for owner", zap.String("owner.id", ownerID), zap.Int("conversations.count", len(filtered)))
-	return filtered, nil
+	return count, nil
 }
 
 func (s *Service) ListConversationsForOwnerPage(ctx context.Context, ownerID string, before time.Time, beforeID string, limit int) ([]common.Conversation, error) {

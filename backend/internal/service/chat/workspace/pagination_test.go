@@ -11,6 +11,17 @@ import (
 
 type pagedConversationQueryStub struct{ items []common.Conversation }
 
+func (s *pagedConversationQueryStub) CountConversationsForOwner(_ context.Context, ownerID string) (int, error) {
+	count := 0
+	for _, item := range s.items {
+		itemOwner, _ := item.Metadata["owner_id"].(string)
+		if itemOwner == ownerID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (s *pagedConversationQueryStub) ListConversationsForOwnerPage(_ context.Context, ownerID string, before time.Time, beforeID string, limit int) ([]common.Conversation, error) {
 	items := make([]common.Conversation, 0, limit)
 	for _, item := range s.items {
@@ -55,6 +66,9 @@ func TestConversationPagesUseOwnerScopedOpaqueCursor(t *testing.T) {
 	}
 	if len(snapshot.Conversations) != conversationPageSize || !snapshot.HasMore || snapshot.NextCursor == "" {
 		t.Fatalf("unexpected first page: %#v", snapshot)
+	}
+	if snapshot.ConversationCount != 35 {
+		t.Fatalf("unexpected conversation count: %d", snapshot.ConversationCount)
 	}
 	page, err := service.ConversationPage(context.Background(), "owner-a", "page-1", snapshot.NextCursor)
 	if err != nil {

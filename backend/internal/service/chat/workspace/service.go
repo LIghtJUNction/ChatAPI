@@ -21,6 +21,7 @@ import (
 
 type ConversationQuery interface {
 	ListConversationsForOwnerPage(context.Context, string, time.Time, string, int) ([]common.Conversation, error)
+	CountConversationsForOwner(context.Context, string) (int, error)
 }
 
 type TimelineQuery interface {
@@ -28,10 +29,11 @@ type TimelineQuery interface {
 }
 
 type Snapshot struct {
-	Type          string                `json:"type"`
-	Conversations []ConversationSummary `json:"conversations"`
-	HasMore       bool                  `json:"has_more"`
-	NextCursor    string                `json:"next_cursor,omitempty"`
+	Type              string                `json:"type"`
+	Conversations     []ConversationSummary `json:"conversations"`
+	ConversationCount int                   `json:"conversation_count"`
+	HasMore           bool                  `json:"has_more"`
+	NextCursor        string                `json:"next_cursor,omitempty"`
 }
 
 type ConversationPage struct {
@@ -43,13 +45,15 @@ type ConversationPage struct {
 }
 
 type ConversationUpsert struct {
-	Type         string              `json:"type"`
-	Conversation ConversationSummary `json:"conversation"`
+	Type              string              `json:"type"`
+	Conversation      ConversationSummary `json:"conversation"`
+	ConversationCount *int                `json:"conversation_count,omitempty"`
 }
 
 type ConversationDelete struct {
-	Type           string `json:"type"`
-	ConversationID string `json:"conversation_id"`
+	Type              string `json:"type"`
+	ConversationID    string `json:"conversation_id"`
+	ConversationCount *int   `json:"conversation_count,omitempty"`
 }
 
 type TimelineReset struct {
@@ -118,11 +122,16 @@ func New(conversations ConversationQuery, timeline TimelineQuery, turn TurnExecu
 func (s *Service) SetAutomation(automation AutomationRecorder) { s.automation = automation }
 
 func (s *Service) Snapshot(ctx context.Context, ownerID string) (Snapshot, error) {
-	page, err := s.conversationPage(ctx, strings.TrimSpace(ownerID), conversationCursor{})
+	ownerID = strings.TrimSpace(ownerID)
+	page, err := s.conversationPage(ctx, ownerID, conversationCursor{})
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{Type: "workspace.snapshot", Conversations: page.Conversations, HasMore: page.HasMore, NextCursor: page.NextCursor}, nil
+	count, err := s.conversations.CountConversationsForOwner(ctx, ownerID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return Snapshot{Type: "workspace.snapshot", Conversations: page.Conversations, ConversationCount: count, HasMore: page.HasMore, NextCursor: page.NextCursor}, nil
 }
 
 func (s *Service) ConversationPage(ctx context.Context, ownerID, commandID, rawCursor string) (ConversationPage, error) {
@@ -285,9 +294,9 @@ func (p *RealtimePublisher) HandleChatEvent(ctx context.Context, event chatevent
 	}
 	switch event.Type {
 	case chatevents.TypeConversationUpserted:
-		p.publishConversationUpsert(event.OwnerID, event.Conversation)
+		p.publishConversationUpsert(ctx, event.OwnerID, event.Conversation)
 	case chatevents.TypeConversationDeleted:
-		p.publishConversationDelete(event.OwnerID, event.ConversationID)
+		p.publishConversationDelete(ctx, event.OwnerID, event.ConversationID)
 	case chatevents.TypeMessageAppended, chatevents.TypeConversationEventAppended:
 		item, ok := timelineItemFromChatEvent(event)
 		if !ok {
@@ -295,24 +304,35 @@ func (p *RealtimePublisher) HandleChatEvent(ctx context.Context, event chatevent
 		}
 		p.publishTimelineItemAppend(event.OwnerID, event.Conversation, item)
 	}
-	_ = ctx
 }
 
-func (p *RealtimePublisher) publishConversationUpsert(ownerID string, conversation common.Conversation) {
+func (p *RealtimePublisher) publishConversationUpsert(ctx context.Context, ownerID string, conversation common.Conversation) {
 	if p == nil || p.hub == nil {
 		return
 	}
 	if ownerID == "" {
 		return
 	}
-	p.hub.publishConversationUpsert(ownerID, conversation)
+	p.hub.publishConversationUpsert(ownerID, conversation, p.conversationCount(ctx, ownerID))
 }
 
-func (p *RealtimePublisher) publishConversationDelete(ownerID string, conversationID string) {
+func (p *RealtimePublisher) publishConversationDelete(ctx context.Context, ownerID string, conversationID string) {
 	if p == nil || p.hub == nil {
 		return
 	}
-	p.hub.publishConversationDelete(strings.TrimSpace(ownerID), strings.TrimSpace(conversationID))
+	ownerID = strings.TrimSpace(ownerID)
+	p.hub.publishConversationDelete(ownerID, strings.TrimSpace(conversationID), p.conversationCount(ctx, ownerID))
+}
+
+func (p *RealtimePublisher) conversationCount(ctx context.Context, ownerID string) *int {
+	if p == nil || p.hub == nil || p.hub.workspace == nil || p.hub.workspace.conversations == nil {
+		return nil
+	}
+	count, err := p.hub.workspace.conversations.CountConversationsForOwner(ctx, strings.TrimSpace(ownerID))
+	if err != nil {
+		return nil
+	}
+	return &count
 }
 
 func (p *RealtimePublisher) publishTimelineItemAppend(ownerID string, conversation common.Conversation, item timelinesvc.Item) {
@@ -573,17 +593,19 @@ func (h *Hub) ConnectionCount(ownerID string) int {
 	return len(h.connections[ownerID])
 }
 
-func (h *Hub) publishConversationUpsert(ownerID string, conversation common.Conversation) {
+func (h *Hub) publishConversationUpsert(ownerID string, conversation common.Conversation, count *int) {
 	h.broadcast(ownerID, ConversationUpsert{
-		Type:         "conversation.upsert",
-		Conversation: SummaryFromConversation(conversation),
+		Type:              "conversation.upsert",
+		Conversation:      SummaryFromConversation(conversation),
+		ConversationCount: count,
 	}, nil)
 }
 
-func (h *Hub) publishConversationDelete(ownerID string, conversationID string) {
+func (h *Hub) publishConversationDelete(ownerID string, conversationID string, count *int) {
 	h.broadcast(ownerID, ConversationDelete{
-		Type:           "conversation.remove",
-		ConversationID: conversationID,
+		Type:              "conversation.remove",
+		ConversationID:    conversationID,
+		ConversationCount: count,
 	}, nil)
 }
 

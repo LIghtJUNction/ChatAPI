@@ -133,6 +133,20 @@ func testConversationRepositoryOwnerPages(t *testing.T, newStore NewStoreFunc) {
 	if len(first) != 2 || !first[0].UpdatedAt.After(first[1].UpdatedAt) {
 		t.Fatalf("unexpected first owner page: %#v", first)
 	}
+	allForOwner, err := st.ListConversationsForOwner(ctx, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allForOwner) != 3 {
+		t.Fatalf("unexpected owner conversation list: %#v", allForOwner)
+	}
+	count, err := st.CountConversationsForOwner(ctx, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != len(allForOwner) {
+		t.Fatalf("owner count=%d, list length=%d", count, len(allForOwner))
+	}
 	second, err := st.ListConversationsForOwnerPage(ctx, "owner-a", first[1].UpdatedAt, first[1].ID, 2)
 	if err != nil {
 		t.Fatal(err)

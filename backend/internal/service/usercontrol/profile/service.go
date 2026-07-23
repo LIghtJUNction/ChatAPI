@@ -39,7 +39,7 @@ type realtimeSettings interface {
 	Current(context.Context) (workspacesettings.Settings, error)
 }
 type conversationCounter interface {
-	ListConversationsForOwner(context.Context, string) ([]common.Conversation, error)
+	CountConversationsForOwner(context.Context, string) (int, error)
 }
 
 type Deps struct {
@@ -186,12 +186,12 @@ func (s *Service) conversationCount(ctx context.Context, userID string) int {
 	if s.conversations == nil {
 		return 0
 	}
-	items, err := s.conversations.ListConversationsForOwner(ctx, userID)
+	count, err := s.conversations.CountConversationsForOwner(ctx, userID)
 	if err != nil {
 		logging.BindContext(s.logger, ctx, zap.String("owner.id", userID)).Warn("usercontrol profile failed to count conversations", zap.Error(err))
 		return 0
 	}
-	return len(items)
+	return count
 }
 
 func (s *Service) conversationLimitFor(ctx context.Context) int {

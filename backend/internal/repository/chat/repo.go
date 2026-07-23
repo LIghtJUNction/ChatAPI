@@ -9,6 +9,8 @@ import (
 
 type Reader interface {
 	ListConversations(context.Context) ([]common.Conversation, error)
+	ListConversationsForOwner(context.Context, string) ([]common.Conversation, error)
+	CountConversationsForOwner(context.Context, string) (int, error)
 	ListConversationsForOwnerPage(context.Context, string, time.Time, string, int) ([]common.Conversation, error)
 	GetConversation(context.Context, string) (common.Conversation, error)
 	FindConversationByToolCallID(context.Context, string, string) (common.Conversation, error)

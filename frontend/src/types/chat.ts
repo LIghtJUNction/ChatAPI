@@ -390,6 +390,7 @@ export type PasswordResetConfig = {
 export type WorkspaceSnapshotEvent = {
   type: 'workspace.snapshot'
   conversations: Conversation[]
+  conversation_count: number
   has_more: boolean
   next_cursor?: string
 }
@@ -412,11 +413,13 @@ export type WorkspaceConversationPageErrorEvent = {
 export type WorkspaceConversationUpsertEvent = {
   type: 'conversation.upsert'
   conversation: Conversation
+  conversation_count?: number
 }
 
 export type WorkspaceConversationDeleteEvent = {
   type: 'conversation.remove'
   conversation_id: string
+  conversation_count?: number
 }
 
 export type WorkspaceTimelineResetEvent = {

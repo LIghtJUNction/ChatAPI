@@ -41,6 +41,39 @@ func (s *Store) ListConversations(ctx context.Context) ([]common.Conversation, e
 	return items, nil
 }
 
+func (s *Store) ListConversationsForOwner(ctx context.Context, ownerID string) ([]common.Conversation, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, title, created_at, updated_at, last_message_at, message_count, last_message_preview, last_user_text, metadata_json, COALESCE(metadata_json->>'response_id', '')
+		FROM conversations
+		WHERE COALESCE(metadata_json->>'owner_id', '') = $1
+		ORDER BY updated_at DESC, id DESC
+	`, strings.TrimSpace(ownerID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]common.Conversation, 0)
+	for rows.Next() {
+		item, err := scanConversation(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) CountConversationsForOwner(ctx context.Context, ownerID string) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM conversations
+		WHERE COALESCE(metadata_json->>'owner_id', '') = $1
+	`, strings.TrimSpace(ownerID)).Scan(&count)
+	return count, err
+}
+
 func (s *Store) ListConversationsForOwnerPage(ctx context.Context, ownerID string, before time.Time, beforeID string, limit int) ([]common.Conversation, error) {
 	if limit <= 0 {
 		return []common.Conversation{}, nil

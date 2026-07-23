@@ -123,7 +123,12 @@ func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCo
 	if err != nil {
 		return common.DeleteConversationsResult{}, 0, err
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
 	deleteIDs := make([]string, 0)
 	skipped := 0
 	for idx, item := range items {

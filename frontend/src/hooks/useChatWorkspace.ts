@@ -98,6 +98,17 @@ export function useChatWorkspace(isMobile: boolean) {
     )
   }, [])
 
+  const handleConversationCountChange = useCallback((value: number) => {
+    setAuth((current) =>
+      current.current_conversation_count === value
+        ? current
+        : {
+            ...current,
+            current_conversation_count: value,
+          },
+    )
+  }, [])
+
   const {
     applySelectedConversation,
     automationExecutions,
@@ -112,6 +123,7 @@ export function useChatWorkspace(isMobile: boolean) {
     authenticated: auth.authenticated,
     conversations,
     onConnectionCountChange: handleConnectionCountChange,
+    onConversationCountChange: handleConversationCountChange,
     selectedConversationId,
     setConversations,
     setTimelineByConversation,

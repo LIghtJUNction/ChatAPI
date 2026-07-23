@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
@@ -60,11 +61,11 @@ func (s *Store) logger(ctx context.Context) *zap.Logger {
 }
 
 func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
-	lockConnection, err := pool.Acquire(ctx)
+	lockConnection, err := pgx.Connect(ctx, pool.Config().ConnString())
 	if err != nil {
 		return fmt.Errorf("acquire postgresql migration lock connection: %w", err)
 	}
-	defer lockConnection.Release()
+	defer func() { _ = lockConnection.Close(context.WithoutCancel(ctx)) }()
 	if _, err := lockConnection.Exec(ctx, `SELECT pg_advisory_lock(hashtext('chatapi_schema_migrations'))`); err != nil {
 		return fmt.Errorf("lock postgresql migrations: %w", err)
 	}

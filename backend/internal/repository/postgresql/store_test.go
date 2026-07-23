@@ -6,7 +6,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	platformrepo "github.com/zyf2007/ChatAPI/internal/repository/platform"
 	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
 	"github.com/zyf2007/ChatAPI/internal/repository/storetest"
@@ -136,6 +138,28 @@ func TestConcurrentBootstrapSerializesPostgreSQLMigrations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("concurrent bootstrap failed: %v", err)
 		}
+	}
+}
+
+func TestBootstrapDoesNotConsumeTheOnlyPoolConnectionForMigrationLock(t *testing.T) {
+	dsn := pgtest.IsolatedDSN(t)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.MaxConns = 1
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := Reset(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if err := Bootstrap(ctx, pool); err != nil {
+		t.Fatalf("bootstrap with one pool connection: %v", err)
 	}
 }
 

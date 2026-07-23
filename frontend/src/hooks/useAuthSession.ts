@@ -13,6 +13,8 @@ const DEFAULT_SESSION: AuthSession = {
   geetest_captcha_id: '',
   current_connection_count: 0,
   realtime_max_connections_per_user: 0,
+  current_conversation_count: 0,
+  user_conversation_limit: 0,
 }
 
 export function useAuthSession() {

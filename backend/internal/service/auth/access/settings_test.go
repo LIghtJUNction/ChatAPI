@@ -24,6 +24,7 @@ func TestAccessSettingsRoundTrip(t *testing.T) {
 	service := authaccess.NewSettingsService(st, authaccess.Settings{})
 	domain := service.AdminDomain()
 	updated, _, err := domain.Patch(context.Background(), map[string]any{
+		"user_conversation_limit":       30,
 		"user_rate_limit_requests":      12,
 		"user_rate_limit_window":        "1m",
 		"session_rate_limit_requests":   24,
@@ -46,6 +47,9 @@ func TestAccessSettingsRoundTrip(t *testing.T) {
 	}
 	if value.UserRateLimitRequests != 12 || value.UserRateLimitWindow != time.Minute {
 		t.Fatalf("unexpected user limits: %#v", value)
+	}
+	if value.UserConversationLimit != 30 {
+		t.Fatalf("unexpected user conversation limit: %#v", value)
 	}
 	if value.ModelKeyRateLimitRequests != 48 || value.ModelKeyRateLimitWindow != 4*time.Minute {
 		t.Fatalf("unexpected model limits: %#v", value)

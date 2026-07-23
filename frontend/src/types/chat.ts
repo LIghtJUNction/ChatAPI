@@ -13,6 +13,8 @@ export type AuthSession = {
   geetest_captcha_id: string
   current_connection_count: number
   realtime_max_connections_per_user: number
+  current_conversation_count: number
+  user_conversation_limit: number
   oidc_enabled?: boolean
   oidc_provider_name?: string
   local_password_login_enabled?: boolean

@@ -18,6 +18,7 @@ const systemAccessSettingsKey = "system_access_settings"
 var ErrInvalidAccessSettings = errors.New("invalid access settings")
 
 type Settings struct {
+	UserConversationLimit     int           `json:"user_conversation_limit"`
 	GlobalRateLimitRequests   int           `json:"global_rate_limit_requests"`
 	GlobalRateLimitWindow     time.Duration `json:"global_rate_limit_window"`
 	UserRateLimitRequests     int           `json:"user_rate_limit_requests"`
@@ -59,6 +60,7 @@ func (s *SettingsService) Get(ctx context.Context) (Settings, error) {
 
 func settingsMap(value Settings) map[string]any {
 	return map[string]any{
+		"user_conversation_limit":       value.UserConversationLimit,
 		"global_rate_limit_requests":    value.GlobalRateLimitRequests,
 		"global_rate_limit_window":      value.GlobalRateLimitWindow.String(),
 		"user_rate_limit_requests":      value.UserRateLimitRequests,
@@ -73,6 +75,9 @@ func settingsMap(value Settings) map[string]any {
 }
 
 func validateSettings(value Settings) error {
+	if value.UserConversationLimit < 0 {
+		return fmt.Errorf("user conversation limit must be non-negative")
+	}
 	checks := []struct {
 		name   string
 		max    int

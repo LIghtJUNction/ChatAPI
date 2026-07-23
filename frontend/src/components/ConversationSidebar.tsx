@@ -177,6 +177,8 @@ export function ConversationSidebar({
               {auth.realtime_max_connections_per_user === 0
                 ? '∞'
                 : auth.realtime_max_connections_per_user}
+              {' · 会话数 '}{auth.current_conversation_count}/
+              {auth.user_conversation_limit === 0 ? '∞' : auth.user_conversation_limit}
             </Typography.Text>
           ) : null}
         </div>

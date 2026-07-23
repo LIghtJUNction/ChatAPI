@@ -10,7 +10,7 @@ func (s *SettingsService) AdminDomain() *settingscore.Service {
 func (s *SettingsService) newAdminDomain() *settingscore.Service {
 	zero := float64(0)
 	d := s.defaults
-	fields := []settingscore.Descriptor{}
+	fields := []settingscore.Descriptor{{Key: "user_conversation_limit", Type: "integer", Title: "用户会话数上限", Description: "每个用户保留的最新会话数，达到上限后自动删除较早的会话，0 表示不限制。", Level: settingscore.LevelCommon, Editable: true, Default: d.UserConversationLimit, Minimum: &zero}}
 	add := func(key, title string, requests int, window string) {
 		fields = append(fields, settingscore.Descriptor{Key: key + "_rate_limit_requests", Type: "integer", Title: title + "请求上限", Description: "窗口内允许的最大请求数，0 表示禁用。", Level: settingscore.LevelCommon, Editable: true, Default: requests, Minimum: &zero}, settingscore.Descriptor{Key: key + "_rate_limit_window", Type: "duration", Title: title + "限流窗口", Description: "限流统计窗口，例如 1m。", Level: settingscore.LevelPolicy, Editable: true, Default: window, Unit: "duration"})
 	}
@@ -30,6 +30,9 @@ func (s *SettingsService) newAdminDomain() *settingscore.Service {
 func settingsFromMap(v map[string]any, d Settings) (Settings, error) {
 	var e error
 	n := d
+	if n.UserConversationLimit, e = intFromAny(v["user_conversation_limit"], d.UserConversationLimit); e != nil {
+		return Settings{}, e
+	}
 	if n.GlobalRateLimitRequests, e = intFromAny(v["global_rate_limit_requests"], d.GlobalRateLimitRequests); e != nil {
 		return Settings{}, e
 	}

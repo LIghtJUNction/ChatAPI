@@ -1,10 +1,12 @@
 package router
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
+	"go.uber.org/zap"
 
 	"github.com/zyf2007/ChatAPI/internal/config"
 	httphandler "github.com/zyf2007/ChatAPI/internal/http/handler"
@@ -141,6 +143,17 @@ func New(deps Deps) http.Handler {
 	if accessPolicy == nil {
 		accessPolicy = authaccess.NewService(deps.Config, deps.Lab, deps.AccessSettings)
 	}
+	conversationLimit := func(ctx context.Context) int {
+		if deps.AccessSettings == nil {
+			return 0
+		}
+		settings, err := deps.AccessSettings.Get(ctx)
+		if err != nil {
+			logging.BindContext(httpLogger, ctx).Warn("failed to load user conversation limit", zap.Error(err))
+			return 0
+		}
+		return settings.UserConversationLimit
+	}
 	metricsRegistry := httpmetrics.NewRegistry()
 
 	router.Use(cors.Handler(cors.Options{
@@ -204,25 +217,38 @@ func New(deps Deps) http.Handler {
 	deps.ChatEvents.Subscribe(deps.Automation)
 	if deps.UserControl == nil {
 		deps.UserControl = usercontrol.New(usercontrol.Deps{
-			Identity:         deps.Identity,
-			LocalAuth:        deps.LocalAuth,
-			Settings:         deps.AuthSettings,
-			TOTP:             deps.TOTP,
-			Policy:           deps.Policy,
-			Query:            deps.Query,
-			Turn:             deps.Control,
-			Configs:          deps.ConfigRepo,
-			Storage:          deps.StorageRepo,
-			Chat:             deps.ChatRepo,
-			AppKeysStore:     deps.AuthRepo,
-			AppKeys:          deps.AppAPIKeys,
-			ModelKeys:        deps.ModelAPIKeys,
-			Accounts:         deps.Accounts,
-			Logger:           deps.logger(logging.LayerUserControl),
-			Events:           deps.ChatEvents,
-			Automation:       deps.Automation,
-			RealtimeSettings: deps.RealtimeSettings,
+			Identity:          deps.Identity,
+			LocalAuth:         deps.LocalAuth,
+			Settings:          deps.AuthSettings,
+			TOTP:              deps.TOTP,
+			Policy:            deps.Policy,
+			Query:             deps.Query,
+			Turn:              deps.Control,
+			Configs:           deps.ConfigRepo,
+			Storage:           deps.StorageRepo,
+			Chat:              deps.ChatRepo,
+			AppKeysStore:      deps.AuthRepo,
+			AppKeys:           deps.AppAPIKeys,
+			ModelKeys:         deps.ModelAPIKeys,
+			Accounts:          deps.Accounts,
+			Logger:            deps.logger(logging.LayerUserControl),
+			Events:            deps.ChatEvents,
+			Automation:        deps.Automation,
+			RealtimeSettings:  deps.RealtimeSettings,
+			ConversationLimit: conversationLimit,
 		})
+	}
+	pruneUserConversations := func(ctx context.Context, ownerID string) {
+		limit := conversationLimit(ctx)
+		if limit <= 0 || deps.UserControl == nil || deps.UserControl.Conversations == nil {
+			return
+		}
+		if _, _, err := deps.UserControl.Conversations.PruneConversations(ctx, ownerID, limit); err != nil {
+			logging.BindContext(httpLogger, ctx, zap.String("owner.id", ownerID), zap.Int("conversation.limit", limit)).Warn("failed to prune user conversations", zap.Error(err))
+		}
+	}
+	if deps.Turn != nil {
+		deps.Turn.PruneConversations = pruneUserConversations
 	}
 	if deps.AdminSettings == nil && deps.AuthSettings != nil && deps.AccessSettings != nil {
 		accessDomain, err := adminsettings.Combine("access", "访问限流", deps.AccessSettings.AdminDomain(), deps.RealtimeSettings, deps.ChatSettings)
@@ -231,7 +257,19 @@ func New(deps Deps) http.Handler {
 		}
 		deps.AdminSettings = adminsettings.New(deps.Config,
 			adminsettings.Domain{Settings: deps.AuthSettings.AdminDomain()},
-			adminsettings.Domain{Settings: accessDomain},
+			adminsettings.Domain{Settings: accessDomain, AfterUpdate: func(ctx context.Context) {
+				if deps.Accounts == nil {
+					return
+				}
+				users, err := deps.Accounts.ListUsers(ctx)
+				if err != nil {
+					logging.BindContext(httpLogger, ctx).Warn("failed to list users for conversation cleanup", zap.Error(err))
+					return
+				}
+				for _, user := range users {
+					pruneUserConversations(ctx, user.ID)
+				}
+			}},
 			adminsettings.Domain{Settings: deps.MediaSettings},
 			adminsettings.Domain{Settings: deps.AutomationSettings},
 		)

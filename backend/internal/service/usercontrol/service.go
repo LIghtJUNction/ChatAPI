@@ -39,29 +39,43 @@ type Service struct {
 }
 
 type Deps struct {
-	Identity         *identitysvc.Service
-	LocalAuth        *localauth.Service
-	Settings         *authsettings.Service
-	TOTP             *totpsvc.Service
-	Policy           *policy.Service
-	Query            *turnquerysvc.Service
-	Turn             *controlsvc.Service
-	Configs          configrepo.Store
-	Storage          storage.Store
-	Chat             chat.Store
-	AppKeysStore     auth.KeyStore
-	AppKeys          *appkey.Service
-	ModelKeys        *modelkey.Service
-	Accounts         *account.Service
-	Logger           *zap.Logger
-	Events           chatevents.Publisher
-	Automation       *automationsvc.Service
-	RealtimeSettings *workspacesettings.Service
+	Identity          *identitysvc.Service
+	LocalAuth         *localauth.Service
+	Settings          *authsettings.Service
+	TOTP              *totpsvc.Service
+	Policy            *policy.Service
+	Query             *turnquerysvc.Service
+	Turn              *controlsvc.Service
+	Configs           configrepo.Store
+	Storage           storage.Store
+	Chat              chat.Store
+	AppKeysStore      auth.KeyStore
+	AppKeys           *appkey.Service
+	ModelKeys         *modelkey.Service
+	Accounts          *account.Service
+	Logger            *zap.Logger
+	Events            chatevents.Publisher
+	Automation        *automationsvc.Service
+	RealtimeSettings  *workspacesettings.Service
+	ConversationLimit func(context.Context) int
 }
 
 func New(deps Deps) *Service {
+	profileDeps := profile.Deps{
+		Identity:          deps.Identity,
+		LocalAuth:         deps.LocalAuth,
+		Settings:          deps.Settings,
+		TOTP:              deps.TOTP,
+		Policy:            deps.Policy,
+		Logger:            deps.Logger,
+		Realtime:          deps.RealtimeSettings,
+		ConversationLimit: deps.ConversationLimit,
+	}
+	if deps.Query != nil {
+		profileDeps.Conversations = deps.Query
+	}
 	return &Service{
-		Profile:  profile.New(profile.Deps{Identity: deps.Identity, LocalAuth: deps.LocalAuth, Settings: deps.Settings, TOTP: deps.TOTP, Policy: deps.Policy, Logger: deps.Logger, Realtime: deps.RealtimeSettings}),
+		Profile:  profile.New(profileDeps),
 		Keys:     keys.New(keys.Deps{Keys: deps.AppKeysStore, AppKeys: deps.AppKeys, ModelKeys: deps.ModelKeys, Logger: deps.Logger}),
 		Config:   userconfig.New(userconfig.Deps{Configs: deps.Configs, Chat: deps.Chat, Events: deps.Events, Logger: deps.Logger}),
 		Identity: identity.New(identity.Deps{Accounts: deps.Accounts, Logger: deps.Logger}),

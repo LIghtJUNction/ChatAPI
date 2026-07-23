@@ -38,25 +38,32 @@ type rolePolicy interface {
 type realtimeSettings interface {
 	Current(context.Context) (workspacesettings.Settings, error)
 }
+type conversationCounter interface {
+	ListConversationsForOwner(context.Context, string) ([]common.Conversation, error)
+}
 
 type Deps struct {
-	Identity  identityService
-	LocalAuth localAuthService
-	Settings  settingsService
-	TOTP      totpService
-	Policy    rolePolicy
-	Logger    *zap.Logger
-	Realtime  realtimeSettings
+	Identity          identityService
+	LocalAuth         localAuthService
+	Settings          settingsService
+	TOTP              totpService
+	Policy            rolePolicy
+	Logger            *zap.Logger
+	Realtime          realtimeSettings
+	Conversations     conversationCounter
+	ConversationLimit func(context.Context) int
 }
 
 type Service struct {
-	identity  identityService
-	localAuth localAuthService
-	settings  settingsService
-	totp      totpService
-	policy    rolePolicy
-	logger    *zap.Logger
-	realtime  realtimeSettings
+	identity          identityService
+	localAuth         localAuthService
+	settings          settingsService
+	totp              totpService
+	policy            rolePolicy
+	logger            *zap.Logger
+	realtime          realtimeSettings
+	conversations     conversationCounter
+	conversationLimit func(context.Context) int
 }
 
 type SessionView struct {
@@ -68,6 +75,8 @@ type SessionView struct {
 	GeeTestCaptchaID              string         `json:"geetest_captcha_id"`
 	CurrentConnectionCount        int            `json:"current_connection_count"`
 	RealtimeMaxConnectionsPerUser int            `json:"realtime_max_connections_per_user"`
+	CurrentConversationCount      int            `json:"current_conversation_count"`
+	UserConversationLimit         int            `json:"user_conversation_limit"`
 	OIDCEnabled                   bool           `json:"oidc_enabled"`
 	OIDCProviderName              string         `json:"oidc_provider_name"`
 	LocalPasswordLoginEnabled     bool           `json:"local_password_login_enabled"`
@@ -80,13 +89,15 @@ func New(deps Deps) *Service {
 		policyService = policy.NewService()
 	}
 	return &Service{
-		identity:  deps.Identity,
-		localAuth: deps.LocalAuth,
-		settings:  deps.Settings,
-		totp:      deps.TOTP,
-		policy:    policyService,
-		logger:    deps.Logger,
-		realtime:  deps.Realtime,
+		identity:          deps.Identity,
+		localAuth:         deps.LocalAuth,
+		settings:          deps.Settings,
+		totp:              deps.TOTP,
+		policy:            policyService,
+		logger:            deps.Logger,
+		realtime:          deps.Realtime,
+		conversations:     deps.Conversations,
+		conversationLimit: deps.ConversationLimit,
 	}
 }
 
@@ -105,6 +116,8 @@ func (s *Service) BuildAnonymousSessionView(ctx context.Context, cfg config.Conf
 		GeeTestCaptchaID:              settings.GeeTestCaptchaID,
 		CurrentConnectionCount:        0,
 		RealtimeMaxConnectionsPerUser: s.realtimeLimit(ctx, cfg),
+		CurrentConversationCount:      0,
+		UserConversationLimit:         s.conversationLimitFor(ctx),
 		OIDCEnabled:                   settings.OIDCEnabled,
 		OIDCProviderName:              settings.OIDCProviderName,
 		LocalPasswordLoginEnabled:     settings.LocalPasswordLoginEnabled,
@@ -142,6 +155,8 @@ func (s *Service) BuildAuthenticatedSessionView(ctx context.Context, cfg config.
 		GeeTestCaptchaID:              settings.GeeTestCaptchaID,
 		CurrentConnectionCount:        0,
 		RealtimeMaxConnectionsPerUser: s.realtimeLimit(ctx, cfg),
+		CurrentConversationCount:      s.conversationCount(ctx, userID),
+		UserConversationLimit:         s.conversationLimitFor(ctx),
 		OIDCEnabled:                   settings.OIDCEnabled,
 		OIDCProviderName:              settings.OIDCProviderName,
 		LocalPasswordLoginEnabled:     settings.LocalPasswordLoginEnabled,
@@ -165,6 +180,25 @@ func (s *Service) realtimeLimit(ctx context.Context, cfg config.Config) int {
 		return cfg.RealtimeMaxConnectionsPerUser
 	}
 	return current.MaxConnectionsPerUser
+}
+
+func (s *Service) conversationCount(ctx context.Context, userID string) int {
+	if s.conversations == nil {
+		return 0
+	}
+	items, err := s.conversations.ListConversationsForOwner(ctx, userID)
+	if err != nil {
+		logging.BindContext(s.logger, ctx, zap.String("owner.id", userID)).Warn("usercontrol profile failed to count conversations", zap.Error(err))
+		return 0
+	}
+	return len(items)
+}
+
+func (s *Service) conversationLimitFor(ctx context.Context) int {
+	if s.conversationLimit == nil {
+		return 0
+	}
+	return s.conversationLimit(ctx)
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID string, password string) error {

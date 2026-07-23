@@ -32,6 +32,7 @@ const outputEventLimitAbortReason = "message event limit exceeded"
 type MutationErrorResolver func(context.Context, string, error) error
 type TextNotifier func(context.Context, string, string, string)
 type AdmissionHook func(context.Context, string) error
+type ConversationLimitPruner func(context.Context, string)
 
 type OutputAssetService interface {
 	Upload(context.Context, string, string, string, string, string, io.Reader) (outputasset.Uploaded, error)
@@ -98,6 +99,7 @@ type Service struct {
 	NotifyText                  TextNotifier
 	EnsureMessageAdmission      AdmissionHook
 	EnsureConversationAdmission AdmissionHook
+	PruneConversations          ConversationLimitPruner
 	OwnerIDFromContext          func(context.Context) string
 	ActorFromContext            func(context.Context) (actor.Actor, bool)
 	Egress                      *egresssvc.Service
@@ -146,6 +148,9 @@ func (s *Service) CreatePendingResponse(ctx context.Context, input SubmitInput) 
 		logging.BindContext(s.Logger, ctx, zap.String("owner.id", principal.OwnerID)).Error("create pending response submit failed", zap.Error(err))
 		return nil, err
 	}
+	if s.PruneConversations != nil {
+		s.PruneConversations(ctx, principal.OwnerID)
+	}
 	route := eventRouteFromTurn(turn)
 	s.publishConversationUpserted(ctx, route, conversation)
 	s.publishMessageAppended(ctx, route, conversation, message)
@@ -187,6 +192,9 @@ func (s *Service) CreatePendingStream(ctx context.Context, input SubmitInput) (*
 	if err != nil {
 		logging.BindContext(s.Logger, ctx, zap.String("owner.id", principal.OwnerID)).Error("create pending stream submit failed", zap.Error(err))
 		return nil, common.Conversation{}, err
+	}
+	if s.PruneConversations != nil {
+		s.PruneConversations(ctx, principal.OwnerID)
 	}
 	route := eventRouteFromTurn(turn)
 	s.publishConversationUpserted(ctx, route, conversation)

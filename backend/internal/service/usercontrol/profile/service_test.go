@@ -42,6 +42,12 @@ func (f fakeRealtime) Current(context.Context) (workspacesettings.Settings, erro
 	return f.value, nil
 }
 
+type fakeConversations struct{ items []common.Conversation }
+
+func (f fakeConversations) ListConversationsForOwner(context.Context, string) ([]common.Conversation, error) {
+	return f.items, nil
+}
+
 func (f fakeTOTP) IsEnabled(context.Context, string) bool { return f.enabled }
 
 type fakeLocalAuth struct {
@@ -104,8 +110,10 @@ func TestProfileServiceBuildAuthenticatedSessionViewWithRoleAndTOTP(t *testing.T
 			OIDCEnabled:               true,
 			OIDCProviderName:          "Kirari",
 		}},
-		TOTP:     fakeTOTP{enabled: true},
-		Realtime: fakeRealtime{value: workspacesettings.Settings{MaxConnectionsPerUser: 4}},
+		TOTP:              fakeTOTP{enabled: true},
+		Realtime:          fakeRealtime{value: workspacesettings.Settings{MaxConnectionsPerUser: 4}},
+		Conversations:     fakeConversations{items: []common.Conversation{{ID: "conv_1"}, {ID: "conv_2"}}},
+		ConversationLimit: func(context.Context) int { return 30 },
 	})
 
 	view, err := svc.BuildAuthenticatedSessionView(context.Background(), config.Config{
@@ -120,7 +128,7 @@ func TestProfileServiceBuildAuthenticatedSessionViewWithRoleAndTOTP(t *testing.T
 	if view.User["id"] != "user_a" || view.User["username"] != "alice" || view.User["role"] != "superadmin" {
 		t.Fatalf("unexpected user payload: %#v", view.User)
 	}
-	if !view.OIDCEnabled || view.OIDCProviderName != "Kirari" || view.RealtimeMaxConnectionsPerUser != 4 {
+	if !view.OIDCEnabled || view.OIDCProviderName != "Kirari" || view.RealtimeMaxConnectionsPerUser != 4 || view.CurrentConversationCount != 2 || view.UserConversationLimit != 30 {
 		t.Fatalf("unexpected settings payload: %#v", view)
 	}
 }

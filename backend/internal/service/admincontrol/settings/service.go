@@ -34,6 +34,7 @@ type PatchResult struct {
 	Document        settingscore.Document `json:"document"`
 	Applied         []string              `json:"applied"`
 	RestartRequired []string              `json:"restart_required"`
+	Warnings        []string              `json:"warnings,omitempty"`
 }
 
 func New(runtime config.Config, domains ...Domain) *Service {
@@ -70,12 +71,13 @@ func (s *Service) Patch(ctx context.Context, domain string, input PatchInput) (P
 	}
 	sort.Strings(applied)
 	sort.Strings(restart)
+	result := PatchResult{Document: doc, Applied: applied, RestartRequired: restart}
 	if d.AfterUpdate != nil {
 		if err := d.AfterUpdate(ctx, applied); err != nil {
-			return PatchResult{}, fmt.Errorf("apply settings side effects: %w", err)
+			result.Warnings = append(result.Warnings, fmt.Sprintf("settings were saved but reconciliation failed: %v", err))
 		}
 	}
-	return PatchResult{Document: doc, Applied: applied, RestartRequired: restart}, nil
+	return result, nil
 }
 func (s *Service) Catalog() map[string]any {
 	groups := make([]map[string]any, 0, len(s.domains))

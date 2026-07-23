@@ -69,11 +69,15 @@ export function DomainSettingsSection({ domain }: { domain: string }) {
       const result = await patchSettings(domain, changes)
       setDocument(result.document)
       setChanges({})
-      appMessage.success(
-        result.restart_required.length
-          ? `已保存；${result.restart_required.length} 项重启后生效`
-          : '配置已生效',
-      )
+      if (result.warnings?.length) {
+        appMessage.warning(`配置已保存，但清理未完全成功：${result.warnings.join('；')}`)
+      } else {
+        appMessage.success(
+          result.restart_required.length
+            ? `已保存；${result.restart_required.length} 项重启后生效`
+            : '配置已生效',
+        )
+      }
     } catch (error) {
       appMessage.error(error instanceof Error ? error.message : '保存失败')
     } finally {

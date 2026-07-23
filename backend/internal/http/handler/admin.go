@@ -515,7 +515,11 @@ func (h AdminHandler) PatchSettings(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": map[string]any{"code": "invalid_settings_patch", "message": err.Error()}})
 		return
 	}
-	h.record(r, "admin.settings", "settings", chi.URLParam(r, "domain"), "update", "success", map[string]any{"applied": result.Applied})
+	outcome := "success"
+	if len(result.Warnings) > 0 {
+		outcome = "partial"
+	}
+	h.record(r, "admin.settings", "settings", chi.URLParam(r, "domain"), "update", outcome, map[string]any{"applied": result.Applied, "warnings": result.Warnings})
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "result": result})
 }
 func (h AdminHandler) RuntimeSettings(w http.ResponseWriter, r *http.Request) {

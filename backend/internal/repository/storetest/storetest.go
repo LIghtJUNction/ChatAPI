@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -106,6 +107,52 @@ func RunConversationRepositoryTests(t *testing.T, newStore NewStoreFunc) {
 	t.Run("owner_conversation_pages", func(t *testing.T) {
 		testConversationRepositoryOwnerPages(t, newStore)
 	})
+	t.Run("conversation_retention", func(t *testing.T) {
+		testConversationRepositoryRetention(t, newStore)
+	})
+}
+
+func testConversationRepositoryRetention(t *testing.T, newStore NewStoreFunc) {
+	t.Helper()
+	ctx := context.Background()
+	st := newStore(t)
+	for index := 0; index < 4; index++ {
+		id := fmt.Sprintf("retention-%d", index)
+		if _, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
+			ConversationID: id,
+			RequestID:      "request-" + id,
+			ResponseID:     "response-" + id,
+			OwnerID:        "retention-owner",
+			RequestFormat:  "responses",
+			Model:          "retention-model",
+			UserContent:    id,
+		}); err != nil {
+			t.Fatalf("create retention conversation %d: %v", index, err)
+		}
+		if index > 0 {
+			if _, _, err := st.AbortPendingTurn(ctx, common.AbortPendingInput{ConversationID: id, Reason: "done"}); err != nil {
+				t.Fatalf("abort retention conversation %d: %v", index, err)
+			}
+		}
+	}
+
+	result, skipped, err := st.PruneConversationsForOwner(ctx, "retention-owner", 1)
+	if err != nil {
+		t.Fatalf("prune retention conversations: %v", err)
+	}
+	if result.DeletedConversations != 2 || skipped != 1 {
+		t.Fatalf("unexpected retention result=%#v skipped=%d", result, skipped)
+	}
+	remaining, err := st.ListConversationsForOwner(ctx, "retention-owner")
+	if err != nil {
+		t.Fatalf("list retained conversations: %v", err)
+	}
+	if len(remaining) != 2 || remaining[0].ID != "retention-3" || remaining[1].ID != "retention-0" {
+		t.Fatalf("unexpected retained conversations: %#v", remaining)
+	}
+	if remaining[1].Metadata["realtime_status"] != "waiting" {
+		t.Fatalf("pending conversation was not retained: %#v", remaining[1])
+	}
 }
 
 func testConversationRepositoryOwnerPages(t *testing.T, newStore NewStoreFunc) {

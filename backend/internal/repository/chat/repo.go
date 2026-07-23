@@ -29,6 +29,7 @@ type Reader interface {
 
 type Writer interface {
 	DeleteConversations(context.Context, []string) (common.DeleteConversationsResult, error)
+	PruneConversationsForOwner(context.Context, string, int) (common.DeleteConversationsResult, int, error)
 	DeleteMediaAssetsByIDs(context.Context, []string) (int, error)
 	ExpirePendingTurns(context.Context, time.Time) (common.ExpirePendingTurnsResult, error)
 	CreatePendingTurn(context.Context, common.CreatePendingInput) (common.Conversation, common.Message, error)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/zyf2007/ChatAPI/internal/config"
@@ -19,14 +20,18 @@ func (fakeDomain) Get(context.Context) (settingscore.Document, error) {
 	return settingscore.Document{Domain: "access"}, nil
 }
 
-func TestPatchReturnsAfterUpdateFailure(t *testing.T) {
+func TestPatchReportsAfterUpdateFailureWithoutHidingAppliedSettings(t *testing.T) {
 	wantErr := errors.New("reconcile failed")
 	service := New(config.Config{}, Domain{
 		Settings:    fakeDomain{},
 		AfterUpdate: func(context.Context, []string) error { return wantErr },
 	})
-	if _, err := service.Patch(context.Background(), "access", PatchInput{Values: map[string]any{"user_conversation_limit": 10}}); !errors.Is(err, wantErr) {
-		t.Fatalf("patch error = %v, want %v", err, wantErr)
+	result, err := service.Patch(context.Background(), "access", PatchInput{Values: map[string]any{"user_conversation_limit": 10}})
+	if err != nil {
+		t.Fatalf("patch returned error after settings were applied: %v", err)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], wantErr.Error()) {
+		t.Fatalf("patch warnings = %v, want reconciliation failure", result.Warnings)
 	}
 }
 func (fakeDomain) Reload(ctx context.Context) (settingscore.Document, error) {

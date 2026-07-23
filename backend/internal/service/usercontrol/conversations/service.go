@@ -3,7 +3,6 @@ package conversations
 import (
 	"context"
 	"errors"
-	"sort"
 	"strings"
 
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
@@ -29,31 +28,31 @@ type turnService interface {
 }
 
 type Deps struct {
-	Query      queryService
-	Turn       turnService
-	DeleteOne  func(context.Context, string) (common.DeleteConversationsResult, error)
-	DeleteMany func(context.Context, []string) (common.DeleteConversationsResult, error)
-	Events     chatevents.Publisher
-	Logger     *zap.Logger
+	Query     queryService
+	Turn      turnService
+	DeleteOne func(context.Context, string) (common.DeleteConversationsResult, error)
+	Prune     func(context.Context, string, int) (common.DeleteConversationsResult, int, error)
+	Events    chatevents.Publisher
+	Logger    *zap.Logger
 }
 
 type Service struct {
-	query      queryService
-	turn       turnService
-	deleteOne  func(context.Context, string) (common.DeleteConversationsResult, error)
-	deleteMany func(context.Context, []string) (common.DeleteConversationsResult, error)
-	events     chatevents.Publisher
-	logger     *zap.Logger
+	query     queryService
+	turn      turnService
+	deleteOne func(context.Context, string) (common.DeleteConversationsResult, error)
+	prune     func(context.Context, string, int) (common.DeleteConversationsResult, int, error)
+	events    chatevents.Publisher
+	logger    *zap.Logger
 }
 
 func New(deps Deps) *Service {
 	return &Service{
-		query:      deps.Query,
-		turn:       deps.Turn,
-		deleteOne:  deps.DeleteOne,
-		deleteMany: deps.DeleteMany,
-		events:     deps.Events,
-		logger:     deps.Logger,
+		query:     deps.Query,
+		turn:      deps.Turn,
+		deleteOne: deps.DeleteOne,
+		prune:     deps.Prune,
+		events:    deps.Events,
+		logger:    deps.Logger,
 	}
 }
 
@@ -119,29 +118,7 @@ func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conver
 }
 
 func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCount int) (common.DeleteConversationsResult, int, error) {
-	items, err := s.query.ListConversationsForOwner(ctx, strings.TrimSpace(ownerID))
-	if err != nil {
-		return common.DeleteConversationsResult{}, 0, err
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
-			return items[i].ID > items[j].ID
-		}
-		return items[i].UpdatedAt.After(items[j].UpdatedAt)
-	})
-	deleteIDs := make([]string, 0)
-	skipped := 0
-	for idx, item := range items {
-		if idx < keepCount {
-			continue
-		}
-		if conversationstate.IsPendingStatus(conversationstate.FromConversation(item).Status) {
-			skipped++
-			continue
-		}
-		deleteIDs = append(deleteIDs, item.ID)
-	}
-	result, err := s.deleteMany(ctx, deleteIDs)
+	result, skipped, err := s.prune(ctx, strings.TrimSpace(ownerID), keepCount)
 	if err != nil {
 		return common.DeleteConversationsResult{}, 0, err
 	}

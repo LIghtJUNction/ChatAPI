@@ -3,6 +3,7 @@ package postgresql
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -278,6 +279,88 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 		return common.DeleteConversationsResult{}, err
 	}
 	return result, nil
+}
+
+func (s *Store) PruneConversationsForOwner(ctx context.Context, ownerID string, keepCount int) (common.DeleteConversationsResult, int, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	if keepCount < 0 {
+		keepCount = 0
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, COALESCE(metadata_json->>'realtime_status', '')
+		FROM conversations
+		WHERE COALESCE(metadata_json->>'owner_id', '') = $1
+		ORDER BY updated_at DESC, id DESC
+		OFFSET $2
+		FOR UPDATE
+	`, ownerID, keepCount)
+	if err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	deleteIDs := make([]string, 0)
+	skipped := 0
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			rows.Close()
+			return common.DeleteConversationsResult{}, 0, err
+		}
+		if status == "waiting" || status == "streaming" {
+			skipped++
+			continue
+		}
+		deleteIDs = append(deleteIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	if len(deleteIDs) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return common.DeleteConversationsResult{}, 0, err
+		}
+		return common.DeleteConversationsResult{}, skipped, nil
+	}
+
+	result := common.DeleteConversationsResult{
+		DeletedConversationItems: make([]common.DeletedConversation, 0, len(deleteIDs)),
+	}
+	for _, id := range deleteIDs {
+		result.DeletedConversationItems = append(result.DeletedConversationItems, common.DeletedConversation{ID: id, OwnerID: ownerID})
+	}
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM messages WHERE conversation_id = ANY($1)`, deleteIDs).Scan(&result.DeletedMessages); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	if err := tx.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id = ANY($1)) +
+			(SELECT COUNT(*) FROM media_asset_event_refs WHERE conversation_id = ANY($1))
+	`, deleteIDs).Scan(&result.DeletedAssetRefs); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM conversations
+		WHERE id = ANY($1)
+			AND COALESCE(metadata_json->>'owner_id', '') = $2
+			AND COALESCE(metadata_json->>'realtime_status', '') NOT IN ('waiting', 'streaming')
+	`, deleteIDs, ownerID)
+	if err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	result.DeletedConversations = int(tag.RowsAffected())
+	if result.DeletedConversations != len(deleteIDs) {
+		return common.DeleteConversationsResult{}, 0, fmt.Errorf("conversation prune changed during transaction")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	return result, skipped, nil
 }
 
 func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (common.ExpirePendingTurnsResult, error) {

@@ -398,6 +398,119 @@ func (s *Store) DeleteConversations(ctx context.Context, conversationIDs []strin
 	return result, nil
 }
 
+func (s *Store) PruneConversationsForOwner(ctx context.Context, ownerID string, keepCount int) (common.DeleteConversationsResult, int, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	if keepCount < 0 {
+		keepCount = 0
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, realtime_status
+		FROM (
+			SELECT id,
+				COALESCE(json_extract(metadata_json, '$.realtime_status'), '') AS realtime_status,
+				ROW_NUMBER() OVER (ORDER BY updated_at DESC, id DESC) AS position
+			FROM conversations
+			WHERE COALESCE(json_extract(metadata_json, '$.owner_id'), '') = ?
+		)
+		WHERE position > ?
+	`, ownerID, keepCount)
+	if err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	deleteIDs := make([]string, 0)
+	skipped := 0
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			_ = rows.Close()
+			return common.DeleteConversationsResult{}, 0, err
+		}
+		if status == "waiting" || status == "streaming" {
+			skipped++
+			continue
+		}
+		deleteIDs = append(deleteIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	if err := rows.Err(); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	if len(deleteIDs) == 0 {
+		if err := tx.Commit(); err != nil {
+			return common.DeleteConversationsResult{}, 0, err
+		}
+		return common.DeleteConversationsResult{}, skipped, nil
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(deleteIDs)), ",")
+	args := make([]any, 0, len(deleteIDs))
+	for _, id := range deleteIDs {
+		args = append(args, id)
+	}
+	var result common.DeleteConversationsResult
+	deletedRows, err := tx.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, COALESCE(json_extract(metadata_json, '$.owner_id'), '')
+		FROM conversations WHERE id IN (%s)
+	`, placeholders), args...)
+	if err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	for deletedRows.Next() {
+		var item common.DeletedConversation
+		if err := deletedRows.Scan(&item.ID, &item.OwnerID); err != nil {
+			_ = deletedRows.Close()
+			return common.DeleteConversationsResult{}, 0, err
+		}
+		result.DeletedConversationItems = append(result.DeletedConversationItems, item)
+	}
+	if err := deletedRows.Close(); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	if err := deletedRows.Err(); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	if err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM messages WHERE conversation_id IN (%s)`, placeholders), args...).Scan(&result.DeletedMessages); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	assetArgs := append(append([]any(nil), args...), args...)
+	if err := tx.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT
+			(SELECT COUNT(*) FROM media_asset_refs WHERE conversation_id IN (%s)) +
+			(SELECT COUNT(*) FROM media_asset_event_refs WHERE conversation_id IN (%s))
+	`, placeholders, placeholders), assetArgs...).Scan(&result.DeletedAssetRefs); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	res, err := tx.ExecContext(ctx, fmt.Sprintf(`
+		DELETE FROM conversations
+		WHERE id IN (%s)
+			AND COALESCE(json_extract(metadata_json, '$.owner_id'), '') = ?
+			AND COALESCE(json_extract(metadata_json, '$.realtime_status'), '') NOT IN ('waiting', 'streaming')
+	`, placeholders), append(args, ownerID)...)
+	if err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	deletedCount, err := res.RowsAffected()
+	if err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	result.DeletedConversations = int(deletedCount)
+	if result.DeletedConversations != len(result.DeletedConversationItems) {
+		return common.DeleteConversationsResult{}, 0, fmt.Errorf("conversation prune changed during transaction")
+	}
+	if err := tx.Commit(); err != nil {
+		return common.DeleteConversationsResult{}, 0, err
+	}
+	return result, skipped, nil
+}
+
 func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (common.ExpirePendingTurnsResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, metadata_json

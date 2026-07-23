@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sort"
 	"testing"
 	"time"
 
@@ -88,8 +89,8 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 				}},
 			}, nil
 		},
-		DeleteMany: func(context.Context, []string) (common.DeleteConversationsResult, error) {
-			return common.DeleteConversationsResult{}, nil
+		Prune: func(context.Context, string, int) (common.DeleteConversationsResult, int, error) {
+			return common.DeleteConversationsResult{}, 0, nil
 		},
 		Events: events,
 	})
@@ -145,7 +146,24 @@ func TestConversationsPruneRandomized(t *testing.T) {
 		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
 			return common.DeleteConversationsResult{}, nil
 		},
-		DeleteMany: func(_ context.Context, ids []string) (common.DeleteConversationsResult, error) {
+		Prune: func(_ context.Context, _ string, keep int) (common.DeleteConversationsResult, int, error) {
+			sorted := append([]common.Conversation(nil), items...)
+			sort.Slice(sorted, func(i, j int) bool {
+				if sorted[i].UpdatedAt.Equal(sorted[j].UpdatedAt) {
+					return sorted[i].ID > sorted[j].ID
+				}
+				return sorted[i].UpdatedAt.After(sorted[j].UpdatedAt)
+			})
+			ids := make([]string, 0)
+			skipped := 0
+			for _, item := range sorted[keep:] {
+				status := fmt.Sprint(item.Metadata["realtime_status"])
+				if status == "waiting" || status == "streaming" {
+					skipped++
+					continue
+				}
+				ids = append(ids, item.ID)
+			}
 			deleted = append([]string(nil), ids...)
 			deletedItems := make([]common.DeletedConversation, 0, len(ids))
 			for _, id := range ids {
@@ -154,7 +172,7 @@ func TestConversationsPruneRandomized(t *testing.T) {
 			return common.DeleteConversationsResult{
 				DeletedConversations:     len(ids),
 				DeletedConversationItems: deletedItems,
-			}, nil
+			}, skipped, nil
 		},
 		Events: events,
 	})
@@ -194,8 +212,8 @@ func TestConversationsAbortConversationChecksOwnershipAndForwardsReason(t *testi
 		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
 			return common.DeleteConversationsResult{}, nil
 		},
-		DeleteMany: func(context.Context, []string) (common.DeleteConversationsResult, error) {
-			return common.DeleteConversationsResult{}, nil
+		Prune: func(context.Context, string, int) (common.DeleteConversationsResult, int, error) {
+			return common.DeleteConversationsResult{}, 0, nil
 		},
 	})
 
@@ -222,8 +240,8 @@ func TestConversationsAbortConversationRejectsForbidden(t *testing.T) {
 		DeleteOne: func(context.Context, string) (common.DeleteConversationsResult, error) {
 			return common.DeleteConversationsResult{}, nil
 		},
-		DeleteMany: func(context.Context, []string) (common.DeleteConversationsResult, error) {
-			return common.DeleteConversationsResult{}, nil
+		Prune: func(context.Context, string, int) (common.DeleteConversationsResult, int, error) {
+			return common.DeleteConversationsResult{}, 0, nil
 		},
 	})
 

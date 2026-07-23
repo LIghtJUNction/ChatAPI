@@ -87,7 +87,7 @@ func New(deps Deps) *Service {
 			DeleteOne: func(ctx context.Context, conversationID string) (common.DeleteConversationsResult, error) {
 				return deps.Chat.DeleteConversations(ctx, []string{conversationID})
 			},
-			DeleteMany: deps.Chat.DeleteConversations,
+			Prune: deps.Chat.PruneConversationsForOwner,
 		}),
 		Automation: deps.Automation,
 	}

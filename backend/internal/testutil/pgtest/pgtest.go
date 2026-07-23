@@ -32,16 +32,19 @@ func IsolatedDSN(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("open postgresql admin pool: %v", err)
 	}
-	defer adminPool.Close()
 
 	schemaName := testSchemaName(t.Name())
 	if _, err := adminPool.Exec(ctx, `CREATE SCHEMA `+quoteIdentifier(schemaName)); err != nil {
+		adminPool.Close()
 		t.Fatalf("create postgresql test schema %q: %v", schemaName, err)
 	}
 	t.Cleanup(func() {
+		defer adminPool.Close()
 		dropCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_, _ = adminPool.Exec(dropCtx, `DROP SCHEMA IF EXISTS `+quoteIdentifier(schemaName)+` CASCADE`)
+		if _, err := adminPool.Exec(dropCtx, `DROP SCHEMA IF EXISTS `+quoteIdentifier(schemaName)+` CASCADE`); err != nil {
+			t.Errorf("drop postgresql test schema %q: %v", schemaName, err)
+		}
 	})
 
 	parsed, err := url.Parse(baseDSN)

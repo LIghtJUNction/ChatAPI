@@ -307,8 +307,8 @@ func TestDiagnoseStorageCleanup(t *testing.T) {
 	if !hasDiagnostic(report, DiagnosticInfo, "storage.cleanup_enabled") {
 		t.Fatalf("missing storage cleanup enabled diagnostic: %#v", report)
 	}
-	if !hasDiagnostic(report, DiagnosticWarn, "storage.cleanup_no_retention") {
-		t.Fatalf("missing no retention warning: %#v", report)
+	if !hasDiagnostic(report, DiagnosticWarn, "storage.cleanup_retention_deprecated") {
+		t.Fatalf("missing deprecated retention warning: %#v", report)
 	}
 	if !hasDiagnostic(report, DiagnosticWarn, "storage.vacuum_enabled") {
 		t.Fatalf("missing vacuum warning: %#v", report)

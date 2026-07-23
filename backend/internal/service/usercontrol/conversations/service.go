@@ -99,8 +99,8 @@ func (s *Service) DeleteConversation(ctx context.Context, ownerID string, conver
 	for _, item := range conversations {
 		if item.ID == strings.TrimSpace(conversationID) {
 			found = true
-			if conversationstate.FromConversation(item).Status == conversationstate.StatusWaiting {
-				logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Warn("usercontrol conversations delete rejected waiting conversation")
+			if conversationstate.IsPendingStatus(conversationstate.FromConversation(item).Status) {
+				logging.BindContext(s.logger, ctx, zap.String("owner.id", strings.TrimSpace(ownerID)), zap.String("conversation.id", strings.TrimSpace(conversationID))).Warn("usercontrol conversations delete rejected pending conversation")
 				return common.DeleteConversationsResult{}, ErrWaitingConversationDelete
 			}
 			break
@@ -135,7 +135,7 @@ func (s *Service) PruneConversations(ctx context.Context, ownerID string, keepCo
 		if idx < keepCount {
 			continue
 		}
-		if conversationstate.FromConversation(item).Status == conversationstate.StatusWaiting {
+		if conversationstate.IsPendingStatus(conversationstate.FromConversation(item).Status) {
 			skipped++
 			continue
 		}

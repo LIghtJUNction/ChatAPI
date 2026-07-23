@@ -134,6 +134,7 @@ type modelAPIKeyRow struct {
 	UserID        string
 	Name          string
 	KeyCiphertext string
+	KeyHash       string
 	KeyPrefix     string
 	Model         string
 	LastUsedAt    *time.Time
@@ -146,6 +147,7 @@ type appAPIKeyRow struct {
 	UserID             string
 	Name               string
 	KeyHash            string
+	KeyCiphertext      string
 	KeyPrefix          string
 	ScopesJSON         string
 	ResourceLimitsJSON string
@@ -463,17 +465,17 @@ func importSnapshot(ctx context.Context, pool *pgxpool.Pool, data snapshot) erro
 	}
 	for _, item := range data.ModelAPIKeys {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO user_api_keys(id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		`, item.ID, item.UserID, item.Name, item.KeyCiphertext, item.KeyPrefix, item.Model, item.LastUsedAt, item.CreatedAt, item.RevokedAt); err != nil {
+			INSERT INTO user_api_keys(id, user_id, name, key_ciphertext, key_hash, key_prefix, model, last_used_at, created_at, revoked_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`, item.ID, item.UserID, item.Name, item.KeyCiphertext, item.KeyHash, item.KeyPrefix, item.Model, item.LastUsedAt, item.CreatedAt, item.RevokedAt); err != nil {
 			return fmt.Errorf("import user_api_keys %s: %w", item.ID, err)
 		}
 	}
 	for _, item := range data.AppAPIKeys {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO user_app_api_keys(id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at)
-			VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11)
-		`, item.ID, item.UserID, item.Name, item.KeyHash, item.KeyPrefix, normalizeJSON(item.ScopesJSON, `[]`), normalizeJSON(item.ResourceLimitsJSON, `{}`), item.ExpiresAt, item.LastUsedAt, item.CreatedAt, item.RevokedAt); err != nil {
+			INSERT INTO user_app_api_keys(id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12)
+		`, item.ID, item.UserID, item.Name, item.KeyHash, item.KeyCiphertext, item.KeyPrefix, normalizeJSON(item.ScopesJSON, `[]`), normalizeJSON(item.ResourceLimitsJSON, `{}`), item.ExpiresAt, item.LastUsedAt, item.CreatedAt, item.RevokedAt); err != nil {
 			return fmt.Errorf("import user_app_api_keys %s: %w", item.ID, err)
 		}
 	}
@@ -697,7 +699,7 @@ func loadUserConfigs(ctx context.Context, db sqliteQuerier) ([]userConfigRow, er
 }
 
 func loadModelAPIKeys(ctx context.Context, db sqliteQuerier) ([]modelAPIKeyRow, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, user_id, name, key_ciphertext, key_prefix, model, last_used_at, created_at, revoked_at FROM user_api_keys ORDER BY created_at ASC, id ASC`)
+	rows, err := db.QueryContext(ctx, `SELECT id, user_id, name, key_ciphertext, key_hash, key_prefix, model, last_used_at, created_at, revoked_at FROM user_api_keys ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite user_api_keys: %w", err)
 	}
@@ -707,7 +709,7 @@ func loadModelAPIKeys(ctx context.Context, db sqliteQuerier) ([]modelAPIKeyRow, 
 		var item modelAPIKeyRow
 		var lastUsedAt, revokedAt sql.NullString
 		var createdAt string
-		if err := rows.Scan(&item.ID, &item.UserID, &item.Name, &item.KeyCiphertext, &item.KeyPrefix, &item.Model, &lastUsedAt, &createdAt, &revokedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Name, &item.KeyCiphertext, &item.KeyHash, &item.KeyPrefix, &item.Model, &lastUsedAt, &createdAt, &revokedAt); err != nil {
 			return nil, err
 		}
 		item.LastUsedAt = parseSQLiteNullableTime(lastUsedAt)
@@ -719,7 +721,7 @@ func loadModelAPIKeys(ctx context.Context, db sqliteQuerier) ([]modelAPIKeyRow, 
 }
 
 func loadAppAPIKeys(ctx context.Context, db sqliteQuerier) ([]appAPIKeyRow, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, user_id, name, key_hash, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at FROM user_app_api_keys ORDER BY created_at ASC, id ASC`)
+	rows, err := db.QueryContext(ctx, `SELECT id, user_id, name, key_hash, key_ciphertext, key_prefix, scopes_json, resource_limits_json, expires_at, last_used_at, created_at, revoked_at FROM user_app_api_keys ORDER BY created_at ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sqlite user_app_api_keys: %w", err)
 	}
@@ -729,7 +731,7 @@ func loadAppAPIKeys(ctx context.Context, db sqliteQuerier) ([]appAPIKeyRow, erro
 		var item appAPIKeyRow
 		var expiresAt, lastUsedAt, revokedAt sql.NullString
 		var createdAt string
-		if err := rows.Scan(&item.ID, &item.UserID, &item.Name, &item.KeyHash, &item.KeyPrefix, &item.ScopesJSON, &item.ResourceLimitsJSON, &expiresAt, &lastUsedAt, &createdAt, &revokedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Name, &item.KeyHash, &item.KeyCiphertext, &item.KeyPrefix, &item.ScopesJSON, &item.ResourceLimitsJSON, &expiresAt, &lastUsedAt, &createdAt, &revokedAt); err != nil {
 			return nil, err
 		}
 		item.ExpiresAt = parseSQLiteNullableTime(expiresAt)

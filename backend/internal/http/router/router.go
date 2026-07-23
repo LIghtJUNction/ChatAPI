@@ -246,6 +246,7 @@ func New(deps Deps) http.Handler {
 	conversationRetention := conversationretention.New(deps.Accounts, retentionPruner, conversationLimit, httpLogger)
 	if deps.Turn != nil {
 		deps.Turn.ConversationCreated = conversationRetention.Enforce
+		deps.Turn.ConversationTerminal = conversationRetention.Enforce
 	}
 	if deps.AdminSettings == nil && deps.AuthSettings != nil && deps.AccessSettings != nil {
 		accessDomain, err := adminsettings.Combine("access", "访问限流", deps.AccessSettings.AdminDomain(), deps.RealtimeSettings, deps.ChatSettings)

@@ -38,6 +38,7 @@ type Event struct {
 	Message           *common.Message
 	ConversationEvent *common.ConversationEvent
 	WaitingTurn       *WaitingTurn
+	SkipCountRefresh  bool
 }
 
 type Publisher interface {
@@ -90,16 +91,24 @@ func PublishDeletedConversations(ctx context.Context, publisher Publisher, resul
 	if publisher == nil {
 		return
 	}
-	for _, item := range result.DeletedConversationItems {
+	lastByOwner := make(map[string]int)
+	for index, item := range result.DeletedConversationItems {
+		ownerID := strings.TrimSpace(item.OwnerID)
+		if ownerID != "" {
+			lastByOwner[ownerID] = index
+		}
+	}
+	for index, item := range result.DeletedConversationItems {
 		ownerID := strings.TrimSpace(item.OwnerID)
 		conversationID := strings.TrimSpace(item.ID)
 		if ownerID == "" || conversationID == "" {
 			continue
 		}
 		publisher.Publish(ctx, Event{
-			Type:           TypeConversationDeleted,
-			OwnerID:        ownerID,
-			ConversationID: conversationID,
+			Type:             TypeConversationDeleted,
+			OwnerID:          ownerID,
+			ConversationID:   conversationID,
+			SkipCountRefresh: lastByOwner[ownerID] != index,
 		})
 	}
 }

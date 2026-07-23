@@ -33,6 +33,7 @@ type MutationErrorResolver func(context.Context, string, error) error
 type TextNotifier func(context.Context, string, string, string)
 type AdmissionHook func(context.Context, string) error
 type ConversationCreatedHandler func(context.Context, string)
+type ConversationTerminalHandler func(context.Context, string)
 
 type OutputAssetService interface {
 	Upload(context.Context, string, string, string, string, string, io.Reader) (outputasset.Uploaded, error)
@@ -100,6 +101,7 @@ type Service struct {
 	EnsureMessageAdmission      AdmissionHook
 	EnsureConversationAdmission AdmissionHook
 	ConversationCreated         ConversationCreatedHandler
+	ConversationTerminal        ConversationTerminalHandler
 	OwnerIDFromContext          func(context.Context) string
 	ActorFromContext            func(context.Context) (actor.Actor, bool)
 	Egress                      *egresssvc.Service
@@ -608,6 +610,9 @@ func (s *Service) finishCompletedTurn(
 	if len(input.OutputPolicy) > 0 {
 		body["output_policy"] = input.OutputPolicy
 	}
+	if s.ConversationTerminal != nil {
+		s.ConversationTerminal(ctx, conversationstate.OwnerID(conversation))
+	}
 	return body, nil
 }
 
@@ -672,6 +677,9 @@ func (s *Service) abortConversationLocked(ctx context.Context, conversationID st
 		zap.String("request.format", conversationstate.RequestFormat(conversation)),
 		zap.String("turn.action", "abort"),
 	).Info("turn aborted conversation")
+	if s.ConversationTerminal != nil {
+		s.ConversationTerminal(ctx, identity.OwnerID)
+	}
 	return s.Pending.Abort(conversationID, body)
 }
 
@@ -1045,6 +1053,9 @@ func (s *Service) disconnectPendingRequest(ctx context.Context, conversationID s
 		StreamEvents: s.applyRuntimeAction(conversationID, runtimeAction).StreamEvents,
 	})
 	_ = s.Pending.Abort(conversationID, body)
+	if s.ConversationTerminal != nil {
+		s.ConversationTerminal(ctx, resolved.OwnerID)
+	}
 	logging.BindContext(s.Logger, context.Background(),
 		zap.String("conversation.id", conversationID),
 		zap.String("request.id", resolved.RequestID),

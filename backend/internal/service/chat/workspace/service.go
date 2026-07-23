@@ -296,7 +296,7 @@ func (p *RealtimePublisher) HandleChatEvent(ctx context.Context, event chatevent
 	case chatevents.TypeConversationUpserted:
 		p.publishConversationUpsert(ctx, event.OwnerID, event.Conversation)
 	case chatevents.TypeConversationDeleted:
-		p.publishConversationDelete(ctx, event.OwnerID, event.ConversationID)
+		p.publishConversationDelete(ctx, event.OwnerID, event.ConversationID, event.SkipCountRefresh)
 	case chatevents.TypeMessageAppended, chatevents.TypeConversationEventAppended:
 		item, ok := timelineItemFromChatEvent(event)
 		if !ok {
@@ -316,12 +316,16 @@ func (p *RealtimePublisher) publishConversationUpsert(ctx context.Context, owner
 	p.hub.publishConversationUpsert(ownerID, conversation, p.conversationCount(ctx, ownerID))
 }
 
-func (p *RealtimePublisher) publishConversationDelete(ctx context.Context, ownerID string, conversationID string) {
+func (p *RealtimePublisher) publishConversationDelete(ctx context.Context, ownerID string, conversationID string, skipCountRefresh bool) {
 	if p == nil || p.hub == nil {
 		return
 	}
 	ownerID = strings.TrimSpace(ownerID)
-	p.hub.publishConversationDelete(ownerID, strings.TrimSpace(conversationID), p.conversationCount(ctx, ownerID))
+	var count *int
+	if !skipCountRefresh {
+		count = p.conversationCount(ctx, ownerID)
+	}
+	p.hub.publishConversationDelete(ownerID, strings.TrimSpace(conversationID), count)
 }
 
 func (p *RealtimePublisher) conversationCount(ctx context.Context, ownerID string) *int {

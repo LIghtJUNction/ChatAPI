@@ -72,6 +72,7 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 			conversations: map[string][]common.Conversation{
 				"user_a": {
 					{ID: "conv_wait", Metadata: map[string]any{"realtime_status": "waiting"}},
+					{ID: "conv_stream", Metadata: map[string]any{"realtime_status": "streaming"}},
 					{ID: "conv_ok", Metadata: map[string]any{"realtime_status": "done"}},
 				},
 			},
@@ -96,6 +97,9 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 	if _, err := svc.DeleteConversation(context.Background(), "user_a", "conv_wait"); !errors.Is(err, userconv.ErrWaitingConversationDelete) {
 		t.Fatalf("expected waiting delete error, got %v", err)
 	}
+	if _, err := svc.DeleteConversation(context.Background(), "user_a", "conv_stream"); !errors.Is(err, userconv.ErrWaitingConversationDelete) {
+		t.Fatalf("expected streaming delete error, got %v", err)
+	}
 	if _, err := svc.DeleteConversation(context.Background(), "user_a", "missing"); !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected not found, got %v", err)
 	}
@@ -115,12 +119,16 @@ func TestConversationsDeleteConversationBranches(t *testing.T) {
 func TestConversationsPruneRandomized(t *testing.T) {
 	rng := rand.New(rand.NewSource(99))
 	items := make([]common.Conversation, 0, 30)
-	waitingCount := 0
+	pendingCount := 0
 	for i := 0; i < 30; i++ {
 		status := "done"
 		if rng.Intn(4) == 0 {
-			status = "waiting"
-			waitingCount++
+			if rng.Intn(2) == 0 {
+				status = "waiting"
+			} else {
+				status = "streaming"
+			}
+			pendingCount++
 		}
 		items = append(items, common.Conversation{
 			ID:        fmt.Sprintf("conv_%02d", i),
@@ -158,8 +166,8 @@ func TestConversationsPruneRandomized(t *testing.T) {
 	if result.DeletedConversations != len(deleted) {
 		t.Fatalf("deleted count mismatch: result=%d ids=%d", result.DeletedConversations, len(deleted))
 	}
-	if skipped < 0 || skipped > waitingCount {
-		t.Fatalf("unexpected skipped count: %d waiting=%d", skipped, waitingCount)
+	if skipped < 0 || skipped > pendingCount {
+		t.Fatalf("unexpected skipped count: %d pending=%d", skipped, pendingCount)
 	}
 	if len(events.events) != len(deleted) {
 		t.Fatalf("expected delete events to match mutation result count, events=%d deleted=%d", len(events.events), len(deleted))
@@ -167,6 +175,9 @@ func TestConversationsPruneRandomized(t *testing.T) {
 	for i, event := range events.events {
 		if event.Type != chatevents.TypeConversationDeleted || event.OwnerID != "owner_from_result" || event.ConversationID != deleted[i]+"_result" {
 			t.Fatalf("delete event %d should use mutation result identity, got %#v", i, event)
+		}
+		if event.SkipCountRefresh != (i < len(events.events)-1) {
+			t.Fatalf("delete event %d has unexpected count refresh flag: %#v", i, event)
 		}
 	}
 }

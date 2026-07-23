@@ -64,7 +64,14 @@ func TestUpdateDraftAutomaticallyCompletesOnCrossChunkStop(t *testing.T) {
 		Runtime:   protocolruntime.New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-4o", ResponseID: "resp_stop"}),
 		CreatedAt: time.Now().UTC(), Events: make(chan turn.PendingEvent, 8), Done: make(chan turn.PendingResult, 1),
 	})
-	service := &turn.Service{Store: store, Pending: registry, OwnerIDFromContext: func(context.Context) string { return "user_a" }}
+	terminalOwnerID := ""
+	service := &turn.Service{
+		Store: store, Pending: registry,
+		OwnerIDFromContext: func(context.Context) string { return "user_a" },
+		ConversationTerminal: func(_ context.Context, ownerID string) {
+			terminalOwnerID = ownerID
+		},
+	}
 	first, err := service.UpdateDraft(ctx, conversation.ID, "answer E", "answer", "")
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +88,9 @@ func TestUpdateDraftAutomaticallyCompletesOnCrossChunkStop(t *testing.T) {
 	}
 	if _, ok := registry.GetByConversationID(conversation.ID); ok {
 		t.Fatal("automatically completed turn remained pending")
+	}
+	if terminalOwnerID != "user_a" {
+		t.Fatalf("conversation terminal hook owner = %q, want user_a", terminalOwnerID)
 	}
 	messages, err := store.ListMessages(ctx, conversation.ID)
 	if err != nil {

@@ -321,13 +321,15 @@ func (r *DiagnosticReport) checkStorage(cfg Config) {
 		if _, _, err := ParseDailyTime(cfg.StorageCleanupTime); err != nil {
 			r.add(DiagnosticError, "storage.cleanup_time_invalid", "CHATAPI_STORAGE_CLEANUP_TIME 必须使用 HH:MM。")
 		} else {
-			r.add(DiagnosticInfo, "storage.cleanup_enabled", "已启用每日存储维护；将按配置清理旧会话和孤儿图片。")
+			r.add(DiagnosticInfo, "storage.cleanup_enabled", "已启用每日存储维护调度。")
 		}
-		if cfg.StorageCleanupKeepRecentConversations == 0 && cfg.StorageCleanupKeepRecentDays == 0 {
-			r.add(DiagnosticWarn, "storage.cleanup_no_retention", "已启用存储清理但未保留最近会话或最近天数，可能删除所有已关闭会话。")
+		if cfg.StorageCleanupKeepRecentConversations != 100 || cfg.StorageCleanupKeepRecentDays != 30 {
+			r.add(DiagnosticWarn, "storage.cleanup_retention_deprecated", "CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_CONVERSATIONS 和 CHATAPI_STORAGE_CLEANUP_KEEP_RECENT_DAYS 已弃用，不会触发会话删除；请使用访问限流中的用户会话数上限。")
 		}
 		if cfg.StorageVacuumEnabled {
 			r.add(DiagnosticWarn, "storage.vacuum_enabled", "已启用自动 SQLite VACUUM；该操作可能长时间锁库，建议仅在低峰期使用。")
+		} else {
+			r.add(DiagnosticWarn, "storage.cleanup_no_operation", "已启用每日存储维护调度，但未启用 SQLite VACUUM，当前不会执行任何定时维护操作。")
 		}
 	}
 	if cfg.StorageDefaultQuotaBytes == 0 {

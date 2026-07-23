@@ -109,8 +109,8 @@ func TestBootstrapDoesNotClearDirtyMetadata(t *testing.T) {
 		t.Fatalf("seed dirty metadata: %v", err)
 	}
 
-	if err := Bootstrap(context.Background(), db); err != nil {
-		t.Fatalf("bootstrap dirty metadata: %v", err)
+	if err := Bootstrap(context.Background(), db); err == nil {
+		t.Fatal("bootstrap accepted dirty migration metadata")
 	}
 	status, err := StatusReport(context.Background(), db)
 	if err != nil {

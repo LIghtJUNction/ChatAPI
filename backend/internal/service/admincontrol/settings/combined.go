@@ -19,6 +19,10 @@ type CombinedDomain struct {
 	owners   map[string]SettingsDomain
 }
 
+type preparedSettingsDomain interface {
+	PreparePatch(context.Context, map[string]any) (settingscore.PreparedPatch, error)
+}
+
 func Combine(domain, title string, children ...SettingsDomain) (*CombinedDomain, error) {
 	combined := &CombinedDomain{
 		domain:   strings.TrimSpace(domain),
@@ -90,26 +94,25 @@ func (d *CombinedDomain) Patch(ctx context.Context, values map[string]any) (sett
 		}
 		grouped[owner][key] = value
 	}
-	restart := make([]string, 0)
+	prepared := make([]settingscore.PreparedPatch, 0, len(grouped))
 	for _, child := range d.children {
 		childValues := grouped[child]
 		if len(childValues) == 0 {
 			continue
 		}
-		if err := child.ValidatePatch(ctx, childValues); err != nil {
-			return settingscore.Document{}, nil, err
+		planner, ok := child.(preparedSettingsDomain)
+		if !ok {
+			return settingscore.Document{}, nil, fmt.Errorf("settings domain %s does not support atomic patches", child.Domain())
 		}
-	}
-	for _, child := range d.children {
-		childValues := grouped[child]
-		if len(childValues) == 0 {
-			continue
-		}
-		_, childRestart, err := child.Patch(ctx, childValues)
+		patch, err := planner.PreparePatch(ctx, childValues)
 		if err != nil {
 			return settingscore.Document{}, nil, err
 		}
-		restart = append(restart, childRestart...)
+		prepared = append(prepared, patch)
+	}
+	_, restart, err := settingscore.CommitPreparedPatches(ctx, prepared)
+	if err != nil {
+		return settingscore.Document{}, nil, err
 	}
 	document, err := d.Get(ctx)
 	sort.Strings(restart)

@@ -99,7 +99,7 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if status.MigrationDirty {
-		return nil
+		return fmt.Errorf("postgresql schema migration is dirty at version %s", status.SchemaVersion)
 	}
 	return applyPendingMigrations(ctx, pool, status)
 }

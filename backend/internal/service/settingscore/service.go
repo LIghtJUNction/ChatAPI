@@ -18,6 +18,16 @@ type Store interface {
 	SetSystemConfig(context.Context, common.SetSystemConfigInput) (common.SystemConfig, error)
 }
 
+type BatchStore interface {
+	SetSystemConfigs(context.Context, []common.SetSystemConfigInput) ([]common.SystemConfig, error)
+}
+
+type PreparedPatch struct {
+	service *Service
+	input   common.SetSystemConfigInput
+	restart []string
+}
+
 type Level string
 type Source string
 
@@ -175,36 +185,48 @@ func (s *Service) document(item *common.SystemConfig) (Document, error) {
 }
 
 func (s *Service) Patch(ctx context.Context, patch map[string]any) (Document, []string, error) {
+	prepared, err := s.PreparePatch(ctx, patch)
+	if err != nil {
+		return Document{}, nil, err
+	}
+	documents, restart, err := CommitPreparedPatches(ctx, []PreparedPatch{prepared})
+	if err != nil {
+		return Document{}, nil, err
+	}
+	return documents[0], restart, nil
+}
+
+func (s *Service) PreparePatch(ctx context.Context, patch map[string]any) (PreparedPatch, error) {
 	s.loadMu.Lock()
 	defer s.loadMu.Unlock()
 	stored, err := s.loadStored(ctx)
 	if err != nil {
-		return Document{}, nil, err
+		return PreparedPatch{}, err
 	}
 	current, err := s.document(stored)
 	if err != nil {
-		return Document{}, nil, err
+		return PreparedPatch{}, err
 	}
 	next := cloneMap(current.Values)
 	for key, value := range patch {
 		field, ok := s.field(key)
 		if !ok {
-			return Document{}, nil, fmt.Errorf("unknown setting %q", key)
+			return PreparedPatch{}, fmt.Errorf("unknown setting %q", key)
 		}
 		if !field.Editable || current.Sources[key] == SourceEnvironment {
-			return Document{}, nil, fmt.Errorf("setting %q is not editable", key)
+			return PreparedPatch{}, fmt.Errorf("setting %q is not editable", key)
 		}
 		if err := validateFieldValue(field, value); err != nil {
-			return Document{}, nil, err
+			return PreparedPatch{}, err
 		}
 		next[key] = value
 	}
 	if err := s.validateFieldValues(next); err != nil {
-		return Document{}, nil, err
+		return PreparedPatch{}, err
 	}
 	if s.spec.Validate != nil {
 		if err := s.spec.Validate(next); err != nil {
-			return Document{}, nil, err
+			return PreparedPatch{}, err
 		}
 	}
 	persisted := map[string]any{}
@@ -214,10 +236,6 @@ func (s *Service) Patch(ctx context.Context, patch map[string]any) (Document, []
 	for key, value := range patch {
 		persisted[key] = value
 	}
-	item, err := s.store.SetSystemConfig(ctx, common.SetSystemConfigInput{Key: s.spec.StorageKey, Value: persisted})
-	if err != nil {
-		return Document{}, nil, err
-	}
 	restart := make([]string, 0)
 	for key := range patch {
 		field, _ := s.field(key)
@@ -225,12 +243,52 @@ func (s *Service) Patch(ctx context.Context, patch map[string]any) (Document, []
 			restart = append(restart, key)
 		}
 	}
-	doc, err := s.document(&item)
-	if err != nil {
-		return Document{}, nil, err
+	return PreparedPatch{service: s, input: common.SetSystemConfigInput{Key: s.spec.StorageKey, Value: persisted}, restart: restart}, nil
+}
+
+func CommitPreparedPatches(ctx context.Context, patches []PreparedPatch) ([]Document, []string, error) {
+	if len(patches) == 0 {
+		return nil, nil, nil
 	}
-	s.storeCache(doc)
-	return cloneDocument(doc), restart, nil
+	store := patches[0].service.store
+	inputs := make([]common.SetSystemConfigInput, len(patches))
+	for index, patch := range patches {
+		if patch.service == nil || patch.service.store != store {
+			return nil, nil, errors.New("combined settings must share one configuration store")
+		}
+		inputs[index] = patch.input
+	}
+	var items []common.SystemConfig
+	if batch, ok := store.(BatchStore); ok {
+		var err error
+		items, err = batch.SetSystemConfigs(ctx, inputs)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else if len(inputs) == 1 {
+		item, err := store.SetSystemConfig(ctx, inputs[0])
+		if err != nil {
+			return nil, nil, err
+		}
+		items = []common.SystemConfig{item}
+	} else {
+		return nil, nil, errors.New("configuration store does not support atomic batch updates")
+	}
+	if len(items) != len(patches) {
+		return nil, nil, errors.New("configuration batch returned an unexpected item count")
+	}
+	documents := make([]Document, len(patches))
+	restart := make([]string, 0)
+	for index, patch := range patches {
+		document, err := patch.service.document(&items[index])
+		if err != nil {
+			return nil, nil, err
+		}
+		patch.service.storeCache(document)
+		documents[index] = cloneDocument(document)
+		restart = append(restart, patch.restart...)
+	}
+	return documents, restart, nil
 }
 
 func (s *Service) ValidatePatch(ctx context.Context, patch map[string]any) error {

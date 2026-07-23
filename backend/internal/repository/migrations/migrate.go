@@ -99,7 +99,7 @@ func Bootstrap(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if status.MigrationDirty {
-		return nil
+		return fmt.Errorf("sqlite schema migration is dirty at version %s", status.SchemaVersion)
 	}
 	return applyPendingMigrations(ctx, db, status)
 }

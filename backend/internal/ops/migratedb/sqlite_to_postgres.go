@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
 	pgstore "github.com/zyf2007/ChatAPI/internal/repository/postgresql"
 	sqlitestore "github.com/zyf2007/ChatAPI/internal/repository/sqlite"
 )
@@ -269,6 +270,9 @@ func SQLiteToPostgres(ctx context.Context, sqlitePath string, postgresDSN string
 	if err := src.Ping(ctx); err != nil {
 		return report, fmt.Errorf("ping sqlite source: %w", err)
 	}
+	if err := validateSQLiteSchemaCompatibility(ctx, src.DB()); err != nil {
+		return report, err
+	}
 
 	dst, err := pgstore.Open(ctx, strings.TrimSpace(postgresDSN))
 	if err != nil {
@@ -390,6 +394,66 @@ func validateSQLiteMigrationTables(ctx context.Context, source *sql.Tx) error {
 		return fmt.Errorf("sqlite migration manifest table %s is missing from the source", table)
 	}
 	return nil
+}
+
+func validateSQLiteSchemaCompatibility(ctx context.Context, source *sql.DB) error {
+	status, err := migrations.StatusReport(ctx, source)
+	if err != nil {
+		return fmt.Errorf("read sqlite migration status: %w", err)
+	}
+	if status.MigrationDirty {
+		return fmt.Errorf("sqlite source migration is dirty at version %s", status.SchemaVersion)
+	}
+	if status.SchemaVersion != migrations.LatestVersion {
+		return fmt.Errorf("sqlite source schema version %s is not supported; require %s", status.SchemaVersion, migrations.LatestVersion)
+	}
+	reference, err := sqlitestore.Open(":memory:")
+	if err != nil {
+		return fmt.Errorf("open sqlite reference schema: %w", err)
+	}
+	defer reference.Close()
+	if err := migrations.Bootstrap(ctx, reference.DB()); err != nil {
+		return fmt.Errorf("bootstrap sqlite reference schema: %w", err)
+	}
+	for _, table := range append([]string{"db_meta", "schema_migrations"}, migrationBusinessTables...) {
+		sourceColumns, err := sqliteTableColumns(ctx, source, table)
+		if err != nil {
+			return err
+		}
+		referenceColumns, err := sqliteTableColumns(ctx, reference.DB(), table)
+		if err != nil {
+			return err
+		}
+		if strings.Join(sourceColumns, "\n") != strings.Join(referenceColumns, "\n") {
+			return fmt.Errorf("sqlite source table %s does not match migration schema", table)
+		}
+	}
+	return nil
+}
+
+func sqliteTableColumns(ctx context.Context, db *sql.DB, table string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info("`+strings.ReplaceAll(table, `"`, `""`)+`")`)
+	if err != nil {
+		return nil, fmt.Errorf("inspect sqlite table %s: %w", table, err)
+	}
+	defer rows.Close()
+	columns := make([]string, 0)
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, err
+		}
+		columns = append(columns, fmt.Sprintf("%d|%s|%s|%d|%v|%d", cid, name, kind, notNull, defaultValue, primaryKey))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(columns) == 0 {
+		return nil, fmt.Errorf("sqlite source table %s is missing", table)
+	}
+	return columns, nil
 }
 
 func loadSQLiteSnapshot(ctx context.Context, db sqliteQuerier) (snapshot, error) {

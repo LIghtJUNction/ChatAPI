@@ -54,6 +54,9 @@ func (s *Service) Reload(ctx context.Context) (settingscore.Document, error) {
 func (s *Service) ValidatePatch(ctx context.Context, v map[string]any) error {
 	return s.core.ValidatePatch(ctx, v)
 }
+func (s *Service) PreparePatch(ctx context.Context, v map[string]any) (settingscore.PreparedPatch, error) {
+	return s.core.PreparePatch(ctx, v)
+}
 func (s *Service) Patch(ctx context.Context, v map[string]any) (settingscore.Document, []string, error) {
 	return s.core.Patch(ctx, v)
 }

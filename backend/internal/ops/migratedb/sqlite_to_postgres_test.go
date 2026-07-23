@@ -44,6 +44,28 @@ func TestSQLiteToPostgresRejectsUndeclaredSourceTable(t *testing.T) {
 	}
 }
 
+func TestSQLiteToPostgresRejectsUnexpectedSourceColumn(t *testing.T) {
+	ctx := context.Background()
+	sqlitePath := filepath.Join(t.TempDir(), "chatapi.sqlite3")
+	source, err := sqlitestore.Open(sqlitePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrations.Bootstrap(ctx, source.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.DB().ExecContext(ctx, `ALTER TABLE users ADD COLUMN future_business_value TEXT NOT NULL DEFAULT ''`); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = SQLiteToPostgres(ctx, sqlitePath, pgtest.IsolatedDSN(t))
+	if err == nil || !strings.Contains(err.Error(), "users") {
+		t.Fatalf("unexpected column migration error=%v", err)
+	}
+}
+
 func TestSafePostgresTargetHidesUnsupportedDSNForms(t *testing.T) {
 	t.Parallel()
 

@@ -108,6 +108,25 @@ func TestBootstrapAppliesLatestPostgreSQLMigration(t *testing.T) {
 	}
 }
 
+func TestBootstrapRejectsDirtyPostgreSQLMigration(t *testing.T) {
+	dsn := pgtest.IsolatedDSN(t)
+	ctx := context.Background()
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	if err := Bootstrap(ctx, store.Pool()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Pool().Exec(ctx, `UPDATE db_meta SET value='1' WHERE key='migration_dirty'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Bootstrap(ctx, store.Pool()); err == nil || !strings.Contains(err.Error(), "dirty") {
+		t.Fatalf("dirty PostgreSQL bootstrap error=%v", err)
+	}
+}
+
 func TestConcurrentBootstrapSerializesPostgreSQLMigrations(t *testing.T) {
 	dsn := pgtest.IsolatedDSN(t)
 	ctx := context.Background()

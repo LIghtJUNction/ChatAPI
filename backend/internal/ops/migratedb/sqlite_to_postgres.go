@@ -16,24 +16,31 @@ import (
 )
 
 type Report struct {
-	Source           string    `json:"source"`
-	Target           string    `json:"target"`
-	StartedAt        time.Time `json:"started_at"`
-	CompletedAt      time.Time `json:"completed_at"`
-	Users            int       `json:"users"`
-	UserIdentities   int       `json:"user_identities"`
-	SystemConfigs    int       `json:"system_configs"`
-	UserConfigs      int       `json:"user_configs"`
-	ModelAPIKeys     int       `json:"model_api_keys"`
-	AppAPIKeys       int       `json:"app_api_keys"`
-	AppAPIAuditLogs  int       `json:"app_api_audit_logs"`
-	AuditLogs        int       `json:"audit_logs"`
-	AutomationRules  int       `json:"automation_rules"`
-	UploadedImages   int       `json:"uploaded_images"`
-	StorageQuotas    int       `json:"storage_quotas"`
-	DeletionFailures int       `json:"deletion_failures"`
-	Conversations    int       `json:"conversations"`
-	Messages         int       `json:"messages"`
+	Source             string    `json:"source"`
+	Target             string    `json:"target"`
+	StartedAt          time.Time `json:"started_at"`
+	CompletedAt        time.Time `json:"completed_at"`
+	Users              int       `json:"users"`
+	UserIdentities     int       `json:"user_identities"`
+	SystemConfigs      int       `json:"system_configs"`
+	UserConfigs        int       `json:"user_configs"`
+	ModelAPIKeys       int       `json:"model_api_keys"`
+	AppAPIKeys         int       `json:"app_api_keys"`
+	AppAPIAuditLogs    int       `json:"app_api_audit_logs"`
+	AuditLogs          int       `json:"audit_logs"`
+	AutomationRules    int       `json:"automation_rules"`
+	UploadedImages     int       `json:"uploaded_images"`
+	StorageQuotas      int       `json:"storage_quotas"`
+	DeletionFailures   int       `json:"deletion_failures"`
+	Conversations      int       `json:"conversations"`
+	Messages           int       `json:"messages"`
+	VerificationCodes  int       `json:"verification_codes"`
+	ConversationEvents int       `json:"conversation_events"`
+	MediaAssets        int       `json:"media_assets"`
+	MediaAssetRefs     int       `json:"media_asset_refs"`
+	MediaEventRefs     int       `json:"media_event_refs"`
+	MediaStaging       int       `json:"media_staging"`
+	VirtualModels      int       `json:"virtual_models"`
 }
 
 type snapshot struct {
@@ -51,6 +58,29 @@ type snapshot struct {
 	DeletionFailures   []storageFileDeletionFailureRow
 	Conversations      []conversationRow
 	Messages           []messageRow
+	Extended           []tableCopy
+}
+
+type tableCopySpec struct {
+	Name        string
+	Columns     []string
+	TimeColumns map[string]bool
+	JSONColumns map[string]bool
+}
+
+type tableCopy struct {
+	Spec tableCopySpec
+	Rows [][]any
+}
+
+var extendedTableSpecs = []tableCopySpec{
+	{Name: "auth_verification_codes", Columns: []string{"email", "purpose", "code_hash", "expires_at", "created_at", "updated_at", "failed_attempts", "last_sent_at"}, TimeColumns: map[string]bool{"expires_at": true, "created_at": true, "updated_at": true, "last_sent_at": true}},
+	{Name: "conversation_events", Columns: []string{"id", "conversation_id", "owner_id", "type", "level", "title", "detail", "request_id", "metadata_json", "created_at"}, TimeColumns: map[string]bool{"created_at": true}, JSONColumns: map[string]bool{"metadata_json": true}},
+	{Name: "media_assets", Columns: []string{"id", "owner_id", "file_id", "path", "media_type", "bytes", "sha256", "width", "height", "source_kind", "original_name", "original_media_type", "created_at"}, TimeColumns: map[string]bool{"created_at": true}},
+	{Name: "media_asset_refs", Columns: []string{"id", "asset_id", "file_id", "owner_id", "request_id", "conversation_id", "message_id", "input_part_index", "created_at"}, TimeColumns: map[string]bool{"created_at": true}},
+	{Name: "media_asset_event_refs", Columns: []string{"id", "asset_id", "file_id", "url", "owner_id", "request_id", "conversation_id", "event_id", "purpose", "part_index", "created_at"}, TimeColumns: map[string]bool{"created_at": true}},
+	{Name: "media_asset_staging", Columns: []string{"asset_id", "owner_id", "conversation_id", "request_id", "created_at"}, TimeColumns: map[string]bool{"created_at": true}},
+	{Name: "user_virtual_models", Columns: []string{"id", "user_id", "name", "created_at"}, TimeColumns: map[string]bool{"created_at": true}},
 }
 
 type userRow struct {
@@ -259,6 +289,24 @@ func SQLiteToPostgres(ctx context.Context, sqlitePath string, postgresDSN string
 	report.DeletionFailures = len(data.DeletionFailures)
 	report.Conversations = len(data.Conversations)
 	report.Messages = len(data.Messages)
+	for _, table := range data.Extended {
+		switch table.Spec.Name {
+		case "auth_verification_codes":
+			report.VerificationCodes = len(table.Rows)
+		case "conversation_events":
+			report.ConversationEvents = len(table.Rows)
+		case "media_assets":
+			report.MediaAssets = len(table.Rows)
+		case "media_asset_refs":
+			report.MediaAssetRefs = len(table.Rows)
+		case "media_asset_event_refs":
+			report.MediaEventRefs = len(table.Rows)
+		case "media_asset_staging":
+			report.MediaStaging = len(table.Rows)
+		case "user_virtual_models":
+			report.VirtualModels = len(table.Rows)
+		}
+	}
 	report.CompletedAt = time.Now().UTC()
 	return report, nil
 }
@@ -279,6 +327,13 @@ func ensureEmptyPostgresTarget(ctx context.Context, pool *pgxpool.Pool) error {
 		"storage_file_deletion_failures",
 		"conversations",
 		"messages",
+		"auth_verification_codes",
+		"conversation_events",
+		"media_assets",
+		"media_asset_refs",
+		"media_asset_event_refs",
+		"media_asset_staging",
+		"user_virtual_models",
 	} {
 		var count int
 		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
@@ -335,6 +390,13 @@ func loadSQLiteSnapshot(ctx context.Context, db *sql.DB) (snapshot, error) {
 	}
 	if data.Messages, err = loadMessages(ctx, db); err != nil {
 		return snapshot{}, err
+	}
+	for _, spec := range extendedTableSpecs {
+		table, loadErr := loadExtendedTable(ctx, db, spec)
+		if loadErr != nil {
+			return snapshot{}, loadErr
+		}
+		data.Extended = append(data.Extended, table)
 	}
 	return data, nil
 }
@@ -458,7 +520,57 @@ func importSnapshot(ctx context.Context, pool *pgxpool.Pool, data snapshot) erro
 			return fmt.Errorf("import messages %s: %w", item.ID, err)
 		}
 	}
+	for _, table := range data.Extended {
+		columns := strings.Join(table.Spec.Columns, ", ")
+		values := make([]string, len(table.Spec.Columns))
+		for i, column := range table.Spec.Columns {
+			values[i] = fmt.Sprintf("$%d", i+1)
+			if table.Spec.JSONColumns[column] {
+				values[i] += "::jsonb"
+			}
+		}
+		query := "INSERT INTO " + table.Spec.Name + "(" + columns + ") VALUES (" + strings.Join(values, ", ") + ")"
+		for i, row := range table.Rows {
+			if _, err := tx.Exec(ctx, query, row...); err != nil {
+				return fmt.Errorf("import %s row %d: %w", table.Spec.Name, i+1, err)
+			}
+		}
+	}
 	return tx.Commit(ctx)
+}
+
+func loadExtendedTable(ctx context.Context, db *sql.DB, spec tableCopySpec) (tableCopy, error) {
+	table := tableCopy{Spec: spec}
+	rows, err := db.QueryContext(ctx, "SELECT "+strings.Join(spec.Columns, ", ")+" FROM "+spec.Name)
+	if err != nil {
+		return table, fmt.Errorf("read sqlite %s: %w", spec.Name, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		values := make([]any, len(spec.Columns))
+		pointers := make([]any, len(spec.Columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			return table, fmt.Errorf("scan sqlite %s: %w", spec.Name, err)
+		}
+		for i, column := range spec.Columns {
+			if bytes, ok := values[i].([]byte); ok {
+				values[i] = string(bytes)
+			}
+			if spec.TimeColumns[column] {
+				raw, _ := values[i].(string)
+				values[i] = parseSQLiteTime(raw)
+			}
+			if spec.JSONColumns[column] {
+				raw, _ := values[i].(string)
+				values[i] = normalizeJSON(raw, `{}`)
+			}
+		}
+		table.Rows = append(table.Rows, values)
+	}
+	return table, rows.Err()
 }
 
 func normalizeJSON(raw string, fallback string) string {

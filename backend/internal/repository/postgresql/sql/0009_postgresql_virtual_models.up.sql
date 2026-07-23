@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS user_virtual_models (
 CREATE INDEX IF NOT EXISTS idx_user_virtual_models_user_id ON user_virtual_models(user_id, created_at DESC);
 
 INSERT INTO user_virtual_models(id, user_id, name, created_at)
-SELECT 'vmodel_' || md5(random()::text || clock_timestamp()::text || user_id || model), user_id, btrim(model), MIN(created_at)
+SELECT 'vmodel_' || md5(random()::text || clock_timestamp()::text || user_id || btrim(model)), user_id, btrim(model), MIN(created_at)
 FROM user_api_keys
 WHERE btrim(model) <> ''
 GROUP BY user_id, btrim(model)

@@ -53,6 +53,15 @@ CHATAPI_WEB_DIST_DIR=../frontend/dist
 CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
+将现有 SQLite 数据库导入空的 PostgreSQL 数据库：
+
+```bash
+cd backend
+go run ./cmd/migrate-db \
+  --sqlite ./data/chatapi.sqlite3 \
+  --postgres-dsn 'postgres://chatapi:password@localhost:5432/chatapi?sslmode=disable'
+```
+
 #### 启动 Go 后端
 
 ```bash

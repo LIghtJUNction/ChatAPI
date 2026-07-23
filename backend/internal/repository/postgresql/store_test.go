@@ -93,6 +93,42 @@ func TestBootstrapAppliesLatestPostgreSQLMigration(t *testing.T) {
 	}
 }
 
+func TestVirtualModelMigrationGroupsExistingAPIKeys(t *testing.T) {
+	dsn := pgtest.IsolatedDSN(t)
+	ctx := context.Background()
+	st, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open postgresql store: %v", err)
+	}
+	t.Cleanup(st.Close)
+	if _, err := st.Pool().Exec(ctx, `
+		CREATE TABLE user_api_keys(user_id TEXT NOT NULL, model TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL);
+		INSERT INTO user_api_keys(user_id, model, created_at) VALUES
+			('u1', ' model-a ', NOW()),
+			('u1', 'model-a', NOW()),
+			('u1', 'model-b', NOW());
+	`); err != nil {
+		t.Fatalf("seed legacy api keys: %v", err)
+	}
+	var migrationSQL string
+	for _, step := range registeredMigrations {
+		if step.Version == LatestVersion {
+			migrationSQL = step.UpSQL
+			break
+		}
+	}
+	if _, err := st.Pool().Exec(ctx, migrationSQL); err != nil {
+		t.Fatalf("apply virtual model migration: %v", err)
+	}
+	var count int
+	if err := st.Pool().QueryRow(ctx, `SELECT COUNT(*) FROM user_virtual_models WHERE user_id='u1'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("virtual model count = %d, want 2", count)
+	}
+}
+
 func openTestStore() storetest.NewStoreFunc {
 	return func(t *testing.T) repositorycontract.Store {
 		t.Helper()

@@ -75,6 +75,13 @@ type tableCopy struct {
 	Rows [][]any
 }
 
+type sqliteValueSpec struct {
+	Table               string
+	JSONColumns         []string
+	RequiredTimeColumns []string
+	OptionalTimeColumns []string
+}
+
 type sqliteQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
@@ -96,6 +103,23 @@ var migrationBusinessTables = []string{
 	"conversations", "messages", "auth_verification_codes", "conversation_events",
 	"media_assets", "media_asset_refs", "media_asset_event_refs", "media_asset_staging",
 	"user_virtual_models",
+}
+
+var sqliteValueSpecs = []sqliteValueSpec{
+	{Table: "users", RequiredTimeColumns: []string{"created_at", "updated_at"}, OptionalTimeColumns: []string{"last_login_at"}},
+	{Table: "user_identities", JSONColumns: []string{"profile_json"}, RequiredTimeColumns: []string{"created_at", "updated_at"}, OptionalTimeColumns: []string{"last_login_at"}},
+	{Table: "config", JSONColumns: []string{"value_json"}, RequiredTimeColumns: []string{"created_at", "updated_at"}},
+	{Table: "user_configs", JSONColumns: []string{"value_json"}, RequiredTimeColumns: []string{"created_at", "updated_at"}},
+	{Table: "user_api_keys", RequiredTimeColumns: []string{"created_at"}, OptionalTimeColumns: []string{"last_used_at", "revoked_at"}},
+	{Table: "user_app_api_keys", JSONColumns: []string{"scopes_json", "resource_limits_json"}, RequiredTimeColumns: []string{"created_at"}, OptionalTimeColumns: []string{"expires_at", "last_used_at", "revoked_at"}},
+	{Table: "app_api_key_audit_logs", RequiredTimeColumns: []string{"created_at"}},
+	{Table: "audit_logs", JSONColumns: []string{"metadata_json"}, RequiredTimeColumns: []string{"created_at"}},
+	{Table: "automation_rules", JSONColumns: []string{"rule_json"}, RequiredTimeColumns: []string{"created_at", "updated_at"}},
+	{Table: "uploaded_images", RequiredTimeColumns: []string{"created_at"}},
+	{Table: "storage_user_quotas", RequiredTimeColumns: []string{"created_at", "updated_at"}},
+	{Table: "storage_file_deletion_failures", RequiredTimeColumns: []string{"created_at", "updated_at"}},
+	{Table: "conversations", JSONColumns: []string{"metadata_json"}, RequiredTimeColumns: []string{"created_at", "updated_at", "last_message_at"}},
+	{Table: "messages", JSONColumns: []string{"metadata_json"}, RequiredTimeColumns: []string{"created_at"}},
 }
 
 type userRow struct {
@@ -283,9 +307,6 @@ func SQLiteToPostgres(ctx context.Context, sqlitePath string, postgresDSN string
 	if err := pgstore.Bootstrap(ctx, dst.Pool()); err != nil {
 		return report, fmt.Errorf("bootstrap postgresql target: %w", err)
 	}
-	if err := ensureEmptyPostgresTarget(ctx, dst.Pool()); err != nil {
-		return report, err
-	}
 
 	sourceTx, err := src.DB().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -293,6 +314,9 @@ func SQLiteToPostgres(ctx context.Context, sqlitePath string, postgresDSN string
 	}
 	defer sourceTx.Rollback()
 	if err := validateSQLiteMigrationTables(ctx, sourceTx); err != nil {
+		return report, err
+	}
+	if err := validateSQLiteValues(ctx, sourceTx); err != nil {
 		return report, err
 	}
 	data, err := loadSQLiteSnapshot(ctx, sourceTx)
@@ -348,19 +372,6 @@ func safePostgresTarget(dsn string) string {
 		return "postgresql"
 	}
 	return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}).String()
-}
-
-func ensureEmptyPostgresTarget(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, table := range migrationBusinessTables {
-		var count int
-		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
-			return fmt.Errorf("check target table %s: %w", table, err)
-		}
-		if count > 0 {
-			return fmt.Errorf("postgresql target is not empty: table %s has %d rows", table, count)
-		}
-	}
-	return nil
 }
 
 func validateSQLiteMigrationTables(ctx context.Context, source *sql.Tx) error {
@@ -517,6 +528,19 @@ func importSnapshot(ctx context.Context, pool *pgxpool.Pool, data snapshot) erro
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, "LOCK TABLE "+strings.Join(migrationBusinessTables, ", ")+" IN ACCESS EXCLUSIVE MODE"); err != nil {
+		return fmt.Errorf("lock postgresql migration target: %w", err)
+	}
+	for _, table := range migrationBusinessTables {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
+			return fmt.Errorf("check target table %s: %w", table, err)
+		}
+		if count > 0 {
+			return fmt.Errorf("postgresql target is not empty: table %s has %d rows", table, count)
+		}
+	}
 
 	for _, item := range data.Users {
 		if _, err := tx.Exec(ctx, `
@@ -681,6 +705,69 @@ func loadExtendedTable(ctx context.Context, db sqliteQuerier, spec tableCopySpec
 		table.Rows = append(table.Rows, values)
 	}
 	return table, rows.Err()
+}
+
+func validateSQLiteValues(ctx context.Context, db sqliteQuerier) error {
+	specs := append([]sqliteValueSpec(nil), sqliteValueSpecs...)
+	for _, table := range extendedTableSpecs {
+		spec := sqliteValueSpec{Table: table.Name}
+		for _, column := range table.Columns {
+			if table.JSONColumns[column] {
+				spec.JSONColumns = append(spec.JSONColumns, column)
+			}
+			if table.TimeColumns[column] {
+				spec.RequiredTimeColumns = append(spec.RequiredTimeColumns, column)
+			}
+		}
+		specs = append(specs, spec)
+	}
+	for _, spec := range specs {
+		for _, column := range spec.JSONColumns {
+			if err := validateSQLiteColumn(ctx, db, spec.Table, column, true, func(raw string) bool {
+				return json.Valid([]byte(raw))
+			}); err != nil {
+				return err
+			}
+		}
+		for _, column := range spec.RequiredTimeColumns {
+			if err := validateSQLiteColumn(ctx, db, spec.Table, column, false, validSQLiteTime); err != nil {
+				return err
+			}
+		}
+		for _, column := range spec.OptionalTimeColumns {
+			if err := validateSQLiteColumn(ctx, db, spec.Table, column, true, validSQLiteTime); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateSQLiteColumn(ctx context.Context, db sqliteQuerier, table, column string, allowEmpty bool, valid func(string) bool) error {
+	rows, err := db.QueryContext(ctx, "SELECT "+column+" FROM "+table)
+	if err != nil {
+		return fmt.Errorf("validate sqlite %s.%s: %w", table, column, err)
+	}
+	defer rows.Close()
+	rowNumber := 0
+	for rows.Next() {
+		rowNumber++
+		var value sql.NullString
+		if err := rows.Scan(&value); err != nil {
+			return fmt.Errorf("scan sqlite %s.%s row %d: %w", table, column, rowNumber, err)
+		}
+		raw := strings.TrimSpace(value.String)
+		if (!value.Valid || raw == "") && allowEmpty {
+			continue
+		}
+		if !value.Valid || raw == "" || !valid(raw) {
+			return fmt.Errorf("invalid sqlite value in %s.%s row %d", table, column, rowNumber)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("validate sqlite %s.%s: %w", table, column, err)
+	}
+	return nil
 }
 
 func normalizeJSON(raw string, fallback string) string {
@@ -1008,9 +1095,19 @@ func loadMessages(ctx context.Context, db sqliteQuerier) ([]messageRow, error) {
 }
 
 func parseSQLiteTime(raw string) time.Time {
+	parsed, _ := parseSQLiteTimeValue(raw)
+	return parsed
+}
+
+func validSQLiteTime(raw string) bool {
+	_, ok := parseSQLiteTimeValue(raw)
+	return ok
+}
+
+func parseSQLiteTimeValue(raw string) (time.Time, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return time.Time{}
+		return time.Time{}, false
 	}
 	for _, layout := range []string{
 		time.RFC3339Nano,
@@ -1021,10 +1118,10 @@ func parseSQLiteTime(raw string) time.Time {
 		"2006-01-02 15:04:05",
 	} {
 		if parsed, err := time.Parse(layout, raw); err == nil {
-			return parsed.UTC()
+			return parsed.UTC(), true
 		}
 	}
-	return time.Time{}
+	return time.Time{}, false
 }
 
 func parseSQLiteNullableTime(raw sql.NullString) *time.Time {

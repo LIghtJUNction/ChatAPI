@@ -66,6 +66,53 @@ func TestSQLiteToPostgresRejectsUnexpectedSourceColumn(t *testing.T) {
 	}
 }
 
+func TestValidateSQLiteValuesRejectsInvalidJSONAndTime(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name    string
+		seed    string
+		wantErr string
+	}{
+		{
+			name: "json",
+			seed: `INSERT INTO config(key, value_json, created_at, updated_at)
+				VALUES ('invalid', '{', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+			wantErr: "config.value_json",
+		},
+		{
+			name: "required time",
+			seed: `INSERT INTO users(id, username, email, created_at, updated_at)
+				VALUES ('invalid-time', 'invalid-time', 'invalid-time@example.com', 'not-a-time', '2026-01-01T00:00:00Z')`,
+			wantErr: "users.created_at",
+		},
+		{
+			name: "optional time",
+			seed: `INSERT INTO users(id, username, email, created_at, updated_at, last_login_at)
+				VALUES ('invalid-optional-time', 'invalid-optional-time', 'invalid-optional@example.com', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'not-a-time')`,
+			wantErr: "users.last_login_at",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, err := sqlitestore.Open(filepath.Join(t.TempDir(), "chatapi.sqlite3"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer source.Close()
+			if err := migrations.Bootstrap(ctx, source.DB()); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.DB().ExecContext(ctx, tt.seed); err != nil {
+				t.Fatal(err)
+			}
+			err = validateSQLiteValues(ctx, source.DB())
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("validation error=%v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestSafePostgresTargetHidesUnsupportedDSNForms(t *testing.T) {
 	t.Parallel()
 

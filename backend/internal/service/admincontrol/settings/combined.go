@@ -57,6 +57,27 @@ func (d *CombinedDomain) Get(ctx context.Context) (settingscore.Document, error)
 func (d *CombinedDomain) Reload(ctx context.Context) (settingscore.Document, error) {
 	return d.read(ctx, true)
 }
+func (d *CombinedDomain) ValidatePatch(ctx context.Context, values map[string]any) error {
+	grouped := make(map[SettingsDomain]map[string]any)
+	for key, value := range values {
+		owner := d.owners[key]
+		if owner == nil {
+			return fmt.Errorf("unknown setting %q", key)
+		}
+		if grouped[owner] == nil {
+			grouped[owner] = make(map[string]any)
+		}
+		grouped[owner][key] = value
+	}
+	for _, child := range d.children {
+		if childValues := grouped[child]; len(childValues) > 0 {
+			if err := child.ValidatePatch(ctx, childValues); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 func (d *CombinedDomain) Patch(ctx context.Context, values map[string]any) (settingscore.Document, []string, error) {
 	grouped := make(map[SettingsDomain]map[string]any)
 	for key, value := range values {
@@ -70,6 +91,15 @@ func (d *CombinedDomain) Patch(ctx context.Context, values map[string]any) (sett
 		grouped[owner][key] = value
 	}
 	restart := make([]string, 0)
+	for _, child := range d.children {
+		childValues := grouped[child]
+		if len(childValues) == 0 {
+			continue
+		}
+		if err := child.ValidatePatch(ctx, childValues); err != nil {
+			return settingscore.Document{}, nil, err
+		}
+	}
 	for _, child := range d.children {
 		childValues := grouped[child]
 		if len(childValues) == 0 {

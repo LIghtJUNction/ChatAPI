@@ -39,6 +39,9 @@ func (s *Service) Get(ctx context.Context) (settingscore.Document, error) { retu
 func (s *Service) Reload(ctx context.Context) (settingscore.Document, error) {
 	return s.core.Reload(ctx)
 }
+func (s *Service) ValidatePatch(ctx context.Context, v map[string]any) error {
+	return s.core.ValidatePatch(ctx, v)
+}
 func (s *Service) Patch(ctx context.Context, v map[string]any) (settingscore.Document, []string, error) {
 	return s.core.Patch(ctx, v)
 }

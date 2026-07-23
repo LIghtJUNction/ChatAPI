@@ -185,15 +185,9 @@ func run() error {
 		},
 		Logger: logFactory.Layer(logging.LayerTurn),
 	}
-	if _, err := turnService.DisconnectRecoveredPending(ctx, "server restarted"); err != nil {
-		return fmt.Errorf("disconnect recovered pending turns: %w", err)
-	}
 	mediaSettingsSvc := preprocesssettings.New(store, cfg)
 	realtimeSettingsSvc := workspacesettings.New(store, cfg)
 	automationSettingsSvc := automationsettings.New(store)
-	go expirePendingLoop(ctx, turnService, chatSettingsSvc, appLogger)
-	go storageVacuumLoop(ctx, cfg, store, auditSvc, appLogger)
-
 	handler := httprouter.New(httprouter.Deps{
 		Config:             cfg,
 		ChatRepo:           store,
@@ -228,6 +222,11 @@ func run() error {
 		RealtimeSettings:   realtimeSettingsSvc,
 		AutomationSettings: automationSettingsSvc,
 	})
+	if _, err := turnService.DisconnectRecoveredPending(ctx, "server restarted"); err != nil {
+		return fmt.Errorf("disconnect recovered pending turns: %w", err)
+	}
+	go expirePendingLoop(ctx, turnService, chatSettingsSvc, appLogger)
+	go storageVacuumLoop(ctx, cfg, store, auditSvc, appLogger)
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),

@@ -3,6 +3,7 @@ package migratedb
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,6 +19,28 @@ func TestSafePostgresTargetRemovesCredentialsAndQuery(t *testing.T) {
 	got := safePostgresTarget("postgres://chatapi:very-secret@db.internal:5432/chatapi?sslmode=disable&password=also-secret")
 	if want := "postgres://db.internal:5432/chatapi"; got != want {
 		t.Fatalf("safePostgresTarget() = %q, want %q", got, want)
+	}
+}
+
+func TestSQLiteToPostgresRejectsUndeclaredSourceTable(t *testing.T) {
+	ctx := context.Background()
+	sqlitePath := filepath.Join(t.TempDir(), "chatapi.sqlite3")
+	source, err := sqlitestore.Open(sqlitePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrations.Bootstrap(ctx, source.DB()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.DB().ExecContext(ctx, `CREATE TABLE future_business_data(id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = SQLiteToPostgres(ctx, sqlitePath, pgtest.IsolatedDSN(t))
+	if err == nil || !strings.Contains(err.Error(), "future_business_data") {
+		t.Fatalf("undeclared table migration error=%v", err)
 	}
 }
 

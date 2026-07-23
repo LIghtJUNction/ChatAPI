@@ -17,6 +17,7 @@ type SettingsDomain interface {
 	Fields() []settingscore.Descriptor
 	Get(context.Context) (settingscore.Document, error)
 	Reload(context.Context) (settingscore.Document, error)
+	ValidatePatch(context.Context, map[string]any) error
 	Patch(context.Context, map[string]any) (settingscore.Document, []string, error)
 }
 type Domain struct {

@@ -37,8 +37,51 @@ func TestPatchReportsAfterUpdateFailureWithoutHidingAppliedSettings(t *testing.T
 func (fakeDomain) Reload(ctx context.Context) (settingscore.Document, error) {
 	return fakeDomain{}.Get(ctx)
 }
+func (fakeDomain) ValidatePatch(context.Context, map[string]any) error { return nil }
 func (fakeDomain) Patch(context.Context, map[string]any) (settingscore.Document, []string, error) {
 	return settingscore.Document{Domain: "access"}, nil, nil
+}
+
+type validatingDomain struct {
+	domain   string
+	key      string
+	validate error
+	patches  int
+}
+
+func (d *validatingDomain) Domain() string { return d.domain }
+func (d *validatingDomain) Title() string  { return d.domain }
+func (d *validatingDomain) Fields() []settingscore.Descriptor {
+	return []settingscore.Descriptor{{Key: d.key}}
+}
+func (d *validatingDomain) Get(context.Context) (settingscore.Document, error) {
+	return settingscore.Document{Domain: d.domain}, nil
+}
+func (d *validatingDomain) Reload(ctx context.Context) (settingscore.Document, error) {
+	return d.Get(ctx)
+}
+func (d *validatingDomain) ValidatePatch(context.Context, map[string]any) error { return d.validate }
+func (d *validatingDomain) Patch(context.Context, map[string]any) (settingscore.Document, []string, error) {
+	d.patches++
+	return settingscore.Document{Domain: d.domain}, nil, nil
+}
+
+func TestCombinedPatchValidatesEveryChildBeforeWriting(t *testing.T) {
+	access := &validatingDomain{domain: "access-core", key: "user_conversation_limit"}
+	realtime := &validatingDomain{domain: "realtime", key: "max_connections", validate: errors.New("invalid realtime setting")}
+	combined, err := Combine("access", "Access", access, realtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := combined.Patch(context.Background(), map[string]any{
+		"user_conversation_limit": 10,
+		"max_connections":         -1,
+	}); !errors.Is(err, realtime.validate) {
+		t.Fatalf("combined validation error=%v", err)
+	}
+	if access.patches != 0 || realtime.patches != 0 {
+		t.Fatalf("patches after validation failure: access=%d realtime=%d", access.patches, realtime.patches)
+	}
 }
 
 func TestPatchPassesSortedChangedKeysToAfterUpdate(t *testing.T) {

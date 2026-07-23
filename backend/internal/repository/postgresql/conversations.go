@@ -424,7 +424,7 @@ func (s *Store) PruneConversationsForOwner(ctx context.Context, ownerID string, 
 
 func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (common.ExpirePendingTurnsResult, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, metadata_json
+		SELECT id, metadata_json, COALESCE(metadata_json->>'owner_id', '')
 		FROM conversations
 		WHERE last_message_at < $1
 			AND COALESCE(metadata_json->>'realtime_status', '') IN ('waiting', 'streaming')
@@ -434,13 +434,14 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (commo
 	}
 	type candidate struct {
 		id       string
+		ownerID  string
 		metadata map[string]any
 	}
 	candidates := make([]candidate, 0)
 	for rows.Next() {
 		var item candidate
 		var metadataJSON []byte
-		if err := rows.Scan(&item.id, &metadataJSON); err != nil {
+		if err := rows.Scan(&item.id, &metadataJSON, &item.ownerID); err != nil {
 			rows.Close()
 			return common.ExpirePendingTurnsResult{}, err
 		}
@@ -475,7 +476,11 @@ func (s *Store) ExpirePendingTurns(ctx context.Context, cutoff time.Time) (commo
 		if err != nil {
 			return common.ExpirePendingTurnsResult{}, err
 		}
-		result.ExpiredConversations += int(tag.RowsAffected())
+		affected := tag.RowsAffected()
+		result.ExpiredConversations += int(affected)
+		if affected > 0 && item.ownerID != "" {
+			result.OwnerIDs = append(result.OwnerIDs, item.ownerID)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return common.ExpirePendingTurnsResult{}, err

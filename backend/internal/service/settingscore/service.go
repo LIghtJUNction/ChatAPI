@@ -233,6 +233,40 @@ func (s *Service) Patch(ctx context.Context, patch map[string]any) (Document, []
 	return cloneDocument(doc), restart, nil
 }
 
+func (s *Service) ValidatePatch(ctx context.Context, patch map[string]any) error {
+	s.loadMu.Lock()
+	defer s.loadMu.Unlock()
+	stored, err := s.loadStored(ctx)
+	if err != nil {
+		return err
+	}
+	current, err := s.document(stored)
+	if err != nil {
+		return err
+	}
+	next := cloneMap(current.Values)
+	for key, value := range patch {
+		field, ok := s.field(key)
+		if !ok {
+			return fmt.Errorf("unknown setting %q", key)
+		}
+		if !field.Editable || current.Sources[key] == SourceEnvironment {
+			return fmt.Errorf("setting %q is not editable", key)
+		}
+		if err := validateFieldValue(field, value); err != nil {
+			return err
+		}
+		next[key] = value
+	}
+	if err := s.validateFieldValues(next); err != nil {
+		return err
+	}
+	if s.spec.Validate != nil {
+		return s.spec.Validate(next)
+	}
+	return nil
+}
+
 func (s *Service) validateFieldValues(values map[string]any) error {
 	for _, field := range s.spec.Fields {
 		value, ok := values[field.Key]

@@ -697,6 +697,16 @@ func (s *Service) ExpirePendingTurns(ctx context.Context, ttl time.Duration, now
 	if err != nil {
 		return ExpireResult{}, err
 	}
+	if s.ConversationTerminal != nil {
+		notified := make(map[string]bool, len(dbResult.OwnerIDs))
+		for _, ownerID := range dbResult.OwnerIDs {
+			if ownerID == "" || notified[ownerID] {
+				continue
+			}
+			notified[ownerID] = true
+			s.ConversationTerminal(ctx, ownerID)
+		}
+	}
 	return ExpireResult{ExpiredConversations: dbResult.ExpiredConversations, ExpiredActiveTurns: activeExpired}, nil
 }
 

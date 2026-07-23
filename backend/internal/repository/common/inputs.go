@@ -295,5 +295,6 @@ type DeleteUploadedImagesResult struct {
 }
 
 type ExpirePendingTurnsResult struct {
-	ExpiredConversations int `json:"expired_conversations"`
+	ExpiredConversations int      `json:"expired_conversations"`
+	OwnerIDs             []string `json:"owner_ids,omitempty"`
 }

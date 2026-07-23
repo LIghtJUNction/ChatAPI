@@ -88,6 +88,15 @@ var extendedTableSpecs = []tableCopySpec{
 	{Name: "user_virtual_models", Columns: []string{"id", "user_id", "name", "created_at"}, TimeColumns: map[string]bool{"created_at": true}},
 }
 
+var migrationBusinessTables = []string{
+	"users", "user_identities", "config", "user_configs", "user_api_keys",
+	"user_app_api_keys", "app_api_key_audit_logs", "audit_logs", "automation_rules",
+	"uploaded_images", "storage_user_quotas", "storage_file_deletion_failures",
+	"conversations", "messages", "auth_verification_codes", "conversation_events",
+	"media_assets", "media_asset_refs", "media_asset_event_refs", "media_asset_staging",
+	"user_virtual_models",
+}
+
 type userRow struct {
 	ID           string
 	Username     string
@@ -279,6 +288,9 @@ func SQLiteToPostgres(ctx context.Context, sqlitePath string, postgresDSN string
 		return report, fmt.Errorf("begin sqlite snapshot: %w", err)
 	}
 	defer sourceTx.Rollback()
+	if err := validateSQLiteMigrationTables(ctx, sourceTx); err != nil {
+		return report, err
+	}
 	data, err := loadSQLiteSnapshot(ctx, sourceTx)
 	if err != nil {
 		return report, err
@@ -335,29 +347,7 @@ func safePostgresTarget(dsn string) string {
 }
 
 func ensureEmptyPostgresTarget(ctx context.Context, pool *pgxpool.Pool) error {
-	for _, table := range []string{
-		"users",
-		"user_identities",
-		"config",
-		"user_configs",
-		"user_api_keys",
-		"user_app_api_keys",
-		"app_api_key_audit_logs",
-		"audit_logs",
-		"automation_rules",
-		"uploaded_images",
-		"storage_user_quotas",
-		"storage_file_deletion_failures",
-		"conversations",
-		"messages",
-		"auth_verification_codes",
-		"conversation_events",
-		"media_assets",
-		"media_asset_refs",
-		"media_asset_event_refs",
-		"media_asset_staging",
-		"user_virtual_models",
-	} {
+	for _, table := range migrationBusinessTables {
 		var count int
 		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
 			return fmt.Errorf("check target table %s: %w", table, err)
@@ -365,6 +355,39 @@ func ensureEmptyPostgresTarget(ctx context.Context, pool *pgxpool.Pool) error {
 		if count > 0 {
 			return fmt.Errorf("postgresql target is not empty: table %s has %d rows", table, count)
 		}
+	}
+	return nil
+}
+
+func validateSQLiteMigrationTables(ctx context.Context, source *sql.Tx) error {
+	known := make(map[string]bool, len(migrationBusinessTables)+2)
+	known["db_meta"] = true
+	known["schema_migrations"] = true
+	for _, table := range migrationBusinessTables {
+		known[table] = true
+	}
+	rows, err := source.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		return fmt.Errorf("inspect sqlite migration tables: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			return err
+		}
+		if !known[table] {
+			return fmt.Errorf("sqlite table %s is not declared in the migration manifest", table)
+		}
+		delete(known, table)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	delete(known, "db_meta")
+	delete(known, "schema_migrations")
+	for table := range known {
+		return fmt.Errorf("sqlite migration manifest table %s is missing from the source", table)
 	}
 	return nil
 }

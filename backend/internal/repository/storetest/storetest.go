@@ -2117,6 +2117,15 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	if expired.ExpiredConversations < 1 {
 		t.Fatalf("unexpected expired conversation count: %#v", expired)
 	}
+	foundExpiredOwner := false
+	for _, ownerID := range expired.OwnerIDs {
+		if ownerID == "user_c" {
+			foundExpiredOwner = true
+		}
+	}
+	if !foundExpiredOwner {
+		t.Fatalf("expired owners do not contain user_c: %#v", expired.OwnerIDs)
+	}
 	expiredConversation, err := st.GetConversation(ctx, expiringConversation.ID)
 	if err != nil {
 		t.Fatalf("get expired conversation: %v", err)

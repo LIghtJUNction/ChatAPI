@@ -6,13 +6,14 @@ import {
   LockOutlined,
   PictureOutlined,
   RobotOutlined,
+  SettingOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import { Button, Collapse, Layout, Menu, Spin, Statistic, Tag, Typography } from 'antd'
+import { Button, Collapse, Descriptions, Layout, List, Menu, Spin, Statistic, Tag, Typography } from 'antd'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import { useAuthSession } from '../../../hooks/useAuthSession'
-import { getOverview, getRuntime } from '../api/settings'
+import { getAuditLogs, getOverview, getRuntime, type AuditLogItem } from '../api/settings'
 import { DomainSettingsSection } from '../sections/DomainSettingsSection'
 import { UserManagementPanel } from '../../../components/settings/UserManagementPanel'
 import { useAdminMonitoring } from '../hooks/useAdminMonitoring'
@@ -28,6 +29,7 @@ const domains = [
 const items = [
   { key: 'overview', label: '概览', icon: <DashboardOutlined /> },
   { key: 'users', label: '用户管理', icon: <TeamOutlined /> },
+  { key: 'system', label: '系统设置', icon: <SettingOutlined /> },
   ...domains,
 ]
 
@@ -75,6 +77,8 @@ export function AdminSettingsPage() {
           <Overview overview={overview} runtime={runtime} />
         ) : selected === 'users' ? (
           <UserManagementPanel open currentRole={auth.session.user.role} />
+        ) : selected === 'system' ? (
+          <SystemSettings runtime={runtime} />
         ) : (
           <DomainSettingsSection key={selected} domain={selected} />
         )}
@@ -85,6 +89,48 @@ export function AdminSettingsPage() {
 
 function isAdminRole(role?: string) {
   return role === 'admin' || role === 'superadmin'
+}
+
+function SystemSettings({ runtime }: { runtime: Record<string, unknown> | null }) {
+  const [logs, setLogs] = useState<AuditLogItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const config = (runtime?.config ?? {}) as Record<string, unknown>
+
+  useEffect(() => {
+    let active = true
+    getAuditLogs('system.storage.vacuum')
+      .then((items) => { if (active) setLogs(items) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  return (
+    <section className="admin-domain-section">
+      <div className="admin-domain-heading"><Typography.Title level={3}>系统设置</Typography.Title></div>
+      <Typography.Paragraph type="secondary">以下参数来自服务启动环境，修改后需重启 ChatAPI 才会生效。</Typography.Paragraph>
+      <Descriptions bordered size="small" column={1} title="存储维护">
+        <Descriptions.Item label="自动维护">{config.storage_cleanup_enabled ? '已启用' : '未启用'}</Descriptions.Item>
+        <Descriptions.Item label="执行时间">{String(config.storage_cleanup_time ?? '-')}</Descriptions.Item>
+        <Descriptions.Item label="保留最近会话">{String(config.storage_cleanup_keep_recent_conversations ?? '-')}</Descriptions.Item>
+        <Descriptions.Item label="保留最近天数">{String(config.storage_cleanup_keep_recent_days ?? '-')}</Descriptions.Item>
+        <Descriptions.Item label="SQLite VACUUM">{config.database_driver === 'sqlite' && config.storage_vacuum_enabled ? '已启用' : '未启用'}</Descriptions.Item>
+      </Descriptions>
+      <Typography.Title level={4} style={{ marginTop: 24 }}>最近维护日志</Typography.Title>
+      <List
+        loading={loading}
+        dataSource={logs}
+        locale={{ emptyText: '暂无已执行的存储维护任务' }}
+        renderItem={(item) => (
+          <List.Item>
+            <List.Item.Meta
+              title={<><Tag color={item.outcome === 'success' ? 'green' : 'red'}>{item.outcome === 'success' ? '成功' : '失败'}</Tag> SQLite VACUUM</>}
+              description={`${formatDateTime(item.created_at)}${item.metadata?.duration_ms != null ? ` · ${item.metadata.duration_ms} ms` : ''}${item.metadata?.error ? ` · ${String(item.metadata.error)}` : ''}`}
+            />
+          </List.Item>
+        )}
+      />
+    </section>
+  )
 }
 
 function Overview({ overview, runtime: runtimeDocument }: { overview: Record<string, unknown> | null; runtime: Record<string, unknown> | null }) {
@@ -160,4 +206,9 @@ function formatUptime(seconds: number) {
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }

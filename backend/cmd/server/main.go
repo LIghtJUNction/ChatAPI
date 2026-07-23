@@ -25,6 +25,7 @@ import (
 	authrepo "github.com/zyf2007/ChatAPI/internal/repository/auth"
 	automationrepo "github.com/zyf2007/ChatAPI/internal/repository/automation"
 	chatrepo "github.com/zyf2007/ChatAPI/internal/repository/chat"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	configrepo "github.com/zyf2007/ChatAPI/internal/repository/config"
 	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
 	platformrepo "github.com/zyf2007/ChatAPI/internal/repository/platform"
@@ -191,6 +192,7 @@ func run() error {
 	realtimeSettingsSvc := workspacesettings.New(store, cfg)
 	automationSettingsSvc := automationsettings.New(store)
 	go expirePendingLoop(ctx, turnService, chatSettingsSvc, appLogger)
+	go storageVacuumLoop(ctx, cfg, store, auditSvc, appLogger)
 
 	handler := httprouter.New(httprouter.Deps{
 		Config:             cfg,
@@ -301,6 +303,75 @@ func expirePendingLoop(ctx context.Context, turns *turnsvc.Service, settings *ch
 			}
 		}
 	}
+}
+
+type maintenanceAuditRecorder interface {
+	Record(context.Context, common.CreateAuditLogInput) (common.AuditLog, error)
+}
+
+func storageVacuumLoop(ctx context.Context, cfg config.Config, store platformrepo.MaintenanceStore, audit maintenanceAuditRecorder, logger *zap.Logger) {
+	if !storageVacuumEnabled(cfg) {
+		return
+	}
+	hour, minute, err := config.ParseDailyTime(cfg.StorageCleanupTime)
+	if err != nil {
+		logger.Warn("storage vacuum scheduler disabled by invalid cleanup time", zap.Error(err))
+		return
+	}
+	for {
+		next := nextDailyRun(time.Now(), hour, minute)
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		startedAt := time.Now()
+		vacuumCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		err := store.Vacuum(vacuumCtx)
+		cancel()
+		metadata := map[string]any{
+			"scheduled_time": cfg.StorageCleanupTime,
+			"duration_ms":    time.Since(startedAt).Milliseconds(),
+		}
+		if err != nil {
+			logger.Warn("scheduled storage vacuum failed", zap.Error(err))
+			metadata["error"] = err.Error()
+			recordMaintenanceAudit(ctx, audit, "failure", metadata, logger)
+			continue
+		}
+		logger.Info("scheduled storage vacuum completed")
+		recordMaintenanceAudit(ctx, audit, "success", metadata, logger)
+	}
+}
+
+func storageVacuumEnabled(cfg config.Config) bool {
+	return cfg.StorageCleanupEnabled && cfg.StorageVacuumEnabled && strings.EqualFold(strings.TrimSpace(cfg.DatabaseDriver), "sqlite")
+}
+
+func recordMaintenanceAudit(ctx context.Context, audit maintenanceAuditRecorder, outcome string, metadata map[string]any, logger *zap.Logger) {
+	if audit == nil {
+		return
+	}
+	if _, err := audit.Record(ctx, common.CreateAuditLogInput{
+		EventType:    "system.storage.vacuum",
+		ResourceType: "database",
+		ResourceID:   "primary",
+		Action:       "vacuum",
+		Outcome:      outcome,
+		Metadata:     metadata,
+	}); err != nil {
+		logger.Warn("record storage vacuum audit failed", zap.Error(err))
+	}
+}
+
+func nextDailyRun(now time.Time, hour int, minute int) time.Time {
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
 }
 
 func detectBackendRoot() (string, error) {

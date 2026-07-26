@@ -17,6 +17,44 @@
 
 
 ## 1. 部署
+### Docker Compose 一键部署
+
+需要 Docker 与 Docker Compose。先准备部署密钥和管理员密码：
+
+```bash
+cp docker-compose.env.example .env
+openssl rand -base64 48  # 生成 CHATAPI_MASTER_KEY
+openssl rand -base64 48  # 生成 CHATAPI_SESSION_SECRET
+```
+
+把生成的随机值分别填入 `.env` 中的 `CHATAPI_MASTER_KEY` 和
+`CHATAPI_SESSION_SECRET`，并修改 `CHATAPI_ADMIN_PASSWORD`。这些值必须长期备份；
+更换 master key 会导致数据库中已经加密的模型 API Key 无法解密。
+
+启动服务：
+
+```bash
+docker compose up -d --build
+```
+
+启动完成后访问 `http://localhost:5000`。SQLite 数据库和媒体文件保存在
+`chatapi-data` 命名卷中，重新构建容器不会丢失。常用维护命令：
+
+```bash
+docker compose ps
+docker compose logs -f chatapi
+docker compose up -d --build  # 拉取代码后重新构建升级
+docker compose down           # 停止服务，保留数据卷
+```
+
+镜像还包含 `migrate-db`，需要迁移到 PostgreSQL 时可通过
+`docker compose exec chatapi migrate-db --help` 查看参数。
+
+不要使用 `docker compose down -v`，除非确实要删除全部 ChatAPI 数据。
+使用域名或反向代理时，还需要在 `.env` 中设置 `CHATAPI_BASE_URL` 和
+`CHATAPI_CORS_ORIGINS`。镜像构建默认通过 `goproxy.cn` 下载 Go 模块；无法访问时可在
+`.env` 中修改 `GOPROXY`。
+
 ### 单二进制构建
 
 在项目根目录执行：

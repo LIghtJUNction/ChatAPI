@@ -1,0 +1,30 @@
+services:
+  chatapi:
+    build:
+      context: .
+      args:
+        GOPROXY: "${GOPROXY:-https://goproxy.cn,direct}"
+    image: chatapi:local
+    restart: unless-stopped
+    ports:
+      - "${CHATAPI_PORT:-5000}:5000"
+    environment:
+      CHATAPI_MASTER_KEY: "${CHATAPI_MASTER_KEY:?Set CHATAPI_MASTER_KEY in .env}"
+      CHATAPI_SESSION_SECRET: "${CHATAPI_SESSION_SECRET:?Set CHATAPI_SESSION_SECRET in .env}"
+      CHATAPI_ADMIN_USERNAME: "${CHATAPI_ADMIN_USERNAME:-superadmin}"
+      CHATAPI_ADMIN_PASSWORD: "${CHATAPI_ADMIN_PASSWORD:?Set CHATAPI_ADMIN_PASSWORD in .env}"
+      CHATAPI_BASE_URL: "${CHATAPI_BASE_URL:-}"
+      CHATAPI_CORS_ORIGINS: "${CHATAPI_CORS_ORIGINS:-http://localhost:${CHATAPI_PORT:-5000},http://127.0.0.1:${CHATAPI_PORT:-5000}}"
+      CHATAPI_LOG_LEVEL: "${CHATAPI_LOG_LEVEL:-info}"
+      TZ: "${TZ:-Asia/Shanghai}"
+    volumes:
+      - chatapi-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5000/api/ready"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  chatapi-data:

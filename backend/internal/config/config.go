@@ -58,6 +58,8 @@ type Config struct {
 	MediaMaxImagesPerRequest              int
 	MediaDerivedDir                       string
 	MediaAVIFQuality                      int
+	ImageProcessorURL                     string
+	ImageProcessorAPIToken                string
 	StorageDefaultQuotaBytes              int64
 	StorageBlockNewConversations          bool
 	StorageCleanupEnabled                 bool
@@ -281,6 +283,8 @@ func FromEnvUnchecked(mode Mode, backendRoot string) (Config, error) {
 	cfg.MediaAllowBase64 = parseBool(os.Getenv("CHATAPI_MEDIA_ALLOW_BASE64"), cfg.MediaAllowBase64)
 	cfg.MediaAllowSVG = parseBool(os.Getenv("CHATAPI_MEDIA_ALLOW_SVG"), cfg.MediaAllowSVG)
 	cfg.MediaDerivedDir = firstNonEmpty(os.Getenv("CHATAPI_MEDIA_DERIVED_DIR"), cfg.MediaDerivedDir)
+	cfg.ImageProcessorURL = strings.TrimRight(strings.TrimSpace(os.Getenv("CHATAPI_IMAGE_PROCESSOR_URL")), "/")
+	cfg.ImageProcessorAPIToken = os.Getenv("CHATAPI_IMAGE_PROCESSOR_API_TOKEN")
 	if raw := strings.TrimSpace(os.Getenv("CHATAPI_MEDIA_MAX_BYTES")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {

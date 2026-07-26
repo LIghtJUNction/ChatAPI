@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -103,7 +104,7 @@ func TestUploadPersistsAVIFAndResolveDerivesBase64(t *testing.T) {
 		UploadMaxBytes:   1 << 20,
 		MediaMaxBytes:    1 << 20,
 		MediaAVIFQuality: 50,
-	}, store, localstore.Store{RootDir: t.TempDir()})
+	}, store, localstore.Store{RootDir: t.TempDir()}, localProcessor(t))
 	raw := tinyPNG(t)
 	uploaded, err := service.Upload(context.Background(), "user_a", "conv_a", "req_a", "result.png", "image/png", bytes.NewReader(raw))
 	if err != nil {
@@ -131,7 +132,7 @@ func TestUploadPersistsAVIFAndResolveDerivesBase64(t *testing.T) {
 
 func TestResolveRejectsDifferentOwner(t *testing.T) {
 	store := &memoryStore{asset: common.MediaAsset{ID: "asset_1", OwnerID: "user_a", MediaType: "image/avif"}, conversationID: "conv_a", requestID: "req_a"}
-	service := New(config.Config{}, store, localstore.Store{RootDir: t.TempDir()})
+	service := New(config.Config{}, store, localstore.Store{RootDir: t.TempDir()}, localProcessor(t))
 	if _, err := service.Consume(context.Background(), "user_b", "conv_a", "req_a", "asset_1", func(Resolved) error { return nil }); err != ErrAssetNotFound {
 		t.Fatalf("expected owner-scoped not found, got %v", err)
 	}
@@ -140,7 +141,7 @@ func TestResolveRejectsDifferentOwner(t *testing.T) {
 func TestConsumeSerializesBase64DerivationPerAsset(t *testing.T) {
 	store := &memoryStore{}
 	binaries := &countingBinaryStore{local: localstore.Store{RootDir: t.TempDir()}}
-	service := New(config.Config{UploadMaxBytes: 1 << 20, MediaMaxBytes: 1 << 20}, store, binaries)
+	service := New(config.Config{UploadMaxBytes: 1 << 20, MediaMaxBytes: 1 << 20}, store, binaries, localProcessor(t))
 	uploaded, err := service.Upload(context.Background(), "user_a", "conv_a", "req_a", "result.png", "image/png", bytes.NewReader(tinyPNG(t)))
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +179,18 @@ func TestConsumeSerializesBase64DerivationPerAsset(t *testing.T) {
 	if succeeded != 1 || notFound != 1 || binaries.openCount() != 1 {
 		t.Fatalf("asset was not consumed once: success=%d not_found=%d opens=%d", succeeded, notFound, binaries.openCount())
 	}
+}
+
+func localProcessor(t *testing.T) media.Processor {
+	t.Helper()
+	processor, err := media.NewProcessor(media.ProcessorConfig{})
+	if errors.Is(err, media.ErrProcessorConfig) {
+		t.Skip("local image processor is excluded from this build")
+	}
+	if err != nil {
+		t.Fatalf("create local processor: %v", err)
+	}
+	return processor
 }
 
 func tinyPNG(t *testing.T) []byte {

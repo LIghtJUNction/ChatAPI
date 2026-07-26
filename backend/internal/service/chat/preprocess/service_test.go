@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -13,12 +14,13 @@ import (
 	"testing"
 
 	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"github.com/zyf2007/ChatAPI/internal/protocol"
 )
 
 func TestPrepareTranscodesBase64ImageToDraftAVIF(t *testing.T) {
 	cfg := config.Default(config.ModeServe, filepath.Join(t.TempDir(), "backend"))
-	svc := New(cfg)
+	svc := New(cfg, localProcessor(t))
 
 	request := protocol.TurnRequest{
 		Protocol: protocol.ProtocolResponses,
@@ -49,6 +51,9 @@ func TestPrepareTranscodesBase64ImageToDraftAVIF(t *testing.T) {
 	if processed.PreparedImages[0].FileID == "" || len(processed.PreparedImages[0].Data) == 0 {
 		t.Fatalf("unexpected prepared image payload: %#v", processed.PreparedImages[0])
 	}
+	if processed.PreparedImages[0].SHA256 != media.SHA256Hex(processed.PreparedImages[0].Data) {
+		t.Fatalf("prepared image hash must describe processed bytes: %#v", processed.PreparedImages[0])
+	}
 	sanitized := mustJSON(t, protocol.BuildRequestBody(processed.Request))
 	if strings.Contains(sanitized, "base64") || strings.Contains(sanitized, "iVBOR") {
 		t.Fatalf("sanitized body should not contain base64 payload: %s", sanitized)
@@ -58,7 +63,7 @@ func TestPrepareTranscodesBase64ImageToDraftAVIF(t *testing.T) {
 func TestPrepareRejectsSVGWhenDisabled(t *testing.T) {
 	cfg := config.Default(config.ModeServe, filepath.Join(t.TempDir(), "backend"))
 	cfg.MediaAllowSVG = false
-	svc := New(cfg)
+	svc := New(cfg, localProcessor(t))
 
 	request := protocol.TurnRequest{
 		Protocol: protocol.ProtocolAnthropicMessages,
@@ -74,7 +79,7 @@ func TestPrepareRejectsSVGWhenDisabled(t *testing.T) {
 
 func TestPrepareTranscodesJPEGDataURLWithWhitespaceToDraftAVIF(t *testing.T) {
 	cfg := config.Default(config.ModeServe, filepath.Join(t.TempDir(), "backend"))
-	svc := New(cfg)
+	svc := New(cfg, localProcessor(t))
 
 	base64Payload := base64.StdEncoding.EncodeToString(tinyJPEG(t))
 	request := protocol.TurnRequest{
@@ -97,6 +102,53 @@ func TestPrepareTranscodesJPEGDataURLWithWhitespaceToDraftAVIF(t *testing.T) {
 	if !strings.HasPrefix(processed.Request.InputParts[0].URL, "/api/media/assets/file_") {
 		t.Fatalf("expected public url, got %#v", processed.Request.InputParts[0])
 	}
+}
+
+func TestPreparePreservesProcessorOperationalError(t *testing.T) {
+	cfg := config.Default(config.ModeServe, filepath.Join(t.TempDir(), "backend"))
+	svc := New(cfg, failingProcessor{err: media.ErrProcessorUnavailable})
+	request := protocol.TurnRequest{InputParts: []protocol.InputPart{{
+		Type: "image", MediaType: "image/png", URL: base64.StdEncoding.EncodeToString(tinyPNG(t)),
+	}}}
+	_, err := svc.Prepare(context.Background(), "user_a", request)
+	if !errors.Is(err, media.ErrProcessorUnavailable) {
+		t.Fatalf("expected processor error to propagate, got %v", err)
+	}
+	var requestErr *protocol.RequestError
+	if errors.As(err, &requestErr) {
+		t.Fatalf("operational error must not become invalid request: %#v", requestErr)
+	}
+}
+
+func TestPrepareMapsProcessorInputErrorToInvalidRequest(t *testing.T) {
+	cfg := config.Default(config.ModeServe, filepath.Join(t.TempDir(), "backend"))
+	svc := New(cfg, failingProcessor{err: media.ErrInvalidImageInput})
+	request := protocol.TurnRequest{InputParts: []protocol.InputPart{{
+		Type: "image", MediaType: "image/png", URL: base64.StdEncoding.EncodeToString(tinyPNG(t)),
+	}}}
+	_, err := svc.Prepare(context.Background(), "user_a", request)
+	var requestErr *protocol.RequestError
+	if !errors.As(err, &requestErr) || requestErr.StatusCode != 400 {
+		t.Fatalf("expected invalid request error, got %v", err)
+	}
+}
+
+type failingProcessor struct{ err error }
+
+func (p failingProcessor) EncodeAVIF(context.Context, media.ParsedImage, media.AVIFOptions) (media.ProcessedImage, error) {
+	return media.ProcessedImage{}, p.err
+}
+
+func localProcessor(t *testing.T) media.Processor {
+	t.Helper()
+	processor, err := media.NewProcessor(media.ProcessorConfig{})
+	if errors.Is(err, media.ErrProcessorConfig) {
+		t.Skip("local image processor is excluded from this build")
+	}
+	if err != nil {
+		t.Fatalf("create local processor: %v", err)
+	}
+	return processor
 }
 
 func mustJSON(t *testing.T, value any) string {

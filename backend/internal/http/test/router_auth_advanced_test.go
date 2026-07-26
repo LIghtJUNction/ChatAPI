@@ -414,6 +414,7 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 
 	return httpapi.RouterDeps{
 		Config:         cfg,
+		MediaProcessor: testMediaProcessor(),
 		ChatRepo:       st,
 		AuthRepo:       st,
 		ConfigRepo:     st,

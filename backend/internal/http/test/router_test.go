@@ -101,6 +101,7 @@ func TestRouterAuthPendingAndOwnerScopedQueries(t *testing.T) {
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
+		MediaProcessor: testMediaProcessor(),
 		ChatRepo:      st,
 		AuthRepo:      st,
 		ConfigRepo:    st,

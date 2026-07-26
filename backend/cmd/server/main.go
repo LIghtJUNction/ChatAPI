@@ -20,6 +20,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	platformbrowser "github.com/zyf2007/ChatAPI/internal/platform/browser"
 	platformemail "github.com/zyf2007/ChatAPI/internal/platform/email"
+	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	platformntfy "github.com/zyf2007/ChatAPI/internal/platform/ntfy"
 	auditrepo "github.com/zyf2007/ChatAPI/internal/repository/audit"
 	authrepo "github.com/zyf2007/ChatAPI/internal/repository/auth"
@@ -90,6 +91,13 @@ func run() error {
 	cfg, err := config.FromEnv(config.ModeServe, backendRoot)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	imageProcessor, err := media.NewProcessor(media.ProcessorConfig{
+		URL: cfg.ImageProcessorURL, APIToken: cfg.ImageProcessorAPIToken,
+		Tenant: "chatapi", Priority: 100,
+	})
+	if err != nil {
+		return fmt.Errorf("init image processor: %w", err)
 	}
 
 	logFactory, err := logging.NewFactory(logging.NewConfig(cfg))
@@ -219,6 +227,7 @@ func run() error {
 		LoggerFactory:      logFactory,
 		ChatSettings:       chatSettingsSvc,
 		MediaSettings:      mediaSettingsSvc,
+		MediaProcessor:     imageProcessor,
 		RealtimeSettings:   realtimeSettingsSvc,
 		AutomationSettings: automationSettingsSvc,
 	})

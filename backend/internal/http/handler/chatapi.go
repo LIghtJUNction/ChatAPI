@@ -142,7 +142,7 @@ func (h ChatAPIHandler) handleProtocolRequest(w http.ResponseWriter, r *http.Req
 	responseBody, err := h.Ingress.SubmitResponse(r.Context(), parsedReq)
 	if err != nil {
 		logging.BindContext(h.Logger, r.Context(), zap.String("protocol", requestFormat)).Error("create pending response failed", zap.Error(err))
-		httpx.WriteJSON(w, http.StatusInternalServerError, h.egress().InternalErrorBody(requestFormat, err))
+		httpx.WriteJSON(w, h.egress().ErrorStatus(err), h.egress().ErrorBody(requestFormat, err))
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, responseBody)
@@ -164,7 +164,7 @@ func (h ChatAPIHandler) handleStreamRequest(w http.ResponseWriter, r *http.Reque
 			zap.String("protocol", parsed.Request.Protocol.String()),
 			zap.Error(err),
 		).Error("create pending stream failed")
-		httpx.WriteJSON(w, http.StatusInternalServerError, h.egress().InternalErrorBody(parsed.Request.Protocol.String(), err))
+		httpx.WriteJSON(w, h.egress().ErrorStatus(err), h.egress().ErrorBody(parsed.Request.Protocol.String(), err))
 		return
 	}
 	logging.BindContext(h.Logger, ctx,

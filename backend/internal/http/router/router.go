@@ -15,6 +15,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/ops/readiness"
 	"github.com/zyf2007/ChatAPI/internal/ops/setup"
+	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
 	"github.com/zyf2007/ChatAPI/internal/repository/audit"
 	"github.com/zyf2007/ChatAPI/internal/repository/auth"
@@ -111,6 +112,7 @@ type Deps struct {
 	AdminMonitoring    *adminmonitoring.Service
 	ChatSettings       *chatsettings.Service
 	MediaSettings      *preprocesssettings.Service
+	MediaProcessor     media.Processor
 	RealtimeSettings   *workspacesettings.Service
 	AutomationSettings *automationsettings.Service
 }
@@ -127,7 +129,7 @@ func New(deps Deps) http.Handler {
 		deps.Lab = labauth.NewService(deps.Config)
 	}
 	mediaStore := localstore.Store{RootDir: deps.Config.MediaDerivedDir}
-	outputImages := outputassetsvc.New(deps.Config, deps.StorageRepo, mediaStore)
+	outputImages := outputassetsvc.New(deps.Config, deps.StorageRepo, mediaStore, deps.MediaProcessor)
 	outputImages.Settings = deps.MediaSettings
 	var outputImageUploader httphandler.OutputImageUploader
 	if deps.Turn != nil {
@@ -284,7 +286,7 @@ func New(deps Deps) http.Handler {
 			if deps.Turn.Submitter.Materializer == nil {
 				deps.Turn.Submitter.Materializer = &turn.RequestMaterializer{
 					Preprocessor: func() *preprocesssvc.Service {
-						p := preprocesssvc.New(deps.Config)
+						p := preprocesssvc.New(deps.Config, deps.MediaProcessor)
 						p.Settings = deps.MediaSettings
 						return p
 					}(),

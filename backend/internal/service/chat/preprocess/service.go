@@ -13,12 +13,16 @@ import (
 )
 
 type Service struct {
-	cfg      config.Config
-	Settings *preprocesssettings.Service
+	cfg       config.Config
+	processor media.Processor
+	Settings  *preprocesssettings.Service
 }
 
-func New(cfg config.Config) *Service {
-	return &Service{cfg: cfg}
+func New(cfg config.Config, processor media.Processor) *Service {
+	if processor == nil {
+		panic("preprocess image processor is required")
+	}
+	return &Service{cfg: cfg, processor: processor}
 }
 
 func (s *Service) Prepare(ctx context.Context, ownerID string, req protocol.TurnRequest) (PreparedRequest, error) {
@@ -58,7 +62,7 @@ func (s *Service) Prepare(ctx context.Context, ownerID string, req protocol.Turn
 	}, nil
 }
 
-func (s *Service) processImagePart(_ context.Context, cfg config.Config, ownerID string, inputPartIndex int, part protocol.InputPart) (protocol.InputPart, media.DraftAsset, error) {
+func (s *Service) processImagePart(ctx context.Context, cfg config.Config, ownerID string, inputPartIndex int, part protocol.InputPart) (protocol.InputPart, media.DraftAsset, error) {
 	parsed, err := media.ParseImageInput(part.URL, part.MediaType, cfg.MediaMaxBytes)
 	if err != nil {
 		switch {
@@ -86,25 +90,28 @@ func (s *Service) processImagePart(_ context.Context, cfg config.Config, ownerID
 	if strings.EqualFold(parsed.DetectedMediaType, "image/svg+xml") && !cfg.MediaAllowSVG {
 		return protocol.InputPart{}, media.DraftAsset{}, protocol.InvalidRequest("svg image is not allowed", "input")
 	}
-	encoded, err := media.EncodeAVIF(parsed, media.AVIFOptions{Quality: cfg.MediaAVIFQuality})
+	processed, err := s.processor.EncodeAVIF(ctx, parsed, media.AVIFOptions{Quality: cfg.MediaAVIFQuality})
 	if err != nil {
-		return protocol.InputPart{}, media.DraftAsset{}, protocol.InvalidRequest("failed to transcode image to avif", "input")
+		if errors.Is(err, media.ErrInvalidImageInput) || errors.Is(err, media.ErrImageTooLarge) {
+			return protocol.InputPart{}, media.DraftAsset{}, protocol.InvalidRequest("failed to transcode image to avif", "input")
+		}
+		return protocol.InputPart{}, media.DraftAsset{}, err
 	}
 	fileID := "file_" + uuid.NewString()
 	ownerID = mediaOwner(ownerID)
 	prepared := media.DraftAsset{
 		FileID:            fileID,
 		OwnerID:           ownerID,
-		MediaType:         "image/avif",
+		MediaType:         processed.MediaType,
 		PublicURL:         media.ChatAssetPublicURL(fileID),
-		Bytes:             int64(len(encoded)),
-		SHA256:            parsed.SHA256,
-		Width:             parsed.Width,
-		Height:            parsed.Height,
+		Bytes:             int64(len(processed.Bytes)),
+		SHA256:            media.SHA256Hex(processed.Bytes),
+		Width:             processed.Width,
+		Height:            processed.Height,
 		SourceKind:        string(parsed.SourceKind),
 		OriginalMediaType: parsed.DetectedMediaType,
 		InputPartIndex:    inputPartIndex,
-		Data:              encoded,
+		Data:              processed.Bytes,
 	}
 	return protocol.InputPart{
 		Type:      "image",

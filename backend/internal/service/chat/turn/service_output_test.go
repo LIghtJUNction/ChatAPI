@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -588,7 +589,7 @@ func TestImageGenerationPersistsURLAndOnlyStreamsDerivedBase64(t *testing.T) {
 	registry.Add(pendingTurn)
 	assetService := outputasset.New(config.Config{
 		UploadMaxBytes: 1 << 20, MediaMaxBytes: 1 << 20, MediaAVIFQuality: 50,
-	}, store, localstore.Store{RootDir: t.TempDir()})
+	}, store, localstore.Store{RootDir: t.TempDir()}, localMediaProcessor(t))
 	service := &turn.Service{
 		Store: store, Pending: registry, OutputAssets: assetService,
 		OwnerIDFromContext: func(context.Context) string { return "user_a" },
@@ -642,6 +643,18 @@ func TestImageGenerationPersistsURLAndOnlyStreamsDerivedBase64(t *testing.T) {
 	if err != nil || mediaType != "image/avif" {
 		t.Fatalf("protocol result was not AVIF: media=%q err=%v", mediaType, err)
 	}
+}
+
+func localMediaProcessor(t *testing.T) media.Processor {
+	t.Helper()
+	processor, err := media.NewProcessor(media.ProcessorConfig{})
+	if errors.Is(err, media.ErrProcessorConfig) {
+		t.Skip("local image processor is excluded from this build")
+	}
+	if err != nil {
+		t.Fatalf("create local processor: %v", err)
+	}
+	return processor
 }
 
 func outputTestPNG(t *testing.T) []byte {

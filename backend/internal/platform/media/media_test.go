@@ -2,7 +2,9 @@ package media
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -23,15 +25,46 @@ func TestParseImageInputAndEncodeAVIF(t *testing.T) {
 		t.Fatalf("unexpected parsed image: %#v", parsed)
 	}
 
-	encoded, err := EncodeAVIF(parsed, AVIFOptions{Quality: 50})
+	processor, err := NewProcessor(ProcessorConfig{})
+	if errors.Is(err, ErrProcessorConfig) {
+		t.Skip("local image processor is excluded from this build")
+	}
+	if err != nil {
+		t.Fatalf("create local processor: %v", err)
+	}
+	processed, err := processor.EncodeAVIF(context.Background(), parsed, AVIFOptions{Quality: 50})
 	if err != nil {
 		t.Fatalf("encode avif: %v", err)
 	}
-	if len(encoded) == 0 {
+	if len(processed.Bytes) == 0 {
 		t.Fatal("expected avif bytes")
 	}
-	if mediaType, width, height, err := InspectImageBytes(encoded); err != nil || mediaType != "image/avif" || width != 2 || height != 1 {
+	if processed.MediaType != "image/avif" || processed.Width != 2 || processed.Height != 1 {
+		t.Fatalf("unexpected processed image: %#v", processed)
+	}
+	if mediaType, width, height, err := InspectImageBytes(processed.Bytes); err != nil || mediaType != "image/avif" || width != 2 || height != 1 {
 		t.Fatalf("unexpected avif inspect result: media=%q width=%d height=%d err=%v", mediaType, width, height, err)
+	}
+}
+
+func TestInspectImageBytesReadsAVIFContainerMetadata(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(testAVIFBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mediaType, width, height, err := InspectImageBytes(data)
+	if err != nil || mediaType != "image/avif" || width != 2 || height != 2 {
+		t.Fatalf("unexpected AVIF metadata: media=%q size=%dx%d err=%v", mediaType, width, height, err)
+	}
+}
+
+func TestInspectImageBytesRejectsTruncatedAVIFContainer(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(testAVIFBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := InspectImageBytes(data[:len(data)-5]); err == nil {
+		t.Fatal("expected truncated AVIF to be rejected")
 	}
 }
 

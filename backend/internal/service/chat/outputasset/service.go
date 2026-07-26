@@ -32,12 +32,13 @@ type BinaryStore interface {
 }
 
 type Service struct {
-	cfg      config.Config
-	store    Store
-	binaries BinaryStore
-	locksMu  sync.Mutex
-	locks    map[string]*consumeLock
-	Settings *preprocesssettings.Service
+	cfg       config.Config
+	store     Store
+	binaries  BinaryStore
+	processor media.Processor
+	locksMu   sync.Mutex
+	locks     map[string]*consumeLock
+	Settings  *preprocesssettings.Service
 }
 
 type consumeLock struct {
@@ -63,8 +64,11 @@ type Resolved struct {
 	Base64 string
 }
 
-func New(cfg config.Config, store Store, binaries BinaryStore) *Service {
-	return &Service{cfg: cfg, store: store, binaries: binaries, locks: make(map[string]*consumeLock)}
+func New(cfg config.Config, store Store, binaries BinaryStore, processor media.Processor) *Service {
+	if processor == nil {
+		panic("output asset image processor is required")
+	}
+	return &Service{cfg: cfg, store: store, binaries: binaries, processor: processor, locks: make(map[string]*consumeLock)}
 }
 
 func (s *Service) Upload(ctx context.Context, ownerID string, conversationID string, requestID string, originalName string, mediaType string, reader io.Reader) (Uploaded, error) {
@@ -102,7 +106,9 @@ func (s *Service) Upload(ctx context.Context, ownerID string, conversationID str
 	if err != nil {
 		return Uploaded{}, err
 	}
-	encoded, err := media.EncodeAVIF(parsed, media.AVIFOptions{Quality: cfg.MediaAVIFQuality})
+	processed, err := s.processor.EncodeAVIF(ctx, parsed, media.AVIFOptions{
+		Quality: cfg.MediaAVIFQuality,
+	})
 	if err != nil {
 		return Uploaded{}, err
 	}
@@ -110,16 +116,16 @@ func (s *Service) Upload(ctx context.Context, ownerID string, conversationID str
 	if mediaLimit <= 0 {
 		mediaLimit = 10 << 20
 	}
-	if int64(len(encoded)) > mediaLimit {
+	if int64(len(processed.Bytes)) > mediaLimit {
 		return Uploaded{}, media.ErrImageTooLarge
 	}
 	fileID := "file_" + uuid.NewString()
 	draft := media.DraftAsset{
-		FileID: fileID, OwnerID: ownerID, MediaType: "image/avif",
-		PublicURL: media.ChatAssetPublicURL(fileID), Bytes: int64(len(encoded)),
-		SHA256: media.SHA256Hex(encoded), Width: parsed.Width, Height: parsed.Height,
+		FileID: fileID, OwnerID: ownerID, MediaType: processed.MediaType,
+		PublicURL: media.ChatAssetPublicURL(fileID), Bytes: int64(len(processed.Bytes)),
+		SHA256: media.SHA256Hex(processed.Bytes), Width: processed.Width, Height: processed.Height,
 		SourceKind: "output_upload", OriginalName: strings.TrimSpace(originalName),
-		OriginalMediaType: parsed.DetectedMediaType, Data: encoded,
+		OriginalMediaType: parsed.DetectedMediaType, Data: processed.Bytes,
 	}
 	stored, err := s.binaries.PersistDraft(ctx, draft)
 	if err != nil {

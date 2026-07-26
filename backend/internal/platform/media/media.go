@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -14,7 +15,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gen2brain/avif"
 	"golang.org/x/image/webp"
 )
 
@@ -108,27 +108,108 @@ func SHA256Hex(data []byte) string {
 	return sha256Hex(data)
 }
 
-func EncodeAVIF(data ParsedImage, opts AVIFOptions) ([]byte, error) {
-	if len(data.Bytes) == 0 {
-		return nil, ErrInvalidImageInput
-	}
-	img, detected, _, _, err := decodeImage(bytes.NewReader(data.Bytes))
-	if err != nil {
-		return nil, err
-	}
-	if quality := opts.Quality; quality <= 0 {
-		opts.Quality = avif.DefaultQuality
-	}
-	var buf bytes.Buffer
-	if err := avif.Encode(&buf, img, avif.Options{Quality: opts.Quality, QualityAlpha: opts.Quality, Speed: avif.DefaultSpeed}); err != nil {
-		return nil, fmt.Errorf("encode avif from %s: %w", detected, err)
-	}
-	return buf.Bytes(), nil
-}
-
 func InspectImageBytes(data []byte) (mediaType string, width int, height int, err error) {
+	if hasAVIFBrand(data) {
+		if width, height, ok := inspectAVIFContainer(data); ok {
+			return "image/avif", width, height, nil
+		}
+		return "", 0, 0, fmt.Errorf("%w: invalid AVIF container", ErrInvalidImageInput)
+	}
 	_, mediaType, width, height, err = decodeImage(bytes.NewReader(data))
 	return
+}
+
+func inspectAVIFContainer(data []byte) (width int, height int, ok bool) {
+	if !hasAVIFBrand(data) || !hasCompleteAVIFMediaData(data) {
+		return 0, 0, false
+	}
+	width, height, ok = findAVIFSpatialExtents(data, 0)
+	return width, height, ok && width > 0 && height > 0
+}
+
+func hasCompleteAVIFMediaData(data []byte) bool {
+	foundMediaData := false
+	for len(data) > 0 {
+		boxType, payload, rest, ok := nextISOBMFFBox(data)
+		if !ok {
+			return false
+		}
+		if boxType == "mdat" && len(payload) > 0 {
+			foundMediaData = true
+		}
+		data = rest
+	}
+	return foundMediaData
+}
+
+func hasAVIFBrand(data []byte) bool {
+	boxType, payload, rest, ok := nextISOBMFFBox(data)
+	for ok {
+		if boxType == "ftyp" && len(payload) >= 8 {
+			if brand := string(payload[:4]); brand == "avif" || brand == "avis" {
+				return true
+			}
+			for offset := 8; offset+4 <= len(payload); offset += 4 {
+				if brand := string(payload[offset : offset+4]); brand == "avif" || brand == "avis" {
+					return true
+				}
+			}
+		}
+		boxType, payload, rest, ok = nextISOBMFFBox(rest)
+	}
+	return false
+}
+
+func findAVIFSpatialExtents(data []byte, depth int) (width int, height int, ok bool) {
+	if depth > 8 {
+		return 0, 0, false
+	}
+	boxType, payload, rest, valid := nextISOBMFFBox(data)
+	for valid {
+		switch boxType {
+		case "ispe":
+			if len(payload) >= 12 {
+				width = int(binary.BigEndian.Uint32(payload[4:8]))
+				height = int(binary.BigEndian.Uint32(payload[8:12]))
+				if width > 0 && height > 0 {
+					return width, height, true
+				}
+			}
+		case "meta":
+			if len(payload) >= 4 {
+				if width, height, ok = findAVIFSpatialExtents(payload[4:], depth+1); ok {
+					return width, height, true
+				}
+			}
+		case "iprp", "ipco":
+			if width, height, ok = findAVIFSpatialExtents(payload, depth+1); ok {
+				return width, height, true
+			}
+		}
+		boxType, payload, rest, valid = nextISOBMFFBox(rest)
+	}
+	return 0, 0, false
+}
+
+func nextISOBMFFBox(data []byte) (boxType string, payload []byte, rest []byte, ok bool) {
+	if len(data) < 8 {
+		return "", nil, nil, false
+	}
+	size := uint64(binary.BigEndian.Uint32(data[:4]))
+	headerSize := uint64(8)
+	if size == 1 {
+		if len(data) < 16 {
+			return "", nil, nil, false
+		}
+		size = binary.BigEndian.Uint64(data[8:16])
+		headerSize = 16
+	} else if size == 0 {
+		size = uint64(len(data))
+	}
+	if size < headerSize || size > uint64(len(data)) {
+		return "", nil, nil, false
+	}
+	return string(data[4:8]), data[headerSize:size], data[size:], true
 }
 
 func parseDataURL(raw string, maxBytes int64) (ParsedImage, error) {

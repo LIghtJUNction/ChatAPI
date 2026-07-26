@@ -105,6 +105,7 @@ func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
 
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
+		MediaProcessor: testMediaProcessor(),
 		ChatRepo:      st,
 		AuthRepo:      st,
 		ConfigRepo:    st,
@@ -252,6 +253,7 @@ func TestResponsesMessageContentDataURLTranscodesToAVIF(t *testing.T) {
 
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
+		MediaProcessor: testMediaProcessor(),
 		ChatRepo:      st,
 		AuthRepo:      st,
 		ConfigRepo:    st,
@@ -362,6 +364,7 @@ func TestJPEGDataURLWithWhitespaceTranscodesToAVIF(t *testing.T) {
 
 	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
 		Config:        cfg,
+		MediaProcessor: testMediaProcessor(),
 		ChatRepo:      st,
 		AuthRepo:      st,
 		ConfigRepo:    st,

@@ -12,8 +12,7 @@
 
 - Go 后端重构进行中，当前分支已切换到新的 Go 工程骨架（可能并不稳定）
 - 支持 `/v1/chat/completions`、`/v1/responses`、`/messages` 三套接口
-- `serve` / `lab` 双模式入口
-- Lab 模式默认 SQLite、本地自动开浏览器、可作为 Mock LLM 调试入口
+- Go 后端通过 `backend/cmd/server` 启动
 
 
 ## 1. 部署
@@ -81,6 +80,16 @@ npm run build
 首页默认显示当前访问来源作为 API 基址；如需在构建时指定其他基址，可在构建前设置 `VITE_HOMEPAGE_API_BASE_URL`。
 
 #### 设置 `.env`
+
+先从项目根目录复制配置模板：
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+然后至少修改以下密钥和管理员密码。两个密钥均可通过
+`openssl rand -base64 48` 生成，并应长期备份：
+
 ```env
 CHATAPI_DATA_DIR=./data
 CHATAPI_DB_DRIVER=sqlite
@@ -89,6 +98,10 @@ CHATAPI_HOST=0.0.0.0
 CHATAPI_PORT=5000
 CHATAPI_WEB_DIST_DIR=../frontend/dist
 CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CHATAPI_MASTER_KEY=replace-with-a-long-random-master-key
+CHATAPI_SESSION_SECRET=replace-with-another-long-random-session-secret
+CHATAPI_ADMIN_USERNAME=superadmin
+CHATAPI_ADMIN_PASSWORD=replace-with-a-strong-unique-password
 ```
 
 将现有 SQLite 数据库导入空的 PostgreSQL 数据库。该命令是离线迁移工具：执行前必须停止会写入源库的 ChatAPI 实例，迁移完成并校验后再修改数据库配置；它不会持续复制迁移期间或迁移后的增量写入。
@@ -104,7 +117,7 @@ go run ./cmd/migrate-db \
 
 ```bash
 cd ./backend
-go run ./cmd/chatapi serve
+go run ./cmd/server
 ```
 ### dev部署
 
@@ -112,7 +125,7 @@ go run ./cmd/chatapi serve
 
 ```bash
 cd ./backend
-go run ./cmd/chatapi serve
+go run ./cmd/server
 ```
 
 #### 启动前端
@@ -139,6 +152,10 @@ CHATAPI_DB_DRIVER=sqlite
 CHATAPI_DB_DSN=./data/chatapi.sqlite3
 CHATAPI_HOST=0.0.0.0
 CHATAPI_PORT=5000
+CHATAPI_MASTER_KEY=replace-with-a-long-random-master-key
+CHATAPI_SESSION_SECRET=replace-with-another-long-random-session-secret
+CHATAPI_ADMIN_USERNAME=superadmin
+CHATAPI_ADMIN_PASSWORD=replace-with-a-strong-unique-password
 ```
 
 如果部署配置保存在项目目录之外，可以设置外部 env 文件路径：
@@ -161,33 +178,6 @@ CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 # 直接让 Go 后端对外托管前端静态文件
 # CHATAPI_WEB_DIST_DIR=../frontend/dist
 
-# Lab 模式可选
-# CHATAPI_OPEN_BROWSER=1
-# CHATAPI_LAB_TOKEN=
-# CHATAPI_LAB_PASSWORD=
-# CHATAPI_ALLOW_REMOTE_LAB=0
-```
-
-## Lab 模式
-
-本地调试可直接启动：
-
-```bash
-cd ./backend
-go run ./cmd/chatapi lab
-```
-
-默认行为：
-
-- 绑定 `127.0.0.1:5000`
-- 使用 SQLite
-- 自动打开浏览器
-- `/api/auth/session` 直接返回已登录 Lab 用户
-
-如果要远程暴露 Lab，必须显式允许并配置一次性 token 或密码：
-
-```bash
-cd ./backend && CHATAPI_HOST=0.0.0.0 CHATAPI_ALLOW_REMOTE_LAB=1 CHATAPI_LAB_TOKEN=xxx go run ./cmd/chatapi lab
 ```
 
 

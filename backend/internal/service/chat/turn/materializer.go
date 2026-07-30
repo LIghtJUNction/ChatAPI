@@ -123,14 +123,29 @@ func rewritePreparedImageURLs(request protocol.TurnRequest, images []media.Draft
 	}
 	rewritten := request
 	out := make([]protocol.InputPart, 0, len(request.InputParts))
-	imagesByIndex := make(map[int]media.DraftAsset, len(images))
+	type imageLocation struct {
+		input   int
+		content int
+	}
+	imagesByIndex := make(map[imageLocation]media.DraftAsset, len(images))
 	for _, image := range images {
-		imagesByIndex[image.InputPartIndex] = image
+		imagesByIndex[imageLocation{input: image.InputPartIndex, content: image.ContentPartIndex}] = image
 	}
 	for index, part := range request.InputParts {
-		if image, ok := imagesByIndex[index]; ok {
+		if image, ok := imagesByIndex[imageLocation{input: index, content: -1}]; ok {
 			part.URL = image.PublicURL
 			part.MediaType = image.MediaType
+		}
+		if part.ToolResult != nil {
+			result := *part.ToolResult
+			result.Content = append([]protocol.ContentPart(nil), part.ToolResult.Content...)
+			for contentIndex := range result.Content {
+				if image, ok := imagesByIndex[imageLocation{input: index, content: contentIndex}]; ok {
+					result.Content[contentIndex].URL = image.PublicURL
+					result.Content[contentIndex].MediaType = image.MediaType
+				}
+			}
+			part.ToolResult = &result
 		}
 		out = append(out, part)
 	}

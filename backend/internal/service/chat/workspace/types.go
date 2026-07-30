@@ -257,13 +257,19 @@ func partsFromRequestBody(requestFormat string, body map[string]any) []TimelineM
 				Text: part.Text,
 			})
 		case "tool_result":
-			if strings.TrimSpace(part.Text) == "" {
+			if part.ToolResult == nil {
 				continue
 			}
-			parts = append(parts, TimelineMessageContentPart{
-				Type: "text",
-				Text: part.Text,
-			})
+			for _, content := range part.ToolResult.Content {
+				switch content.Type {
+				case "text":
+					if strings.TrimSpace(content.Text) != "" {
+						parts = append(parts, TimelineMessageContentPart{Type: "text", Text: content.Text})
+					}
+				case "image":
+					parts = append(parts, TimelineMessageContentPart{Type: "image", Src: strings.TrimSpace(content.URL), MediaType: strings.TrimSpace(content.MediaType)})
+				}
+			}
 		}
 	}
 	return parts

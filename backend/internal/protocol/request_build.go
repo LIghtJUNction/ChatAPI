@@ -244,14 +244,37 @@ func buildResponsesInput(parts []InputPart) []any {
 			}
 			items = append(items, item)
 		case "tool_result":
-			item := map[string]any{"type": "function_call_output", "output": part.Text}
-			if part.ToolCallID != "" {
-				item["call_id"] = part.ToolCallID
+			if part.ToolResult == nil {
+				continue
+			}
+			item := map[string]any{"type": "function_call_output", "output": buildResponsesToolResultContent(part.ToolResult.Content)}
+			if part.ToolResult.CallID != "" {
+				item["call_id"] = part.ToolResult.CallID
 			}
 			items = append(items, item)
 		}
 	}
 	return items
+}
+
+func buildResponsesToolResultContent(parts []ContentPart) any {
+	if len(parts) == 1 && parts[0].Type == "text" {
+		return parts[0].Text
+	}
+	content := make([]any, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			content = append(content, map[string]any{"type": "input_text", "text": part.Text})
+		case "image":
+			image := map[string]any{"type": "input_image", "image_url": part.URL}
+			if part.MediaType != "" {
+				image["media_type"] = part.MediaType
+			}
+			content = append(content, image)
+		}
+	}
+	return content
 }
 
 func buildChatCompletionsMessages(request TurnRequest) []any {
@@ -265,8 +288,8 @@ func buildChatCompletionsMessages(request TurnRequest) []any {
 	if request.AssistantContent != "" {
 		items = append(items, map[string]any{"role": "assistant", "content": request.AssistantContent})
 	}
-	if payload := buildChatMessageContent(request.InputParts); len(payload) > 0 {
-		items = append(items, map[string]any{"role": "user", "content": payload})
+	for _, message := range buildChatInputMessages(request.InputParts) {
+		items = append(items, message)
 	}
 	return items
 }
@@ -314,17 +337,80 @@ func buildAnthropicMessageContent(parts []InputPart) []any {
 				},
 			})
 		case "tool_result":
+			if part.ToolResult == nil {
+				continue
+			}
 			item := map[string]any{
 				"type":    "tool_result",
-				"content": []any{map[string]any{"type": "text", "text": part.Text}},
+				"content": buildAnthropicToolResultContent(part.ToolResult.Content),
 			}
-			if part.ToolCallID != "" {
-				item["tool_use_id"] = part.ToolCallID
+			if part.ToolResult.CallID != "" {
+				item["tool_use_id"] = part.ToolResult.CallID
 			}
 			items = append(items, item)
 		}
 	}
 	return items
+}
+
+func buildChatInputMessages(parts []InputPart) []any {
+	messages := make([]any, 0, len(parts))
+	userContent := make([]any, 0, len(parts))
+	flushUser := func() {
+		if len(userContent) == 0 {
+			return
+		}
+		messages = append(messages, map[string]any{"role": "user", "content": userContent})
+		userContent = nil
+	}
+	for _, part := range parts {
+		if part.Type != "tool_result" {
+			userContent = append(userContent, buildChatMessageContent([]InputPart{part})...)
+			continue
+		}
+		if part.ToolResult == nil {
+			continue
+		}
+		flushUser()
+		message := map[string]any{"role": "tool", "content": buildChatToolResultContent(part.ToolResult.Content)}
+		if part.ToolResult.CallID != "" {
+			message["tool_call_id"] = part.ToolResult.CallID
+		}
+		messages = append(messages, message)
+	}
+	flushUser()
+	return messages
+}
+
+func buildChatToolResultContent(parts []ContentPart) any {
+	if len(parts) == 1 && parts[0].Type == "text" {
+		return parts[0].Text
+	}
+	content := make([]any, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			content = append(content, map[string]any{"type": "text", "text": part.Text})
+		case "image":
+			content = append(content, map[string]any{"type": "image_url", "image_url": map[string]any{"url": part.URL}})
+		}
+	}
+	return content
+}
+
+func buildAnthropicToolResultContent(parts []ContentPart) []any {
+	content := make([]any, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			content = append(content, map[string]any{"type": "text", "text": part.Text})
+		case "image":
+			content = append(content, map[string]any{"type": "image", "source": map[string]any{
+				"type": "url", "url": part.URL, "media_type": part.MediaType,
+			}})
+		}
+	}
+	return content
 }
 
 func buildToolChoiceBody(choice ToolChoice) any {

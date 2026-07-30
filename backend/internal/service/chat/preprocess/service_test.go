@@ -27,7 +27,10 @@ func TestPrepareTranscodesBase64ImageToDraftAVIF(t *testing.T) {
 		Model:    "demo",
 		InputParts: []protocol.InputPart{
 			{Type: "text", Text: "hello"},
-			{Type: "image", MediaType: "image/png", URL: base64.StdEncoding.EncodeToString(tinyPNG(t))},
+			{Type: "tool_result", ToolResult: &protocol.ToolResult{CallID: "call_view_image", Content: []protocol.ContentPart{
+				{Type: "text", Text: "loaded image"},
+				{Type: "image", MediaType: "image/png", URL: base64.StdEncoding.EncodeToString(tinyPNG(t))},
+			}}},
 		},
 		UserContent: "hello",
 	}
@@ -38,7 +41,11 @@ func TestPrepareTranscodesBase64ImageToDraftAVIF(t *testing.T) {
 	if len(processed.Request.InputParts) != 2 {
 		t.Fatalf("unexpected parts: %#v", processed.Request.InputParts)
 	}
-	imagePart := processed.Request.InputParts[1]
+	toolResult := processed.Request.InputParts[1].ToolResult
+	if toolResult == nil || toolResult.CallID != "call_view_image" || len(toolResult.Content) != 2 {
+		t.Fatalf("tool result structure was lost: %#v", processed.Request.InputParts[1])
+	}
+	imagePart := toolResult.Content[1]
 	if imagePart.MediaType != "image/avif" || imagePart.URL == "" {
 		t.Fatalf("unexpected processed image part: %#v", imagePart)
 	}

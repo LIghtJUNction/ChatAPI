@@ -38,6 +38,32 @@ func (s *Service) Prepare(ctx context.Context, ownerID string, req protocol.Turn
 	preparedImages := make([]media.DraftAsset, 0)
 	imageCount := 0
 	for idx, part := range req.InputParts {
+		if part.Type == "tool_result" && part.ToolResult != nil {
+			next := part
+			nextResult := *part.ToolResult
+			nextResult.Content = append([]protocol.ContentPart(nil), part.ToolResult.Content...)
+			for contentIdx, content := range nextResult.Content {
+				if content.Type != "image" {
+					continue
+				}
+				imageCount++
+				if cfg.MediaMaxImagesPerRequest > 0 && imageCount > cfg.MediaMaxImagesPerRequest {
+					return PreparedRequest{}, protocol.InvalidRequest("too many images in request", "input")
+				}
+				imagePart := protocol.InputPart{Type: "image", MediaType: content.MediaType, URL: content.URL}
+				processedPart, prepared, err := s.processImagePart(ctx, cfg, ownerID, idx, contentIdx, imagePart)
+				if err != nil {
+					return PreparedRequest{}, err
+				}
+				nextResult.Content[contentIdx] = protocol.ContentPart{Type: "image", MediaType: processedPart.MediaType, URL: processedPart.URL}
+				if prepared.FileID != "" {
+					preparedImages = append(preparedImages, prepared)
+				}
+			}
+			next.ToolResult = &nextResult
+			out = append(out, next)
+			continue
+		}
 		if part.Type != "image" {
 			out = append(out, part)
 			continue
@@ -46,7 +72,7 @@ func (s *Service) Prepare(ctx context.Context, ownerID string, req protocol.Turn
 		if cfg.MediaMaxImagesPerRequest > 0 && imageCount > cfg.MediaMaxImagesPerRequest {
 			return PreparedRequest{}, protocol.InvalidRequest("too many images in request", "input")
 		}
-		next, prepared, err := s.processImagePart(ctx, cfg, ownerID, idx, part)
+		next, prepared, err := s.processImagePart(ctx, cfg, ownerID, idx, -1, part)
 		if err != nil {
 			return PreparedRequest{}, err
 		}
@@ -62,7 +88,7 @@ func (s *Service) Prepare(ctx context.Context, ownerID string, req protocol.Turn
 	}, nil
 }
 
-func (s *Service) processImagePart(ctx context.Context, cfg config.Config, ownerID string, inputPartIndex int, part protocol.InputPart) (protocol.InputPart, media.DraftAsset, error) {
+func (s *Service) processImagePart(ctx context.Context, cfg config.Config, ownerID string, inputPartIndex int, contentPartIndex int, part protocol.InputPart) (protocol.InputPart, media.DraftAsset, error) {
 	parsed, err := media.ParseImageInput(part.URL, part.MediaType, cfg.MediaMaxBytes)
 	if err != nil {
 		switch {
@@ -111,6 +137,7 @@ func (s *Service) processImagePart(ctx context.Context, cfg config.Config, owner
 		SourceKind:        string(parsed.SourceKind),
 		OriginalMediaType: parsed.DetectedMediaType,
 		InputPartIndex:    inputPartIndex,
+		ContentPartIndex:  contentPartIndex,
 		Data:              processed.Bytes,
 	}
 	return protocol.InputPart{

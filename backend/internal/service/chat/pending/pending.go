@@ -406,6 +406,14 @@ func cloneTurnRequest(input protocol.TurnRequest) protocol.TurnRequest {
 	cloned := input
 	if len(input.InputParts) > 0 {
 		cloned.InputParts = append([]protocol.InputPart(nil), input.InputParts...)
+		for index, part := range cloned.InputParts {
+			if part.ToolResult == nil {
+				continue
+			}
+			result := *part.ToolResult
+			result.Content = append([]protocol.ContentPart(nil), part.ToolResult.Content...)
+			cloned.InputParts[index].ToolResult = &result
+		}
 	}
 	if len(input.ToolSchemas) > 0 {
 		cloned.ToolSchemas = make([]protocol.ToolSchema, 0, len(input.ToolSchemas))

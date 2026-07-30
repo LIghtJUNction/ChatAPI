@@ -57,6 +57,7 @@ type DraftAsset struct {
 	OriginalName      string
 	OriginalMediaType string
 	InputPartIndex    int
+	ContentPartIndex  int
 	Data              []byte
 }
 

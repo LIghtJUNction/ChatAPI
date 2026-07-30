@@ -71,7 +71,10 @@ func extractToolCallIDs(parts []protocol.InputPart) []string {
 		if part.Type != "tool_result" {
 			continue
 		}
-		id := strings.TrimSpace(part.ToolCallID)
+		if part.ToolResult == nil {
+			continue
+		}
+		id := strings.TrimSpace(part.ToolResult.CallID)
 		if id == "" {
 			continue
 		}

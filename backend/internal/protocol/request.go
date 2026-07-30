@@ -60,7 +60,19 @@ type InputPart struct {
 	Text       string
 	MediaType  string
 	URL        string
-	ToolCallID string
+	ToolResult *ToolResult
+}
+
+type ToolResult struct {
+	CallID  string
+	Content []ContentPart
+}
+
+type ContentPart struct {
+	Type      string
+	Text      string
+	MediaType string
+	URL       string
 }
 
 type ToolChoice struct {

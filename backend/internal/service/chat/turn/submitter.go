@@ -182,10 +182,10 @@ func extractSubmitToolCallIDs(request protocol.TurnRequest) []string {
 	seen := map[string]struct{}{}
 	ids := make([]string, 0)
 	for _, part := range request.InputParts {
-		if part.ToolCallID == "" {
+		if part.Type != "tool_result" || part.ToolResult == nil {
 			continue
 		}
-		id := strings.TrimSpace(part.ToolCallID)
+		id := strings.TrimSpace(part.ToolResult.CallID)
 		if id == "" {
 			continue
 		}

@@ -160,8 +160,41 @@ func TestParseRequestSupportsResponsesFunctionCallOutputInput(t *testing.T) {
 	if request.UserContent != "{\"ok\":true}" {
 		t.Fatalf("unexpected user content: %#v", request.UserContent)
 	}
-	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" || request.InputParts[0].Text != "{\"ok\":true}" {
+	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" || request.InputParts[0].ToolResult == nil || len(request.InputParts[0].ToolResult.Content) != 1 || request.InputParts[0].ToolResult.Content[0].Text != "{\"ok\":true}" {
 		t.Fatalf("unexpected function_call_output parsing: %#v", request.InputParts)
+	}
+}
+
+func TestResponsesFunctionCallOutputPreservesImageContent(t *testing.T) {
+	request := ParseRequest("responses", map[string]any{
+		"model": "gpt-test",
+		"input": []any{map[string]any{
+			"type": "function_call_output", "call_id": "call_view_image",
+			"output": []any{
+				map[string]any{"type": "input_text", "text": "loaded image"},
+				map[string]any{"type": "input_image", "image_url": "data:image/png;base64,ZmFrZQ==", "media_type": "image/png"},
+			},
+		}},
+	})
+	if len(request.InputParts) != 1 {
+		t.Fatalf("unexpected function output parts: %#v", request.InputParts)
+	}
+	result := request.InputParts[0].ToolResult
+	if request.InputParts[0].Type != "tool_result" || result == nil || result.CallID != "call_view_image" || len(result.Content) != 2 {
+		t.Fatalf("unexpected structured tool output: %#v", request.InputParts[0])
+	}
+	if result.Content[0].Type != "text" || result.Content[0].Text != "loaded image" || result.Content[1].Type != "image" || result.Content[1].URL != "data:image/png;base64,ZmFrZQ==" {
+		t.Fatalf("unexpected tool output content: %#v", result.Content)
+	}
+
+	normalized := BuildRequestBody(request)
+	input := normalized["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("tool output should remain one input item: %#v", input)
+	}
+	output := input[0].(map[string]any)["output"].([]any)
+	if len(output) != 2 || output[1].(map[string]any)["type"] != "input_image" {
+		t.Fatalf("unexpected rebuilt tool output: %#v", output)
 	}
 }
 
@@ -176,7 +209,7 @@ func TestParseRequestSupportsChatCompletionsToolMessage(t *testing.T) {
 	if request.UserContent != "{\"ok\":true}" {
 		t.Fatalf("unexpected tool message user content: %#v", request.UserContent)
 	}
-	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" {
+	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" || request.InputParts[0].ToolResult == nil {
 		t.Fatalf("unexpected tool message input parts: %#v", request.InputParts)
 	}
 }
@@ -203,7 +236,7 @@ func TestParseRequestSupportsAnthropicToolResultBlocks(t *testing.T) {
 	if request.UserContent != "weather is sunny\ntemperature 25C" {
 		t.Fatalf("unexpected anthropic tool result content: %#v", request.UserContent)
 	}
-	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" {
+	if len(request.InputParts) != 1 || request.InputParts[0].Type != "tool_result" || request.InputParts[0].ToolResult == nil || len(request.InputParts[0].ToolResult.Content) != 2 {
 		t.Fatalf("unexpected anthropic tool result parts: %#v", request.InputParts)
 	}
 }

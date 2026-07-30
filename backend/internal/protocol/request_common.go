@@ -119,15 +119,11 @@ func extractInputPart(record map[string]any) InputPart {
 			URL:       firstNonEmptyText(record["image_url"], nestedStringValue(record, "image_url", "url"), nestedStringValue(record, "source", "data"), nestedStringValue(record, "source", "url")),
 		}
 	case "function_call_output", "tool_result":
-		text = firstNonEmptyText(record["output"], text, flattenToolResultContent(record["content"]))
-		if text == "" {
-			return InputPart{}
+		content := record["content"]
+		if output, ok := record["output"]; ok {
+			content = output
 		}
-		return InputPart{
-			Type:       "tool_result",
-			Text:       text,
-			ToolCallID: firstNonEmptyText(record["tool_call_id"], record["call_id"], record["tool_use_id"]),
-		}
+		return extractToolResult(content, firstNonEmptyText(record["tool_call_id"], record["call_id"], record["tool_use_id"]))
 	default:
 		if text != "" {
 			return InputPart{Type: "text", Text: text}
@@ -139,8 +135,14 @@ func extractInputPart(record map[string]any) InputPart {
 func joinInputPartText(parts []InputPart) string {
 	texts := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if (part.Type == "text" || part.Type == "tool_result") && strings.TrimSpace(part.Text) != "" {
+		if part.Type == "text" && strings.TrimSpace(part.Text) != "" {
 			texts = append(texts, strings.TrimSpace(part.Text))
+		} else if part.Type == "tool_result" && part.ToolResult != nil {
+			for _, content := range part.ToolResult.Content {
+				if content.Type == "text" && strings.TrimSpace(content.Text) != "" {
+					texts = append(texts, strings.TrimSpace(content.Text))
+				}
+			}
 		}
 	}
 	return strings.Join(texts, "\n")
@@ -200,12 +202,41 @@ func extractLastUserContent(proto Protocol, body map[string]any) string {
 	return ""
 }
 
-func extractToolResultParts(content any) []InputPart {
-	text := flattenToolResultContent(content)
-	if text == "" {
+func extractToolResult(content any, callID string) InputPart {
+	result := &ToolResult{CallID: strings.TrimSpace(callID), Content: extractToolResultContent(content)}
+	if len(result.Content) == 0 {
+		return InputPart{}
+	}
+	return InputPart{Type: "tool_result", ToolResult: result}
+}
+
+func extractToolResultContent(content any) []ContentPart {
+	if text, ok := content.(string); ok {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil
+		}
+		return []ContentPart{{Type: "text", Text: text}}
+	}
+	items, ok := content.([]any)
+	if !ok {
 		return nil
 	}
-	return []InputPart{{Type: "tool_result", Text: text}}
+	parts := make([]ContentPart, 0, len(items))
+	for _, item := range items {
+		record, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		part := extractInputPart(record)
+		switch part.Type {
+		case "text":
+			parts = append(parts, ContentPart{Type: "text", Text: part.Text})
+		case "image":
+			parts = append(parts, ContentPart{Type: "image", MediaType: part.MediaType, URL: part.URL})
+		}
+	}
+	return parts
 }
 
 func flattenToolResultContent(content any) string {

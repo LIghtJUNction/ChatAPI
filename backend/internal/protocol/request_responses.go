@@ -38,6 +38,13 @@ func extractResponsesTurnInputParts(input []any) []InputPart {
 		if !ok {
 			continue
 		}
+		if stringValue(record["type"], "") == "function_call_output" {
+			part := extractToolResult(record["output"], stringValue(record["call_id"], ""))
+			if part.Type != "" {
+				parts = append(parts, part)
+			}
+			continue
+		}
 		part := extractInputPart(record)
 		if part.Type != "" {
 			parts = append(parts, part)
@@ -52,13 +59,10 @@ func extractResponsesTurnInputParts(input []any) []InputPart {
 		case "user":
 			parts = append(parts, extractPartsFromMessageContent(record["content"])...)
 		case "tool":
-			toolParts := extractToolResultParts(record["content"])
-			for idx := range toolParts {
-				if toolParts[idx].Type == "tool_result" {
-					toolParts[idx].ToolCallID = stringValue(record["tool_call_id"], "")
-				}
+			part := extractToolResult(record["content"], stringValue(record["tool_call_id"], ""))
+			if part.Type != "" {
+				parts = append(parts, part)
 			}
-			parts = append(parts, toolParts...)
 		}
 	}
 	return parts

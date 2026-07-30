@@ -2441,7 +2441,6 @@ body.image-preview-open {
   display: grid;
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
 }
 
 .tool-call-fields {
@@ -2538,25 +2537,8 @@ body.image-preview-open {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  max-height: min(40svh, 420px);
-  overflow: auto;
   padding-right: 4px;
   padding-bottom: 12px;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-.tool-form-grid::-webkit-scrollbar {
-  width: 6px;
-}
-
-.tool-form-grid::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.tool-form-grid::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.22);
-  border-radius: 999px;
 }
 
 .tool-form-item {
@@ -3144,20 +3126,12 @@ body[data-route='/'] .social-link-button:focus-visible::before {
     max-height: calc(var(--visual-viewport-height, 100dvh) - env(safe-area-inset-top) - 8px);
   }
 
-  .tool-form-grid {
-    max-height: min(32svh, 320px);
-  }
-
   .composer-shell {
     padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
   }
 
   .composer-stack {
     padding-bottom: 12px;
-  }
-
-  .tool-form-grid {
-    padding-bottom: 10px;
   }
 
   .composer-textarea {

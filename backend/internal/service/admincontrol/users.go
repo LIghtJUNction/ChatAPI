@@ -13,8 +13,8 @@ func (s *Service) ListUsers(ctx context.Context) ([]common.User, error) {
 	return s.accounts.ListUsers(ctx)
 }
 
-func (s *Service) ListUsersPage(ctx context.Context, page int, pageSize int) (account.UserPage, error) {
-	return s.accounts.ListUsersPage(ctx, page, pageSize)
+func (s *Service) ListUsersPage(ctx context.Context, page int, pageSize int, query string) (account.UserPage, error) {
+	return s.accounts.ListUsersPage(ctx, page, pageSize, query)
 }
 
 func (s *Service) GetUser(ctx context.Context, userID string) (common.User, error) {

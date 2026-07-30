@@ -287,19 +287,44 @@ func testUserRepositoryCreatesUpdatesAndListsUsers(t *testing.T, newStore NewSto
 	if len(items) != 2 {
 		t.Fatalf("expected two users, got %#v", items)
 	}
-	firstPage, total, err := st.ListUsersPage(ctx, 0, 1)
+	firstPage, total, err := st.ListUsersPage(ctx, 0, 1, "")
 	if err != nil {
 		t.Fatalf("list first user page: %v", err)
 	}
 	if len(firstPage) != 1 || total != 2 {
 		t.Fatalf("unexpected first user page: items=%#v total=%d", firstPage, total)
 	}
-	secondPage, total, err := st.ListUsersPage(ctx, 1, 1)
+	secondPage, total, err := st.ListUsersPage(ctx, 1, 1, "")
 	if err != nil {
 		t.Fatalf("list second user page: %v", err)
 	}
 	if len(secondPage) != 1 || total != 2 || secondPage[0].ID == firstPage[0].ID {
 		t.Fatalf("unexpected second user page: items=%#v total=%d", secondPage, total)
+	}
+
+	if _, err := st.CreateAppAPIKey(ctx, common.CreateAppAPIKeyInput{ID: "app_search", UserID: alice.ID, Name: "search", KeyHash: "app-search-hash", KeyPrefix: "sk-AppPrefix"}); err != nil {
+		t.Fatalf("create searchable app key: %v", err)
+	}
+	if _, err := st.CreateModelAPIKey(ctx, common.CreateModelAPIKeyInput{ID: "model_search", UserID: bob.ID, Name: "search", KeyHash: "model-search-hash", KeyPrefix: "sk-DistinctiveModelPrefix"}); err != nil {
+		t.Fatalf("create searchable model key: %v", err)
+	}
+	if _, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{ConversationID: "conv_search", RequestID: "req_search", ResponseID: "resp_search", OwnerID: bob.ID, UserContent: "Distinctive chat phrase", UserMessageContent: "Distinctive chat phrase"}); err != nil {
+		t.Fatalf("create searchable conversation: %v", err)
+	}
+	for query, expectedID := range map[string]string{
+		"ALICE2":           alice.ID,
+		"appprefix":        alice.ID,
+		"modelprefix":      bob.ID,
+		"distinctive":      bob.ID,
+		"distinctive chat": bob.ID,
+	} {
+		matched, matchedTotal, err := st.ListUsersPage(ctx, 0, 10, query)
+		if err != nil {
+			t.Fatalf("search users for %q: %v", query, err)
+		}
+		if matchedTotal != 1 || len(matched) != 1 || matched[0].ID != expectedID {
+			t.Fatalf("unexpected search result for %q: items=%#v total=%d", query, matched, matchedTotal)
+		}
 	}
 
 	if _, err := st.GetUser(ctx, "missing"); !errors.Is(err, common.ErrNotFound) {

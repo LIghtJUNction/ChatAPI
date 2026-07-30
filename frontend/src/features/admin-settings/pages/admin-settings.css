@@ -183,10 +183,18 @@ body[data-route^="/admin/settings"] .user-management-form .ant-input-affix-wrapp
 }
 body[data-route^="/admin/settings"] .user-management-list-heading {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   padding: 12px 4px;
   border-top: 1px solid #e5e7eb;
+}
+body[data-route^="/admin/settings"] .user-management-list-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+body[data-route^="/admin/settings"] .user-management-search {
+  width: min(360px, 48vw);
 }
 body[data-route^="/admin/settings"] .user-management-table {
   overflow: hidden;
@@ -299,6 +307,14 @@ body[data-route^="/admin/settings"] .user-management-table .ant-pagination {
   }
   body[data-route^="/admin/settings"] .user-management-header .ant-btn {
     align-self: flex-start;
+  }
+  body[data-route^="/admin/settings"] .user-management-list-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+  body[data-route^="/admin/settings"] .user-management-search {
+    width: 100%;
   }
   body[data-route^="/admin/settings"] .user-management-form {
     align-items: stretch;

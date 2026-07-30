@@ -17,6 +17,8 @@ export function useUserManagementState(open: boolean) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [totalUsers, setTotalUsers] = useState(0)
+  const [searchText, setSearchText] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [reloadVersion, setReloadVersion] = useState(0)
   const [monitoredUserIDs, setMonitoredUserIDs] = useState<string[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -34,6 +36,11 @@ export function useUserManagementState(open: boolean) {
   const [detailUser, setDetailUser] = useState<User | null>(null)
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => setSearchQuery(searchText.trim()), 300)
+    return () => window.clearTimeout(timeout)
+  }, [searchText])
+
+  useEffect(() => {
     if (!open) return
     let active = true
 
@@ -47,7 +54,11 @@ export function useUserManagementState(open: boolean) {
           page: number
           page_size: number
           total: number
-        }>(`/api/admin/users?page=${page}&page_size=${pageSize}`)
+        }>(`/api/admin/users?${new URLSearchParams({
+          page: String(page),
+          page_size: String(pageSize),
+          ...(searchQuery ? { q: searchQuery } : {}),
+        }).toString()}`)
         if (!active) return
         const items = Array.isArray(data.items) ? data.items : []
         setTotalUsers(data.total)
@@ -68,7 +79,7 @@ export function useUserManagementState(open: boolean) {
     return () => {
       active = false
     }
-  }, [open, page, pageSize, reloadVersion])
+  }, [open, page, pageSize, reloadVersion, searchQuery])
 
   const monitoring = useAdminMonitoring(open, monitoredUserIDs)
   const usersWithConnections = useMemo(
@@ -192,6 +203,11 @@ export function useUserManagementState(open: boolean) {
     users: usersWithConnections,
     setPage,
     setPageSize,
+    searchText,
+    setSearchText: (value: string) => {
+      setSearchText(value)
+      setPage(1)
+    },
     totalUsers,
     closeDetailModal,
   }

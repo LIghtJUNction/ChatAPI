@@ -123,23 +123,37 @@ func (s *Store) ListUsers(ctx context.Context) ([]common.User, error) {
 	return items, rows.Err()
 }
 
-func (s *Store) ListUsersPage(ctx context.Context, offset int, limit int) ([]common.User, int, error) {
+func (s *Store) ListUsersPage(ctx context.Context, offset int, limit int, query string) ([]common.User, int, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	query = strings.TrimSpace(query)
+	const filter = `
+		($1 = '' OR position(lower($1) in lower(u.username)) > 0
+			OR EXISTS (SELECT 1 FROM user_app_api_keys ak WHERE ak.user_id = u.id AND ak.revoked_at IS NULL AND position(lower($1) in lower(ak.key_prefix)) > 0)
+			OR EXISTS (SELECT 1 FROM user_api_keys mk WHERE mk.user_id = u.id AND mk.revoked_at IS NULL AND position(lower($1) in lower(mk.key_prefix)) > 0)
+			OR EXISTS (
+				SELECT 1 FROM conversations c
+				WHERE COALESCE(c.metadata_json->>'owner_id', '') = u.id
+					AND (position(lower($1) in lower(c.title)) > 0 OR EXISTS (
+						SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND position(lower($1) in lower(m.content)) > 0
+					))
+			)
+		)`
 	var total int
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&total); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM users u WHERE `+filter, query).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT u.id, u.username, u.email, u.password_hash, u.role, u.is_active, u.local_admin, u.created_at, u.updated_at, u.last_login_at,
 		(SELECT COUNT(*) FROM user_app_api_keys WHERE user_id = u.id), (SELECT COUNT(*) FROM user_api_keys WHERE user_id = u.id)
 		FROM users u
+		WHERE `+filter+`
 		ORDER BY created_at DESC, id DESC
-		LIMIT $1 OFFSET $2
-	`, limit, offset)
+		LIMIT $2 OFFSET $3
+	`, query, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

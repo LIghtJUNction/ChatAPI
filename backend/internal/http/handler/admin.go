@@ -80,7 +80,7 @@ func monitoringUserIDs(raw string, limit int) []string {
 func (h AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	page, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("page")))
 	pageSize, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("page_size")))
-	result, err := h.Control.ListUsersPage(r.Context(), page, pageSize)
+	result, err := h.Control.ListUsersPage(r.Context(), page, pageSize, r.URL.Query().Get("q"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

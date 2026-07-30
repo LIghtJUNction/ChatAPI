@@ -84,7 +84,7 @@ func (s *Service) ListUsers(ctx context.Context) ([]common.User, error) {
 	return s.store.ListUsers(ctx)
 }
 
-func (s *Service) ListUsersPage(ctx context.Context, page int, pageSize int) (UserPage, error) {
+func (s *Service) ListUsersPage(ctx context.Context, page int, pageSize int, query string) (UserPage, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -94,7 +94,7 @@ func (s *Service) ListUsersPage(ctx context.Context, page int, pageSize int) (Us
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	items, total, err := s.store.ListUsersPage(ctx, (page-1)*pageSize, pageSize)
+	items, total, err := s.store.ListUsersPage(ctx, (page-1)*pageSize, pageSize, strings.TrimSpace(query))
 	if err != nil {
 		return UserPage{}, err
 	}

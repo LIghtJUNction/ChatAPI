@@ -14,7 +14,7 @@ type UserStore interface {
 	GetUserByEmail(context.Context, string) (common.User, error)
 	GetUserByUsername(context.Context, string) (common.User, error)
 	ListUsers(context.Context) ([]common.User, error)
-	ListUsersPage(context.Context, int, int) ([]common.User, int, error)
+	ListUsersPage(context.Context, int, int, string) ([]common.User, int, error)
 	PreviewUserDeletion(context.Context, string) (common.UserDeletionPreview, error)
 	DeleteUserAccount(context.Context, string) error
 	TransferUserOwnership(context.Context, string, string) (common.UserOwnershipTransferResult, error)

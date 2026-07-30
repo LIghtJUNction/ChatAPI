@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Form, Input, Select, Table, Typography } from 'antd'
-import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
+import { CloseOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 
 import { useUserManagementState } from './userManagement/useUserManagementState'
 import { buildUserColumns } from './userManagement/userColumns'
@@ -37,6 +37,8 @@ export function UserManagementPanel({ open, currentRole }: UserManagementPanelPr
     users,
     setPage,
     setPageSize,
+    searchText,
+    setSearchText,
     totalUsers,
     closeDetailModal,
   } = useUserManagementState(open)
@@ -99,8 +101,18 @@ export function UserManagementPanel({ open, currentRole }: UserManagementPanelPr
       </Form> : null}
 
       <div className="user-management-list-heading">
-        <Typography.Text strong>账户列表</Typography.Text>
-        <Typography.Text type="secondary">连接状态每 2 秒校准</Typography.Text>
+        <div>
+          <Typography.Text strong>账户列表</Typography.Text>
+          <Typography.Text type="secondary">连接状态每 2 秒校准</Typography.Text>
+        </div>
+        <Input
+          className="user-management-search"
+          prefix={<SearchOutlined />}
+          placeholder="搜索用户名、Key 前缀或聊天记录"
+          value={searchText}
+          onChange={(event) => setSearchText(event.target.value)}
+          allowClear
+        />
       </div>
       <Table
         className="user-management-table"

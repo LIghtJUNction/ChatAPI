@@ -12,7 +12,6 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/config"
-	httpapi "github.com/zyf2007/ChatAPI/internal/http"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
@@ -31,6 +30,7 @@ import (
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
+	httpapp "github.com/zyf2007/ChatAPI/internal/testutil/httpapp"
 )
 
 func TestRouterUserFlow(t *testing.T) {
@@ -131,7 +131,7 @@ func TestRouterUserFlow(t *testing.T) {
 		KeyStore:     st,
 	})
 
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
 		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
 		ChatRepo:       st,

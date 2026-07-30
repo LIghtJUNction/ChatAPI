@@ -1,163 +1,56 @@
 package router
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
-	"go.uber.org/zap"
 
 	"github.com/zyf2007/ChatAPI/internal/config"
 	httphandler "github.com/zyf2007/ChatAPI/internal/http/handler"
 	httpmiddleware "github.com/zyf2007/ChatAPI/internal/http/middleware"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/httpmetrics"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
-	"github.com/zyf2007/ChatAPI/internal/ops/readiness"
-	"github.com/zyf2007/ChatAPI/internal/ops/setup"
-	"github.com/zyf2007/ChatAPI/internal/platform/media"
-	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
-	"github.com/zyf2007/ChatAPI/internal/repository/audit"
-	"github.com/zyf2007/ChatAPI/internal/repository/auth"
-	automationrepo "github.com/zyf2007/ChatAPI/internal/repository/automation"
-	"github.com/zyf2007/ChatAPI/internal/repository/chat"
-	configrepo "github.com/zyf2007/ChatAPI/internal/repository/config"
-	"github.com/zyf2007/ChatAPI/internal/repository/platform"
-	"github.com/zyf2007/ChatAPI/internal/repository/storage"
-	"github.com/zyf2007/ChatAPI/internal/service/account"
-	"github.com/zyf2007/ChatAPI/internal/service/admincontrol"
-	adminmonitoring "github.com/zyf2007/ChatAPI/internal/service/admincontrol/monitoring"
-	adminsettings "github.com/zyf2007/ChatAPI/internal/service/admincontrol/settings"
-	auditsvc "github.com/zyf2007/ChatAPI/internal/service/audit"
 	authaccess "github.com/zyf2007/ChatAPI/internal/service/auth/access"
-	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/geetest"
-	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/identity"
-	labauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/lab"
-	localauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/local"
-	oidcsvc "github.com/zyf2007/ChatAPI/internal/service/auth/authn/oidc"
-	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/ratelimit"
 	sessionrestore "github.com/zyf2007/ChatAPI/internal/service/auth/authn/sessionrestore"
-	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
-	totpsvc "github.com/zyf2007/ChatAPI/internal/service/auth/authn/totp"
-	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/verification"
 	appkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/appkey"
 	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
-	automationsvc "github.com/zyf2007/ChatAPI/internal/service/automation"
-	automationsettings "github.com/zyf2007/ChatAPI/internal/service/automation/settings"
-	catalogsvc "github.com/zyf2007/ChatAPI/internal/service/chat/catalog"
-	controlsvc "github.com/zyf2007/ChatAPI/internal/service/chat/control"
-	conversationresolve "github.com/zyf2007/ChatAPI/internal/service/chat/conversationresolve"
-	egresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/egress"
-	chatevents "github.com/zyf2007/ChatAPI/internal/service/chat/events"
-	ingresssvc "github.com/zyf2007/ChatAPI/internal/service/chat/ingress"
-	outputassetsvc "github.com/zyf2007/ChatAPI/internal/service/chat/outputasset"
-	preprocesssvc "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess"
-	preprocesssettings "github.com/zyf2007/ChatAPI/internal/service/chat/preprocess/settings"
-	chatsettings "github.com/zyf2007/ChatAPI/internal/service/chat/settings"
-	streamingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/streaming"
-	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
-	"github.com/zyf2007/ChatAPI/internal/service/chat/turn"
-	"github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
-	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
-	workspacesettings "github.com/zyf2007/ChatAPI/internal/service/chat/workspace/settings"
-	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
-	"github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversationretention"
 )
 
 type Deps struct {
-	Config             config.Config
-	ChatRepo           chat.Store
-	AuthRepo           auth.Store
-	ConfigRepo         configrepo.Store
-	AutomationRepo     automationrepo.Store
-	StorageRepo        storage.Store
-	AuditRepo          audit.Store
-	PlatformRepo       platform.MaintenanceStore
-	Turn               *turn.Service
-	Query              *turnquery.Service
-	ModelAPIKeys       *modelkey.Service
-	Catalog            *catalogsvc.Service
-	Control            *controlsvc.Service
-	Ingress            *ingresssvc.Service
-	Streaming          *streamingsvc.Service
-	Egress             *egresssvc.Service
-	Timeline           *timelinesvc.Service
-	ChatEvents         *chatevents.Dispatcher
-	AppAPIKeys         *appkey.Service
-	Lab                *labauth.Service
-	LocalAuth          *localauth.Service
-	Verification       *verification.Service
-	Policy             *policy.Service
-	Access             *authaccess.Service
-	AccessSettings     *authaccess.SettingsService
-	AuthSettings       *authsettings.Service
-	GeeTest            *geetest.Service
-	TOTP               *totpsvc.Service
-	OIDC               *oidcsvc.Service
-	LoginLimiter       *ratelimit.Service
-	AdminControl       *admincontrol.Service
-	Audit              *auditsvc.Service
-	Accounts           *account.Service
-	Identity           *identity.Service
-	UserControl        *usercontrol.Service
-	UserSessions       *session.Service
-	LoggerFactory      *logging.Factory
-	Workspace          *workspacesvc.Service
-	WorkspaceHub       *workspacesvc.Hub
-	Automation         *automationsvc.Service
-	AutomationEvents   *automationsvc.Dispatcher
-	AdminSettings      *adminsettings.Service
-	AdminMonitoring    *adminmonitoring.Service
-	ChatSettings       *chatsettings.Service
-	MediaSettings      *preprocesssettings.Service
-	MediaProcessor     media.Processor
-	RealtimeSettings   *workspacesettings.Service
-	AutomationSettings *automationsettings.Service
+	Config        config.Config
+	LoggerFactory *logging.Factory
+	Access        *authaccess.Service
+	Policy        *policy.Service
+	UserSessions  *session.Service
+	ModelAPIKeys  *modelkey.Service
+	AppAPIKeys    *appkey.Service
+
+	Chat      httphandler.ChatAPIHandler
+	App       httphandler.AppAPIHandler
+	Auth      httphandler.AuthHandler
+	User      httphandler.UserHandler
+	Admin     httphandler.AdminHandler
+	Lab       httphandler.LabHandler
+	Workspace httphandler.WorkspaceHandler
+	Upload    httphandler.UploadHandler
+	Health    httphandler.HealthHandler
+	Readiness httphandler.ReadinessHandler
+	Setup     httphandler.SetupHandler
+	Metrics   httphandler.MetricsHandler
 }
 
 func New(deps Deps) http.Handler {
 	router := chi.NewRouter()
-	if deps.MediaSettings == nil && deps.ConfigRepo != nil {
-		deps.MediaSettings = preprocesssettings.New(deps.ConfigRepo, deps.Config)
-	}
-
 	httpLogger := deps.logger(logging.LayerHTTP)
 	authLogger := deps.logger(logging.LayerAuth)
-	if deps.Lab == nil {
-		deps.Lab = labauth.NewService(deps.Config)
+	metricsRegistry := deps.Metrics.Registry
+	if metricsRegistry == nil {
+		metricsRegistry = httpmetrics.NewRegistry()
+		deps.Metrics.Registry = metricsRegistry
 	}
-	mediaStore := localstore.Store{RootDir: deps.Config.MediaDerivedDir}
-	outputImages := outputassetsvc.New(deps.Config, deps.StorageRepo, mediaStore, deps.MediaProcessor)
-	outputImages.Settings = deps.MediaSettings
-	var outputImageUploader httphandler.OutputImageUploader
-	if deps.Turn != nil {
-		deps.Turn.OutputAssets = outputImages
-		outputImageUploader = deps.Turn
-	}
-	if deps.AccessSettings == nil && deps.AuthRepo != nil {
-		deps.AccessSettings = authaccess.NewSettingsService(deps.AuthRepo, authaccess.Settings{
-			GlobalRateLimitRequests: deps.Config.AccessRateLimitRequests,
-			GlobalRateLimitWindow:   deps.Config.AccessRateLimitWindow,
-		}, deps.Config.SettingsEnvironment("access"))
-	}
-	accessPolicy := deps.Access
-	if accessPolicy == nil {
-		accessPolicy = authaccess.NewService(deps.Config, deps.Lab, deps.AccessSettings)
-	}
-	conversationLimit := func(ctx context.Context) int {
-		if deps.AccessSettings == nil {
-			return 0
-		}
-		settings, err := deps.AccessSettings.Get(ctx)
-		if err != nil {
-			logging.BindContext(httpLogger, ctx).Warn("failed to load user conversation limit", zap.Error(err))
-			return 0
-		}
-		return settings.UserConversationLimit
-	}
-	metricsRegistry := httpmetrics.NewRegistry()
 
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   deps.Config.CORSOrigins,
@@ -168,213 +61,35 @@ func New(deps Deps) http.Handler {
 	}))
 	router.Use(httpmiddleware.RecordHTTPMetrics(metricsRegistry))
 	router.Use(requestLoggingMiddleware(deps.LoggerFactory, httpLogger))
-	router.Use(httpmiddleware.RequireLabAccess(accessPolicy, authLogger))
-	router.Use(httpmiddleware.RequireAccessRateLimit(accessPolicy))
-	router.Use(httpmiddleware.LoadLabActor(accessPolicy, authLogger))
+	router.Use(httpmiddleware.RequireLabAccess(deps.Access, authLogger))
+	router.Use(httpmiddleware.RequireAccessRateLimit(deps.Access))
+	router.Use(httpmiddleware.LoadLabActor(deps.Access, authLogger))
 	router.Use(httpmiddleware.LoadUserSession(sessionrestore.NewService(deps.UserSessions), authLogger))
-	router.Use(httpmiddleware.RequireSessionCSRF(accessPolicy, deps.Policy, authLogger))
+	router.Use(httpmiddleware.RequireSessionCSRF(deps.Access, deps.Policy, authLogger))
 
-	if deps.Control == nil {
-		deps.Control = controlsvc.New(deps.Query, deps.Turn, deps.logger(logging.LayerTurnQuery))
-	}
-	if deps.Workspace == nil {
-		deps.Workspace = workspacesvc.New(deps.Query, firstTimeline(deps.Timeline, deps.ChatRepo), deps.Control)
-	}
-	if deps.WorkspaceHub == nil {
-		deps.WorkspaceHub = workspacesvc.NewHub(deps.Workspace)
-	}
-	if deps.AdminMonitoring == nil {
-		deps.AdminMonitoring = adminmonitoring.New(deps.WorkspaceHub)
-	}
-	if deps.ChatSettings == nil && deps.ConfigRepo != nil {
-		deps.ChatSettings = chatsettings.New(deps.ConfigRepo, deps.Config)
-	}
-	if deps.RealtimeSettings == nil && deps.ConfigRepo != nil {
-		deps.RealtimeSettings = workspacesettings.New(deps.ConfigRepo, deps.Config)
-	}
-	if deps.AutomationSettings == nil && deps.ConfigRepo != nil {
-		deps.AutomationSettings = automationsettings.New(deps.ConfigRepo)
-	}
-	deps.WorkspaceHub.SetSettings(deps.RealtimeSettings)
-	if deps.ChatEvents == nil {
-		deps.ChatEvents = chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(deps.WorkspaceHub))
-	}
-	if deps.Automation == nil {
-		if deps.AutomationRepo == nil {
-			deps.AutomationRepo, _ = deps.ConfigRepo.(automationrepo.Store)
-		}
-		if deps.AutomationRepo != nil && deps.Turn != nil && deps.Turn.Pending != nil {
-			if deps.AutomationEvents == nil {
-				deps.AutomationEvents = automationsvc.NewDispatcher(workspacesvc.NewAutomationRealtimePublisher(deps.WorkspaceHub))
-			}
-			deps.Automation = automationsvc.New(automationsvc.Deps{
-				Rules: deps.AutomationRepo, Control: deps.Control, Pending: deps.Turn.Pending,
-				Events: deps.AutomationEvents, Logger: deps.logger(logging.LayerTurn), Settings: deps.AutomationSettings,
-			})
-		}
-	}
-	deps.Workspace.SetAutomation(deps.Automation)
-	if deps.Control != nil {
-		deps.Control.Subscribe(deps.Automation)
-	}
-	deps.ChatEvents.Subscribe(deps.Automation)
-	if deps.UserControl == nil {
-		deps.UserControl = usercontrol.New(usercontrol.Deps{
-			Identity:          deps.Identity,
-			LocalAuth:         deps.LocalAuth,
-			Settings:          deps.AuthSettings,
-			TOTP:              deps.TOTP,
-			Policy:            deps.Policy,
-			Query:             deps.Query,
-			Turn:              deps.Control,
-			Configs:           deps.ConfigRepo,
-			Storage:           deps.StorageRepo,
-			Chat:              deps.ChatRepo,
-			AppKeysStore:      deps.AuthRepo,
-			AppKeys:           deps.AppAPIKeys,
-			ModelKeys:         deps.ModelAPIKeys,
-			Accounts:          deps.Accounts,
-			Logger:            deps.logger(logging.LayerUserControl),
-			Events:            deps.ChatEvents,
-			Automation:        deps.Automation,
-			RealtimeSettings:  deps.RealtimeSettings,
-			ConversationLimit: conversationLimit,
-		})
-	}
-	var retentionPruner conversationretention.Pruner
-	if deps.UserControl != nil && deps.UserControl.Conversations != nil {
-		retentionPruner = deps.UserControl.Conversations
-	}
-	conversationRetention := conversationretention.New(deps.Accounts, retentionPruner, conversationLimit, httpLogger)
-	if deps.Turn != nil {
-		deps.Turn.ConversationCreated = conversationRetention.Enforce
-		deps.Turn.ConversationTerminal = conversationRetention.Enforce
-	}
-	if deps.AdminSettings == nil && deps.AuthSettings != nil && deps.AccessSettings != nil {
-		accessDomain, err := adminsettings.Combine("access", "访问限流", deps.AccessSettings.AdminDomain(), deps.RealtimeSettings, deps.ChatSettings)
-		if err != nil {
-			panic(err)
-		}
-		deps.AdminSettings = adminsettings.New(deps.Config,
-			adminsettings.Domain{Settings: deps.AuthSettings.AdminDomain()},
-			adminsettings.Domain{Settings: accessDomain, AfterUpdate: conversationRetention.SettingsUpdated},
-			adminsettings.Domain{Settings: deps.MediaSettings},
-			adminsettings.Domain{Settings: deps.AutomationSettings},
-		)
-	}
-	if deps.AdminControl == nil {
-		deps.AdminControl = admincontrol.New(admincontrol.Deps{
-			Accounts:     deps.Accounts,
-			Query:        deps.Query,
-			Control:      deps.Control,
-			ChatStore:    deps.ChatRepo,
-			StorageStore: deps.StorageRepo,
-			KeyStore:     deps.AuthRepo,
-			Events:       deps.ChatEvents,
-			Settings:     deps.AdminSettings,
-		})
-	}
-	deps.AdminControl.SetSettings(deps.AdminSettings)
-	if deps.Turn != nil {
-		if deps.Turn.Resolver == nil {
-			deps.Turn.Resolver = conversationresolve.New(deps.ChatRepo, deps.Turn.Pending)
-		}
-		if deps.Turn.Egress == nil {
-			deps.Turn.Egress = firstEgress(deps.Egress)
-		}
-		if deps.Turn.Submitter != nil {
-			if deps.Turn.Submitter.Materializer == nil {
-				deps.Turn.Submitter.Materializer = &turn.RequestMaterializer{
-					Preprocessor: func() *preprocesssvc.Service {
-						p := preprocesssvc.New(deps.Config, deps.MediaProcessor)
-						p.Settings = deps.MediaSettings
-						return p
-					}(),
-					AssetPersister:     mediaStore,
-					DeletionFailures:   deps.StorageRepo,
-					PreparedImageClean: mediaStore,
-				}
-			}
-		}
-		if deps.Turn.Events == nil {
-			deps.Turn.Events = deps.ChatEvents
-		}
-	}
-
-	chatHandler := httphandler.ChatAPIHandler{
-		Turn:      deps.Turn,
-		Query:     deps.Query,
-		Timeline:  firstTimeline(deps.Timeline, deps.ChatRepo),
-		Ingress:   firstIngress(deps.Ingress, deps.Turn),
-		Streaming: firstStreaming(deps.Streaming),
-		Catalog:   firstCatalog(deps.Catalog, deps.ModelAPIKeys),
-		Control:   deps.Control,
-		Egress:    firstEgress(deps.Egress),
-		Logger:    deps.logger(logging.LayerHTTP),
-	}
-	appHandler := httphandler.AppAPIHandler{
-		Turn:     deps.Turn,
-		Query:    deps.Query,
-		Timeline: firstTimeline(deps.Timeline, deps.ChatRepo),
-		Logger:   deps.logger(logging.LayerTurnQuery),
-	}
-	authHandler := httphandler.AuthHandler{
-		Config:       deps.Config,
-		LocalAuth:    deps.LocalAuth,
-		Verification: deps.Verification,
-		Policy:       deps.Policy,
-		Settings:     deps.AuthSettings,
-		GeeTest:      deps.GeeTest,
-		TOTP:         deps.TOTP,
-		OIDC:         deps.OIDC,
-		Audit:        deps.Audit,
-		LoginLimiter: deps.LoginLimiter,
-		Sessions:     deps.UserSessions,
-		Logger:       deps.logger(logging.LayerAuth),
-	}
-	userHandler := httphandler.UserHandler{
-		Config:      deps.Config,
-		UserControl: deps.UserControl,
-		Timeline:    firstTimeline(deps.Timeline, deps.ChatRepo),
-		Logger:      deps.logger(logging.LayerAuth),
-	}
-	adminHandler := httphandler.AdminHandler{
-		Control:    deps.AdminControl,
-		Timeline:   firstTimeline(deps.Timeline, deps.ChatRepo),
-		Audit:      deps.Audit,
-		Logger:     deps.logger(logging.LayerAudit),
-		Monitoring: deps.AdminMonitoring,
-	}
-	labHandler := httphandler.LabHandler{
-		Config:  deps.Config,
-		Query:   deps.Query,
-		Turn:    deps.Turn,
-		Control: deps.Control,
-		Logger:  deps.logger(logging.LayerHTTP),
-	}
-	workspaceHandler := httphandler.WorkspaceHandler{
-		Hub:    deps.WorkspaceHub,
-		Logger: deps.logger(logging.LayerHTTP),
-	}
-	uploadHandler := httphandler.UploadHandler{
-		Storage: deps.StorageRepo, OutputImages: outputImageUploader,
-		OutputImageMaxBytes: deps.Config.UploadMaxBytes,
-	}
-	healthHandler := httphandler.HealthHandler{Config: deps.Config, Store: deps.PlatformRepo}
-	readinessHandler := httphandler.ReadinessHandler{Service: readiness.NewService(deps.Config, deps.PlatformRepo)}
-	setupHandler := httphandler.SetupHandler{Service: setup.NewService(deps.AuthRepo, deps.Config)}
-	metricsHandler := httphandler.MetricsHandler{Registry: metricsRegistry}
+	chatHandler := deps.Chat
+	appHandler := deps.App
+	authHandler := deps.Auth
+	userHandler := deps.User
+	adminHandler := deps.Admin
+	labHandler := deps.Lab
+	workspaceHandler := deps.Workspace
+	uploadHandler := deps.Upload
+	healthHandler := deps.Health
+	readinessHandler := deps.Readiness
+	setupHandler := deps.Setup
+	metricsHandler := deps.Metrics
 
 	modelAuth := httpmiddleware.RequireModelAPIKey(deps.ModelAPIKeys, authLogger)
-	modelPrincipalAccess := httpmiddleware.RequirePrincipalAccess(accessPolicy, authLogger)
+	modelPrincipalAccess := httpmiddleware.RequirePrincipalAccess(deps.Access, authLogger)
 	appAuth := func(scopes ...string) func(http.Handler) http.Handler {
 		return chainMiddleware(
 			httpmiddleware.RequireAppAPIKey(deps.AppAPIKeys, deps.Policy, deps.Config.TrustedProxies, authLogger, scopes...),
-			httpmiddleware.RequirePrincipalAccess(accessPolicy, authLogger),
+			httpmiddleware.RequirePrincipalAccess(deps.Access, authLogger),
 		)
 	}
 	userAuth := httpmiddleware.RequireUserSession(deps.Policy, authLogger)
-	userPrincipalAccess := httpmiddleware.RequirePrincipalAccess(accessPolicy, authLogger)
+	userPrincipalAccess := httpmiddleware.RequirePrincipalAccess(deps.Access, authLogger)
 	userOrAppAuth := func(scopes ...string) func(http.Handler) http.Handler {
 		return httpmiddleware.RequireUserSessionOrAppAPI(deps.Policy, appAuth(scopes...), userAuth)
 	}

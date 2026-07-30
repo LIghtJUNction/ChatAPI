@@ -13,7 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/config"
-	httpapi "github.com/zyf2007/ChatAPI/internal/http"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
@@ -33,6 +32,7 @@ import (
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
+	httpapp "github.com/zyf2007/ChatAPI/internal/testutil/httpapp"
 )
 
 func TestRouterWorkspaceWebSocketUpgradeWithSession(t *testing.T) {
@@ -92,25 +92,25 @@ func TestRouterWorkspaceWebSocketUpgradeWithSession(t *testing.T) {
 	workspaceHub := workspacesvc.NewHub(workspaceService)
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		LocalAuth:     localService,
-		Verification:  verificationService,
-		Policy:        policies,
-		Accounts:      accountService,
-		Identity:      identityService,
-		UserSessions:  sessionService,
-		Query:         queryService,
-		Workspace:     workspaceService,
-		WorkspaceHub:  workspaceHub,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		LocalAuth:      localService,
+		Verification:   verificationService,
+		Policy:         policies,
+		Accounts:       accountService,
+		Identity:       identityService,
+		UserSessions:   sessionService,
+		Query:          queryService,
+		Workspace:      workspaceService,
+		WorkspaceHub:   workspaceHub,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 
@@ -221,28 +221,28 @@ func TestRouterWorkspaceWebSocketReceivesTimelineEventOnAbort(t *testing.T) {
 	appKeyService := appkey.NewService(st, "test-master-key")
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		LocalAuth:     localService,
-		Verification:  verificationService,
-		Policy:        policies,
-		Accounts:      accountService,
-		Identity:      identityService,
-		UserSessions:  sessionService,
-		Query:         queryService,
-		Turn:          turnService,
-		ModelAPIKeys:  modelKeyService,
-		AppAPIKeys:    appKeyService,
-		Workspace:     workspaceService,
-		WorkspaceHub:  workspaceHub,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		LocalAuth:      localService,
+		Verification:   verificationService,
+		Policy:         policies,
+		Accounts:       accountService,
+		Identity:       identityService,
+		UserSessions:   sessionService,
+		Query:          queryService,
+		Turn:           turnService,
+		ModelAPIKeys:   modelKeyService,
+		AppAPIKeys:     appKeyService,
+		Workspace:      workspaceService,
+		WorkspaceHub:   workspaceHub,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 
@@ -409,28 +409,28 @@ func TestRouterConversationTimelineIncludesSystemEvent(t *testing.T) {
 	appKeyService := appkey.NewService(st, "test-master-key")
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		LocalAuth:     localService,
-		Verification:  verificationService,
-		Policy:        policies,
-		Accounts:      accountService,
-		Identity:      identityService,
-		UserSessions:  sessionService,
-		Query:         queryService,
-		Turn:          turnService,
-		ModelAPIKeys:  modelKeyService,
-		AppAPIKeys:    appKeyService,
-		Workspace:     workspaceService,
-		WorkspaceHub:  workspaceHub,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		LocalAuth:      localService,
+		Verification:   verificationService,
+		Policy:         policies,
+		Accounts:       accountService,
+		Identity:       identityService,
+		UserSessions:   sessionService,
+		Query:          queryService,
+		Turn:           turnService,
+		ModelAPIKeys:   modelKeyService,
+		AppAPIKeys:     appKeyService,
+		Workspace:      workspaceService,
+		WorkspaceHub:   workspaceHub,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 
@@ -555,28 +555,28 @@ func TestRouterTimelineAbortUsesCurrentTurnRequestIDOnReusedConversation(t *test
 	appKeyService := appkey.NewService(st, "test-master-key")
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		LocalAuth:     localService,
-		Verification:  verificationService,
-		Policy:        policies,
-		Accounts:      accountService,
-		Identity:      identityService,
-		UserSessions:  sessionService,
-		Query:         queryService,
-		Turn:          turnService,
-		ModelAPIKeys:  modelKeyService,
-		AppAPIKeys:    appKeyService,
-		Workspace:     workspaceService,
-		WorkspaceHub:  workspaceHub,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		LocalAuth:      localService,
+		Verification:   verificationService,
+		Policy:         policies,
+		Accounts:       accountService,
+		Identity:       identityService,
+		UserSessions:   sessionService,
+		Query:          queryService,
+		Turn:           turnService,
+		ModelAPIKeys:   modelKeyService,
+		AppAPIKeys:     appKeyService,
+		Workspace:      workspaceService,
+		WorkspaceHub:   workspaceHub,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 

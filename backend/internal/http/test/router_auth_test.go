@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/zyf2007/ChatAPI/internal/config"
-	httpapi "github.com/zyf2007/ChatAPI/internal/http"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/platform/email"
 	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
@@ -23,6 +22,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authn/verification"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
+	httpapp "github.com/zyf2007/ChatAPI/internal/testutil/httpapp"
 )
 
 type memorySender struct {
@@ -79,22 +79,22 @@ func TestRouterLocalAuthFlow(t *testing.T) {
 	localService.Logger = logFactory.Layer(logging.LayerAuth)
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
 	cfg.SMTPEnabled = true
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		LocalAuth:     localService,
-		Verification:  verificationService,
-		Policy:        policies,
-		Accounts:      accountService,
-		Identity:      identityService,
-		UserSessions:  sessionService,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		LocalAuth:      localService,
+		Verification:   verificationService,
+		Policy:         policies,
+		Accounts:       accountService,
+		Identity:       identityService,
+		UserSessions:   sessionService,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 

@@ -11,7 +11,6 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/config"
-	httpapi "github.com/zyf2007/ChatAPI/internal/http"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
@@ -24,6 +23,7 @@ import (
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
+	httpapp "github.com/zyf2007/ChatAPI/internal/testutil/httpapp"
 )
 
 func TestRouterLabModeAccessAndEndpoints(t *testing.T) {
@@ -65,21 +65,21 @@ func TestRouterLabModeAccessAndEndpoints(t *testing.T) {
 	cfg.LabPassword = "secret"
 	labService := labauth.NewService(cfg)
 
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		Turn:          turnService,
-		Query:         queryService,
-		ModelAPIKeys:  modelKeyService,
-		AppAPIKeys:    appKeyService,
-		Lab:           labService,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		Turn:           turnService,
+		Query:          queryService,
+		ModelAPIKeys:   modelKeyService,
+		AppAPIKeys:     appKeyService,
+		Lab:            labService,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 
@@ -169,16 +169,16 @@ func TestRouterGlobalAccessRateLimit(t *testing.T) {
 	cfg.AccessRateLimitRequests = 2
 	cfg.AccessRateLimitWindow = time.Minute
 
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 
@@ -235,7 +235,7 @@ func TestRouterPrincipalAccessRateLimitForAppKey(t *testing.T) {
 	}
 
 	cfg := config.Default(config.ModeServe, "/tmp/chatapi-test")
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
 		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
 		ChatRepo:       st,

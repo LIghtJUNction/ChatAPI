@@ -21,7 +21,6 @@ import (
 	"github.com/pquerna/otp/totp"
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/config"
-	httpapi "github.com/zyf2007/ChatAPI/internal/http"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/platform/email"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
@@ -46,6 +45,7 @@ import (
 	pendingsvc "github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
+	httpapp "github.com/zyf2007/ChatAPI/internal/testutil/httpapp"
 )
 
 func TestAuthSettingsGeeTestAndTOTPFlow(t *testing.T) {
@@ -356,13 +356,13 @@ func newAdvancedAuthServerWithConfig(t *testing.T, st *sqlitestore.Store, cfg co
 	if mutate != nil {
 		mutate(baseURL, &cfg)
 	}
-	server := httptest.NewUnstartedServer(httpapi.NewRouter(newAdvancedRouterDeps(st, cfg, logFactory, sender)))
+	server := httptest.NewUnstartedServer(httpapp.MustNewRouter(newAdvancedRouterDeps(st, cfg, logFactory, sender)))
 	server.Listener = listener
 	server.Start()
 	return server, sender
 }
 
-func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory *logging.Factory, sender email.Sender) httpapi.RouterDeps {
+func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory *logging.Factory, sender email.Sender) httpapp.Input {
 	policies := policy.NewService()
 	sessionService, err := session.NewService(session.Config{Secret: "01234567890123456789012345678901"})
 	if err != nil {
@@ -412,7 +412,7 @@ func newAdvancedRouterDeps(st *sqlitestore.Store, cfg config.Config, logFactory 
 		KeyStore:     st,
 	})
 
-	return httpapi.RouterDeps{
+	return httpapp.Input{
 		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
 		ChatRepo:       st,

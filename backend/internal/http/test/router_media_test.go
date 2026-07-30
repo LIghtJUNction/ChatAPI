@@ -17,7 +17,6 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/actor"
 	"github.com/zyf2007/ChatAPI/internal/config"
-	httpapi "github.com/zyf2007/ChatAPI/internal/http"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/platform/media/localstore"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
@@ -34,6 +33,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
+	httpapp "github.com/zyf2007/ChatAPI/internal/testutil/httpapp"
 )
 
 func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
@@ -103,25 +103,25 @@ func TestBase64ImageSubmitDeleteConversationAndCleanupOrphan(t *testing.T) {
 		t.Fatalf("create model key: %v", err)
 	}
 
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		LocalAuth:     localService,
-		Verification:  verificationService,
-		Policy:        policies,
-		Accounts:      accountService,
-		Identity:      identityService,
-		UserSessions:  sessionService,
-		Turn:          turnService,
-		Query:         queryService,
-		ModelAPIKeys:  modelKeyService,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		LocalAuth:      localService,
+		Verification:   verificationService,
+		Policy:         policies,
+		Accounts:       accountService,
+		Identity:       identityService,
+		UserSessions:   sessionService,
+		Turn:           turnService,
+		Query:          queryService,
+		ModelAPIKeys:   modelKeyService,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 
@@ -251,19 +251,19 @@ func TestResponsesMessageContentDataURLTranscodesToAVIF(t *testing.T) {
 		t.Fatalf("create model key: %v", err)
 	}
 
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		Turn:          turnService,
-		Query:         queryService,
-		ModelAPIKeys:  modelKeyService,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		Turn:           turnService,
+		Query:          queryService,
+		ModelAPIKeys:   modelKeyService,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 
@@ -362,19 +362,19 @@ func TestJPEGDataURLWithWhitespaceTranscodesToAVIF(t *testing.T) {
 		t.Fatalf("create model key: %v", err)
 	}
 
-	server := httptest.NewServer(httpapi.NewRouter(httpapi.RouterDeps{
-		Config:        cfg,
+	server := httptest.NewServer(httpapp.MustNewRouter(httpapp.Input{
+		Config:         cfg,
 		MediaProcessor: testMediaProcessor(),
-		ChatRepo:      st,
-		AuthRepo:      st,
-		ConfigRepo:    st,
-		StorageRepo:   st,
-		AuditRepo:     st,
-		PlatformRepo:  st,
-		Turn:          turnService,
-		Query:         queryService,
-		ModelAPIKeys:  modelKeyService,
-		LoggerFactory: logFactory,
+		ChatRepo:       st,
+		AuthRepo:       st,
+		ConfigRepo:     st,
+		StorageRepo:    st,
+		AuditRepo:      st,
+		PlatformRepo:   st,
+		Turn:           turnService,
+		Query:          queryService,
+		ModelAPIKeys:   modelKeyService,
+		LoggerFactory:  logFactory,
 	}))
 	defer server.Close()
 

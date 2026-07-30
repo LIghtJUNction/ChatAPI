@@ -35,22 +35,28 @@ type PendingLookup interface {
 	GetByConversationID(string) (*turnsvc.PendingTurn, bool)
 }
 
+type ModelKeyStore interface {
+	ListModelAPIKeysByUser(context.Context, string) ([]common.ModelAPIKey, error)
+}
+
 type Deps struct {
-	Rules    automationrepo.Store
-	Control  ControlExecutor
-	Pending  PendingLookup
-	Events   StatePublisher
-	Logger   *zap.Logger
-	Settings *automationsettings.Service
+	Rules     automationrepo.Store
+	ModelKeys ModelKeyStore
+	Control   ControlExecutor
+	Pending   PendingLookup
+	Events    StatePublisher
+	Logger    *zap.Logger
+	Settings  *automationsettings.Service
 }
 
 type Service struct {
-	rules    automationrepo.Store
-	control  ControlExecutor
-	pending  PendingLookup
-	events   StatePublisher
-	logger   *zap.Logger
-	settings *automationsettings.Service
+	rules     automationrepo.Store
+	modelKeys ModelKeyStore
+	control   ControlExecutor
+	pending   PendingLookup
+	events    StatePublisher
+	logger    *zap.Logger
+	settings  *automationsettings.Service
 
 	mu              sync.Mutex
 	recordings      map[string]*recording
@@ -62,7 +68,7 @@ type Service struct {
 
 func New(deps Deps) *Service {
 	return &Service{
-		rules: deps.Rules, control: deps.Control, pending: deps.Pending,
+		rules: deps.Rules, modelKeys: deps.ModelKeys, control: deps.Control, pending: deps.Pending,
 		events: deps.Events, logger: deps.Logger, settings: deps.Settings,
 		recordings: map[string]*recording{}, executions: map[string]*execution{},
 		manualTakeovers: map[string]struct{}{}, ruleGenerations: map[string]uint64{}, ownerRevisions: map[string]uint64{},
@@ -76,9 +82,30 @@ func (s *Service) ListRules(ctx context.Context, ownerID string) ([]Rule, error)
 		return nil, err
 	}
 	items := make([]Rule, 0, len(rows))
+	var migrationKeyID string
+	var migrationKeyLoaded bool
 	for _, row := range rows {
 		rule, err := ruleFromStored(row)
-		if err != nil || rule.SchemaVersion != SchemaVersion || ValidateRule(rule) != nil {
+		if err != nil {
+			continue
+		}
+		if rule.SchemaVersion == 2 {
+			if s.modelKeys == nil {
+				continue
+			}
+			if !migrationKeyLoaded {
+				migrationKeyID, err = s.firstActiveModelKeyID(ctx, strings.TrimSpace(ownerID))
+				if err != nil {
+					return nil, err
+				}
+				migrationKeyLoaded = true
+			}
+			rule, err = s.migrateV2Rule(ctx, rule, migrationKeyID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if rule.SchemaVersion != SchemaVersion || ValidateRule(rule) != nil {
 			continue
 		}
 		items = append(items, rule)
@@ -93,6 +120,40 @@ func (s *Service) ListRules(ctx context.Context, ownerID string) ([]Rule, error)
 		return items[i].ID < items[j].ID
 	})
 	return items, nil
+}
+
+func (s *Service) firstActiveModelKeyID(ctx context.Context, ownerID string) (string, error) {
+	keys, err := s.modelKeys.ListModelAPIKeysByUser(ctx, ownerID)
+	if err != nil {
+		return "", err
+	}
+	for _, key := range keys {
+		if key.RevokedAt == nil && strings.TrimSpace(key.ID) != "" {
+			return strings.TrimSpace(key.ID), nil
+		}
+	}
+	return "", nil
+}
+
+func (s *Service) migrateV2Rule(ctx context.Context, rule Rule, modelKeyID string) (Rule, error) {
+	rule.SchemaVersion = SchemaVersion
+	rule.Match = MatchSpec{
+		Pattern: rule.Match.Pattern, ModelPattern: ".*", ModelKeyID: strings.TrimSpace(modelKeyID),
+	}
+	if rule.Match.ModelKeyID == "" {
+		rule.Enabled = false
+	}
+	payload, err := rulePayload(rule)
+	if err != nil {
+		return Rule{}, err
+	}
+	stored, err := s.rules.UpsertAutomationRule(ctx, common.UpsertAutomationRuleInput{
+		ID: rule.ID, UserID: rule.OwnerID, Enabled: rule.Enabled, Payload: payload,
+	})
+	if err != nil {
+		return Rule{}, err
+	}
+	return ruleFromStored(stored)
 }
 
 func (s *Service) SaveRule(ctx context.Context, ownerID string, rule Rule) (Rule, error) {

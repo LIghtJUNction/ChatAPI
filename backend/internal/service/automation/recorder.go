@@ -106,7 +106,7 @@ func (s *Service) stopRecording(ctx context.Context, ownerID string, expected *r
 		ID:            "rule_" + uuid.NewString(), OwnerID: ownerID,
 		Name:     fmt.Sprintf("录制规则 %s", time.Now().Format("01-02 15:04")),
 		Enabled:  false,
-		Match:    MatchSpec{Target: "last_user_text"},
+		Match:    MatchSpec{ModelPattern: ".*"},
 		Playback: PlaybackSpec{Mode: "recorded", FixedIntervalMS: 200, LoopIntervalMS: 1000},
 		Steps:    make([]Step, len(state.Steps)),
 	}

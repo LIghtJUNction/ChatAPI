@@ -1,4 +1,6 @@
-import { Button, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Typography } from 'antd'
+import { useEffect, useEffectEvent, useState } from 'react'
+
+import { AutoComplete, Button, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Typography } from 'antd'
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -6,7 +8,8 @@ import {
   PlusOutlined,
 } from '@ant-design/icons'
 
-import type { AutomationAction, AutomationRule, AutomationStep } from '../types/chat'
+import { requestJson } from '../lib/api'
+import type { AutomationAction, AutomationRule, AutomationStep, ModelKeyInfo, VirtualModelInfo } from '../types/chat'
 
 type Props = {
   editingAutomationRule: AutomationRule | null
@@ -57,6 +60,33 @@ export function AutomationRuleEditorModal({
   onCancel,
   onSave,
 }: Props) {
+  const [modelKeys, setModelKeys] = useState<ModelKeyInfo[]>([])
+  const [virtualModels, setVirtualModels] = useState<VirtualModelInfo[]>([])
+  const setDefaultModelKey = useEffectEvent((modelKeyID: string) => {
+    if (editingAutomationRule && !editingAutomationRule.match.model_key_id) {
+      setEditingAutomationRule({
+        ...editingAutomationRule,
+        match: { ...editingAutomationRule.match, model_key_id: modelKeyID },
+      })
+    }
+  })
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void Promise.all([
+      requestJson<{ items?: VirtualModelInfo[] }>('/api/user/virtual-models'),
+      requestJson<{ items?: ModelKeyInfo[] }>('/api/user/model-keys'),
+    ]).then(([models, keys]) => {
+      if (!active) return
+      setVirtualModels(Array.isArray(models.items) ? models.items : [])
+      const nextKeys = Array.isArray(keys.items) ? keys.items : []
+      setModelKeys(nextKeys)
+      if (nextKeys[0]) setDefaultModelKey(nextKeys[0].id)
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [open])
+
   function updateRule(update: (rule: AutomationRule) => AutomationRule) {
     if (editingAutomationRule) setEditingAutomationRule(update(editingAutomationRule))
   }
@@ -178,15 +208,45 @@ export function AutomationRuleEditorModal({
 
           <div className="automation-editor-section">
             <Typography.Title level={5} className="automation-editor-title">匹配</Typography.Title>
-            <Typography.Text className="prune-input-label">最后一条 User 消息（Go RE2 正则）</Typography.Text>
-            <Input
-              value={editingAutomationRule.match.pattern}
-              onChange={(event) => updateRule((rule) => ({
-                ...rule,
-                match: { target: 'last_user_text', pattern: event.target.value },
-              }))}
-              placeholder="例如：^(帮我|请).*(搜索|查询)"
-            />
+            <div className="automation-match-fields">
+              <Typography.Text className="prune-input-label">User 消息</Typography.Text>
+              <Input
+                value={editingAutomationRule.match.pattern}
+                onChange={(event) => updateRule((rule) => ({
+                  ...rule,
+                  match: { ...rule.match, pattern: event.target.value },
+                }))}
+                placeholder="Go RE2 正则，例如：^(帮我|请).*(搜索|查询)"
+              />
+              <Typography.Text className="prune-input-label">虚拟模型</Typography.Text>
+              <AutoComplete
+                value={editingAutomationRule.match.model_pattern}
+                options={virtualModels.map((item) => ({ label: item.name, value: `^${item.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$` }))}
+                onChange={(model_pattern) => updateRule((rule) => ({
+                  ...rule,
+                  match: { ...rule.match, model_pattern },
+                }))}
+                placeholder="Go RE2 正则，例如：^gpt-4\\..*"
+              />
+              <Typography.Text className="prune-input-label">模型 Key</Typography.Text>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                value={editingAutomationRule.match.model_key_id || undefined}
+                options={modelKeys.map((item) => ({
+                  label: `${item.name}${item.key_prefix ? ` · ${item.key_prefix}` : ''}`,
+                  value: item.id,
+                }))}
+                onChange={(model_key_id) => updateRule((rule) => ({
+                  ...rule,
+                  match: { ...rule.match, model_key_id },
+                }))}
+                placeholder="选择请求使用的模型 Key"
+              />
+            </div>
+            <Typography.Text type="secondary">
+              三项条件同时命中时执行。消息与模型使用 Go RE2 正则；Key 按内部 ID 精确匹配，不会存储密钥明文。
+            </Typography.Text>
           </div>
 
           <div className="automation-editor-section">

@@ -1101,6 +1101,9 @@ func (s *Service) publishTurnWaiting(ctx context.Context, turn *PendingTurn, las
 		Protocol: strings.TrimSpace(turn.RequestFormat), Model: strings.TrimSpace(turn.Model),
 		LastUserText: lastUserText,
 	}
+	if turn.Actor.EntryPoint == "virtual_model" || turn.Actor.Source == "model_api_key" {
+		waiting.ModelKeyID = strings.TrimSpace(turn.Actor.PrincipalID)
+	}
 	s.Events.Publish(ctx, chatevents.Event{
 		Type: chatevents.TypeTurnWaiting, OwnerID: waiting.OwnerID,
 		ConversationID: waiting.ConversationID, WaitingTurn: &waiting,

@@ -22,8 +22,13 @@ func NormalizeRule(rule Rule) Rule {
 	rule.ID = strings.TrimSpace(rule.ID)
 	rule.OwnerID = strings.TrimSpace(rule.OwnerID)
 	rule.Name = strings.TrimSpace(rule.Name)
-	rule.Match.Target = "last_user_text"
 	rule.Match.Pattern = strings.TrimSpace(rule.Match.Pattern)
+	rule.Match.ModelPattern = strings.TrimSpace(rule.Match.ModelPattern)
+	rule.Match.ModelKeyID = strings.TrimSpace(rule.Match.ModelKeyID)
+	rule.Match.Target = strings.TrimSpace(rule.Match.Target)
+	if rule.SchemaVersion >= SchemaVersion {
+		rule.Match.Target = ""
+	}
 	rule.Playback.Mode = strings.TrimSpace(rule.Playback.Mode)
 	if rule.Playback.Mode == "" {
 		rule.Playback.Mode = "recorded"
@@ -47,14 +52,22 @@ func ValidateRule(rule Rule) error {
 		return fmt.Errorf("%w: name is required", ErrInvalidRule)
 	}
 	if len(rule.Match.Pattern) > maxRegexLength {
-		return fmt.Errorf("%w: match pattern exceeds %d characters", ErrInvalidRule, maxRegexLength)
+		return fmt.Errorf("%w: user text pattern exceeds %d characters", ErrInvalidRule, maxRegexLength)
 	}
-	if rule.Enabled && rule.Match.Pattern == "" {
-		return fmt.Errorf("%w: enabled rule requires a match pattern", ErrInvalidRule)
+	if len(rule.Match.ModelPattern) > maxRegexLength {
+		return fmt.Errorf("%w: model pattern exceeds %d characters", ErrInvalidRule, maxRegexLength)
+	}
+	if rule.Enabled && (rule.Match.Pattern == "" || rule.Match.ModelPattern == "" || rule.Match.ModelKeyID == "") {
+		return fmt.Errorf("%w: enabled rule requires user text, model, and model key match conditions", ErrInvalidRule)
 	}
 	if rule.Match.Pattern != "" {
 		if _, err := regexp.Compile(rule.Match.Pattern); err != nil {
-			return fmt.Errorf("%w: invalid match pattern: %v", ErrInvalidRule, err)
+			return fmt.Errorf("%w: invalid user text pattern: %v", ErrInvalidRule, err)
+		}
+	}
+	if rule.Match.ModelPattern != "" {
+		if _, err := regexp.Compile(rule.Match.ModelPattern); err != nil {
+			return fmt.Errorf("%w: invalid model pattern: %v", ErrInvalidRule, err)
 		}
 	}
 	if rule.Playback.Mode != "recorded" && rule.Playback.Mode != "fixed" {

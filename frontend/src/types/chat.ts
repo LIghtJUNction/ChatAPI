@@ -323,8 +323,9 @@ export type AutomationRule = {
   enabled: boolean
   priority: number
   match: {
-    target: 'last_user_text'
     pattern: string
+    model_pattern: string
+    model_key_id: string
   }
   playback: {
     mode: 'recorded' | 'fixed'

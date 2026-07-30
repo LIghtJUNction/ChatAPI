@@ -61,6 +61,14 @@ type memoryPending struct {
 	items map[string]*turnsvc.PendingTurn
 }
 
+type memoryModelKeys struct {
+	items []common.ModelAPIKey
+}
+
+func (m memoryModelKeys) ListModelAPIKeysByUser(context.Context, string) ([]common.ModelAPIKey, error) {
+	return append([]common.ModelAPIKey(nil), m.items...), nil
+}
+
 func (m memoryPending) GetByConversationID(id string) (*turnsvc.PendingTurn, bool) {
 	item, ok := m.items[id]
 	return item, ok
@@ -111,7 +119,7 @@ func (r *capturedRealtime) PublishAutomationState(_ context.Context, payload Sta
 func validRule() Rule {
 	return Rule{
 		SchemaVersion: SchemaVersion, ID: "rule_a", Name: "recorded rule", Enabled: true,
-		Match:    MatchSpec{Target: "last_user_text", Pattern: `^hello`},
+		Match:    MatchSpec{Pattern: `^hello`, ModelPattern: `^demo-.*`, ModelKeyID: "modelkey_a"},
 		Playback: PlaybackSpec{Mode: "fixed", FixedIntervalMS: 0},
 		Steps:    []Step{{ID: "step_a", Action: Action{Kind: "stream_delta", Mode: "answer", Text: "world"}}},
 	}
@@ -124,6 +132,9 @@ func TestRuleValidationRejectsUnsafeShapes(t *testing.T) {
 	}{
 		{"empty enabled pattern", func(rule *Rule) { rule.Match.Pattern = "" }},
 		{"invalid regex", func(rule *Rule) { rule.Match.Pattern = "(" }},
+		{"empty model pattern", func(rule *Rule) { rule.Match.ModelPattern = "" }},
+		{"invalid model regex", func(rule *Rule) { rule.Match.ModelPattern = "(" }},
+		{"empty model key", func(rule *Rule) { rule.Match.ModelKeyID = "" }},
 		{"terminal before end", func(rule *Rule) {
 			rule.Steps = []Step{
 				{ID: "one", Action: Action{Kind: "stream_complete", Mode: "assistant_message"}},
@@ -149,6 +160,97 @@ func TestRuleValidationRejectsUnsafeShapes(t *testing.T) {
 				t.Fatal("expected validation failure")
 			}
 		})
+	}
+}
+
+func TestMatchConditionsMustAllMatch(t *testing.T) {
+	waiting := chatevents.WaitingTurn{
+		LastUserText: "please search", Model: "demo.model+fast", ModelKeyID: "modelkey_123",
+	}
+	cases := []struct {
+		name string
+		spec MatchSpec
+		want bool
+	}{
+		{name: "all conditions", spec: MatchSpec{Pattern: `^please\s+search$`, ModelPattern: `^demo\..*`, ModelKeyID: "modelkey_123"}, want: true},
+		{name: "text mismatch", spec: MatchSpec{Pattern: `^other`, ModelPattern: `^demo\..*`, ModelKeyID: "modelkey_123"}, want: false},
+		{name: "model mismatch", spec: MatchSpec{Pattern: `^please`, ModelPattern: `^other`, ModelKeyID: "modelkey_123"}, want: false},
+		{name: "key mismatch", spec: MatchSpec{Pattern: `^please`, ModelPattern: `^demo\..*`, ModelKeyID: "modelkey_456"}, want: false},
+		{name: "invalid text regex", spec: MatchSpec{Pattern: `(`, ModelPattern: `.*`, ModelKeyID: "modelkey_123"}, want: false},
+		{name: "invalid model regex", spec: MatchSpec{Pattern: `.*`, ModelPattern: `(`, ModelKeyID: "modelkey_123"}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := matchesWaitingTurn(tc.spec, waiting); got != tc.want {
+				t.Fatalf("matchesWaitingTurn() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestModelMatchRequiresValidRegex(t *testing.T) {
+	rule := validRule()
+	rule.Match.ModelPattern = "("
+	if err := ValidateRule(rule); err == nil {
+		t.Fatal("invalid model regex should be rejected")
+	}
+}
+
+func TestListRulesMigratesV2MatchConditions(t *testing.T) {
+	store := newMemoryRules()
+	legacy := validRule()
+	legacy.SchemaVersion = 2
+	legacy.Match = MatchSpec{Target: "last_user_text", Pattern: `^legacy`}
+	payload, err := rulePayload(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.items["owner/rule_a"] = common.AutomationRule{
+		ID: "rule_a", UserID: "owner", Enabled: true, Payload: payload,
+	}
+	revokedAt := time.Now().UTC()
+	service := New(Deps{
+		Rules: store,
+		ModelKeys: memoryModelKeys{items: []common.ModelAPIKey{
+			{ID: "revoked", RevokedAt: &revokedAt},
+			{ID: "modelkey_first"},
+			{ID: "modelkey_second"},
+		}},
+	})
+	items, err := service.ListRules(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("migrated rules = %#v", items)
+	}
+	match := items[0].Match
+	if items[0].SchemaVersion != SchemaVersion || match.Pattern != `^legacy` || match.ModelPattern != ".*" || match.ModelKeyID != "modelkey_first" {
+		t.Fatalf("unexpected migrated rule: %#v", items[0])
+	}
+	persisted, err := ruleFromStored(store.items["owner/rule_a"])
+	if err != nil || persisted.SchemaVersion != SchemaVersion || persisted.Match != match {
+		t.Fatalf("migration was not persisted: rule=%#v err=%v", persisted, err)
+	}
+}
+
+func TestListRulesDisablesV2RuleWithoutActiveModelKey(t *testing.T) {
+	store := newMemoryRules()
+	legacy := validRule()
+	legacy.SchemaVersion = 2
+	legacy.Match = MatchSpec{Target: "last_user_text", Pattern: `^legacy`}
+	payload, err := rulePayload(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.items["owner/rule_a"] = common.AutomationRule{ID: "rule_a", UserID: "owner", Enabled: true, Payload: payload}
+	service := New(Deps{Rules: store, ModelKeys: memoryModelKeys{}})
+	items, err := service.ListRules(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Enabled || items[0].Match.ModelPattern != ".*" || items[0].Match.ModelKeyID != "" {
+		t.Fatalf("rule without a model key should be retained but disabled: %#v", items)
 	}
 }
 
@@ -262,7 +364,7 @@ func TestMatchingRuleReplaysThroughControl(t *testing.T) {
 	}
 	service.HandleChatEvent(context.Background(), chatevents.Event{
 		Type:        chatevents.TypeTurnWaiting,
-		WaitingTurn: &chatevents.WaitingTurn{OwnerID: "owner", ConversationID: "conv", RequestID: "req", ResponseID: "resp", LastUserText: "hello there"},
+		WaitingTurn: &chatevents.WaitingTurn{OwnerID: "owner", ConversationID: "conv", RequestID: "req", ResponseID: "resp", Model: "demo-chat", ModelKeyID: "modelkey_a", LastUserText: "hello there"},
 	})
 	select {
 	case command := <-calls:
@@ -275,7 +377,7 @@ func TestMatchingRuleReplaysThroughControl(t *testing.T) {
 
 	service.HandleChatEvent(context.Background(), chatevents.Event{
 		Type:        chatevents.TypeTurnWaiting,
-		WaitingTurn: &chatevents.WaitingTurn{OwnerID: "owner", ConversationID: "conv", RequestID: "req", LastUserText: "no match"},
+		WaitingTurn: &chatevents.WaitingTurn{OwnerID: "owner", ConversationID: "conv", RequestID: "req", Model: "demo-chat", ModelKeyID: "modelkey_a", LastUserText: "no match"},
 	})
 	select {
 	case command := <-calls:

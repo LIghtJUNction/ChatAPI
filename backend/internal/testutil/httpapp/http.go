@@ -213,7 +213,7 @@ func assemble(input Input) (HTTPResult, error) {
 			input.AutomationEvents = automationsvc.NewDispatcher(workspacesvc.NewAutomationRealtimePublisher(input.WorkspaceHub))
 		}
 		input.Automation = automationsvc.New(automationsvc.Deps{
-			Rules: input.AutomationRepo, Control: input.Control, Pending: input.Turn.Pending,
+			Rules: input.AutomationRepo, ModelKeys: input.AuthRepo, Control: input.Control, Pending: input.Turn.Pending,
 			Events: input.AutomationEvents, Logger: logger(logging.LayerTurn), Settings: input.AutomationSettings,
 		})
 	}

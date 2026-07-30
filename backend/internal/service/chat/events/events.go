@@ -25,6 +25,7 @@ type WaitingTurn struct {
 	ConversationID string `json:"conversation_id"`
 	Protocol       string `json:"protocol"`
 	Model          string `json:"model"`
+	ModelKeyID     string `json:"model_key_id,omitempty"`
 	LastUserText   string `json:"last_user_text"`
 }
 

@@ -198,7 +198,7 @@ func buildChatModule(input applicationInput, auth authModule) chatModule {
 	events := chatevents.NewDispatcher(workspacesvc.NewRealtimePublisher(hub))
 	automationSettings := automationsettings.New(store)
 	automationEvents := automationsvc.NewDispatcher(workspacesvc.NewAutomationRealtimePublisher(hub))
-	automation := automationsvc.New(automationsvc.Deps{Rules: store, Control: control, Pending: pending, Events: automationEvents, Logger: logger(logging.LayerTurn), Settings: automationSettings})
+	automation := automationsvc.New(automationsvc.Deps{Rules: store, ModelKeys: store, Control: control, Pending: pending, Events: automationEvents, Logger: logger(logging.LayerTurn), Settings: automationSettings})
 	workspace.SetAutomation(automation)
 	control.Subscribe(automation)
 	events.Subscribe(automation)

@@ -36,16 +36,27 @@ func (s *Service) matchAndRun(ctx context.Context, waiting chatevents.WaitingTur
 		return
 	}
 	for _, rule := range rules {
-		if !rule.Enabled || rule.Match.Pattern == "" {
+		if !rule.Enabled {
 			continue
 		}
-		matcher, err := regexp.Compile(rule.Match.Pattern)
-		if err != nil || !matcher.MatchString(waiting.LastUserText) {
+		if !matchesWaitingTurn(rule.Match, waiting) {
 			continue
 		}
 		s.startExecutionAtGeneration(ctx, waiting, rule, generation)
 		return
 	}
+}
+
+func matchesWaitingTurn(spec MatchSpec, waiting chatevents.WaitingTurn) bool {
+	textMatcher, err := regexp.Compile(strings.TrimSpace(spec.Pattern))
+	if err != nil || !textMatcher.MatchString(waiting.LastUserText) {
+		return false
+	}
+	modelMatcher, err := regexp.Compile(strings.TrimSpace(spec.ModelPattern))
+	return err == nil &&
+		modelMatcher.MatchString(strings.TrimSpace(waiting.Model)) &&
+		strings.TrimSpace(spec.ModelKeyID) != "" &&
+		strings.TrimSpace(spec.ModelKeyID) == strings.TrimSpace(waiting.ModelKeyID)
 }
 
 func (s *Service) startExecution(parent context.Context, waiting chatevents.WaitingTurn, rule Rule) {

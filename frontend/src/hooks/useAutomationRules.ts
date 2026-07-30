@@ -6,12 +6,12 @@ import type { AutomationRule } from '../types/chat'
 
 function buildEmptyAutomationRule(): AutomationRule {
   return {
-    schema_version: 2,
+    schema_version: 3,
     id: '',
     name: '新自动化规则',
     enabled: false,
     priority: 0,
-    match: { target: 'last_user_text', pattern: '' },
+    match: { pattern: '', model_pattern: '.*', model_key_id: '' },
     playback: { mode: 'recorded', initial_delay_ms: 0, fixed_interval_ms: 200, loop: false, loop_interval_ms: 1000 },
     steps: [],
   }
@@ -64,8 +64,10 @@ export function useAutomationRules() {
       appMessage.warning('请输入规则名称')
       return
     }
-		if (rule.enabled && (!rule.match.pattern.trim() || rule.steps.length === 0)) {
-      appMessage.warning('启用规则前需要填写匹配正则并至少保留一个步骤')
+		if (rule.enabled && (
+			!rule.match.pattern.trim() || !rule.match.model_pattern.trim() || !rule.match.model_key_id.trim() || rule.steps.length === 0
+		)) {
+      appMessage.warning('启用规则前需要填写消息、模型、模型 Key 匹配条件并至少保留一个步骤')
 			return
 		}
 		if (rule.playback.loop && rule.playback.loop_interval_ms < 1) {

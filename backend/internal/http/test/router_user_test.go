@@ -252,6 +252,7 @@ func TestRouterUserFlow(t *testing.T) {
 	if len(modelKeysResp["items"].([]any)) != 1 {
 		t.Fatalf("unexpected initial model keys: %#v", modelKeysResp)
 	}
+	existingModelKeyID := modelKeysResp["items"].([]any)[0].(map[string]any)["id"].(string)
 	createModelResp := postJSONWithCookie(t, server.URL+"/api/user/model-keys", map[string]any{
 		"name": "extra-model",
 		"key":  "demo-model-2",
@@ -283,10 +284,10 @@ func TestRouterUserFlow(t *testing.T) {
 		t.Fatalf("unexpected initial automation rules: %#v", rulesResp)
 	}
 	rulesResp = postJSONWithCookie(t, server.URL+"/api/automation/rules", map[string]any{
-		"schema_version": 2,
+		"schema_version": 3,
 		"enabled":        true,
 		"name":           "rule-1",
-		"match":          map[string]any{"target": "last_user_text", "pattern": "hello"},
+		"match":          map[string]any{"pattern": "hello", "model_pattern": ".*", "model_key_id": existingModelKeyID},
 		"playback":       map[string]any{"mode": "fixed", "fixed_interval_ms": 200},
 		"steps": []map[string]any{{
 			"id": "step-1", "delay_before_ms": 0,
@@ -298,10 +299,10 @@ func TestRouterUserFlow(t *testing.T) {
 	}
 	ruleID := rulesResp["rule"].(map[string]any)["id"].(string)
 	putJSONWithCookie(t, server.URL+"/api/automation/rules/"+ruleID, map[string]any{
-		"schema_version": 2,
+		"schema_version": 3,
 		"enabled":        false,
 		"name":           "rule-1-updated",
-		"match":          map[string]any{"target": "last_user_text", "pattern": "hello"},
+		"match":          map[string]any{"pattern": "hello", "model_pattern": ".*", "model_key_id": existingModelKeyID},
 		"playback":       map[string]any{"mode": "recorded"},
 		"steps": []map[string]any{{
 			"id": "step-1", "delay_before_ms": 25,

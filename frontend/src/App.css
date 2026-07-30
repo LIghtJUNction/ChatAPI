@@ -1509,6 +1509,13 @@
   margin: 0 !important;
 }
 
+.automation-match-fields {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
 .automation-editor-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

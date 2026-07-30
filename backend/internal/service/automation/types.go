@@ -7,11 +7,13 @@ import (
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 type MatchSpec struct {
-	Target  string `json:"target"`
-	Pattern string `json:"pattern"`
+	Pattern      string `json:"pattern"`
+	ModelPattern string `json:"model_pattern"`
+	ModelKeyID   string `json:"model_key_id"`
+	Target       string `json:"target,omitempty"`
 }
 
 type PlaybackSpec struct {

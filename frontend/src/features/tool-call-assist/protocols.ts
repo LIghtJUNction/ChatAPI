@@ -8,8 +8,12 @@ export type AssistProtocolAdapter = {
   extractText(payload: unknown): string
 }
 
+function jsonSchemaDefinition(schema: JsonSchema) {
+  return { name: 'tool_call_arguments', strict: false, schema }
+}
+
 function responseFormat(schema: JsonSchema) {
-  return { type: 'json_schema', name: 'tool_call_arguments', strict: false, schema }
+  return { type: 'json_schema', ...jsonSchemaDefinition(schema) }
 }
 
 function systemInstruction(input: ToolCallAssistInput) {
@@ -63,7 +67,7 @@ const chatCompletionsAdapter: AssistProtocolAdapter = {
           { role: 'system', content: systemInstruction(input) },
           { role: 'user', content: input.instruction },
         ],
-        response_format: { type: 'json_schema', json_schema: responseFormat(input.schema) },
+        response_format: { type: 'json_schema', json_schema: jsonSchemaDefinition(input.schema) },
       },
     }
   },
